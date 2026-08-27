@@ -2538,6 +2538,5 @@ Installerad sökväg:
     <string name="settings_frame_generation_not_found">Lossless Scaling hittades inte. Installera det från Steam och öppna den här skärmen igen för att importera det automatiskt.</string>
     <string name="settings_frame_generation_failed">Lossless.dll hittades, men dess shaders kunde inte läsas. Kontrollera Steam-filerna och försök igen.</string>
     <string name="settings_frame_generation_updated">Uppdaterad från %1$s.</string>
-    <string name="settings_frame_generation_not_owned">Bildgenerering använder shaders från Lossless Scaling. Köp det på Steam med det inloggade kontot för att aktivera detta.</string>
     <string name="settings_frame_generation_locate">Välj Lossless.dll…</string>
 </resources>

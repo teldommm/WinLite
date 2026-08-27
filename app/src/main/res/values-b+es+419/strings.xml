@@ -2538,6 +2538,5 @@ Ruta instalada:
     <string name="settings_frame_generation_not_found">No se encontró Lossless Scaling. Instálalo desde Steam y vuelve a abrir esta pantalla para importarlo automáticamente.</string>
     <string name="settings_frame_generation_failed">Se encontró Lossless.dll, pero no se pudieron leer sus sombreadores. Verifica los archivos de Steam e inténtalo de nuevo.</string>
     <string name="settings_frame_generation_updated">Actualizado desde %1$s.</string>
-    <string name="settings_frame_generation_not_owned">La generación de fotogramas usa sombreadores de Lossless Scaling. Cómpralo en Steam con la cuenta con la que has iniciado sesión para activarlo.</string>
     <string name="settings_frame_generation_locate">Seleccionar Lossless.dll…</string>
 </resources>

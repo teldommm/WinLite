@@ -2540,7 +2540,6 @@
     <string name="settings_frame_generation_not_found">Lossless Scaling을 찾을 수 없습니다. Steam에서 설치한 뒤 이 화면을 다시 열면 자동으로 가져옵니다.</string>
     <string name="settings_frame_generation_failed">Lossless.dll을 찾았지만 셰이더를 읽을 수 없습니다. Steam 파일을 확인하고 다시 시도하세요.</string>
     <string name="settings_frame_generation_updated">%1$s에서 업데이트했습니다.</string>
-    <string name="settings_frame_generation_not_owned">프레임 생성은 Lossless Scaling의 셰이더를 사용합니다. 사용하려면 로그인한 계정으로 Steam에서 구매하세요.</string>
     <string name="settings_frame_generation_locate">Lossless.dll 선택…</string>
 </resources>
 

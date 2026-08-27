@@ -2540,6 +2540,5 @@ Installierter Pfad:
     <string name="settings_frame_generation_not_found">Lossless Scaling wurde nicht gefunden. Installiere es über Steam und öffne diesen Bildschirm erneut, um es automatisch zu importieren.</string>
     <string name="settings_frame_generation_failed">Lossless.dll wurde gefunden, aber ihre Shader konnten nicht gelesen werden. Überprüfe die Steam-Dateien und versuche es erneut.</string>
     <string name="settings_frame_generation_updated">Aus %1$s aktualisiert.</string>
-    <string name="settings_frame_generation_not_owned">Frame-Generierung nutzt Shader von Lossless Scaling. Kaufe es auf Steam mit dem angemeldeten Konto, um dies zu aktivieren.</string>
     <string name="settings_frame_generation_locate">Lossless.dll auswählen…</string>
 </resources>

@@ -2538,6 +2538,5 @@ Asennuspolku:
     <string name="settings_frame_generation_not_found">Lossless Scalingia ei löytynyt. Asenna se Steamista ja avaa tämä näkymä uudelleen, niin se tuodaan automaattisesti.</string>
     <string name="settings_frame_generation_failed">Lossless.dll löytyi, mutta sen varjostimia ei voitu lukea. Tarkista Steam-tiedostot ja yritä uudelleen.</string>
     <string name="settings_frame_generation_updated">Päivitetty kohteesta %1$s.</string>
-    <string name="settings_frame_generation_not_owned">Ruudun generointi käyttää Lossless Scalingin varjostimia. Osta se Steamista kirjautuneella tilillä ottaaksesi tämän käyttöön.</string>
     <string name="settings_frame_generation_locate">Valitse Lossless.dll…</string>
 </resources>

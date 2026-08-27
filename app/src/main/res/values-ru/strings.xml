@@ -2445,6 +2445,5 @@
     <string name="settings_frame_generation_not_found">Lossless Scaling не найден. Установите его из Steam и снова откройте этот экран, чтобы импортировать автоматически.</string>
     <string name="settings_frame_generation_failed">Lossless.dll найден, но его шейдеры не удалось прочитать. Проверьте файлы Steam и попробуйте снова.</string>
     <string name="settings_frame_generation_updated">Обновлено из %1$s.</string>
-    <string name="settings_frame_generation_not_owned">Генерация кадров использует шейдеры Lossless Scaling. Купите его в Steam под текущей учётной записью, чтобы включить эту функцию.</string>
     <string name="settings_frame_generation_locate">Выбрать Lossless.dll…</string>
 </resources>

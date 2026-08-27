@@ -2545,7 +2545,6 @@ Zainstalowana ścieżka:
     <string name="settings_frame_generation_not_found">Nie znaleziono Lossless Scaling. Zainstaluj je ze Steam i otwórz ten ekran ponownie, aby zaimportować je automatycznie.</string>
     <string name="settings_frame_generation_failed">Znaleziono Lossless.dll, ale nie udało się odczytać shaderów. Sprawdź pliki Steam i spróbuj ponownie.</string>
     <string name="settings_frame_generation_updated">Zaktualizowano z %1$s.</string>
-    <string name="settings_frame_generation_not_owned">Generowanie klatek korzysta z shaderów Lossless Scaling. Kup je na Steam na zalogowanym koncie, aby to włączyć.</string>
     <string name="settings_frame_generation_locate">Wybierz Lossless.dll…</string>
 </resources>
 

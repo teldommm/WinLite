@@ -13,7 +13,6 @@ object LosslessAutoImport {
     const val RESULT_READY = 0
     const val RESULT_IMPORTED = 1
     const val RESULT_UPDATED = 2
-    const val RESULT_NOT_OWNED = 3
     const val RESULT_NOT_FOUND = 4
     const val RESULT_FAILED = 5
 
@@ -21,12 +20,6 @@ object LosslessAutoImport {
     private const val INSTALL_DIR_NAME = "Lossless Scaling"
 
     class Outcome(val result: Int, val sourceName: String)
-
-    fun isOwned(): Boolean {
-        val licensed = runCatching { SteamService.getPkgInfoOf(STEAM_APP_ID) != null }.getOrDefault(false)
-        if (licensed) return true
-        return runCatching { SteamService.getInstalledApp(STEAM_APP_ID) != null }.getOrDefault(false)
-    }
 
     fun findDll(context: Context): File? {
         val candidates = LinkedHashSet<File>()
@@ -45,10 +38,6 @@ object LosslessAutoImport {
     }
 
     fun sync(context: Context): Outcome {
-        if (!isOwned()) {
-            return Outcome(if (LosslessScaling.isInstalled(context)) RESULT_READY else RESULT_NOT_OWNED, "")
-        }
-
         val dll = findDll(context)
         if (dll == null) {
             return Outcome(if (LosslessScaling.isInstalled(context)) RESULT_READY else RESULT_NOT_FOUND, "")
@@ -64,7 +53,6 @@ object LosslessAutoImport {
     }
 
     fun importFrom(context: Context, uri: Uri): Outcome {
-        if (!isOwned()) return Outcome(RESULT_NOT_OWNED, "")
         val status = LosslessScaling.installFrom(context, uri)
         if (status != LosslessScaling.STATUS_OK) return Outcome(RESULT_FAILED, "")
         return Outcome(RESULT_IMPORTED, uri.lastPathSegment?.substringAfterLast('/').orEmpty())
@@ -72,7 +60,6 @@ object LosslessAutoImport {
 
     fun importFrom(context: Context, dll: File): Outcome {
         val name = dll.parentFile?.name?.takeIf { it.isNotBlank() } ?: dll.name
-        if (!isOwned()) return Outcome(RESULT_NOT_OWNED, name)
         val status = LosslessScaling.installFrom(context, dll)
         if (status != LosslessScaling.STATUS_OK) return Outcome(RESULT_FAILED, name)
         return Outcome(RESULT_IMPORTED, name)

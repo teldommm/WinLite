@@ -2538,6 +2538,5 @@ Yüklü konum:
     <string name="settings_frame_generation_not_found">Lossless Scaling bulunamadı. Steam üzerinden yükleyin ve otomatik olarak içe aktarmak için bu ekranı yeniden açın.</string>
     <string name="settings_frame_generation_failed">Lossless.dll bulundu ancak gölgelendiricileri okunamadı. Steam dosyalarını doğrulayıp tekrar deneyin.</string>
     <string name="settings_frame_generation_updated">%1$s kaynağından güncellendi.</string>
-    <string name="settings_frame_generation_not_owned">Kare üretimi Lossless Scaling gölgelendiricilerini kullanır. Bunu etkinleştirmek için oturum açmış hesapla Steam\'den satın alın.</string>
     <string name="settings_frame_generation_locate">Lossless.dll seç…</string>
 </resources>

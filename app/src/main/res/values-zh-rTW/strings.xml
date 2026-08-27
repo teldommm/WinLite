@@ -2538,7 +2538,6 @@
     <string name="settings_frame_generation_not_found">找不到 Lossless Scaling。請從 Steam 安裝，然後重新開啟此畫面以自動匯入。</string>
     <string name="settings_frame_generation_failed">已找到 Lossless.dll，但無法讀取其著色器。請驗證 Steam 檔案後再試一次。</string>
     <string name="settings_frame_generation_updated">已從 %1$s 更新。</string>
-    <string name="settings_frame_generation_not_owned">影格生成使用 Lossless Scaling 的著色器。請使用目前登入的帳號在 Steam 上購買以啟用此功能。</string>
     <string name="settings_frame_generation_locate">選擇 Lossless.dll…</string>
 </resources>
 

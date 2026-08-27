@@ -2538,6 +2538,5 @@ Caminho instalado:
     <string name="settings_frame_generation_not_found">O Lossless Scaling não foi encontrado. Instale-o a partir do Steam e reabra este ecrã para importá-lo automaticamente.</string>
     <string name="settings_frame_generation_failed">O Lossless.dll foi encontrado, mas não foi possível ler os seus shaders. Verifique os ficheiros do Steam e tente novamente.</string>
     <string name="settings_frame_generation_updated">Atualizado de %1$s.</string>
-    <string name="settings_frame_generation_not_owned">A geração de fotogramas usa shaders do Lossless Scaling. Compre-o no Steam com a conta com sessão iniciada para ativar isto.</string>
     <string name="settings_frame_generation_locate">Selecionar Lossless.dll…</string>
 </resources>

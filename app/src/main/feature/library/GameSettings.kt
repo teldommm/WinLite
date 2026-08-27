@@ -671,7 +671,6 @@ const val FRAMEGEN_SHADERS_IMPORTING = 2
 const val FRAMEGEN_SHADERS_MISSING = 3
 const val FRAMEGEN_SHADERS_FAILED = 4
 const val FRAMEGEN_SHADERS_UPDATED = 5
-const val FRAMEGEN_SHADERS_NOT_OWNED = 6
 
 val FrameGenMultiplierOptions = listOf(2, 3, 4)
 val FrameGenTargetOptions = listOf(0, 60, 90, 120, 144)
@@ -1850,7 +1849,6 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
                             R.string.settings_frame_generation_updated,
                             state.frameGenSourceName.value,
                         )
-                    FRAMEGEN_SHADERS_NOT_OWNED -> stringResource(R.string.settings_frame_generation_not_owned)
                     FRAMEGEN_SHADERS_FAILED -> stringResource(R.string.settings_frame_generation_failed)
                     else -> stringResource(R.string.settings_frame_generation_not_found)
                 },
@@ -1859,14 +1857,12 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
             lineHeight = SettingLabelSize * 1.4f,
         )
 
-        if (shaders != FRAMEGEN_SHADERS_NOT_OWNED) {
-            Spacer(Modifier.height(SettingItemGap))
-            SettingActionButton(
-                label = stringResource(R.string.settings_frame_generation_locate),
-                enabled = !busy,
-                onClick = { pickDll() },
-            )
-        }
+        Spacer(Modifier.height(SettingItemGap))
+        SettingActionButton(
+            label = stringResource(R.string.settings_frame_generation_locate),
+            enabled = !busy,
+            onClick = { pickDll() },
+        )
 
         if (enabled) {
             Spacer(Modifier.height(SettingItemGap))
@@ -5583,7 +5579,6 @@ private fun frameGenStateFor(result: Int): Int =
     when (result) {
         LosslessAutoImport.RESULT_READY, LosslessAutoImport.RESULT_IMPORTED -> FRAMEGEN_SHADERS_READY
         LosslessAutoImport.RESULT_UPDATED -> FRAMEGEN_SHADERS_UPDATED
-        LosslessAutoImport.RESULT_NOT_OWNED -> FRAMEGEN_SHADERS_NOT_OWNED
         LosslessAutoImport.RESULT_NOT_FOUND -> FRAMEGEN_SHADERS_MISSING
         else -> FRAMEGEN_SHADERS_FAILED
     }

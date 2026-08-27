@@ -2538,7 +2538,6 @@ Cale instalata:
     <string name="settings_frame_generation_not_found">Lossless Scaling nu a fost găsit. Instalează-l din Steam și redeschide acest ecran pentru a-l importa automat.</string>
     <string name="settings_frame_generation_failed">Lossless.dll a fost găsit, dar shaderele sale nu au putut fi citite. Verifică fișierele Steam și încearcă din nou.</string>
     <string name="settings_frame_generation_updated">Actualizat din %1$s.</string>
-    <string name="settings_frame_generation_not_owned">Generarea de cadre folosește shadere din Lossless Scaling. Cumpără-l pe Steam cu contul conectat pentru a activa acest lucru.</string>
     <string name="settings_frame_generation_locate">Selectează Lossless.dll…</string>
 </resources>
 
