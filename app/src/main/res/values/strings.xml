@@ -766,7 +766,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="session_drawer_upscaler_fsr">SGSR 1</string>
     <string name="session_drawer_sgsr_edge_sharpness">Edge Sharpness</string>
     <string name="session_drawer_frame_generation">Frame Generation</string>
-    <string name="session_drawer_frame_generation_enable">Generate Frames</string>
+    <string name="session_drawer_frame_generation_enable">Generate</string>
     <string name="session_drawer_frame_generation_multiplier">Multiplier</string>
     <string name="session_drawer_frame_generation_multiplier_value">%1$dx</string>
     <string name="session_drawer_frame_generation_target">Adaptive Target</string>

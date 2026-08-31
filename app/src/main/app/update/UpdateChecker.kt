@@ -252,13 +252,9 @@ object UpdateChecker {
             return null
         }
 
-        val apkType =
-            when (context.packageName) {
-                "com.ludashi.benchmark" -> "ludashi"
-                "com.tencent.ig" -> null
-                "com.antutu.ABenchMark" -> null
-                else -> "standard"
-            } ?: return null
+        // Only the Standard flavor remains (com.winnative.cmod), so this is always "standard"
+        // now — kept as a val (not inlined into the URL) in case flavors return later.
+        val apkType = "standard"
         val downloadUrl = "${DOWNLOADS_PAGE_URL}download.php?type=$apkType"
 
         val releaseNotes = fetchReleaseNotes()

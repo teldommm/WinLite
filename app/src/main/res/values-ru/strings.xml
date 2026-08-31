@@ -613,7 +613,7 @@
     <string name="session_drawer_pause">Пауза</string>
     <string name="session_drawer_wine_processes_paused">Процессы Wine приостановлены</string>
     <string name="session_drawer_pause_all_wine_processes">Приостановить все процессы Wine</string>
-    <string name="session_drawer_controls_section">Элементы управления</string>
+    <string name="session_drawer_controls_section">Управление</string>
     <string name="session_drawer_session_section">Сеанс</string>
     <string name="session_drawer_header_subtitle">Быстрый доступ к элементам управления, наложениям и инструментам сеанса.</string>
     <string name="session_drawer_swipe_hint">Проведите пальцем по экрану, чтобы вернуться в игру.</string>
@@ -1589,7 +1589,7 @@
     <string name="cloud_saves_history_delete_failed">Не удалось удалить облачное сохранение</string>
     <string name="cloud_saves_history_delete_success">Облачное сохранение удалено</string>
     <string name="session_drawer_frame_generation">Генерация кадров</string>
-    <string name="session_drawer_frame_generation_enable">Генерировать кадры</string>
+    <string name="session_drawer_frame_generation_enable">Генерировать</string>
     <string name="session_drawer_frame_generation_multiplier">Множитель</string>
     <string name="session_drawer_frame_generation_multiplier_value">%1$dx</string>
     <string name="session_drawer_frame_generation_target">Адаптивная цель</string>

@@ -85,18 +85,6 @@ jobs:
             gradleTask: assembleStandardDebug
             apkPath: app/build/outputs/apk/standard/debug/standard.apk
             artifactName: release-apk-standard
-          - name: Ludashi
-            gradleTask: assembleLudashiDebug
-            apkPath: app/build/outputs/apk/ludashi/debug/ludashi.apk
-            artifactName: release-apk-ludashi
-          - name: Pubg
-            gradleTask: assemblePubgDebug
-            apkPath: app/build/outputs/apk/pubg/debug/pubg.apk
-            artifactName: release-apk-pubg
-          - name: Antutu
-            gradleTask: assembleAntutuDebug
-            apkPath: app/build/outputs/apk/antutu/debug/antutu.apk
-            artifactName: release-apk-antutu
 
     steps:
       - name: Clone repository
@@ -230,14 +218,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p assets
-          for flavor in standard ludashi pubg antutu; do
+          for flavor in standard; do
             gh run download "$GITHUB_RUN_ID" \
               --repo "$GITHUB_REPOSITORY" \
               --name "release-apk-$flavor" \
               --dir assets
           done
           ls -l assets
-          test "$(find assets -name '*.apk' | wc -l)" -eq 4
+          test "$(find assets -name '*.apk' | wc -l)" -eq 1
 
       - name: Assemble release notes
         id: notes
