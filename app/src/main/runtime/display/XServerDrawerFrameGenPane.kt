@@ -121,28 +121,11 @@ private fun FrameGenerationSection(
         if (!state.frameGenAvailable) {
             FrameGenNote(stringResource(R.string.session_drawer_frame_generation_missing), paneScale)
         } else {
-            NavBooleanRow(
-                title = stringResource(R.string.session_drawer_frame_generation_enable),
-                checked = state.frameGenEnabled,
-                onCheckedChange = listener::onFrameGenEnabledChanged,
-            )
-
+            // Enable toggle now lives in the outer GearToggleRow (Effects pane); settings
+            // below are always visible regardless of the enabled state.
             FrameGenNote(stringResource(R.string.session_drawer_frame_generation_note), paneScale)
 
-            AnimatedVisibility(
-                visible = state.frameGenEnabled,
-                enter =
-                    expandVertically(
-                        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                        expandFrom = Alignment.Top,
-                    ) + fadeIn(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)),
-                exit =
-                    shrinkVertically(
-                        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-                        shrinkTowards = Alignment.Top,
-                    ) + fadeOut(animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
                     FrameGenFieldLabel(
                         stringResource(R.string.session_drawer_frame_generation_target),
                         paneScale,
@@ -218,7 +201,6 @@ private fun FrameGenerationSection(
                         paneScale = paneScale,
                     )
                 }
-            }
         }
     }
 }

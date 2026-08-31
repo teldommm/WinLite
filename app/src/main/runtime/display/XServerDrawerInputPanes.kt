@@ -300,13 +300,9 @@ internal fun GyroscopePaneContent(
                         .padding(horizontal = (12f * paneScale).dp, vertical = (12f * paneScale).dp),
                 verticalArrangement = Arrangement.spacedBy((10f * paneScale).dp),
             ) {
-            NavEnableRow(
-                title = stringResource(R.string.session_gyroscope_title),
-                checked = state.gyroscopeEnabled,
-                onCheckedChange = listener::onGyroscopeEnabledChanged,
-            )
-
-            if (state.gyroscopeEnabled) {
+            // Enable toggle now lives in the outer GearToggleRow (Controls pane); settings
+            // below are always visible regardless of the enabled state.
+            run {
                 Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
                     PaneSectionLabel(stringResource(R.string.session_gyroscope_mode))
                     Row(

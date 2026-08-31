@@ -1138,8 +1138,6 @@
     <string name="session_drawer_color_profile_crt">CRT 효과</string>
     <string name="session_drawer_calibrate_advanced">고급 보정</string>
     <string name="session_drawer_rail_label_hud">HUD</string>
-    <string name="session_drawer_rail_label_frame_gen">FPS</string>
-    <string name="session_drawer_rail_label_gyro">자이로</string>
     <string name="session_drawer_rail_label_effects">FX</string>
     <string name="session_drawer_rail_label_apps">더 보기</string>
     <string name="session_drawer_rail_label_keyboard">키보드</string>

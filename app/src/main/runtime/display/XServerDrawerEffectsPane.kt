@@ -202,6 +202,34 @@ internal fun ScreenEffectsPaneContent(
                         .padding(horizontal = (12f * paneScale).dp, vertical = (12f * paneScale).dp),
                 verticalArrangement = Arrangement.spacedBy((10f * paneScale).dp),
             ) {
+                // Frame Generation — above SGSR: a summary toggle + gear that opens
+                // FrameGenSettingsPopupContent as a popup.
+                Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
+                    PaneSectionLabel(stringResource(R.string.session_drawer_frame_generation))
+
+                    if (!state.frameGenAvailable) {
+                        FrameGenNote(stringResource(R.string.session_drawer_frame_generation_missing), paneScale)
+                    } else {
+                        var frameGenSettingsOpen by remember { mutableStateOf(false) }
+                        GearToggleRow(
+                            title = stringResource(R.string.session_drawer_frame_generation_enable),
+                            checked = state.frameGenEnabled,
+                            onCheckedChange = listener::onFrameGenEnabledChanged,
+                            onGearClick = { frameGenSettingsOpen = true },
+                        )
+                        if (frameGenSettingsOpen) {
+                            PaneOverlayDialog(
+                                title = stringResource(R.string.session_drawer_frame_generation),
+                                onDismiss = { frameGenSettingsOpen = false },
+                            ) {
+                                FrameGenSettingsPopupContent(state = state, listener = listener)
+                            }
+                        }
+                    }
+                }
+
+                ThinDivider()
+
                 Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
                     PaneSectionLabel(stringResource(R.string.shortcuts_graphics_sgsr_full_title))
                     NavBooleanRow(
@@ -235,6 +263,12 @@ internal fun ScreenEffectsPaneContent(
                         }
                     }
                 }
+
+                ThinDivider()
+
+                // FPS limiter — below SGSR. Kept inline (not behind a gear) since it's a
+                // quick, frequently-used control.
+                FpsLimiterSection(state = state, listener = listener, paneScale = paneScale)
 
                 ThinDivider()
 
@@ -459,40 +493,6 @@ internal fun ScreenEffectsPaneContent(
                         checked = state.scaleFilter == 3,
                         onCheckedChange = { on -> listener.onScaleFilterSelected(if (on) 3 else 0) },
                     )
-                }
-
-                ThinDivider()
-
-                // FPS limiter, folded in from Frame Gen's old FPS-limiter section — kept
-                // inline (not behind a gear) since it's a quick, frequently-used control.
-                FpsLimiterSection(state = state, listener = listener, paneScale = paneScale)
-
-                ThinDivider()
-
-                // Frame Generation, folded in from the old standalone FRAME_GEN rail tab:
-                // a summary toggle + gear that opens FrameGenSettingsPopupContent as a popup.
-                Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
-                    PaneSectionLabel(stringResource(R.string.session_drawer_frame_generation))
-
-                    if (!state.frameGenAvailable) {
-                        FrameGenNote(stringResource(R.string.session_drawer_frame_generation_missing), paneScale)
-                    } else {
-                        var frameGenSettingsOpen by remember { mutableStateOf(false) }
-                        GearToggleRow(
-                            title = stringResource(R.string.session_drawer_frame_generation_enable),
-                            checked = state.frameGenEnabled,
-                            onCheckedChange = listener::onFrameGenEnabledChanged,
-                            onGearClick = { frameGenSettingsOpen = true },
-                        )
-                        if (frameGenSettingsOpen) {
-                            PaneOverlayDialog(
-                                title = stringResource(R.string.session_drawer_frame_generation),
-                                onDismiss = { frameGenSettingsOpen = false },
-                            ) {
-                                FrameGenSettingsPopupContent(state = state, listener = listener)
-                            }
-                        }
-                    }
                 }
 
                 ThinDivider()

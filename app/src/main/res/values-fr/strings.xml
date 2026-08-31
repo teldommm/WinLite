@@ -1138,8 +1138,6 @@ Chemin installé :
     <string name="session_drawer_color_profile_crt">Effet CRT</string>
     <string name="session_drawer_calibrate_advanced">Étalonnage avancé</string>
     <string name="session_drawer_rail_label_hud">HUD</string>
-    <string name="session_drawer_rail_label_frame_gen">FPS</string>
-    <string name="session_drawer_rail_label_gyro">Gyro</string>
     <string name="session_drawer_rail_label_effects">FX</string>
     <string name="session_drawer_rail_label_apps">Plus</string>
     <string name="session_drawer_rail_label_keyboard">Clavier</string>

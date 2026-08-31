@@ -59,12 +59,8 @@ internal fun ReshadePaneContent(
                         .padding(horizontal = (12f * paneScale).dp, vertical = (12f * paneScale).dp),
                 verticalArrangement = Arrangement.spacedBy((10f * paneScale).dp),
             ) {
-                NavBooleanRow(
-                    title = stringResource(R.string.reshade_drawer_enable),
-                    checked = state.reshadeMasterEnabled,
-                    onCheckedChange = listener::onReshadeMasterEnabledChanged,
-                )
-
+                // Enable toggle now lives in the outer GearToggleRow (Effects pane); mode +
+                // effect rows below are always visible regardless of the enabled state.
                 if (state.reshadeLoadout.isEmpty()) {
                     Text(
                         text = stringResource(R.string.reshade_drawer_empty),
@@ -74,12 +70,10 @@ internal fun ReshadePaneContent(
                     return@Column
                 }
 
-                if (state.reshadeMasterEnabled) {
-                    ReshadeModeRow(mode = state.reshadeMode, onChange = listener::onReshadeModeChanged)
+                ReshadeModeRow(mode = state.reshadeMode, onChange = listener::onReshadeModeChanged)
 
-                    state.reshadeLoadout.forEachIndexed { index, item ->
-                        ReshadeEffectRow(index = index, item = item, mode = state.reshadeMode, listener = listener)
-                    }
+                state.reshadeLoadout.forEachIndexed { index, item ->
+                    ReshadeEffectRow(index = index, item = item, mode = state.reshadeMode, listener = listener)
                 }
             }
         }

@@ -1625,51 +1625,8 @@ private fun GeneralSection(
         }
     }
 
-    if (!isContainer) {
-        Spacer(Modifier.height(SettingSectionGap))
-        SettingGroup(verticalPadding = SettingTightGap) {
-            val fpsMin = 15
-            // Cap the slider at the panel's highest supported refresh rate (parsed from entries like "120 Hz"); fall back to 60.
-            val supportedMax = state.refreshRateEntries.value
-                .mapNotNull { it.trim().substringBefore(" ").toIntOrNull() }
-                .maxOrNull() ?: 60
-            val maxFps = supportedMax.coerceAtLeast(fpsMin)
-            val enabled = state.fpsLimit.intValue > 0
-            // Remember the last enabled value so off→on restores it; re-seed when the supported max changes.
-            var lastFps by remember(maxFps) {
-                mutableStateOf(
-                    (if (state.fpsLimit.intValue > 0) state.fpsLimit.intValue else 60)
-                        .coerceIn(fpsMin, maxFps)
-                )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                SettingSwitch(
-                    label = "FPS Limiter",
-                    checked = enabled,
-                    onCheckedChange = { on -> state.fpsLimit.intValue = if (on) lastFps else 0 }
-                )
-                AnimatedVisibility(
-                    visible = enabled,
-                    enter = graphicsCardExpandEnter(),
-                    exit = graphicsCardExpandExit()
-                ) {
-                    SettingSlider(
-                        label = "Limit",
-                        value = lastFps,
-                        range = fpsMin..maxFps,
-                        valueText = "$lastFps FPS",
-                        steps = (maxFps - fpsMin - 1).coerceAtLeast(0),
-                        onValueChange = {
-                            val v = it.coerceIn(fpsMin, maxFps)
-                            lastFps = v
-                            state.fpsLimit.intValue = v
-                        }
-                    )
-                }
-            }
-        }
-    }
+    // FPS limiter removed here — it now lives in the in-session drawer (Effects tab), so
+    // this pre-launch duplicate isn't needed.
 }
 
 @Composable
@@ -1733,10 +1690,6 @@ private fun DisplaySection(
 
     Spacer(Modifier.height(SettingItemGap))
 
-    FrameGenerationCard(state)
-
-    Spacer(Modifier.height(SettingItemGap))
-
     val dxWrapperEntries = state.dxWrapperEntries.value
     val dxWrapperIdx = state.selectedDxWrapper.intValue
     val selectedDxWrapper = if (dxWrapperIdx in dxWrapperEntries.indices)
@@ -1748,6 +1701,10 @@ private fun DisplaySection(
     } else {
         WineD3DConfigCard(state)
     }
+
+    Spacer(Modifier.height(SettingItemGap))
+
+    FrameGenerationCard(state)
 
 }
 
@@ -1798,10 +1755,7 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
     }
 
     val shaders = state.frameGenShaderState.intValue
-    val ready = shaders == FRAMEGEN_SHADERS_READY || shaders == FRAMEGEN_SHADERS_UPDATED
     val busy = shaders == FRAMEGEN_SHADERS_IMPORTING || shaders == FRAMEGEN_SHADERS_CHECKING
-    val enabled = ready && state.frameGenEnabled.value
-    val targetRate = state.frameGenTargetRate.intValue
 
     SettingGroup {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1822,14 +1776,9 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
 
         Spacer(Modifier.height(SettingItemGap))
 
-        SettingSwitch(
-            label = stringResource(R.string.session_drawer_frame_generation_enable),
-            checked = enabled,
-            enabled = ready,
-            onCheckedChange = { state.frameGenEnabled.value = it },
-        )
-
-
+        // Enable + multiplier/target-rate/preset now live only in the in-session drawer
+        // (Effects tab). This card is shader-import only: locate/import the Lossless.dll
+        // frame-gen shaders so the drawer's toggle has something to enable.
         Text(
             text =
                 when (shaders) {
@@ -1863,64 +1812,6 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
             enabled = !busy,
             onClick = { pickDll() },
         )
-
-        if (enabled) {
-            Spacer(Modifier.height(SettingItemGap))
-
-            SettingPairRow {
-                Box(Modifier.weight(1f)) {
-                    SettingDropdown(
-                        label = stringResource(R.string.session_drawer_frame_generation_target),
-                        entries =
-                            FrameGenTargetOptions.map { rate ->
-                                if (rate == 0) {
-                                    stringResource(R.string.session_drawer_frame_generation_target_off)
-                                } else {
-                                    stringResource(R.string.session_drawer_frame_generation_target_value, rate)
-                                }
-                            },
-                        selectedIndex = FrameGenTargetOptions.indexOf(targetRate).coerceAtLeast(0),
-                        onSelected = { state.frameGenTargetRate.intValue = FrameGenTargetOptions[it] },
-                    )
-                }
-                Box(Modifier.weight(1f)) {
-                    SettingDropdown(
-                        label = stringResource(R.string.session_drawer_frame_generation_multiplier),
-                        entries =
-                            FrameGenMultiplierOptions.map { multiplier ->
-                                stringResource(
-                                    R.string.session_drawer_frame_generation_multiplier_value,
-                                    multiplier,
-                                )
-                            },
-                        selectedIndex =
-                            FrameGenMultiplierOptions
-                                .indexOf(state.frameGenMultiplier.intValue)
-                                .coerceAtLeast(0),
-                        onSelected = {
-                            state.frameGenMultiplier.intValue = FrameGenMultiplierOptions[it]
-                        },
-                        enabled = targetRate == 0,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(SettingItemGap))
-
-            FrameGenPresetSlider(
-                selected = FrameGenPreset.fromFlowScale(state.frameGenFlowScale.intValue),
-                onSelected = { state.frameGenFlowScale.intValue = it.flowScale },
-            )
-
-            Spacer(Modifier.height(SettingItemGap))
-
-            Text(
-                text = stringResource(R.string.session_drawer_frame_generation_note),
-                color = TextSecondary,
-                fontSize = SettingLabelSize,
-                lineHeight = SettingLabelSize * 1.4f,
-            )
-        }
     }
 }
 
