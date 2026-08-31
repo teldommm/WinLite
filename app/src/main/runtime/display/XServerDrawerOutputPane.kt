@@ -185,34 +185,9 @@ import com.winlator.cmod.shared.ui.widget.chasingBorder
 import kotlin.math.roundToInt
 
 // Output/display pane composables, split out of XServerDrawerMenu.kt (behavior-identical).
-
-@Composable
-internal fun OutputPaneContent(
-    state: XServerDrawerState,
-    listener: XServerDrawerActionListener,
-) {
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val paneScale = computePaneScale(maxHeight)
-        CompositionLocalProvider(LocalPaneScale provides paneScale) {
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = (12f * paneScale).dp, vertical = (12f * paneScale).dp),
-                verticalArrangement = Arrangement.spacedBy((10f * paneScale).dp),
-            ) {
-                if (state.outputSwapActive) {
-                    OutputActiveControls(state = state, listener = listener, paneScale = paneScale)
-                } else if (state.outputDisplayAvailable) {
-                    OutputSendToDisplay(state = state, listener = listener, paneScale = paneScale)
-                } else {
-                    OutputCastEntry(listener = listener, paneScale = paneScale)
-                }
-            }
-        }
-    }
-}
+// Note: OutputPaneContent itself (the old standalone-pane wrapper) was removed — its content
+// now lives inline at the bottom of SCREEN_EFFECTS instead, calling OutputActiveControls /
+// OutputSendToDisplay / OutputCastEntry directly (they already take paneScale as a param).
 
 @Composable
 internal fun OutputActiveControls(

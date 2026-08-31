@@ -36,10 +36,13 @@ import com.winlator.cmod.R
 import com.winlator.cmod.shared.framegen.FrameGenPreset
 import kotlin.math.roundToInt
 
+// The FPS limiter now lives inline in SCREEN_EFFECTS (not behind the Frame Gen gear), so it
+// needs its own reusable section with its own fpsLimitMemory state.
 @Composable
-internal fun FrameGenPaneContent(
+internal fun FpsLimiterSection(
     state: XServerDrawerState,
     listener: XServerDrawerActionListener,
+    paneScale: Float,
 ) {
     var fpsLimitMemory by remember {
         mutableStateOf(if (state.fpsLimit > 0) state.fpsLimit else FPS_LIMITER_DEFAULT)
@@ -48,6 +51,47 @@ internal fun FrameGenPaneContent(
         if (state.fpsLimit > 0) fpsLimitMemory = state.fpsLimit
     }
 
+    Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
+        PaneSectionLabel(stringResource(R.string.session_drawer_fps_limiter))
+
+        Box(
+            Modifier.fillMaxWidth().paneNavItem(
+                cornerRadius = (12f * paneScale).dp,
+                onActivate = {
+                    listener.onFPSLimitChanged(
+                        if (state.fpsLimit > 0) {
+                            0
+                        } else {
+                            fpsLimitMemory.coerceIn(FPS_LIMITER_MIN, state.maxRefreshRate)
+                        },
+                    )
+                },
+                onAdjust = { dir ->
+                    val base = if (state.fpsLimit > 0) state.fpsLimit else fpsLimitMemory
+                    val q = base / 5.0
+                    val units = if (dir > 0) Math.floor(q + 1e-4) + 1 else Math.ceil(q - 1e-4) - 1
+                    listener.onFPSLimitChanged(
+                        (units * 5).toInt().coerceIn(FPS_LIMITER_MIN, state.maxRefreshRate),
+                    )
+                },
+            ),
+        ) {
+            FPSLimiterCard(
+                currentLimit = state.fpsLimit,
+                maxRefreshRate = state.maxRefreshRate,
+                onLimitChanged = listener::onFPSLimitChanged,
+            )
+        }
+    }
+}
+
+// Frame Gen settings, now opened from a gear icon inside SCREEN_EFFECTS instead of its own
+// rail tab — just the multiplier/quality section (FPS limiter moved out, see above).
+@Composable
+internal fun FrameGenSettingsPopupContent(
+    state: XServerDrawerState,
+    listener: XServerDrawerActionListener,
+) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val paneScale = computePaneScale(maxHeight)
         CompositionLocalProvider(LocalPaneScale provides paneScale) {
@@ -60,41 +104,6 @@ internal fun FrameGenPaneContent(
                 verticalArrangement = Arrangement.spacedBy((10f * paneScale).dp),
             ) {
                 FrameGenerationSection(state = state, listener = listener, paneScale = paneScale)
-
-                ThinDivider()
-
-                Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
-                    PaneSectionLabel(stringResource(R.string.session_drawer_fps_limiter))
-
-                    Box(
-                        Modifier.fillMaxWidth().paneNavItem(
-                            cornerRadius = (12f * paneScale).dp,
-                            onActivate = {
-                                listener.onFPSLimitChanged(
-                                    if (state.fpsLimit > 0) {
-                                        0
-                                    } else {
-                                        fpsLimitMemory.coerceIn(FPS_LIMITER_MIN, state.maxRefreshRate)
-                                    },
-                                )
-                            },
-                            onAdjust = { dir ->
-                                val base = if (state.fpsLimit > 0) state.fpsLimit else fpsLimitMemory
-                                val q = base / 5.0
-                                val units = if (dir > 0) Math.floor(q + 1e-4) + 1 else Math.ceil(q - 1e-4) - 1
-                                listener.onFPSLimitChanged(
-                                    (units * 5).toInt().coerceIn(FPS_LIMITER_MIN, state.maxRefreshRate),
-                                )
-                            },
-                        ),
-                    ) {
-                        FPSLimiterCard(
-                            currentLimit = state.fpsLimit,
-                            maxRefreshRate = state.maxRefreshRate,
-                            onLimitChanged = listener::onFPSLimitChanged,
-                        )
-                    }
-                }
             }
         }
     }

@@ -463,162 +463,14 @@ internal fun ScreenEffectsPaneContent(
 
                 ThinDivider()
 
-                // FPS/HUD content, folded in from the old standalone HUD rail tab.
-                Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
-                    PaneSectionLabel(stringResource(R.string.session_drawer_rail_label_hud))
-
-                    var hudMetricEditor by remember { mutableStateOf<HUDMetricEditor?>(null) }
-                    val hudElementNames =
-                        listOf(
-                            stringResource(R.string.session_drawer_hud_element_fps),
-                            stringResource(R.string.session_drawer_hud_element_api),
-                            stringResource(R.string.session_drawer_hud_element_gpu),
-                            stringResource(R.string.session_drawer_hud_element_cpu),
-                            stringResource(R.string.session_drawer_hud_element_ram),
-                            stringResource(R.string.session_drawer_hud_element_battery),
-                            stringResource(R.string.session_drawer_hud_element_temp),
-                            stringResource(R.string.session_drawer_hud_element_graph),
-                            stringResource(R.string.session_drawer_hud_element_cpu_temp),
-                        )
-                    val hudElementOrder = listOf(1, 2, 3, 8, 4, 5, 6, 0, 7)
-                    val hudActive =
-                        state.items.firstOrNull { it.itemId == R.id.main_menu_fps_monitor }?.active ?: false
-
-                    hudMetricEditor?.let { editor ->
-                        HUDMetricInputDialog(
-                            editor = editor,
-                            initialPercent =
-                                when (editor) {
-                                    HUDMetricEditor.ALPHA -> (state.hudTransparency * 100).roundToInt()
-                                    HUDMetricEditor.BACKGROUND_ALPHA -> (state.hudBackgroundTransparency * 100).roundToInt()
-                                    HUDMetricEditor.SCALE -> (state.hudScale * 100).roundToInt()
-                                },
-                            onDismiss = { hudMetricEditor = null },
-                            onConfirm = { enteredPercent ->
-                                hudMetricEditor = null
-                                when (editor) {
-                                    HUDMetricEditor.ALPHA -> {
-                                        listener.onHUDTransparencyChanged(enteredPercent.coerceIn(editor.minPercent, editor.maxPercent) / 100f)
-                                    }
-                                    HUDMetricEditor.BACKGROUND_ALPHA -> {
-                                        listener.onHUDBackgroundTransparencyChanged(
-                                            enteredPercent.coerceIn(editor.minPercent, editor.maxPercent) / 100f,
-                                        )
-                                    }
-                                    HUDMetricEditor.SCALE -> {
-                                        listener.onHUDScaleChanged(enteredPercent.coerceIn(editor.minPercent, editor.maxPercent) / 100f)
-                                    }
-                                }
-                            },
-                        )
-                    }
-
-                    NavEnableRow(
-                        title = stringResource(R.string.session_drawer_fps_monitor),
-                        checked = hudActive,
-                        onCheckedChange = { listener.onActionSelected(R.id.main_menu_fps_monitor) },
-                    )
-
-                    var mangoSettingsOpen by remember { mutableStateOf(false) }
-                    GearToggleRow(
-                        title = stringResource(R.string.session_drawer_hud_mango_style),
-                        checked = state.mangoHudEnabled,
-                        onCheckedChange = listener::onMangoHudChanged,
-                        onGearClick = { mangoSettingsOpen = true },
-                    )
-                    if (mangoSettingsOpen) {
-                        MangoHudSettingsDialog(
-                            elements = state.mangoHudElements,
-                            hudAlpha = state.mangoHudAlpha,
-                            bgAlpha = state.mangoHudBgAlpha,
-                            hudScale = state.mangoHudScale,
-                            locked = state.mangoHudLocked,
-                            onToggle = listener::onMangoHudElementToggled,
-                            onAlphaChanged = listener::onMangoHudAlphaChanged,
-                            onBgAlphaChanged = listener::onMangoHudBackgroundAlphaChanged,
-                            onScaleChanged = listener::onMangoHudScaleChanged,
-                            onLockChanged = listener::onMangoHudLockChanged,
-                            onDismiss = { mangoSettingsOpen = false },
-                        )
-                    }
-
-                    if (hudActive) {
-                        NavSliderRow(
-                            label = stringResource(R.string.session_drawer_hud_alpha),
-                            valueText = "${(state.hudTransparency * 100).toInt()}%",
-                            value = state.hudTransparency,
-                            valueRange = 0.1f..1f,
-                            steps = 17,
-                            onValueClick = { hudMetricEditor = HUDMetricEditor.ALPHA },
-                            onValueChange = { listener.onHUDTransparencyChanged(it.snapToStep(0.05f, 0.1f, 1f)) },
-                        )
-
-                        if (state.hudBackgroundAlphaEnabled) {
-                            NavSliderRow(
-                                label = stringResource(R.string.session_drawer_hud_background),
-                                valueText = "${(state.hudBackgroundTransparency * 100).toInt()}%",
-                                value = state.hudBackgroundTransparency,
-                                valueRange = 0.1f..1f,
-                                steps = 17,
-                                onValueClick = { hudMetricEditor = HUDMetricEditor.BACKGROUND_ALPHA },
-                                onValueChange = {
-                                    listener.onHUDBackgroundTransparencyChanged(it.snapToStep(0.05f, 0.1f, 1f))
-                                },
-                            )
-                        }
-
-                        NavSliderRow(
-                            label = stringResource(R.string.session_drawer_hud_scale),
-                            valueText = "${Math.round(state.hudScale * 100)}%",
-                            value = state.hudScale,
-                            valueRange = 0.3f..2.0f,
-                            steps = 33,
-                            onValueClick = { hudMetricEditor = HUDMetricEditor.SCALE },
-                            onValueChange = { listener.onHUDScaleChanged(it.snapToStep(0.05f, 0.3f, 2.0f)) },
-                            adjustStep = 0.05f,
-                        )
-
-                        NavBooleanRow(
-                            title = stringResource(R.string.session_drawer_hud_background_alpha),
-                            checked = state.hudBackgroundAlphaEnabled,
-                            onCheckedChange = listener::onHUDBackgroundAlphaDecoupledChanged,
-                        )
-
-                        NavBooleanRow(
-                            title = stringResource(R.string.session_drawer_hud_frametime_numeric),
-                            checked = state.frametimeNumericEnabled,
-                            onCheckedChange = listener::onFrametimeNumericChanged,
-                        )
-
-                        Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
-                            PaneSectionLabel(stringResource(R.string.session_drawer_hud_elements))
-                            ChipFlow {
-                                hudElementOrder.forEach { index ->
-                                    HUDToggleChip(
-                                        label = hudElementNames[index],
-                                        checked = state.hudElements[index],
-                                        onClick = { listener.onHUDElementToggled(index, !state.hudElements[index]) },
-                                        modifier = Modifier.paneNavItem(
-                                            cornerRadius = (16f * paneScale).dp,
-                                            onActivate = { listener.onHUDElementToggled(index, !state.hudElements[index]) },
-                                        ),
-                                    )
-                                }
-                            }
-                        }
-
-                        NavBooleanRow(
-                            title = stringResource(R.string.session_drawer_dual_series_battery),
-                            checked = state.dualSeriesBatteryEnabled,
-                            onCheckedChange = listener::onDualSeriesBatteryChanged,
-                        )
-                    }
-                }
+                // FPS limiter, folded in from Frame Gen's old FPS-limiter section — kept
+                // inline (not behind a gear) since it's a quick, frequently-used control.
+                FpsLimiterSection(state = state, listener = listener, paneScale = paneScale)
 
                 ThinDivider()
 
                 // Frame Generation, folded in from the old standalone FRAME_GEN rail tab:
-                // a summary toggle + gear that opens the full FrameGenPaneContent as a popup.
+                // a summary toggle + gear that opens FrameGenSettingsPopupContent as a popup.
                 Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
                     PaneSectionLabel(stringResource(R.string.session_drawer_frame_generation))
 
@@ -637,17 +489,20 @@ internal fun ScreenEffectsPaneContent(
                                 title = stringResource(R.string.session_drawer_frame_generation),
                                 onDismiss = { frameGenSettingsOpen = false },
                             ) {
-                                FrameGenPaneContent(state = state, listener = listener)
+                                FrameGenSettingsPopupContent(state = state, listener = listener)
                             }
                         }
                     }
                 }
 
-                // ReShade, folded in from the old standalone RESHADE rail tab. Shown only
-                // when the host added a main_menu_reshade item (same condition the rail used).
-                if (state.items.any { it.itemId == R.id.main_menu_reshade }) {
-                    ThinDivider()
+                ThinDivider()
 
+                // ReShade, folded in from the old standalone RESHADE rail tab: its settings
+                // are large (mode + per-effect stack), so — same as Frame Gen — just a
+                // summary toggle + gear that opens the full ReshadePaneContent as a popup.
+                // Shown only when the host added a main_menu_reshade item (same condition
+                // the rail used before).
+                if (state.items.any { it.itemId == R.id.main_menu_reshade }) {
                     Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
                         PaneSectionLabel(stringResource(R.string.reshade_section_title))
 
@@ -666,6 +521,20 @@ internal fun ScreenEffectsPaneContent(
                                 ReshadePaneContent(state = state, listener = listener)
                             }
                         }
+                    }
+
+                    ThinDivider()
+                }
+
+                // Output, folded in from the old standalone OUTPUT rail tab — placed at the
+                // very bottom of Effects, shown inline (no gear) same as it was on its own tab.
+                Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
+                    if (state.outputSwapActive) {
+                        OutputActiveControls(state = state, listener = listener, paneScale = paneScale)
+                    } else if (state.outputDisplayAvailable) {
+                        OutputSendToDisplay(state = state, listener = listener, paneScale = paneScale)
+                    } else {
+                        OutputCastEntry(listener = listener, paneScale = paneScale)
                     }
                 }
             }

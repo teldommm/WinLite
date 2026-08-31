@@ -470,10 +470,13 @@ internal enum class HUDMetricEditor(
     BACKGROUND_ALPHA(minPercent = 10, maxPercent = 100),
 }
 
-// HUD, FRAME_GEN, GYROSCOPE and RESHADE are no longer standalone panes: their content now
-// lives inline (HUD) or behind a gear-icon PaneOverlayDialog (Frame Gen, ReShade, Gyroscope)
-// inside INPUT_CONTROLS / SCREEN_EFFECTS, to cut down on top-rail tabs.
-internal enum class DrawerPane { INPUT_CONTROLS, SCREEN_EFFECTS, OUTPUT, TASK_MANAGER, LOGS, TOUCH }
+// FRAME_GEN, GYROSCOPE and OUTPUT are no longer standalone panes: Frame Gen lives behind a
+// gear inside SCREEN_EFFECTS (FPS limiter is inline there too), Gyroscope behind a gear
+// inside INPUT_CONTROLS, and Output content sits inline at the bottom of SCREEN_EFFECTS.
+// RESHADE is no longer a standalone pane either: it now lives behind a gear inside
+// SCREEN_EFFECTS, same treatment as Frame Gen (its settings are large enough to warrant
+// a popup rather than inline content).
+internal enum class DrawerPane { INPUT_CONTROLS, HUD, SCREEN_EFFECTS, TASK_MANAGER, LOGS, TOUCH }
 
 internal const val LogsPaneMaxLines = 2000
 internal const val LogsFlushIntervalMs = 200L
@@ -516,22 +519,20 @@ private data class RailPaneSpec(
 private val RAIL_PANES =
     listOf(
         RailPaneSpec(
-            pane = DrawerPane.INPUT_CONTROLS,
-            itemId = R.id.main_menu_input_controls,
-            labelRes = R.string.session_drawer_rail_label_input_controls,
-            iconOverride = Icons.Outlined.SportsEsports,
+            pane = DrawerPane.HUD,
+            itemId = R.id.main_menu_fps_monitor,
+            labelRes = R.string.session_drawer_rail_label_hud,
         ),
         RailPaneSpec(
             pane = DrawerPane.SCREEN_EFFECTS,
             itemId = R.id.main_menu_screen_effects,
             labelRes = R.string.session_drawer_rail_label_effects,
         ),
-        // Shown only when the host adds a main_menu_output item to state.items.
         RailPaneSpec(
-            pane = DrawerPane.OUTPUT,
-            itemId = R.id.main_menu_output,
-            labelRes = R.string.session_drawer_rail_label_output,
-            iconOverride = Icons.Outlined.Monitor,
+            pane = DrawerPane.INPUT_CONTROLS,
+            itemId = R.id.main_menu_input_controls,
+            labelRes = R.string.session_drawer_rail_label_input_controls,
+            iconOverride = Icons.Outlined.SportsEsports,
         ),
     )
 
@@ -539,20 +540,20 @@ private val RAIL_PANE_ITEM_IDS = RAIL_PANES.map { it.itemId }.toSet()
 private val PINNED_BOTTOM_ITEM_IDS = setOf(R.id.main_menu_pause, R.id.main_menu_exit)
 
 // Items that used to be their own rail pane (and so were excluded from the grid via
-// RAIL_PANE_ITEM_IDS) but now live inline/behind a gear inside INPUT_CONTROLS or
-// SCREEN_EFFECTS instead. Still excluded from the grid so they don't show up twice.
+// RAIL_PANE_ITEM_IDS) but now live inline/behind a gear inside SCREEN_EFFECTS or
+// INPUT_CONTROLS instead. Still excluded from the grid so they don't show up twice.
 private val FOLDED_INTO_PANE_ITEM_IDS =
     setOf(
-        R.id.main_menu_fps_monitor,
         R.id.main_menu_frame_generation,
         R.id.main_menu_gyroscope,
+        R.id.main_menu_output,
         R.id.main_menu_reshade,
     )
 
 // Generic gear-triggered settings popup, shared by rows that used to be their own top-rail
-// pane (Frame Gen, ReShade, Gyroscope) and now live inline as a toggle + gear row instead.
-// Mirrors MangoHudSettingsDialog's shell: pinned header (icon + title + close), bounded
-// height, and a weight(1f, fill=false) content slot so the wrapped pane's own internal
+// pane (Frame Gen, Gyroscope) and now live behind a toggle + gear row instead. Mirrors
+// MangoHudSettingsDialog's shell: pinned header (icon + title + close), bounded height, and
+// a weight(1f, fill=false) content slot so the wrapped pane's own internal
 // BoxWithConstraints/scroll gets a definite height to measure against.
 @Composable
 internal fun PaneOverlayDialog(
@@ -633,7 +634,8 @@ internal fun PaneOverlayDialog(
 }
 
 // Small reusable summary row: title + toggle + gear button that opens a PaneOverlayDialog.
-// Used to fold a formerly-standalone pane (Frame Gen, ReShade, Gyroscope) into a single row.
+// Used to fold a formerly-standalone pane (Frame Gen, Gyroscope) into a single row, same
+// visual treatment as the Mango-HUD toggle+gear row.
 @Composable
 internal fun GearToggleRow(
     title: String,
@@ -1849,9 +1851,9 @@ internal fun XServerDrawerContent(
                             CompositionLocalProvider(LocalPaneNav provides paneNav) {
                             when (pane) {
                                 DrawerPane.INPUT_CONTROLS -> InputControlsPaneContent(state = state, listener = listener)
+                                DrawerPane.HUD -> HUDPaneContent(state = state, listener = listener)
                                 DrawerPane.TOUCH -> TouchPaneContent(state = state, listener = listener, onClose = { onOpenPaneChange(null) })
                                 DrawerPane.SCREEN_EFFECTS -> ScreenEffectsPaneContent(state = state, listener = listener)
-                                DrawerPane.OUTPUT -> OutputPaneContent(state = state, listener = listener)
                                 DrawerPane.TASK_MANAGER ->
                                     TaskManagerPaneContent(
                                         taskManagerState = taskManagerState,
