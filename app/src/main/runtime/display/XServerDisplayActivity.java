@@ -1720,13 +1720,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             shortcut = new Shortcut(container, new File(shortcutPath));
         }
 
-        if (shortcut != null
-                && com.winlator.cmod.feature.retro.RetroShortcuts.isRetroShortcut(shortcut)) {
-            com.winlator.cmod.feature.retro.RetroShortcuts.launch(this, shortcut);
-            finish();
-            return;
-        }
-
         loadScreenEffectsSettings();
 
         boolean recordToFile = preferences.getBoolean("hud_record_to_file", false);

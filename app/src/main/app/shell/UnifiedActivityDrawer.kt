@@ -788,7 +788,6 @@ internal fun UnifiedActivity.AddCustomGameDialog(onDismiss: () -> Unit) {
     var selectedExePath by remember { mutableStateOf<String?>(null) }
     var gameName by remember { mutableStateOf("") }
     var gameFolder by remember { mutableStateOf<String?>(null) }
-    var retroSystem by remember { mutableStateOf<com.winlator.cmod.feature.retro.RetroSystem?>(null) }
     var isAdding by remember { mutableStateOf(false) }
     var nameEditing by remember { mutableStateOf(false) }
     val nameFocus = remember { FocusRequester() }
@@ -800,46 +799,26 @@ internal fun UnifiedActivity.AddCustomGameDialog(onDismiss: () -> Unit) {
         }
     }
     val registry = remember { PaneNavRegistry() }
-    val addEnabled =
-        selectedExePath != null && gameName.isNotBlank() && !isAdding &&
-            (retroSystem != null || gameFolder != null)
+    val addEnabled = selectedExePath != null && gameName.isNotBlank() && gameFolder != null && !isAdding
     val doAdd: () -> Unit = {
         isAdding = true
-        val chosenRetro = retroSystem
         scope.launch(Dispatchers.IO) {
-            val added =
-                if (chosenRetro != null) {
-                    com.winlator.cmod.feature.retro.RetroShortcuts
-                        .create(context, gameName.trim(), selectedExePath!!, chosenRetro)
-                } else {
-                    addCustomGame(context, gameName.trim(), selectedExePath!!, gameFolder!!)
-                    true
-                }
+            addCustomGame(context, gameName.trim(), selectedExePath!!, gameFolder!!)
             withContext(Dispatchers.Main) {
                 isAdding = false
-                if (added) {
-                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                        context,
-                        "$gameName added!",
-                        android.widget.Toast.LENGTH_SHORT,
-                    )
-                    onDismiss()
-                } else {
-                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                        context,
-                        "Could not add game",
-                        android.widget.Toast.LENGTH_SHORT,
-                    )
-                }
+                com.winlator.cmod.shared.ui.toast.WinToast.show(
+                    context,
+                    "$gameName added!",
+                    android.widget.Toast.LENGTH_SHORT,
+                )
+                onDismiss()
             }
         }
     }
 
     fun selectExecutable(path: String) {
-        val detectedRetro = com.winlator.cmod.feature.retro.RetroSystems.detectForFile(path)
         val file = java.io.File(path)
-        val launchable = file.extension.lowercase() in DirectoryPickerDialog.ExecutableExtensions
-        if (!file.isFile || (!launchable && detectedRetro == null)) {
+        if (!file.isFile || file.extension.lowercase() !in DirectoryPickerDialog.ExecutableExtensions) {
             com.winlator.cmod.shared.ui.toast.WinToast.show(
                 context,
                 R.string.common_ui_select_valid_exe_file,
@@ -849,24 +828,9 @@ internal fun UnifiedActivity.AddCustomGameDialog(onDismiss: () -> Unit) {
         }
 
         selectedExePath = path
-        retroSystem = detectedRetro
-        gameFolder =
-            if (detectedRetro != null) {
-                java.io.File(path).parent
-            } else {
-                LibraryShortcutUtils.detectCustomGameFolder(path)
-            }
+        gameFolder = LibraryShortcutUtils.detectCustomGameFolder(path)
         if (gameName.isBlank()) {
-            gameName =
-                if (detectedRetro != null) {
-                    java.io
-                        .File(path)
-                        .nameWithoutExtension
-                        .replace("_", " ")
-                        .replace("-", " ")
-                } else {
-                    LibraryShortcutUtils.suggestCustomGameName(path)
-                }
+            gameName = LibraryShortcutUtils.suggestCustomGameName(path)
         }
     }
 
@@ -928,8 +892,7 @@ internal fun UnifiedActivity.AddCustomGameDialog(onDismiss: () -> Unit) {
                                                                 android.os.Environment.DIRECTORY_DOWNLOADS,
                                                             ).absolutePath,
                                                 title = getString(R.string.common_ui_select_exe),
-                                                allowedExtensions = DirectoryPickerDialog.ExecutableExtensions +
-                                                    com.winlator.cmod.feature.retro.RetroSystems.allExtensions,
+                                                allowedExtensions = DirectoryPickerDialog.ExecutableExtensions,
                                                 dimAmount = 0.5f,
                                                 preserveBackdropBlur = true,
                                                 extraRoots = driveRoots(includeInternal = true),
@@ -942,7 +905,7 @@ internal fun UnifiedActivity.AddCustomGameDialog(onDismiss: () -> Unit) {
                             Icon(Icons.Outlined.FolderOpen, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                selectedExePath ?: "Select Executable or Console ROM",
+                                selectedExePath ?: "Select Executable",
                                 color = if (selectedExePath == null) TextSecondary else TextPrimary,
                                 maxLines = if (selectedExePath == null) 1 else Int.MAX_VALUE,
                                 overflow = if (selectedExePath == null) TextOverflow.Ellipsis else TextOverflow.Visible,
@@ -990,72 +953,6 @@ internal fun UnifiedActivity.AddCustomGameDialog(onDismiss: () -> Unit) {
 
                             Spacer(Modifier.height(8.dp))
 
-                            if (retroSystem != null) {
-                                val activeRetroSystem = retroSystem
-                                var consoleMenuOpen by remember { mutableStateOf(false) }
-                                Box {
-                                    Row(
-                                        modifier =
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(Color.White.copy(alpha = 0.05f))
-                                                .paneNavItem(
-                                                    cornerRadius = 10.dp,
-                                                    tapToSelect = true,
-                                                    onActivate = { consoleMenuOpen = true },
-                                                ).clickable { consoleMenuOpen = true }
-                                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            Icons.Outlined.SportsEsports,
-                                            contentDescription = null,
-                                            tint = StatusOnline.copy(alpha = 0.7f),
-                                            modifier = Modifier.size(14.dp),
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text("Console", color = TextSecondary, fontSize = 9.sp)
-                                            Text(
-                                                activeRetroSystem?.displayName ?: "",
-                                                color = TextPrimary,
-                                                fontSize = 10.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                        Icon(
-                                            Icons.Outlined.Edit,
-                                            contentDescription = stringResource(R.string.common_ui_change),
-                                            tint = Accent,
-                                            modifier = Modifier.size(14.dp),
-                                        )
-                                    }
-                                    DropdownMenu(
-                                        expanded = consoleMenuOpen,
-                                        onDismissRequest = { consoleMenuOpen = false },
-                                        containerColor = Color(0xFF1C232E),
-                                    ) {
-                                        com.winlator.cmod.feature.retro.RetroSystems.ALL.forEach { candidate ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        candidate.displayName,
-                                                        color =
-                                                            if (candidate.id == activeRetroSystem?.id) Accent else TextPrimary,
-                                                        fontSize = 12.sp,
-                                                    )
-                                                },
-                                                onClick = {
-                                                    retroSystem = candidate
-                                                    consoleMenuOpen = false
-                                                },
-                                            )
-                                        }
-                                    }
-                                }
-                            } else {
                             // Game folder — single compact row
                             Row(
                                 modifier =
@@ -1114,7 +1011,6 @@ internal fun UnifiedActivity.AddCustomGameDialog(onDismiss: () -> Unit) {
                                         modifier = Modifier.size(14.dp),
                                     )
                                 }
-                            }
                             }
                         }
                     }

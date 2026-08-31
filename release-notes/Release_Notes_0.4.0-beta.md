@@ -2,15 +2,6 @@
 
 ### Main Changes:
 
-**Retro console emulation**
- - WinNative now plays retro console games alongside your Wine/PC titles. Retro games live in the same Library and launch the same way, but run on a libretro backend — or, for PS2 and GameCube/Wii, on a full emulator in its own process.
- - Supported systems: NES (FCEUmm), SNES (Snes9x), Game Boy / Color (Gambatte), Game Boy Advance (mGBA, with gpSP for link-cable multiplayer), Genesis / Master System / Game Gear (Genesis Plus GX), Nintendo 64 (Mupen64Plus-Next), PlayStation (Beetle PSX), PlayStation 2 (ARMSX2), and GameCube / Wii (Dolphin, standalone Vulkan).
- - **No emulator core ships inside the APK.** Cores are downloaded on demand from **Settings › Retro** as a single verified bundle, extracted atomically so an interrupted install can never leave a half-installed core set behind. Updates are an exact checksum comparison — the screen tells you the installed build date and only downloads when you tap.
- - **RetroAchievements** support (softcore) with login, achievement lists and in-game unlock toasts.
- - **347 core options** generated from each core's own source, grouped into Display / Sound / Performance / Controls / System, as per-console defaults and per-game overrides.
- - Editable touch layouts with per-game profiles, netplay for the libretro cores and Dolphin, save states, cloud save sync, and a draggable performance HUD — fully translated into all 22 locales.
- - The guide button now opens the retro menu in the 3D engine too, and the Stadium ROM row imports through the system file picker instead of only printing a path.
-
 **ReShade — drop-in effects, in-app catalog and live in-game control**
  - ReShade `.fx` effects now work on Vulkan-backed (DXVK/VKD3D) games, with a per-game and per-container **loadout**: add effects, reorder them, and pick **Solo** (one at a time, live A/B switch) or **Stack** (layer any subset in chain order).
  - A built-in **catalog** lets you search, download and delete effects without leaving the app, and each effect's own parameters are exposed for tuning.
@@ -65,12 +56,11 @@
  - Removed the hairline of surface left on screen by the closed drawer sheet.
  - Fixed custom mapping drive containers.
  - App source files have been reorganized for readability, and the Antutu flavor has been added and fixed.
- - Build plumbing: LibretroDroid moved out of the main repo and is fetched during configuration, so a fresh clone resolves in the IDE without a manual build.
 
 ### Contributors
 Huge thanks to everyone who contributed, this release wouldn't exist without you:
  - @Xnick417x — 39 commits (ReShade groundwork, frame pacing and FPS limiter, Mango HUD, touch/control input, file manager, drivers and wrappers, container fixes, many more)
- - @MaxsTechReview — 4 commits (retro console emulation, core bundle delivery, 3D engine guide button + Stadium ROM import, build plumbing)
+ - @MaxsTechReview — 4 commits (build plumbing)
  - @SadMoment — 2 commits (custom game artwork scraper, SteamGridDB name search)
  - @The412Banner — 1 commit (ReShade: drop-in effects, catalog, loadouts and live in-game control)
 

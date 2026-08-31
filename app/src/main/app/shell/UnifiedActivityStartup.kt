@@ -464,7 +464,6 @@ internal fun UnifiedActivity.maybeAutoSignInGoogleOnLaunch() {
                 if (authed) {
                     com.winlator.cmod.feature.sync.google.GameSaveBackupManager
                         .setDriveConnected(applicationContext, true)
-                    retryPendingRetroCloudBackup()
                 }
             }
     }.onFailure {

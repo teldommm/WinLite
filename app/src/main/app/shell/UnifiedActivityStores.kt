@@ -538,9 +538,6 @@ internal fun UnifiedActivity.GameCapsule(
                             .clip(RoundedCornerShape(8.dp)),
                 ) {
                     ArtContent(Modifier.fillMaxSize())
-                    libraryBadgeLabel(app.id, isCustom)?.let { badge ->
-                        RetroConsoleRibbon(badge, Modifier.align(Alignment.CenterStart))
-                    }
                 }
 
                 Spacer(Modifier.width(14.dp))
@@ -588,9 +585,6 @@ internal fun UnifiedActivity.GameCapsule(
                         .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
             ) {
                 ArtContent(Modifier.fillMaxSize())
-                libraryBadgeLabel(app.id, isCustom)?.let { badge ->
-                    RetroConsoleRibbon(badge, Modifier.align(Alignment.CenterStart))
-                }
             }
 
             Text(

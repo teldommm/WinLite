@@ -916,7 +916,6 @@ internal fun UnifiedActivity.GameSettingsDialog(
                 HomeShortcutUiState(
                     shortcut = shortcut,
                     isPinned = shortcut?.let { LibraryShortcutUtils.hasPinnedHomeShortcut(context, it) } == true,
-                    loaded = true,
                 )
             }
     }
@@ -1283,7 +1282,6 @@ internal fun UnifiedActivity.GameSettingsDialog(
                     gameId = gameIdStr,
                     gameName = app.name,
                     shortcut = shortcut,
-                    retroSaveDir = com.winlator.cmod.feature.sync.google.GameSaveBackupManager.retroSaveDir(context, shortcut, gameIdStr),
                     onCloudSyncToggle = { enabled ->
                         cloudSyncEnabled = enabled
                         setShortcutCloudSyncEnabled(shortcut, enabled)
@@ -1445,7 +1443,6 @@ internal fun UnifiedActivity.GOGGameSettingsDialog(
                 HomeShortcutUiState(
                     shortcut = shortcut,
                     isPinned = shortcut?.let { LibraryShortcutUtils.hasPinnedHomeShortcut(context, it) } == true,
-                    loaded = true,
                 )
             }
     }
@@ -1781,7 +1778,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                 HomeShortcutUiState(
                     shortcut = shortcut,
                     isPinned = shortcut?.let { LibraryShortcutUtils.hasPinnedHomeShortcut(context, it) } == true,
-                    loaded = true,
                 )
             }
     }
@@ -1802,32 +1798,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
         }
     }
     val hasPinnedShortcut = pinnedShortcutOverride ?: homeShortcutState.isPinned
-    val librarySystemIdHint = if (isCustom) retroLibrarySystemIds.value[app.id] else null
-    val retroCaps =
-        remember(homeShortcutState.shortcut, homeShortcutState.loaded, isCustom, librarySystemIdHint) {
-            when {
-                !isCustom -> com.winlator.cmod.feature.retro.RetroShortcuts.LibraryCapabilities()
-                homeShortcutState.loaded ->
-                    com.winlator.cmod.feature.retro.RetroShortcuts.libraryCapabilities(homeShortcutState.shortcut)
-                else ->
-                    com.winlator.cmod.feature.retro.RetroShortcuts.libraryCapabilitiesForSystemId(librarySystemIdHint)
-            }
-        }
-    val isRetro = retroCaps.isRetro
-    val isExternalRetro = retroCaps.isExternal
-    val retroSystemId = retroCaps.systemId
-    val retroRomPath =
-        retroCaps.romPath
-            ?: homeShortcutState.shortcut
-                ?.getExtra(com.winlator.cmod.feature.retro.RetroShortcuts.KEY_ROM)
-                ?.takeIf { it.isNotEmpty() }
-    LaunchedEffect(retroSystemId, retroRomPath, isExternalRetro) {
-        val sid = retroSystemId
-        val rp = retroRomPath
-        if (sid != null && rp != null && !isExternalRetro) {
-            com.winlator.cmod.feature.retro.RetroAchievementsManager.prefetch(context, sid, rp)
-        }
-    }
 
     BackHandler(enabled = activePopup != null) {
         activePopup = null
@@ -1917,14 +1887,7 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
         when {
             isGog -> "GOG"
             isEpic -> "Epic Games"
-            isCustom ->
-                retroCaps.sourceLabel
-                    ?: librarySystemIdHint?.let {
-                        com.winlator.cmod.feature.retro.RetroSystems
-                            .fromId(it)
-                            ?.badgeLabel
-                    }
-                    ?: "Custom"
+            isCustom -> "Custom"
             else -> "Steam"
         }
 
@@ -2367,107 +2330,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                             )
                                 }
                             }
-                            var showSaveTransfer by remember(app.id) { mutableStateOf(false) }
-                            val retroSaveImportLauncher =
-                                rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-                                    if (uri != null) {
-                                        val sourceName =
-                                            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                                                if (it.moveToFirst()) it.getString(0) else null
-                                            } ?: "save"
-                                        val result =
-                                            runCatching {
-                                                val bytes =
-                                                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                                                        ?: return@runCatching com.winlator.cmod.feature.retro.RetroSaveImport.Result.Invalid("Could not read the file.")
-                                                com.winlator.cmod.feature.retro.RetroSaveImport.import(context, app.name, sourceName, bytes)
-                                            }.getOrElse { com.winlator.cmod.feature.retro.RetroSaveImport.Result.Invalid("Could not read the file.") }
-                                        val message =
-                                            when (result) {
-                                                is com.winlator.cmod.feature.retro.RetroSaveImport.Result.Success ->
-                                                    "Imported save (${result.name}, ${result.bytes / 1024} KB)"
-                                                is com.winlator.cmod.feature.retro.RetroSaveImport.Result.Invalid ->
-                                                    "Import failed: ${result.reason}"
-                                            }
-                                        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            val retroSaveExportLauncher =
-                                rememberLauncherForActivityResult(
-                                    ActivityResultContracts.CreateDocument("application/octet-stream"),
-                                ) { uri ->
-                                    if (uri != null) {
-                                        val ok =
-                                            runCatching {
-                                                val sram =
-                                                    com.winlator.cmod.feature.retro.RetroSaveStates.sramFile(context, app.name)
-                                                if (!sram.isFile) return@runCatching false
-                                                context.contentResolver.openOutputStream(uri)?.use { it.write(sram.readBytes()) }
-                                                true
-                                            }.getOrDefault(false)
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            context.getString(
-                                                if (ok) R.string.retro_save_transfer_export_ok else R.string.retro_save_transfer_export_failed,
-                                            ),
-                                            android.widget.Toast.LENGTH_SHORT,
-                                        ).show()
-                                    }
-                                }
-                            if (showSaveTransfer) {
-                                androidx.compose.material3.AlertDialog(
-                                    onDismissRequest = { showSaveTransfer = false },
-                                    title = { androidx.compose.material3.Text(stringResource(R.string.retro_save_transfer_title)) },
-                                    text = { androidx.compose.material3.Text(stringResource(R.string.retro_save_transfer_message)) },
-                                    confirmButton = {
-                                        androidx.compose.material3.TextButton(onClick = {
-                                            showSaveTransfer = false
-                                            retroSaveImportLauncher.launch(arrayOf("*/*"))
-                                        }) { androidx.compose.material3.Text(stringResource(R.string.retro_save_transfer_import)) }
-                                    },
-                                    dismissButton = {
-                                        androidx.compose.material3.TextButton(onClick = {
-                                            val sram = com.winlator.cmod.feature.retro.RetroSaveStates.sramFile(context, app.name)
-                                            showSaveTransfer = false
-                                            if (!sram.isFile) {
-                                                android.widget.Toast.makeText(
-                                                    context,
-                                                    context.getString(R.string.retro_save_transfer_none),
-                                                    android.widget.Toast.LENGTH_SHORT,
-                                                ).show()
-                                            } else {
-                                                retroSaveExportLauncher.launch("${app.name}.srm")
-                                            }
-                                        }) { androidx.compose.material3.Text(stringResource(R.string.retro_save_transfer_export)) }
-                                    },
-                                )
-                            }
-                            // The 3D engine offers itself only for the few Gen 1
-                            // titles it supports, and only when its files are
-                            // actually in the retro bundle. Compatibility is the
-                            // ROM's SHA-1, so deciding it means hashing a file:
-                            // done once off the composition thread, keyed on the
-                            // shortcut, rather than on every recomposition.
-                            val engine3dShortcut = homeShortcutState.shortcut
-                            val engine3dKey = engine3dShortcut?.file?.absolutePath
-                            var engine3dSupported by remember(engine3dKey) { mutableStateOf(false) }
-                            var engine3dOn by remember(engine3dKey) {
-                                mutableStateOf(
-                                    engine3dShortcut?.let {
-                                        com.winlator.cmod.feature.retro.Gen1EmbedLaunch.isEnabled(it)
-                                    } ?: false,
-                                )
-                            }
-                            LaunchedEffect(engine3dKey) {
-                                engine3dSupported =
-                                    engine3dShortcut != null &&
-                                    withContext(Dispatchers.IO) {
-                                        runCatching {
-                                            com.winlator.cmod.feature.retro.Gen1EmbedLaunch
-                                                .isCompatible(context, engine3dShortcut)
-                                        }.getOrDefault(false)
-                                    }
-                            }
                             LibraryGameLaunchScreen(
                                 appName = launchAppName,
                                 subtitle = subtitle,
@@ -2480,31 +2342,9 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                 lastPlayedMillis = lastPlayed,
                                 installSizeText = installSizeText,
                                 isCustom = isCustom,
-                                isRetro = isRetro,
-                                showBootToDesktop = retroCaps.showBootToDesktop,
-                                showSaveTransfer = retroCaps.showSaveTransfer,
                                 hasPinnedShortcut = hasPinnedShortcut,
                                 playEnabled = playEnabled,
                                 playDisabledLabel = playDisabledLabel,
-                                altEngineLabel =
-                                    if (engine3dSupported) stringResource(R.string.retro_gs_engine_3d) else null,
-                                altEngineEnabled = engine3dOn,
-                                onAltEngineChange =
-                                    if (engine3dSupported && engine3dShortcut != null) {
-                                        { on ->
-                                            engine3dOn = on
-                                            // Written straight to the shortcut, so
-                                            // Play uses it immediately and the
-                                            // Graphics pane agrees with it.
-                                            engine3dShortcut.putExtra(
-                                                com.winlator.cmod.feature.retro.Gen1EmbedLaunch.KEY_ENGINE_3D,
-                                                if (on) "1" else "0",
-                                            )
-                                            engine3dShortcut.saveData()
-                                        }
-                                    } else {
-                                        null
-                                    },
                                 onBack = onDismissRequest,
                                 onPlay = {
                                     val containerManager = ContainerManager(context)
@@ -2522,6 +2362,7 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                 onSettings = {
                                     val shortcut = resolveOrCreateShortcut()
                                     if (shortcut != null) {
+                                        // Layer the settings dialog on top; keep the detail dialog open underneath.
                                         ShortcutSettingsComposeDialog(this@LibraryGameDetailDialog, shortcut).show()
                                     }
                                 },
@@ -2538,46 +2379,9 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                         )
                                     }
                                 },
-                                onAchievements =
-                                    when {
-                                        isRetro -> {
-                                            val sysId = retroSystemId
-                                            val rom = retroRomPath
-                                            if (sysId != null && rom != null && retroCaps.showAchievements) {
-                                                {
-                                                    context.startActivity(
-                                                        android.content.Intent(
-                                                            context,
-                                                            com.winlator.cmod.feature.retro.RetroAchievementsActivity::class.java,
-                                                        ).apply {
-                                                            putExtra(
-                                                                com.winlator.cmod.feature.retro.RetroAchievementsActivity.EXTRA_SYSTEM_ID,
-                                                                sysId,
-                                                            )
-                                                            putExtra(
-                                                                com.winlator.cmod.feature.retro.RetroAchievementsActivity.EXTRA_ROM_PATH,
-                                                                rom,
-                                                            )
-                                                            putExtra(
-                                                                com.winlator.cmod.feature.retro.RetroAchievementsActivity.EXTRA_GAME_NAME,
-                                                                app.name,
-                                                            )
-                                                            putExtra(
-                                                                com.winlator.cmod.feature.retro.RetroAchievementsActivity.EXTRA_IN_SESSION,
-                                                                false,
-                                                            )
-                                                        },
-                                                    )
-                                                }
-                                            } else {
-                                                null
-                                            }
-                                        }
-                                        !isCustom && !isEpic && !isGog -> {
-                                            { showAchievements = true }
-                                        }
-                                        else -> null
-                                    },
+                                onAchievements = if (!isCustom && !isEpic && !isGog) {
+                                    { showAchievements = true }
+                                } else null,
                                 onShortcut = {
                                     if (hasPinnedShortcut) {
                                         heroPopup = HeroLaunchPopup.RemoveShortcut
@@ -2612,41 +2416,9 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                     }
                                 },
                                 onCloudSaves = { activePopup = LibraryDetailPopup.CloudSaves },
-                                onSaveTransfer =
-                                    if (retroCaps.showSaveTransfer) {
-                                        { showSaveTransfer = true }
-                                    } else {
-                                        null
-                                    },
-                                onCheats =
-                                    if (retroCaps.showCheats && retroSystemId != null) {
-                                        {
-                                            context.startActivity(
-                                                android.content.Intent(
-                                                    context,
-                                                    com.winlator.cmod.feature.retro.RetroCheatsActivity::class.java,
-                                                ).apply {
-                                                    putExtra(
-                                                        com.winlator.cmod.feature.retro.RetroCheatsActivity.EXTRA_SYSTEM_ID,
-                                                        retroSystemId,
-                                                    )
-                                                    putExtra(
-                                                        com.winlator.cmod.feature.retro.RetroCheatsActivity.EXTRA_GAME_NAME,
-                                                        app.name,
-                                                    )
-                                                },
-                                            )
-                                        }
-                                    } else {
-                                        null
-                                    },
-                                cheatsEnabled =
-                                    !(
-                                        com.winlator.cmod.feature.retro.RetroAchievementsManager.isEnabled(context) &&
-                                            com.winlator.cmod.feature.retro.RetroAchievementsManager.isLoggedIn(context) &&
-                                            com.winlator.cmod.feature.retro.RetroAchievementsManager.isHardcorePreferred(context)
-                                    ),
                                 onUninstall = uninstallGame,
+                                // Store source tag actions. Steam exposes verify/update/workshop;
+                                // Epic and GOG expose verify/update for installed games.
                                 steamMenuEnabled = !isCustom &&
                                     (!isEpic || epicGame?.isInstalled == true) &&
                                     (!isGog || gogGame?.isInstalled == true),
@@ -2882,7 +2654,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                 gameId = detailGameId,
                                 gameName = app.name,
                                 shortcut = detailShortcut,
-                                retroSaveDir = com.winlator.cmod.feature.sync.google.GameSaveBackupManager.retroSaveDir(context, detailShortcut, detailGameId),
                                 onCloudSyncToggle = { enabled ->
                                     cloudSyncEnabled = enabled
                                     setShortcutCloudSyncEnabled(detailShortcut, enabled)
@@ -3076,7 +2847,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                     gameId = detailGameId,
                                     gameName = app.name,
                                     shortcut = detailShortcut,
-                                    retroSaveDir = com.winlator.cmod.feature.sync.google.GameSaveBackupManager.retroSaveDir(context, detailShortcut, detailGameId),
                                     onCloudSyncToggle = { enabled ->
                                         cloudSyncEnabled = enabled
                                         setShortcutCloudSyncEnabled(detailShortcut, enabled)

@@ -134,7 +134,6 @@ internal fun CloudSavesContent(
     gameId: String,
     gameName: String,
     shortcut: Shortcut?,
-    retroSaveDir: java.io.File? = null,
     onCloudSyncToggle: (Boolean) -> Unit,
     onOfflineModeToggle: (Boolean) -> Unit,
     onSyncFromCloud: () -> Unit,
@@ -398,7 +397,7 @@ internal fun CloudSavesContent(
             )
         }
 
-        if (!steamManagedCloud && retroSaveDir == null) {
+        if (!steamManagedCloud) {
             var customSavePath by remember(shortcut?.file?.absolutePath, historyRefreshKey) {
                 mutableStateOf(shortcut?.let { GameSaveBackupManager.getCustomGameSaveWindowsPath(it) })
             }
@@ -598,7 +597,6 @@ internal fun CloudSavesContent(
                                         gameName = gameName,
                                         origin = GameSaveBackupManager.BackupOrigin.MANUAL,
                                         authMode = GoogleAuthMode.INTERACTIVE,
-                                        customSaveDir = retroSaveDir,
                                         containerHint = targetContainer,
                                     )
                                 }
@@ -961,7 +959,6 @@ internal fun CloudSavesContent(
                                     target,
                                     gameSource,
                                     gameId,
-                                    customSaveDir = retroSaveDir,
                                     containerHint = targetContainer,
                                 )
                             }

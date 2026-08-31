@@ -2446,12 +2446,6 @@ class ShortcutSettingsComposeDialog private constructor(
     // Show / Dismiss
 
     fun show() {
-        if (com.winlator.cmod.feature.retro.RetroShortcuts.isRetroShortcut(shortcut)) {
-            com.winlator.cmod.feature.retro
-                .RetroSettingsDialog(activity, shortcut)
-                .show()
-            return
-        }
         dialog.show()
         restorePaneNav?.invoke()
         restorePaneNav = dialog.window?.bindPaneNav(

@@ -1885,7 +1885,7 @@ internal fun UnifiedActivity.LibraryCarousel(
     var localLibraryRefreshKey by remember { mutableIntStateOf(0) }
     var shortcutsLoaded by remember { mutableStateOf(false) }
     var pullRefreshing by remember { mutableStateOf(false) }
-    LaunchedEffect(shortcutRefreshKey, localLibraryRefreshKey, com.winlator.cmod.feature.retro.RetroBoxart.artVersion.value) {
+    LaunchedEffect(shortcutRefreshKey, localLibraryRefreshKey) {
         shortcutsLoaded = false
 
         // Pull-to-refresh only: rescan disk so a manually moved game is picked up without faking a re-download.
@@ -1899,13 +1899,11 @@ internal fun UnifiedActivity.LibraryCarousel(
         val shortcutScanResult =
             runCatching {
                 withContext(Dispatchers.IO) {
-                    runCatching { com.winlator.cmod.feature.retro.RetroRomScanner.scanConfiguredFolder(context) }
                     val cm = ContainerManager(context)
                     cm.upgradeShortcuts {
                         localLibraryRefreshKey++
                     }
                     val allShortcuts = cm.loadShortcuts()
-                    val badges = HashMap<Int, String>()
                     val apps =
                         allShortcuts
                             .mapNotNull { shortcut ->
@@ -1927,13 +1925,6 @@ internal fun UnifiedActivity.LibraryCarousel(
                                     }
                                 val customId = -(identity.hashCode().and(0x7FFFFFFF) + 1)
 
-                                com.winlator.cmod.feature.retro.RetroSystems
-                                    .fromId(
-                                        shortcut.getExtra(
-                                            com.winlator.cmod.feature.retro.RetroShortcuts.KEY_SYSTEM,
-                                        ),
-                                    )?.let { badges[customId] = it.id }
-
                                 SteamApp(
                                     id = customId,
                                     name = displayName,
@@ -1946,14 +1937,13 @@ internal fun UnifiedActivity.LibraryCarousel(
                                 )
                             }
 
-                    Triple(allShortcuts, apps, badges)
+                    allShortcuts to apps
                 }
             }.getOrNull()
 
         if (shortcutScanResult != null) {
             cachedShortcuts = shortcutScanResult.first
             customApps = shortcutScanResult.second
-            retroLibrarySystemIds.value = shortcutScanResult.third
         }
 
         shortcutsLoaded = true
