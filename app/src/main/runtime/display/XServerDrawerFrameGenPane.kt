@@ -266,7 +266,7 @@ private fun FrameGenFieldLabel(text: String, paneScale: Float) {
 }
 
 @Composable
-private fun FrameGenNote(text: String, paneScale: Float) {
+internal fun FrameGenNote(text: String, paneScale: Float) {
     Text(
         text = text,
         color = DrawerTextSecondary,

@@ -241,6 +241,26 @@ internal fun InputControlsPaneContent(
                     }
                 }
 
+                // Gyroscope, folded in from the old standalone GYROSCOPE rail tab: a summary
+                // toggle + gear that opens the full GyroscopePaneContent as a popup.
+                Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
+                    var gyroSettingsOpen by remember { mutableStateOf(false) }
+                    GearToggleRow(
+                        title = stringResource(R.string.session_gyroscope_title),
+                        checked = state.gyroscopeEnabled,
+                        onCheckedChange = listener::onGyroscopeEnabledChanged,
+                        onGearClick = { gyroSettingsOpen = true },
+                    )
+                    if (gyroSettingsOpen) {
+                        PaneOverlayDialog(
+                            title = stringResource(R.string.session_gyroscope_title),
+                            onDismiss = { gyroSettingsOpen = false },
+                        ) {
+                            GyroscopePaneContent(state = state, listener = listener)
+                        }
+                    }
+                }
+
                 NavBooleanRow(
                     title = stringResource(R.string.session_drawer_show_touchscreen_controls),
                     checked = state.inputControlsShowOverlay,

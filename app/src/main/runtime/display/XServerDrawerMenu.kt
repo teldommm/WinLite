@@ -85,7 +85,6 @@ import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PictureInPictureAlt
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Speed
@@ -171,6 +170,9 @@ import androidx.compose.ui.window.PopupProperties
 import com.winlator.cmod.R
 import com.winlator.cmod.shared.theme.SessionDrawerStyle
 import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinNativeOutline
+import com.winlator.cmod.shared.theme.WinNativeSurface
+import com.winlator.cmod.shared.theme.WinNativeTextPrimary
 import com.winlator.cmod.shared.ui.dialog.WinNativeDialogButton
 import com.winlator.cmod.shared.ui.dialog.WinNativeDialogShell
 import com.winlator.cmod.shared.ui.nav.DialogPaneNav
@@ -468,7 +470,10 @@ internal enum class HUDMetricEditor(
     BACKGROUND_ALPHA(minPercent = 10, maxPercent = 100),
 }
 
-internal enum class DrawerPane { INPUT_CONTROLS, HUD, FRAME_GEN, GYROSCOPE, SCREEN_EFFECTS, RESHADE, OUTPUT, TASK_MANAGER, LOGS, TOUCH }
+// HUD, FRAME_GEN, GYROSCOPE and RESHADE are no longer standalone panes: their content now
+// lives inline (HUD) or behind a gear-icon PaneOverlayDialog (Frame Gen, ReShade, Gyroscope)
+// inside INPUT_CONTROLS / SCREEN_EFFECTS, to cut down on top-rail tabs.
+internal enum class DrawerPane { INPUT_CONTROLS, SCREEN_EFFECTS, OUTPUT, TASK_MANAGER, LOGS, TOUCH }
 
 internal const val LogsPaneMaxLines = 2000
 internal const val LogsFlushIntervalMs = 200L
@@ -517,33 +522,9 @@ private val RAIL_PANES =
             iconOverride = Icons.Outlined.SportsEsports,
         ),
         RailPaneSpec(
-            pane = DrawerPane.HUD,
-            itemId = R.id.main_menu_fps_monitor,
-            labelRes = R.string.session_drawer_rail_label_hud,
-        ),
-        RailPaneSpec(
-            pane = DrawerPane.FRAME_GEN,
-            itemId = R.id.main_menu_frame_generation,
-            labelRes = R.string.session_drawer_rail_label_frame_gen,
-            iconOverride = Icons.Outlined.Speed,
-        ),
-        RailPaneSpec(
-            pane = DrawerPane.GYROSCOPE,
-            itemId = R.id.main_menu_gyroscope,
-            labelRes = R.string.session_drawer_rail_label_gyro,
-            iconOverride = Icons.Outlined.ScreenRotation,
-        ),
-        RailPaneSpec(
             pane = DrawerPane.SCREEN_EFFECTS,
             itemId = R.id.main_menu_screen_effects,
             labelRes = R.string.session_drawer_rail_label_effects,
-        ),
-        // Shown only when the host adds a main_menu_reshade item to state.items.
-        RailPaneSpec(
-            pane = DrawerPane.RESHADE,
-            itemId = R.id.main_menu_reshade,
-            labelRes = R.string.reshade_section_title,
-            iconOverride = Icons.Outlined.AutoAwesome,
         ),
         // Shown only when the host adds a main_menu_output item to state.items.
         RailPaneSpec(
@@ -556,6 +537,151 @@ private val RAIL_PANES =
 
 private val RAIL_PANE_ITEM_IDS = RAIL_PANES.map { it.itemId }.toSet()
 private val PINNED_BOTTOM_ITEM_IDS = setOf(R.id.main_menu_pause, R.id.main_menu_exit)
+
+// Items that used to be their own rail pane (and so were excluded from the grid via
+// RAIL_PANE_ITEM_IDS) but now live inline/behind a gear inside INPUT_CONTROLS or
+// SCREEN_EFFECTS instead. Still excluded from the grid so they don't show up twice.
+private val FOLDED_INTO_PANE_ITEM_IDS =
+    setOf(
+        R.id.main_menu_fps_monitor,
+        R.id.main_menu_frame_generation,
+        R.id.main_menu_gyroscope,
+        R.id.main_menu_reshade,
+    )
+
+// Generic gear-triggered settings popup, shared by rows that used to be their own top-rail
+// pane (Frame Gen, ReShade, Gyroscope) and now live inline as a toggle + gear row instead.
+// Mirrors MangoHudSettingsDialog's shell: pinned header (icon + title + close), bounded
+// height, and a weight(1f, fill=false) content slot so the wrapped pane's own internal
+// BoxWithConstraints/scroll gets a definite height to measure against.
+@Composable
+internal fun PaneOverlayDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val overlayNav = remember { SharedPaneNavRegistry().apply { stableCursor = true } }
+    val shape = RoundedCornerShape(16.dp)
+    val maxCardHeight = (LocalConfiguration.current.screenHeightDp * 0.92f).dp
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        CompositionLocalProvider(SharedLocalPaneNav provides overlayNav) {
+            DialogPaneNav(overlayNav, onDismiss = onDismiss, onStart = onDismiss)
+            Box(
+                modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 14.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier =
+                        Modifier
+                            .widthIn(max = 460.dp)
+                            .fillMaxWidth()
+                            .heightIn(max = maxCardHeight)
+                            .clip(shape)
+                            .background(WinNativeSurface)
+                            .border(1.dp, WinNativeOutline, shape)
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Settings,
+                            contentDescription = null,
+                            tint = WinNativeTextPrimary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                            text = title,
+                            color = DrawerTextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        val closeShape = RoundedCornerShape(10.dp)
+                        Box(
+                            modifier =
+                                Modifier
+                                    .size(32.dp)
+                                    .clip(closeShape)
+                                    .background(PaneInnerResting)
+                                    .border(1.dp, RestingCardBorder, closeShape)
+                                    .clickable(onClick = onDismiss),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.common_ui_close),
+                                tint = DrawerTextPrimary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(WinNativeOutline))
+                    Box(Modifier.weight(1f, fill = false)) {
+                        content()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Small reusable summary row: title + toggle + gear button that opens a PaneOverlayDialog.
+// Used to fold a formerly-standalone pane (Frame Gen, ReShade, Gyroscope) into a single row.
+@Composable
+internal fun GearToggleRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    onGearClick: () -> Unit,
+) {
+    val paneScale = LocalPaneScale.current
+    Row(
+        horizontalArrangement = Arrangement.spacedBy((8f * paneScale).dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            Modifier.weight(1f).paneNavItem(
+                cornerRadius = (14f * paneScale).dp,
+                onActivate = { onCheckedChange(!checked) },
+            ),
+        ) {
+            DrawerBooleanRow(
+                title = title,
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+            )
+        }
+        val gearShape = RoundedCornerShape((12f * paneScale).dp)
+        Box(
+            modifier =
+                Modifier
+                    .size((44f * paneScale).dp)
+                    .clip(gearShape)
+                    .background(PaneInnerResting)
+                    .border(1.dp, RestingCardBorder, gearShape)
+                    .paneNavItem(
+                        cornerRadius = (12f * paneScale).dp,
+                        onActivate = onGearClick,
+                    )
+                    .clickable(onClick = onGearClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Settings,
+                contentDescription = stringResource(R.string.common_ui_settings),
+                tint = DrawerTextPrimary,
+                modifier = Modifier.size((20f * paneScale).dp),
+            )
+        }
+    }
+}
 
 private val TopRailTileMinWidth = 60.dp
 private val TopRailTileHorizontalPadding = 10.dp
@@ -1723,12 +1849,8 @@ internal fun XServerDrawerContent(
                             CompositionLocalProvider(LocalPaneNav provides paneNav) {
                             when (pane) {
                                 DrawerPane.INPUT_CONTROLS -> InputControlsPaneContent(state = state, listener = listener)
-                                DrawerPane.HUD -> HUDPaneContent(state = state, listener = listener)
-                                DrawerPane.FRAME_GEN -> FrameGenPaneContent(state = state, listener = listener)
-                                DrawerPane.GYROSCOPE -> GyroscopePaneContent(state = state, listener = listener)
                                 DrawerPane.TOUCH -> TouchPaneContent(state = state, listener = listener, onClose = { onOpenPaneChange(null) })
                                 DrawerPane.SCREEN_EFFECTS -> ScreenEffectsPaneContent(state = state, listener = listener)
-                                DrawerPane.RESHADE -> ReshadePaneContent(state = state, listener = listener)
                                 DrawerPane.OUTPUT -> OutputPaneContent(state = state, listener = listener)
                                 DrawerPane.TASK_MANAGER ->
                                     TaskManagerPaneContent(
@@ -2059,7 +2181,7 @@ private fun ActionCardGrid(
     val paneScale = LocalPaneScale.current
     val cards =
         state.items.filter {
-            it.itemId !in RAIL_PANE_ITEM_IDS && it.itemId !in PINNED_BOTTOM_ITEM_IDS
+            it.itemId !in RAIL_PANE_ITEM_IDS && it.itemId !in PINNED_BOTTOM_ITEM_IDS && it.itemId !in FOLDED_INTO_PANE_ITEM_IDS
         }
     var showRecordSettings by remember { mutableStateOf(false) }
 

@@ -419,6 +419,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
     private boolean isPaused = false;
     private boolean reusingSession = false;
     private boolean isRelativeMouseMovement = false;
+    private static final String PREF_RELATIVE_MOUSE_MOVEMENT = "relative_mouse_movement_enabled";
     private boolean isRefactorSizeEnabled = false;
     private int screenTouchMode = 0;
     private boolean rtsGesturesEnabled = false;
@@ -6018,6 +6019,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             case R.id.main_menu_relative_mouse_movement:
                 isRelativeMouseMovement = !isRelativeMouseMovement;
                 xServer.setRelativeMouseMovement(isRelativeMouseMovement);
+                preferences.edit().putBoolean(PREF_RELATIVE_MOUSE_MOVEMENT, isRelativeMouseMovement).apply();
                 updatePointerCapture();
                 renderDrawerMenu();
                 break;
@@ -7738,6 +7740,9 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         touchpadView.setTapToClickEnabled(isTapToClickEnabled);
         touchpadView.setSensitivity(globalCursorSpeed);
         touchpadView.setMouseEnabled(!isMouseDisabled);
+        isRelativeMouseMovement = preferences.getBoolean(PREF_RELATIVE_MOUSE_MOVEMENT, false);
+        xServer.setRelativeMouseMovement(isRelativeMouseMovement);
+        updatePointerCapture();
         touchpadView.setFourFingersTapCallback(() -> {
             if (drawerStateHolder == null || !drawerStateHolder.isDrawerOpen()) {
                 openDrawerMenu();
