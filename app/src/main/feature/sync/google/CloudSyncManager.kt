@@ -17,10 +17,6 @@ import com.winlator.cmod.R
 import com.winlator.cmod.feature.stores.common.Store
 import com.winlator.cmod.feature.stores.common.StoreSessionBus
 import com.winlator.cmod.feature.stores.common.StoreSessionEvent
-import com.winlator.cmod.feature.stores.epic.service.EpicAuthManager
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGService
 import com.winlator.cmod.feature.stores.steam.service.SteamService
 import com.winlator.cmod.feature.stores.steam.utils.PrefManager
 import kotlinx.coroutines.CoroutineScope
@@ -59,12 +55,8 @@ object CloudSyncManager {
     private const val AUTH_SESSION_RETRY_DELAY_MS = 750L
     private const val ZIP_MANIFEST = "manifest.json"
     private const val ZIP_STEAM = "stores/steam.json"
-    private const val ZIP_EPIC = "stores/epic_credentials.json"
-    private const val ZIP_GOG = "stores/gog_auth.json"
 
     private const val STORE_STEAM = "Steam"
-    private const val STORE_EPIC = "Epic"
-    private const val STORE_GOG = "GOG"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val syncMutex = Mutex()
@@ -404,12 +396,6 @@ object CloudSyncManager {
         if (STORE_STEAM in restoredStores) {
             rehydrateSteamSession(context)
         }
-        if (STORE_EPIC in restoredStores) {
-            rehydrateEpicSession(context)
-        }
-        if (STORE_GOG in restoredStores) {
-            rehydrateGogSession(context)
-        }
     }
 
     private suspend fun rehydrateSteamSession(context: Context) {
@@ -435,24 +421,6 @@ object CloudSyncManager {
         } else {
             Timber.tag(TAG).w("Steam session restore did not finish logging in before refresh timeout")
         }
-    }
-
-    private suspend fun rehydrateEpicSession(context: Context) {
-        Timber.tag(TAG).i("Rehydrating restored Epic session for live UI and store state")
-        EpicAuthManager.updateLoginStatus(context)
-        EpicService.triggerLibrarySync(context)
-        waitForCondition(timeoutMillis = 6000L) { EpicService.isRunning }
-        runCatching { EpicService.refreshLibrary(context) }
-            .onFailure { Timber.tag(TAG).w(it, "Epic library refresh failed after restore") }
-    }
-
-    private suspend fun rehydrateGogSession(context: Context) {
-        Timber.tag(TAG).i("Rehydrating restored GOG session for live UI and store state")
-        GOGAuthManager.updateLoginStatus(context)
-        GOGService.triggerLibrarySync(context)
-        waitForCondition(timeoutMillis = 6000L) { GOGService.isRunning }
-        runCatching { GOGService.refreshLibrary(context) }
-            .onFailure { Timber.tag(TAG).w(it, "GOG library refresh failed after restore") }
     }
 
     private suspend fun waitForCondition(
@@ -771,8 +739,6 @@ object CloudSyncManager {
         val stores = linkedMapOf<String, ByteArray>()
 
         exportSteam(context)?.let { stores[STORE_STEAM] = it }
-        exportEpic(context)?.let { stores[STORE_EPIC] = it }
-        exportGog(context)?.let { stores[STORE_GOG] = it }
 
         val createdAt = System.currentTimeMillis()
         val fingerprint = computeFingerprint(stores)
@@ -800,22 +766,6 @@ object CloudSyncManager {
         return json.toString().toByteArray(StandardCharsets.UTF_8)
     }
 
-    private fun exportEpic(context: Context): ByteArray? {
-        if (!EpicAuthManager.hasStoredCredentials(context)) {
-            return null
-        }
-        val file = File(context.filesDir, "epic/credentials.json")
-        return if (file.exists()) file.readBytes() else null
-    }
-
-    private fun exportGog(context: Context): ByteArray? {
-        if (!GOGAuthManager.hasStoredCredentials(context)) {
-            return null
-        }
-        val file = File(GOGAuthManager.getAuthConfigPath(context))
-        return if (file.exists()) file.readBytes() else null
-    }
-
     private fun restoreMissingStores(
         context: Context,
         payload: StorePayload,
@@ -827,18 +777,6 @@ object CloudSyncManager {
                 STORE_STEAM -> {
                     if (!SteamService.hasStoredCredentials(context) && restoreSteam(context, bytes)) {
                         restored += STORE_STEAM
-                    }
-                }
-
-                STORE_EPIC -> {
-                    if (!EpicAuthManager.hasStoredCredentials(context) && restoreEpic(context, bytes)) {
-                        restored += STORE_EPIC
-                    }
-                }
-
-                STORE_GOG -> {
-                    if (!GOGAuthManager.hasStoredCredentials(context) && restoreGog(context, bytes)) {
-                        restored += STORE_GOG
                     }
                 }
             }
@@ -873,41 +811,7 @@ object CloudSyncManager {
             false
         }
 
-    private fun restoreEpic(
-        context: Context,
-        bytes: ByteArray,
-    ): Boolean =
-        runCatching {
-            Timber.tag(TAG).i("Restoring Epic login tokens from cloud payload")
-            val file = File(context.filesDir, "epic/credentials.json")
-            file.parentFile?.mkdirs()
-            file.writeBytes(bytes)
-            EpicAuthManager.updateLoginStatus(context)
-            EpicService.start(context)
-            StoreSessionBus.emit(StoreSessionEvent.SessionRestored(Store.EPIC))
-            true
-        }.getOrElse { error ->
-            Timber.tag(TAG).e(error, "Failed to restore Epic login tokens")
-            false
-        }
 
-    private fun restoreGog(
-        context: Context,
-        bytes: ByteArray,
-    ): Boolean =
-        runCatching {
-            Timber.tag(TAG).i("Restoring GOG login tokens from cloud payload")
-            val file = File(GOGAuthManager.getAuthConfigPath(context))
-            file.parentFile?.mkdirs()
-            file.writeBytes(bytes)
-            GOGAuthManager.updateLoginStatus(context)
-            GOGService.start(context)
-            StoreSessionBus.emit(StoreSessionEvent.SessionRestored(Store.GOG))
-            true
-        }.getOrElse { error ->
-            Timber.tag(TAG).e(error, "Failed to restore GOG login tokens")
-            false
-        }
 
     private fun payloadToZip(payload: StorePayload): ByteArray {
         val output = ByteArrayOutputStream()
@@ -925,8 +829,6 @@ object CloudSyncManager {
                 val entryName =
                     when (store) {
                         STORE_STEAM -> ZIP_STEAM
-                        STORE_EPIC -> ZIP_EPIC
-                        STORE_GOG -> ZIP_GOG
                         else -> null
                     }
                 if (entryName != null) {
@@ -955,14 +857,6 @@ object CloudSyncManager {
 
                     ZIP_STEAM -> {
                         stores[STORE_STEAM] = entryBytes
-                    }
-
-                    ZIP_EPIC -> {
-                        stores[STORE_EPIC] = entryBytes
-                    }
-
-                    ZIP_GOG -> {
-                        stores[STORE_GOG] = entryBytes
                     }
                 }
                 zip.closeEntry()

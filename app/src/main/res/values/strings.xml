@@ -85,7 +85,6 @@
     <string name="common_ui_save">Save</string>
     <string name="common_ui_clone">Clone</string>
     <string name="common_ui_properties">Properties</string>
-    <string name="common_ui_store">Store</string>
     <string name="common_ui_library">Library</string>
     <string name="common_ui_downloads">Downloads</string>
     <string name="common_ui_import">Import</string>
@@ -183,7 +182,7 @@
     <string name="library_games_failed_to_uninstall">Failed to uninstall.</string>
     <string name="library_games_failed_to_uninstall_reason">Failed to uninstall: %1$s</string>
     <string name="library_games_loading">Loading library\u2026</string>
-    <string name="library_games_no_games_installed">No games installed. Use a Store tab or the + button to add games.</string>
+    <string name="library_games_no_games_installed">No games installed. Use the Steam tab or the + button to add games.</string>
     <string name="library_games_times_played_label">Number of times played: </string>
     <string name="library_games_playtime_label">Playtime: </string>
     <string name="library_games_no_games_hub">No Games Installed\nClick to open Winlator Backend</string>
@@ -210,21 +209,19 @@
     <string name="library_games_game_name">Game Name</string>
     <string name="library_games_game_folder_mapped_drive">Game Folder (Mapped Game Drive)</string>
     <string name="library_games_select_exe_provide_name">Select an exe and provide a name</string>
-    <string name="library_games_sign_in_prompt">Sign into a store or add a custom game to build your library.</string>
+    <string name="library_games_sign_in_prompt">Sign into Steam or add a custom game to build your library.</string>
 
     <!-- Stores > Accounts -->
-    <string name="stores_accounts_title">Stores</string>
+    <string name="stores_accounts_title">Steam</string>
     <string name="stores_accounts_steam_integration_title">Steam</string>
     <string name="stores_accounts_shared_downloads_folder">Shared Downloads Folder</string>
-    <string name="stores_accounts_shared_downloads_subtitle">Use a single folder across all stores</string>
+    <string name="stores_accounts_shared_downloads_subtitle">Use the same folder for all downloads</string>
     <string name="stores_accounts_default_downloads_folder">Default Downloads Folder</string>
     <string name="stores_accounts_steam_downloads">Steam Downloads</string>
-    <string name="stores_accounts_epic_downloads">Epic Downloads</string>
-    <string name="stores_accounts_gog_downloads">GOG Downloads</string>
     <string name="stores_accounts_download_speed">Download Speed</string>
     <string name="stores_accounts_download_speed_subtitle">Controls Steam download thread concurrency</string>
     <string name="stores_accounts_download_server">Download Server</string>
-    <string name="stores_accounts_connected_stores">Connected Stores</string>
+    <string name="stores_accounts_connected_stores">Steam Account</string>
     <string name="stores_accounts_download_settings">Download Settings</string>
     <string name="stores_accounts_download_speed_conservative">Conservative</string>
     <string name="stores_accounts_download_speed_balanced">Balanced</string>
@@ -234,22 +231,18 @@
     <string name="stores_accounts_download_server_subtitle">Steam CDN region for game downloads</string>
     <string name="stores_accounts_sign_out_confirm">Sign out of %1$s?</string>
     <string name="stores_accounts_sign_out_message">You\'ll need to sign in again to access your library.</string>
-    <string name="stores_accounts_logged_in_epic">Logged in to Epic Games!</string>
-    <string name="stores_accounts_epic_login_failed">Epic Login failed: %1$s</string>
-    <string name="stores_accounts_logged_in_gog">Logged in to GOG!</string>
-    <string name="stores_accounts_gog_login_failed">GOG Login failed: %1$s</string>
     <string name="stores_accounts_custom_download_path">Custom Download Path</string>
-    <string name="stores_accounts_custom_download_path_description">A default download path has already been configured in Settings &gt; Stores. If you wish to set a unique custom path for this specific installation, click Proceed.</string>
+    <string name="stores_accounts_custom_download_path_description">A default download path has already been configured in Settings &gt; Steam. If you wish to set a unique custom path for this specific installation, click Proceed.</string>
     <string name="stores_accounts_not_signed_in">Not signed in</string>
     <string name="stores_accounts_status_online">Online</string>
     <string name="stores_accounts_status_away">Away</string>
     <string name="stores_accounts_status_offline">Offline</string>
     <string name="stores_accounts_status_invisible">Invisible</string>
     <string name="stores_accounts_status_header">STATUS</string>
-    <string name="stores_accounts_stores_header">STORES</string>
-    <string name="stores_accounts_sign_in_store_prompt">Please sign in to access the %1$s store.</string>
-    <string name="stores_accounts_manage">Manage Store Accounts</string>
-    <string name="stores_accounts_sign_into_store">Sign into %1$s</string>
+    <string name="stores_accounts_stores_header">STEAM</string>
+    <string name="stores_accounts_sign_in_store_prompt">Please sign in to access Steam.</string>
+    <string name="stores_accounts_manage">Manage Steam Account</string>
+    <string name="stores_accounts_sign_into_store">Sign into Steam</string>
 
     <!-- Downloads > Queue -->
     <string name="downloads_queue_cancel_all">Cancel All</string>
@@ -1230,7 +1223,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_other_language_summary">Choose the display language</string>
     <string name="settings_other_language_system_default">System default</string>
     <string name="settings_other_game_language_title">Game Language</string>
-    <string name="settings_other_game_language_summary">Preferred language for Steam/Epic/GOG downloads</string>
+    <string name="settings_other_game_language_summary">Preferred language for Steam downloads</string>
 
     <string name="settings_other_section_integration">Integration</string>
     <string name="settings_other_setup_wizard_title">Setup Wizard</string>
@@ -1329,7 +1322,7 @@ Installed path:
     <string name="setup_wizard_default_settings">Default Settings</string>
     <string name="setup_wizard_containers">Container Setup</string>
     <string name="setup_wizard_containers_description">Open each container and set the defaults you want every new game to inherit. New games will target the x86-64 container by default.</string>
-    <string name="setup_wizard_store_sign_in_optional">Store sign-in is optional. Each sign-in returns here when it finishes.</string>
+    <string name="setup_wizard_store_sign_in_optional">Steam sign-in is optional. It returns here when it finishes.</string>
     <string name="setup_wizard_granted">Granted</string>
     <string name="setup_wizard_grant">Grant</string>
     <string name="setup_wizard_denied">Denied</string>
@@ -1394,16 +1387,16 @@ Installed path:
     <string name="google_cloud_working">Working\u2026</string>
     <string name="google_cloud_sign_in">Sign In</string>
     <string name="google_cloud_disable_sync">Disable Sync</string>
-    <string name="google_cloud_store_logins">Store Logins</string>
-    <string name="google_cloud_store_login_sync_busy">Working on your store login sync\u2026</string>
+    <string name="google_cloud_store_logins">Steam Login</string>
+    <string name="google_cloud_store_login_sync_busy">Working on your Steam login sync\u2026</string>
     <string name="google_cloud_saved_games_unavailable">Google Saved Games unavailable</string>
     <string name="google_cloud_snapshot_ready">Cloud snapshot ready</string>
     <string name="google_cloud_waiting_first_backup">Waiting for first backup</string>
-    <string name="google_cloud_no_store_logins_detected">No store logins detected</string>
+    <string name="google_cloud_no_store_logins_detected">No Steam login detected</string>
     <string name="google_cloud_last_synced">Last synced %1$s</string>
     <string name="google_cloud_backup">Backup</string>
     <string name="google_cloud_restore">Restore</string>
-    <string name="google_cloud_sign_in_to_sync">Sign in to Google Play Games to sync store logins.</string>
+    <string name="google_cloud_sign_in_to_sync">Sign in to Google Play Games to sync your Steam login.</string>
     <string name="google_cloud_sign_in_failed">Google Play Games sign-in failed.</string>
     <string name="google_cloud_sign_in_finishing">Google Play Games sign-in is still finishing. Wait a moment and try cloud sync again.</string>
     <string name="google_cloud_connected_restore_available">Google Play Games connected. Restore is available for %1$s.</string>
@@ -1411,38 +1404,35 @@ Installed path:
     <string name="google_cloud_connected_ready">Google Play Games connected. Backup and Restore are ready.</string>
     <string name="google_cloud_sync_disabled">Google Play Games sync disabled for this app.</string>
     <string name="google_cloud_sign_in_first">Sign in to Google Play Games first.</string>
-    <string name="google_cloud_no_saved_logins_found">No saved store logins were found in Google cloud sync.</string>
-    <string name="google_cloud_backup_already_matches">Cloud backup already matches the current store logins.</string>
-    <string name="google_cloud_no_local_logins">No local store logins are available to back up.</string>
-    <string name="google_cloud_logins_restored_and_synced">Store logins restored and synced for %1$s.</string>
-    <string name="google_cloud_logins_restored">Restored store logins for %1$s.</string>
-    <string name="google_cloud_logins_backed_up">Backed up store logins for %1$s.</string>
-    <string name="google_cloud_sync_ready">Store login sync is ready.</string>
-    <string name="google_cloud_no_logins_to_sync">No store logins available to sync yet.</string>
+    <string name="google_cloud_no_saved_logins_found">No saved Steam login was found in Google cloud sync.</string>
+    <string name="google_cloud_backup_already_matches">Cloud backup already matches the current Steam login.</string>
+    <string name="google_cloud_no_local_logins">No local Steam login is available to back up.</string>
+    <string name="google_cloud_logins_restored_and_synced">Steam login restored and synced for %1$s.</string>
+    <string name="google_cloud_logins_restored">Restored Steam login for %1$s.</string>
+    <string name="google_cloud_logins_backed_up">Backed up Steam login for %1$s.</string>
+    <string name="google_cloud_sync_ready">Steam login sync is ready.</string>
+    <string name="google_cloud_no_logins_to_sync">No Steam login available to sync yet.</string>
     <string name="google_cloud_sign_in_to_backup">Sign in to back up %1$s login tokens.</string>
-    <string name="google_cloud_no_backed_up_logins">No backed up store logins found yet.</string>
-    <string name="google_cloud_local_cloud_differ">Local and cloud store logins differ. Use Backup to overwrite cloud data or Restore to pull the saved tokens.</string>
-    <string name="google_cloud_local_ready_to_backup">Local store logins are ready to back up for %1$s.</string>
-    <string name="google_cloud_backup_ready">Store login backup is ready.</string>
+    <string name="google_cloud_no_backed_up_logins">No backed up Steam login found yet.</string>
+    <string name="google_cloud_local_cloud_differ">Local and cloud Steam logins differ. Use Backup to overwrite cloud data or Restore to pull the saved tokens.</string>
+    <string name="google_cloud_local_ready_to_backup">Local Steam login is ready to back up for %1$s.</string>
+    <string name="google_cloud_backup_ready">Steam login backup is ready.</string>
     <string name="google_cloud_restore_available">Cloud login restore is available for %1$s.</string>
-    <string name="google_cloud_logins_synced">Store logins are synced with Google Play Games.</string>
-    <string name="google_cloud_sync_problem">Store login sync ran into a problem.</string>
+    <string name="google_cloud_logins_synced">Steam login is synced with Google Play Games.</string>
+    <string name="google_cloud_sync_problem">Steam login sync ran into a problem.</string>
     <string name="google_cloud_error_auth_needed">Google Play Games needs to finish authentication before cloud sync can access Saved Games. Open the Play Games profile prompt if shown, then try again.</string>
     <string name="google_cloud_error_developer">Google Play Games Saved Games rejected this build. Check the Play Games app ID, linked package name, and signing certificate in Play Console.</string>
     <string name="google_cloud_error_build_rejected">Google account is connected, but Google Play Games Saved Games rejected this build. Check the Play Games app ID, linked package, and signing certificate.</string>
     <string name="google_cloud_error_network">Google cloud sync failed because the network request did not complete or Google Play services needs attention.</string>
-    <string name="google_cloud_error_no_snapshot">No saved store logins were found in Google cloud sync yet.</string>
+    <string name="google_cloud_error_no_snapshot">No saved Steam login was found in Google cloud sync yet.</string>
     <string name="google_cloud_error_generic">Google cloud sync failed: %1$s</string>
     <string name="google_cloud_error_before_open">Google cloud sync failed before Google Saved Games could open.</string>
     <string name="cloud_saves_title">Cloud Saves</string>
     <string name="cloud_saves_title_for_provider">%1$s Cloud Saves - %2$s</string>
     <string name="cloud_saves_sync_summary">Pull the version %1$s has right now.</string>
-    <string name="cloud_saves_sync_summary_generic">Pull the current cloud version.</string>
-    <string name="cloud_saves_no_backups">No backups yet for this game.</string>
     <string name="cloud_sync_title">Cloud Saves</string>
     <string name="cloud_sync_disable_title">Disable Cloud Saves</string>
     <string name="cloud_saves_steam_push_label">Push to Steam Cloud</string>
-    <string name="cloud_saves_steam_push_helper">Force-upload local save</string>
     <string name="cloud_saves_steam_push_success">Save pushed to Steam Cloud.</string>
     <string name="cloud_saves_steam_push_failed">Could not push save to Steam Cloud.</string>
     <string name="cloud_saves_history_steam_unreachable">Steam Cloud is unreachable right now. Reconnecting in the background tap refresh once you’re back online.</string>
@@ -1451,44 +1441,23 @@ Installed path:
     <string name="cloud_sync_disabled_summary">Launch without cloud save download or exit sync.</string>
     <string name="cloud_saves_offline_mode">Disable Cloud Sync</string>
     <string name="cloud_saves_offline_mode_summary">Stops all automatic cloud activity for this game.</string>
-    <string name="cloud_saves_backing_up">Backing up cloud save\u2026</string>
     <string name="cloud_saves_restoring">Restoring cloud save\u2026</string>
 
     <!-- Cloud Saves > Provider sync & backup history -->
     <string name="cloud_saves_sync_from_provider">Sync from %1$s Cloud</string>
-    <string name="cloud_saves_sync_from_provider_generic">Sync from Cloud</string>
-    <string name="cloud_saves_syncing_from_provider">Downloading save from %1$s\u2026</string>
     <string name="cloud_saves_sync_from_provider_success">%1$s cloud save downloaded.</string>
     <string name="cloud_saves_sync_from_provider_failed">Could not download save from %1$s.</string>
-    <string name="cloud_saves_gog_manage_label">Manage GOG Cloud Saves</string>
-    <string name="cloud_saves_gog_manage_helper">Opens the Official GOG Website</string>
-    <string name="cloud_saves_gog_manage_no_browser">No browser available to open the GOG cloud saves page</string>
-    <string name="cloud_saves_gog_zip_label">Download GOG Cloud Zip</string>
-    <string name="cloud_saves_gog_zip_helper">Save current cloud files</string>
-    <string name="cloud_saves_gog_zip_success">GOG cloud saves zip saved.</string>
-    <string name="cloud_saves_gog_zip_failed">Could not save GOG cloud saves zip.</string>
-    <string name="cloud_saves_gog_zip_empty">No GOG cloud save files found.</string>
     <string name="cloud_saves_google_backup_label">Backup To Google</string>
-    <string name="cloud_saves_google_backup_helper">Save a copy to Google Play Games</string>
-    <string name="cloud_saves_google_backup_no_save">No save files found to back up.</string>
     <string name="cloud_saves_history_title">Save History</string>
     <string name="cloud_saves_history_empty">No previous saves backed up yet. Replaced saves and manual backups will appear here for 30 days.</string>
     <string name="cloud_saves_history_loading">Loading save history\u2026</string>
-    <string name="cloud_saves_history_sign_in">Sign in to Google to view your save history.</string>
-    <string name="cloud_saves_history_origin_local">local</string>
-    <string name="cloud_saves_history_origin_cloud">cloud</string>
-    <string name="cloud_saves_history_origin_manual">manual</string>
-    <string name="cloud_saves_history_origin_auto">auto</string>
     <!-- Save History badge: where the backup is stored. -->
     <string name="cloud_saves_history_storage_steam">Steam</string>
     <string name="cloud_saves_history_storage_google">Google</string>
-    <string name="cloud_saves_history_storage_epic">Epic</string>
-    <string name="cloud_saves_history_storage_gog">GOG</string>
     <string name="cloud_saves_history_restore">Restore</string>
     <string name="cloud_saves_history_download">Download</string>
     <string name="cloud_saves_history_download_success">File downloaded.</string>
     <string name="cloud_saves_history_download_failed">Download failed.</string>
-    <string name="cloud_saves_history_cloud_readonly">Read-only</string>
     <string name="cloud_saves_history_restore_confirm_title">Restore this backup?</string>
     <string name="cloud_saves_history_restore_confirm_body">This will replace your current local save with the backup from %1$s.</string>
     <string name="cloud_saves_history_restore_success">Save restored from backup.</string>
@@ -1522,14 +1491,11 @@ Installed path:
 
     <!-- Cloud Saves > Steam Cloud actions -->
     <string name="cloud_saves_steam_sync_label">Sync from Steam Cloud</string>
-    <string name="cloud_saves_steam_sync_helper">Download latest save</string>
     <string name="cloud_saves_steam_sync_success">Synced from Steam Cloud</string>
     <string name="cloud_saves_steam_sync_failed">Steam Cloud sync failed</string>
     <string name="cloud_saves_steam_browse_label">View Steam Cloud Saves</string>
-    <string name="cloud_saves_steam_browse_helper">Open cloud storage</string>
     <string name="cloud_saves_steam_browse_no_browser">No browser available to open the Steam page</string>
     <string name="cloud_saves_steam_import_label">Import Files</string>
-    <string name="cloud_saves_steam_import_helper">Restore downloaded files</string>
     <string name="cloud_saves_steam_import_picker_unavailable">File picker unavailable</string>
     <string name="cloud_saves_steam_restore_overwrite_body">This will download Steam Cloud\'s current save files and overwrite the current save files.</string>
 
@@ -1550,7 +1516,7 @@ Installed path:
     <string name="saves_export_path_summary">Saves will be exported to /WinNative/saves</string>
     <string name="saves_export_success_path">Exported to %1$s</string>
     <string name="saves_export_warning_title">Only use this with custom games</string>
-    <string name="saves_export_warning_body">Export may include saves from store-installed or cloud-sync games.</string>
+    <string name="saves_export_warning_body">Export may include saves from Steam-installed or cloud-sync games.</string>
     <string name="saves_import_warning_title">This will overwrite existing saves in this container</string>
     <string name="saves_import_warning_body">When restoring an older backup with multiple games, copy any newer saves into the zip with your file manager first. Only Saves existing in the .zip will be effected. Manage Saves wisely.</string>
 
@@ -1593,8 +1559,6 @@ Installed path:
     <string name="preloader_cloud_downloading">Cloud Sync Downloading</string>
     <string name="cloud_sync_failed_provider">%1$s cloud save sync failed.</string>
     <string name="preloader_platform_steam">Steam</string>
-    <string name="preloader_platform_epic">Epic Games</string>
-    <string name="preloader_platform_gog">GOG</string>
     <string name="preloader_platform_custom">Custom Game</string>
 
     <!-- Performance recording settings -->

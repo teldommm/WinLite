@@ -143,12 +143,6 @@ public final class FrontendExporter {
     if ("STEAM".equalsIgnoreCase(source)) {
       store = "steam";
       gameId = shortcut.getExtra("app_id");
-    } else if ("EPIC".equalsIgnoreCase(source)) {
-      store = "epic";
-      gameId = shortcut.getExtra("app_id");
-    } else if ("GOG".equalsIgnoreCase(source)) {
-      store = "gog";
-      gameId = shortcut.getExtra("gog_id");
     } else {
       return null;
     }

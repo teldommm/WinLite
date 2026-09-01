@@ -9,8 +9,6 @@ import com.google.android.gms.games.snapshot.Snapshot
 import com.google.android.gms.games.snapshot.SnapshotMetadata
 import com.google.android.gms.games.snapshot.SnapshotMetadataChange
 import com.google.android.gms.tasks.Tasks
-import com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-import com.winlator.cmod.feature.stores.gog.service.GOGService
 import com.winlator.cmod.feature.steamcloudsync.SteamCloudSyncHelper
 import com.winlator.cmod.feature.steamcloudsync.SteamSaveSnapshotManager
 import com.winlator.cmod.runtime.container.Container
@@ -81,8 +79,6 @@ object GameSaveBackupManager {
 
     enum class GameSource(val code: Char) {
         STEAM('s'),
-        EPIC('e'),
-        GOG('g'),
         CUSTOM('c'),
     }
 
@@ -92,10 +88,6 @@ object GameSaveBackupManager {
         STEAM_LOCAL,
         /** Steam Cloud's CURRENT file listing, grouped into save sets by ~120s timestamp clusters (Steam has no server-side version history). Restore re-downloads the group's files to their local paths. */
         STEAM_CLOUD,
-        /** Epic cloud-save manifests: each upload writes a timestamped manifest plus chunk files; selecting a row restores that manifest. */
-        EPIC_CLOUD,
-        /** GOG cloud's live file listing. Restore pulls full cloud state down. */
-        GOG_CLOUD,
 
         /** Google Play Games Saved Games: one manifest snapshot plus N gzipped-zip part snapshots, shown as a single GOOGLE entry. */
         GOOGLE,
@@ -704,43 +696,8 @@ object GameSaveBackupManager {
                     .enumerateGoogleSaveSources(context, appId, forRestore, containerHint)
                     .map { (zipRoot, dir) -> SaveBackupSource("steam/$zipRoot", dir) }
             }
-            GameSource.EPIC -> getEpicSaveSources(context, gameId, forRestore, containerHint)
-            GameSource.GOG -> getGogSaveSources(context, gameId, forRestore, containerHint)
             GameSource.CUSTOM -> getCustomSaveSources(context, gameId, customSaveDir, forRestore)
         }
-
-    private suspend fun getEpicSaveSources(
-        context: Context,
-        gameId: String,
-        forRestore: Boolean,
-        containerHint: Container? = null,
-    ): List<SaveBackupSource> {
-        val appId = gameId.toIntOrNull() ?: return emptyList()
-        // Pass the game's container so the save dir resolves against the right wineprefix — without it a manual backup/restore (game not running) finds no saves.
-        val saveDir =
-            EpicCloudSavesManager.getResolvedSaveDirectory(context, appId, containerHint?.id) ?: return emptyList()
-        return if (forRestore || (saveDir.exists() && !saveDir.listFiles().isNullOrEmpty())) {
-            listOf(SaveBackupSource("epic/save", saveDir))
-        } else {
-            emptyList()
-        }
-    }
-
-    private suspend fun getGogSaveSources(
-        context: Context,
-        gameId: String,
-        forRestore: Boolean,
-        containerHint: Container? = null,
-    ): List<SaveBackupSource> {
-        val saveDirs = GOGService.getResolvedSaveDirectories(context, "GOG_$gameId", containerHint?.id)
-        return saveDirs.mapIndexedNotNull { index, saveDir ->
-            if (forRestore || (saveDir.exists() && !saveDir.listFiles().isNullOrEmpty())) {
-                SaveBackupSource("gog/location_$index", saveDir)
-            } else {
-                null
-            }
-        }
-    }
 
     /** Custom-game save sources in priority order: explicit customSaveDir, then the customSaveWindowsPath extra, then the legacy custom_game_folder extra, then the prefix's users/xuser/{Documents,Saved Games,AppData}. */
     private fun getCustomSaveSources(
@@ -794,11 +751,6 @@ object GameSaveBackupManager {
         return try {
             when (source) {
                 GameSource.STEAM -> false // Steam Cloud handled elsewhere.
-                GameSource.EPIC -> {
-                    val appId = gameId.toIntOrNull() ?: return false
-                    EpicCloudSavesManager.syncCloudSaves(context, appId, "download")
-                }
-                GameSource.GOG -> GOGService.syncCloudSaves(context, "GOG_$gameId", "download")
                 GameSource.CUSTOM -> false
             }
         } catch (e: Exception) {
@@ -815,11 +767,6 @@ object GameSaveBackupManager {
         return try {
             when (source) {
                 GameSource.STEAM -> false
-                GameSource.EPIC -> {
-                    val appId = gameId.toIntOrNull() ?: return false
-                    EpicCloudSavesManager.syncCloudSaves(context, appId, "upload")
-                }
-                GameSource.GOG -> GOGService.syncCloudSaves(context, "GOG_$gameId", "upload")
                 GameSource.CUSTOM -> false
             }
         } catch (e: Exception) {
@@ -1234,7 +1181,7 @@ object GameSaveBackupManager {
 
     // ── Restore: extract ──
 
-    /** Apply a staged restore onto the live save dirs: move each live dir aside, copy in the staged one, delete the aside-backup only after every source succeeds; on failure restore the aside dirs so the live save is unchanged (the only rollback Epic/GOG/Custom have). */
+    /** Apply a staged restore onto the live save dirs: move each live dir aside, copy in the staged one, delete the aside-backup only after every source succeeds; on failure restore the aside dirs so the live save is unchanged (the only rollback Custom has). */
     private fun swapRestoredSources(liveSources: List<SaveBackupSource>, staging: File): Boolean {
         val done = mutableListOf<Triple<File, File?, Boolean>>() // (live, bak, hadLive)
         fun rollback() {

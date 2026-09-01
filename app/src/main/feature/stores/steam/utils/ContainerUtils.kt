@@ -187,7 +187,6 @@ object ContainerUtils {
                 "steam",
                 "origin",
                 "uplay",
-                "epic",
                 "battlenet",
             )
         return systemKeywords.any { fileName.contains(it) }

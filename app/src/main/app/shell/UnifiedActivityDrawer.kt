@@ -171,27 +171,6 @@ import com.winlator.cmod.feature.shortcuts.ShortcutBroadcastReceiver
 import com.winlator.cmod.feature.shortcuts.ShortcutSettingsComposeDialog
 import com.winlator.cmod.feature.shortcuts.ShortcutsFragment
 import com.winlator.cmod.feature.stores.common.StoreArtworkCache
-import com.winlator.cmod.feature.stores.epic.data.EpicCredentials
-import com.winlator.cmod.feature.stores.epic.data.EpicGame
-import com.winlator.cmod.feature.stores.epic.data.EpicGameToken
-import com.winlator.cmod.feature.stores.epic.service.EpicAuthManager
-import com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-import com.winlator.cmod.feature.stores.epic.service.EpicConstants
-import com.winlator.cmod.feature.stores.epic.service.EpicDownloadManager
-import com.winlator.cmod.feature.stores.epic.service.EpicGameLauncher
-import com.winlator.cmod.feature.stores.epic.service.EpicManager
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.epic.service.EpicUpdateInfo
-import com.winlator.cmod.feature.stores.epic.ui.auth.EpicOAuthActivity
-import com.winlator.cmod.feature.stores.gog.data.GOGDlcInfo
-import com.winlator.cmod.feature.stores.gog.data.GOGGame
-import com.winlator.cmod.feature.stores.gog.data.LibraryItem
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGConstants
-import com.winlator.cmod.feature.stores.gog.service.GOGManifestSizes
-import com.winlator.cmod.feature.stores.gog.service.GOGService
-import com.winlator.cmod.feature.stores.gog.service.GOGUpdateInfo
-import com.winlator.cmod.feature.stores.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.feature.stores.steam.SteamLoginActivity
 import com.winlator.cmod.feature.stores.steam.data.DepotInfo
 import com.winlator.cmod.feature.stores.steam.data.DownloadInfo
@@ -275,7 +254,7 @@ internal fun UnifiedActivity.LoginRequiredScreen(
         ) {
             stringResource(R.string.library_games_sign_in_prompt)
         } else {
-            stringResource(R.string.stores_accounts_sign_in_store_prompt, storeName)
+            stringResource(R.string.stores_accounts_sign_in_store_prompt)
         }
     val buttonText =
         if (storeName ==
@@ -283,7 +262,7 @@ internal fun UnifiedActivity.LoginRequiredScreen(
         ) {
             stringResource(R.string.stores_accounts_manage)
         } else {
-            stringResource(R.string.stores_accounts_sign_into_store, storeName)
+            stringResource(R.string.stores_accounts_sign_into_store)
         }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -475,13 +454,7 @@ internal fun UnifiedActivity.DrawerContent(
             Spacer(Modifier.height(8.dp))
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DrawerFilterButton("Steam", storeVisible["steam"] == true, Modifier.weight(1f)) { onStoreVisibleChanged("steam", it) }
-                DrawerFilterButton("Epic", storeVisible["epic"] == true, Modifier.weight(1f)) { onStoreVisibleChanged("epic", it) }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DrawerFilterButton("GOG", storeVisible["gog"] == true, Modifier.weight(1f)) { onStoreVisibleChanged("gog", it) }
-                Spacer(Modifier.weight(1f))
+                DrawerFilterButton("Steam", storeVisible["steam"] == true, Modifier.fillMaxWidth()) { onStoreVisibleChanged("steam", it) }
             }
 
             Spacer(Modifier.height(16.dp))

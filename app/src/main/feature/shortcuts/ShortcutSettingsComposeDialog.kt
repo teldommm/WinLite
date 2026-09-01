@@ -1276,8 +1276,6 @@ class ShortcutSettingsComposeDialog private constructor(
                         shortcut.putExtra("custom_game_folder", gameFolder.absolutePath)
                         updateCustomShortcutExecLine(container, gameFolder, exeFile)
                     }
-                } else if (gameSource == "EPIC" || gameSource == "GOG") {
-                    updateStoreShortcutExecLine(container, gameSource, launchExePath)
                 }
             }
 
@@ -1614,38 +1612,6 @@ class ShortcutSettingsComposeDialog private constructor(
         return canonicalFile
             .substring(prefix.length)
             .replace(File.separatorChar, '/')
-    }
-
-    private fun updateStoreShortcutExecLine(
-        targetContainer: Container,
-        gameSource: String,
-        launchExePath: String,
-    ) {
-        val exeFile = File(launchExePath).takeIf { it.isFile } ?: return
-        val gameInstallPath = shortcut.getExtra("game_install_path")
-        val mappedPath =
-            gameInstallPath
-                .takeIf { it.isNotBlank() && File(it).isDirectory }
-                ?.let { WineUtils.getDriveCGameWindowsPath(targetContainer, gameSource, it, exeFile.absolutePath) }
-                ?.takeIf { it.isNotBlank() }
-                ?: WineUtils.hostPathToRootWinePath(targetContainer, exeFile.absolutePath)
-                    .takeIf { it.isNotBlank() }
-                ?: return
-
-        val content = StringBuilder()
-        var replaced = false
-        for (line in FileUtils.readLines(shortcut.file)) {
-            if (line.startsWith("Exec=")) {
-                content.append("Exec=wine \"").append(mappedPath).append("\"\n")
-                replaced = true
-            } else {
-                content.append(line).append('\n')
-            }
-        }
-        if (!replaced) {
-            content.append("Exec=wine \"").append(mappedPath).append("\"\n")
-        }
-        FileUtils.writeString(shortcut.file, content.toString())
     }
 
     private fun updateCustomShortcutExecLine(
@@ -2539,9 +2505,7 @@ class ShortcutSettingsComposeDialog private constructor(
          * user dismisses the dialog without saving, the file remains (and shows up in the
          * Shortcuts tab from then on).
          *
-         * @param source one of "STEAM", "EPIC", "GOG"
-         * @param appId  numeric app id (for GOG use the pseudo id)
-         * @param gogId  GOG id string — required when `source == "GOG"`, ignored otherwise
+         * @param source one of "STEAM", "CUSTOM"
          */
         @JvmStatic
         fun createLibraryShortcut(
@@ -2549,7 +2513,6 @@ class ShortcutSettingsComposeDialog private constructor(
             containerManager: ContainerManager,
             source: String,
             appId: Int,
-            gogId: String?,
             appName: String,
         ): Shortcut? {
             val container = SetupWizardActivity.getPreferredGameContainer(context, containerManager)
@@ -2563,8 +2526,6 @@ class ShortcutSettingsComposeDialog private constructor(
             val shortcutFile = File(desktopDir, "$safeName.desktop")
             val iconKey = when (source) {
                 "STEAM" -> "steam_icon_$appId"
-                "EPIC" -> "epic_icon_$appId"
-                "GOG" -> "gog_icon_$gogId"
                 else -> ""
             }
             val exec = if (source == "STEAM") {
@@ -2581,9 +2542,6 @@ class ShortcutSettingsComposeDialog private constructor(
             sb.append("\n[Extra Data]\n")
             sb.append("game_source=$source\n")
             sb.append("app_id=$appId\n")
-            if (source == "GOG" && !gogId.isNullOrEmpty()) {
-                sb.append("gog_id=$gogId\n")
-            }
             sb.append("container_id=${container.id}\n")
             sb.append("use_container_defaults=1\n")
             FileUtils.writeString(shortcutFile, sb.toString())

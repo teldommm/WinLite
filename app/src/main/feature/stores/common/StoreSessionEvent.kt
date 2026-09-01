@@ -2,8 +2,6 @@ package com.winlator.cmod.feature.stores.common
 
 /** Identifies which store emitted a session event. */
 enum class Store {
-    EPIC,
-    GOG,
     STEAM,
 }
 

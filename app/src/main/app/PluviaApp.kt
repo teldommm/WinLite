@@ -5,8 +5,6 @@ import android.os.Bundle
 import android.util.Log
 import com.winlator.cmod.app.db.PluviaDatabase
 import com.winlator.cmod.app.update.UpdateChecker
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGConstants
 import com.winlator.cmod.feature.stores.steam.events.EventDispatcher
 import com.winlator.cmod.feature.stores.steam.service.SteamService
 import com.winlator.cmod.feature.stores.steam.utils.PrefManager
@@ -34,7 +32,6 @@ class PluviaApp : Application() {
         registerRefreshRateLifecycleCallbacks()
 
         PrefManager.install(this)
-        GOGConstants.init(this)
 
         com.winlator.cmod.app.service.NetworkMonitor
             .init(this)
@@ -208,8 +205,6 @@ class PluviaApp : Application() {
         appScope.launch {
             // Release the main thread for Activity launch and first Compose work.
             withContext(Dispatchers.IO) {
-                GOGAuthManager.updateLoginStatus(this@PluviaApp)
-
                 // Keep encrypted prefs setup off launcher auth checks.
                 val steamLogsEnabled =
                     runCatching {

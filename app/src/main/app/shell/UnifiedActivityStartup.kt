@@ -165,27 +165,6 @@ import com.winlator.cmod.feature.shortcuts.ShortcutBroadcastReceiver
 import com.winlator.cmod.feature.shortcuts.ShortcutSettingsComposeDialog
 import com.winlator.cmod.feature.shortcuts.ShortcutsFragment
 import com.winlator.cmod.feature.stores.common.StoreArtworkCache
-import com.winlator.cmod.feature.stores.epic.data.EpicCredentials
-import com.winlator.cmod.feature.stores.epic.data.EpicGame
-import com.winlator.cmod.feature.stores.epic.data.EpicGameToken
-import com.winlator.cmod.feature.stores.epic.service.EpicAuthManager
-import com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-import com.winlator.cmod.feature.stores.epic.service.EpicConstants
-import com.winlator.cmod.feature.stores.epic.service.EpicDownloadManager
-import com.winlator.cmod.feature.stores.epic.service.EpicGameLauncher
-import com.winlator.cmod.feature.stores.epic.service.EpicManager
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.epic.service.EpicUpdateInfo
-import com.winlator.cmod.feature.stores.epic.ui.auth.EpicOAuthActivity
-import com.winlator.cmod.feature.stores.gog.data.GOGDlcInfo
-import com.winlator.cmod.feature.stores.gog.data.GOGGame
-import com.winlator.cmod.feature.stores.gog.data.LibraryItem
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGConstants
-import com.winlator.cmod.feature.stores.gog.service.GOGManifestSizes
-import com.winlator.cmod.feature.stores.gog.service.GOGService
-import com.winlator.cmod.feature.stores.gog.service.GOGUpdateInfo
-import com.winlator.cmod.feature.stores.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.feature.stores.steam.SteamLoginActivity
 import com.winlator.cmod.feature.stores.steam.data.DepotInfo
 import com.winlator.cmod.feature.stores.steam.data.DownloadInfo
@@ -418,8 +397,8 @@ internal fun UnifiedActivity.bootstrapStartupState() {
         val resolvedStoreVisible =
             runCatching {
                 val saved = PrefManager.libraryStoreVisible.split(",").toSet()
-                mapOf("steam" to ("steam" in saved), "epic" to ("epic" in saved), "gog" to ("gog" in saved))
-            }.getOrElse { mapOf("steam" to true, "epic" to true, "gog" to true) }
+                mapOf("steam" to ("steam" in saved))
+            }.getOrElse { mapOf("steam" to true) }
 
         val resolvedContentFilters =
             runCatching {
@@ -434,10 +413,6 @@ internal fun UnifiedActivity.bootstrapStartupState() {
 
         runCatching { dbProvider.get() }
             .onFailure { Log.w("UnifiedActivity", "Database warmup failed", it) }
-        runCatching { EpicAuthManager.updateLoginStatus(appContext) }
-            .onFailure { Log.w("UnifiedActivity", "Epic auth warmup failed", it) }
-        runCatching { GOGAuthManager.updateLoginStatus(appContext) }
-            .onFailure { Log.w("UnifiedActivity", "GOG auth warmup failed", it) }
         runCatching { SteamService.initLoginStatus(appContext) }
             .onFailure { Log.w("UnifiedActivity", "Steam auth warmup failed", it) }
 
@@ -475,20 +450,8 @@ internal fun UnifiedActivity.scheduleDeferredStoreBootstrap() {
     window.decorView.post {
         if (isFinishing || isDestroyed) return@post
         lifecycleScope.launch(Dispatchers.IO) {
-            if (EpicService.hasStoredCredentials(this@scheduleDeferredStoreBootstrap)) {
-                EpicService.start(this@scheduleDeferredStoreBootstrap)
-                // Keep token validation off the first-frame path.
-                EpicAuthManager.getStoredCredentials(this@scheduleDeferredStoreBootstrap)
-                com.winlator.cmod.feature.stores.epic.service.EpicTokenRefreshWorker
-                    .schedule(this@scheduleDeferredStoreBootstrap)
-            }
-
             if (SteamService.hasStoredCredentials(this@scheduleDeferredStoreBootstrap)) {
                 SteamService.start(this@scheduleDeferredStoreBootstrap)
-            }
-
-            if (GOGAuthManager.isLoggedIn(this@scheduleDeferredStoreBootstrap)) {
-                GOGService.start(this@scheduleDeferredStoreBootstrap)
             }
 
             SteamService.maybeRepairInstalledMetadataOnStartup(this@scheduleDeferredStoreBootstrap)
@@ -503,8 +466,6 @@ internal fun UnifiedActivity.buildTabs(storeVisible: Map<String, Boolean>): List
             TabDef(getString(R.string.common_ui_downloads), "downloads"),
         )
     if (storeVisible["steam"] != false) base.add(TabDef("Steam", "steam"))
-    if (storeVisible["epic"] != false) base.add(TabDef("Epic", "epic"))
-    if (storeVisible["gog"] != false) base.add(TabDef("GOG", "gog"))
     return base
 }
 
@@ -533,37 +494,6 @@ internal fun <K> UnifiedActivity.rememberInstallPathStateMap(entries: List<Pair<
                 entries.associate { (key, path) ->
                     key to (path?.isNotBlank() == true && java.io.File(path).exists())
                 }
-            }
-    }
-
-    return installStateMap
-}
-
-@Composable
-internal fun UnifiedActivity.rememberEpicInstallStateMap(
-    context: android.content.Context,
-    apps: List<EpicGame>,
-): Map<Int, Boolean> {
-    var installStateMap by remember { mutableStateOf<Map<Int, Boolean>>(emptyMap()) }
-
-    LaunchedEffect(apps) {
-        installStateMap =
-            withContext(Dispatchers.IO) {
-                apps.associate { it.id to EpicService.isGameInstalled(context, it.id) }
-            }
-    }
-
-    return installStateMap
-}
-
-@Composable
-internal fun UnifiedActivity.rememberGogInstallStateMap(apps: List<GOGGame>): Map<String, Boolean> {
-    var installStateMap by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
-
-    LaunchedEffect(apps) {
-        installStateMap =
-            withContext(Dispatchers.IO) {
-                apps.associate { it.id to GOGService.isGameInstalled(it.id) }
             }
     }
 

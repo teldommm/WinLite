@@ -234,8 +234,7 @@ data class PerfDigest(
 
         /**
          * Encodes the game source + game id into the canonical 4-byte hash used by the
-         * client-side leaderboard filter. Format: "STEAM:1091500", "EPIC:Fortnite",
-         * "GOG:1207658886", "CUSTOM:<exePath>".
+         * client-side leaderboard filter. Format: "STEAM:1091500", "CUSTOM:<exePath>".
          */
         fun gameIdHashOf(gameSource: String, gameId: String): ByteArray =
             shortHash("$gameSource:$gameId")

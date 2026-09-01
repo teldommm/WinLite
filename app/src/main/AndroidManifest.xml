@@ -85,20 +85,6 @@
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation" />
 
         <activity
-            android:name="com.winlator.cmod.feature.stores.epic.ui.auth.EpicOAuthActivity"
-            android:theme="@style/AppTheme.Dark"
-            android:screenOrientation="fullUser"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation"
-            android:exported="false" />
-
-        <activity
-            android:name="com.winlator.cmod.feature.stores.gog.ui.auth.GOGOAuthActivity"
-            android:theme="@style/AppTheme.Dark"
-            android:screenOrientation="fullUser"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation"
-            android:exported="false" />
-
-        <activity
             android:name="com.winlator.cmod.runtime.display.XServerDisplayActivity"
             android:theme="@style/AppThemeFullscreen"
             android:launchMode="singleTask"
@@ -156,18 +142,6 @@
             android:excludeFromRecents="true"
             android:noHistory="true"
             android:exported="false" />
-
-        <service
-            android:name="com.winlator.cmod.feature.stores.epic.service.EpicService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
-        <service
-            android:name="com.winlator.cmod.feature.stores.gog.service.GOGService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
 
         <!-- Need for keep the container alive when the process is paused,
              also required to prevent the system from killing a component download/install

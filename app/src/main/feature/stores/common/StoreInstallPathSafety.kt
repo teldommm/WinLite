@@ -74,8 +74,6 @@ object StoreInstallPathSafety {
             listOf(
                 PrefManager.defaultDownloadFolder,
                 PrefManager.steamDownloadFolder,
-                PrefManager.epicDownloadFolder,
-                PrefManager.gogDownloadFolder,
                 PrefManager.externalStoragePath,
             )
 

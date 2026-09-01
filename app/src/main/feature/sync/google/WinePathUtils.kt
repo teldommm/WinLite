@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * Bidirectional Wine-prefix path utilities used by the Custom Games save-folder picker
- * and Google save backup/restore. PathType.kt covers Steam/GOG/Epic forward mapping; this
+ * and Google save backup/restore. PathType.kt covers Steam forward mapping; this
  * helper covers the missing reverse direction (Android → Windows) plus a forward
  * resolver that goes through a specific Container.
  */

@@ -40,12 +40,10 @@ const val DATABASE_NAME = "pluvia_database"
         FileChangeLists::class,
         SteamApp::class,
         SteamLicense::class,
-        com.winlator.cmod.feature.stores.epic.data.EpicGame::class,
-        com.winlator.cmod.feature.stores.gog.data.GOGGame::class,
         DownloadingAppInfo::class,
         DownloadRecord::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 @TypeConverters(
@@ -55,13 +53,8 @@ const val DATABASE_NAME = "pluvia_database"
     LicenseConverter::class,
     PathTypeConverter::class,
     UserFileInfoListConverter::class,
-    com.winlator.cmod.feature.stores.epic.db.converters.EpicConverter::class,
 )
 abstract class PluviaDatabase : RoomDatabase() {
-    abstract fun epicGameDao(): com.winlator.cmod.feature.stores.epic.db.dao.EpicGameDao
-
-    abstract fun gogGameDao(): com.winlator.cmod.feature.stores.gog.db.dao.GOGGameDao
-
     abstract fun steamLicenseDao(): SteamLicenseDao
 
     abstract fun steamAppDao(): SteamAppDao
@@ -91,7 +84,7 @@ abstract class PluviaDatabase : RoomDatabase() {
                         context.applicationContext,
                         PluviaDatabase::class.java,
                         DATABASE_NAME,
-                    ).addMigrations(MIGRATION_6_7, MIGRATION_7_8)
+                    ).addMigrations(MIGRATION_7_8)
                     .fallbackToDestructiveMigration(true)
                     .build()
                     .also { instance = it }
@@ -105,13 +98,6 @@ abstract class PluviaDatabase : RoomDatabase() {
             object : Migration(7, 8) {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     db.execSQL("ALTER TABLE app_info ADD COLUMN install_path TEXT")
-                }
-            }
-
-        private val MIGRATION_6_7 =
-            object : Migration(6, 7) {
-                override fun migrate(db: SupportSQLiteDatabase) {
-                    db.execSQL("ALTER TABLE gog_games ADD COLUMN hero_image_url TEXT NOT NULL DEFAULT ''")
                 }
             }
     }

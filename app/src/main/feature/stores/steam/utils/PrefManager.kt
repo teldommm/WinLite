@@ -265,7 +265,7 @@ object PrefManager {
         }
 
     var libraryStoreVisible: String
-        get() = getString("library_store_visible", "steam,epic,gog")
+        get() = getString("library_store_visible", "steam")
         set(value) {
             setString("library_store_visible", value)
         }
@@ -316,18 +316,6 @@ object PrefManager {
         get() = getString("steam_download_folder", "")
         set(value) {
             setString("steam_download_folder", value)
-        }
-
-    var epicDownloadFolder: String
-        get() = getString("epic_download_folder", "")
-        set(value) {
-            setString("epic_download_folder", value)
-        }
-
-    var gogDownloadFolder: String
-        get() = getString("gog_download_folder", "")
-        set(value) {
-            setString("gog_download_folder", value)
         }
 
     var chatServiceEnabled: Boolean

@@ -164,27 +164,6 @@ import com.winlator.cmod.feature.shortcuts.ShortcutBroadcastReceiver
 import com.winlator.cmod.feature.shortcuts.ShortcutSettingsComposeDialog
 import com.winlator.cmod.feature.shortcuts.ShortcutsFragment
 import com.winlator.cmod.feature.stores.common.StoreArtworkCache
-import com.winlator.cmod.feature.stores.epic.data.EpicCredentials
-import com.winlator.cmod.feature.stores.epic.data.EpicGame
-import com.winlator.cmod.feature.stores.epic.data.EpicGameToken
-import com.winlator.cmod.feature.stores.epic.service.EpicAuthManager
-import com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-import com.winlator.cmod.feature.stores.epic.service.EpicConstants
-import com.winlator.cmod.feature.stores.epic.service.EpicDownloadManager
-import com.winlator.cmod.feature.stores.epic.service.EpicGameLauncher
-import com.winlator.cmod.feature.stores.epic.service.EpicManager
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.epic.service.EpicUpdateInfo
-import com.winlator.cmod.feature.stores.epic.ui.auth.EpicOAuthActivity
-import com.winlator.cmod.feature.stores.gog.data.GOGDlcInfo
-import com.winlator.cmod.feature.stores.gog.data.GOGGame
-import com.winlator.cmod.feature.stores.gog.data.LibraryItem
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGConstants
-import com.winlator.cmod.feature.stores.gog.service.GOGManifestSizes
-import com.winlator.cmod.feature.stores.gog.service.GOGService
-import com.winlator.cmod.feature.stores.gog.service.GOGUpdateInfo
-import com.winlator.cmod.feature.stores.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.feature.stores.steam.SteamLoginActivity
 import com.winlator.cmod.feature.stores.steam.data.DepotInfo
 import com.winlator.cmod.feature.stores.steam.data.DownloadInfo
@@ -1019,21 +998,14 @@ internal fun UnifiedActivity.DownloadItemDeck(
     var previousStatus by remember { mutableStateOf(status) }
     var showCompletedProgressBar by remember { mutableStateOf(status != DownloadPhase.COMPLETE) }
     val isSteam = id.startsWith("STEAM_")
-    val isEpic = id.startsWith("EPIC_")
-    val isGog = id.startsWith("GOG_")
     val appId =
         if (isSteam) {
             id.removePrefix("STEAM_").toIntOrNull() ?: 0
-        } else if (isEpic) {
-            id.removePrefix("EPIC_").toIntOrNull() ?: 0
         } else {
             0
         }
-    val gogId = if (isGog) id.removePrefix("GOG_") else ""
 
     var steamApp by remember(appId) { mutableStateOf<SteamApp?>(null) }
-    var epicGame by remember(appId) { mutableStateOf<EpicGame?>(null) }
-    var gogGame by remember(gogId) { mutableStateOf<GOGGame?>(null) }
     val context = LocalContext.current
     val clickInteractionSource = remember { MutableInteractionSource() }
     val animatedProgress by animateFloatAsState(
@@ -1055,14 +1027,10 @@ internal fun UnifiedActivity.DownloadItemDeck(
         previousStatus = status
     }
 
-    LaunchedEffect(appId, gogId, isSteam, isEpic, isGog) {
+    LaunchedEffect(appId, isSteam) {
         withContext(Dispatchers.IO) {
             if (isSteam) {
                 steamApp = db.steamAppDao().findApp(appId)
-            } else if (isEpic) {
-                epicGame = EpicService.getEpicGameOf(appId)
-            } else if (isGog) {
-                gogGame = GOGService.getGOGGameOf(gogId)
             }
         }
     }
@@ -1071,20 +1039,12 @@ internal fun UnifiedActivity.DownloadItemDeck(
     val displayName =
         if (isSteam) {
             steamApp?.name
-        } else if (isEpic) {
-            epicGame?.title
-        } else if (isGog) {
-            gogGame?.title
         } else {
             unknownGameLabel
         }
     val displayImage =
         if (isSteam) {
             steamApp?.getHeaderImageUrl()
-        } else if (isEpic) {
-            epicGame?.primaryImageUrl ?: epicGame?.iconUrl
-        } else if (isGog) {
-            gogGame?.imageUrl ?: gogGame?.iconUrl
         } else {
             null
         }

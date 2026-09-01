@@ -1,8 +1,6 @@
 package com.winlator.cmod.feature.stores.common
 
 import android.content.Context
-import com.winlator.cmod.feature.stores.epic.data.EpicGame
-import com.winlator.cmod.feature.stores.gog.data.GOGGame
 import com.winlator.cmod.feature.stores.steam.data.SteamApp
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -127,28 +125,18 @@ object StoreArtworkCache {
         url: String,
     ): ArtworkRef = ArtworkRef("steam", app.id.toString(), slot, url)
 
-    fun libraryRefs(
-        app: SteamApp,
-        gogGame: GOGGame?,
-        epicGame: EpicGame?,
-    ): List<ArtworkRef> =
+    fun libraryRefs(app: SteamApp): List<ArtworkRef> =
         when {
-            gogGame != null -> gogRefs(gogGame)
-            epicGame != null -> epicRefs(epicGame)
             app.id < 0 -> emptyList()
             else -> steamRefs(app)
         }
 
     fun primaryRef(
         app: SteamApp,
-        gogGame: GOGGame?,
-        epicGame: EpicGame?,
         useLibraryCapsule: Boolean,
         listMode: Boolean,
     ): ArtworkRef? =
         when {
-            gogGame != null -> gogPrimaryRef(gogGame)
-            epicGame != null -> epicPrimaryRef(epicGame)
             app.id < 0 -> null
             else -> {
                 val slot: String
@@ -171,59 +159,10 @@ object StoreArtworkCache {
             }
         }
 
-    fun heroRef(
-        app: SteamApp,
-        gogGame: GOGGame?,
-        epicGame: EpicGame?,
-    ): ArtworkRef? =
+    fun heroRef(app: SteamApp): ArtworkRef? =
         when {
-            gogGame != null -> gogHeroRef(gogGame)
-            epicGame != null -> epicHeroRef(epicGame)
             app.id < 0 -> null
             else -> steamRef(app, "hero", app.getHeroUrl())
-        }
-
-    fun epicRefs(game: EpicGame): List<ArtworkRef> =
-        listOf(
-            ArtworkRef("epic", game.id.toString(), "cover", game.artCover),
-            ArtworkRef("epic", game.id.toString(), "square", game.artSquare),
-            ArtworkRef("epic", game.id.toString(), "logo", game.artLogo),
-            ArtworkRef("epic", game.id.toString(), "hero", game.artPortrait),
-        ).filter { it.url.isNotBlank() }
-
-    fun epicPrimaryRef(game: EpicGame): ArtworkRef? =
-        when {
-            game.artCover.isNotBlank() -> ArtworkRef("epic", game.id.toString(), "cover", game.artCover)
-            game.artSquare.isNotBlank() -> ArtworkRef("epic", game.id.toString(), "square", game.artSquare)
-            game.artLogo.isNotBlank() -> ArtworkRef("epic", game.id.toString(), "logo", game.artLogo)
-            game.artPortrait.isNotBlank() -> ArtworkRef("epic", game.id.toString(), "hero", game.artPortrait)
-            else -> null
-        }
-
-    fun epicHeroRef(game: EpicGame): ArtworkRef? =
-        when {
-            game.artPortrait.isNotBlank() -> ArtworkRef("epic", game.id.toString(), "hero", game.artPortrait)
-            else -> epicPrimaryRef(game)
-        }
-
-    fun gogRefs(game: GOGGame): List<ArtworkRef> =
-        listOf(
-            ArtworkRef("gog", game.id, "cover", game.imageUrl),
-            ArtworkRef("gog", game.id, "hero", game.heroImageUrl),
-            ArtworkRef("gog", game.id, "icon", game.iconUrl),
-        ).filter { it.url.isNotBlank() }
-
-    fun gogPrimaryRef(game: GOGGame): ArtworkRef? =
-        when {
-            game.imageUrl.isNotBlank() -> ArtworkRef("gog", game.id, "cover", game.imageUrl)
-            game.iconUrl.isNotBlank() -> ArtworkRef("gog", game.id, "icon", game.iconUrl)
-            else -> null
-        }
-
-    fun gogHeroRef(game: GOGGame): ArtworkRef? =
-        when {
-            game.heroImageUrl.isNotBlank() -> ArtworkRef("gog", game.id, "hero", game.heroImageUrl)
-            else -> gogPrimaryRef(game)
         }
 
     private fun cache(

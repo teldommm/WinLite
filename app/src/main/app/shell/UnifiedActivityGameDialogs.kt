@@ -170,27 +170,6 @@ import com.winlator.cmod.feature.shortcuts.ShortcutBroadcastReceiver
 import com.winlator.cmod.feature.shortcuts.ShortcutSettingsComposeDialog
 import com.winlator.cmod.feature.shortcuts.ShortcutsFragment
 import com.winlator.cmod.feature.stores.common.StoreArtworkCache
-import com.winlator.cmod.feature.stores.epic.data.EpicCredentials
-import com.winlator.cmod.feature.stores.epic.data.EpicGame
-import com.winlator.cmod.feature.stores.epic.data.EpicGameToken
-import com.winlator.cmod.feature.stores.epic.service.EpicAuthManager
-import com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-import com.winlator.cmod.feature.stores.epic.service.EpicConstants
-import com.winlator.cmod.feature.stores.epic.service.EpicDownloadManager
-import com.winlator.cmod.feature.stores.epic.service.EpicGameLauncher
-import com.winlator.cmod.feature.stores.epic.service.EpicManager
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.epic.service.EpicUpdateInfo
-import com.winlator.cmod.feature.stores.epic.ui.auth.EpicOAuthActivity
-import com.winlator.cmod.feature.stores.gog.data.GOGDlcInfo
-import com.winlator.cmod.feature.stores.gog.data.GOGGame
-import com.winlator.cmod.feature.stores.gog.data.LibraryItem
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGConstants
-import com.winlator.cmod.feature.stores.gog.service.GOGManifestSizes
-import com.winlator.cmod.feature.stores.gog.service.GOGService
-import com.winlator.cmod.feature.stores.gog.service.GOGUpdateInfo
-import com.winlator.cmod.feature.stores.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.feature.stores.steam.SteamLoginActivity
 import com.winlator.cmod.feature.stores.steam.data.DepotInfo
 import com.winlator.cmod.feature.stores.steam.data.DownloadInfo
@@ -548,8 +527,8 @@ internal fun UnifiedActivity.GameSettingsInfoCard(
 }
 
 /**
- * Shared uninstall/remove confirmation UI used by GameSettingsDialog,
- * GOGGameSettingsDialog, and LibraryGameDetailDialog.
+ * Shared uninstall/remove confirmation UI used by GameSettingsDialog
+ * and LibraryGameDetailDialog.
  */
 @Composable
 internal fun UnifiedActivity.UninstallConfirmation(
@@ -887,32 +866,19 @@ internal fun UnifiedActivity.GameSettingsDialog(
     var currentTab by remember { mutableStateOf(GameSettingsScreen.Menu) }
     val scope = rememberCoroutineScope()
     val isCustom = app.id < 0
-    val isEpic = app.id >= 2000000000
-    val epicId = if (isEpic) app.id - 2000000000 else 0
-    var shortcutRefreshKey by remember(app.id, isCustom, isEpic, epicId) { mutableStateOf(0) }
-    var pinnedShortcutOverride by remember(app.id, isCustom, isEpic, epicId) { mutableStateOf<Boolean?>(null) }
-    val epicArtworkUrl by produceState<String?>(initialValue = null, key1 = isEpic, key2 = epicId) {
-        value =
-            if (isEpic) {
-                val epicGame = db.epicGameDao().getById(epicId)
-                epicGame?.primaryImageUrl ?: epicGame?.iconUrl
-            } else {
-                null
-            }
-    }
+    var shortcutRefreshKey by remember(app.id, isCustom) { mutableStateOf(0) }
+    var pinnedShortcutOverride by remember(app.id, isCustom) { mutableStateOf<Boolean?>(null) }
     val currentRefreshSignal = this@GameSettingsDialog.libraryRefreshSignal
     val homeShortcutState by produceState(
         HomeShortcutUiState(),
         app.id,
         isCustom,
-        isEpic,
-        epicId,
         currentRefreshSignal,
         shortcutRefreshKey,
     ) {
         value =
             withContext(Dispatchers.IO) {
-                val shortcut = findLibraryShortcutForGame(ContainerManager(context), app, isCustom, isEpic, epicId)
+                val shortcut = findLibraryShortcutForGame(ContainerManager(context), app, isCustom)
                 HomeShortcutUiState(
                     shortcut = shortcut,
                     isPinned = shortcut?.let { LibraryShortcutUtils.hasPinnedHomeShortcut(context, it) } == true,
@@ -920,7 +886,7 @@ internal fun UnifiedActivity.GameSettingsDialog(
             }
     }
     val artworkRefreshListener =
-        remember(app.id, isCustom, isEpic, epicId) {
+        remember(app.id, isCustom) {
             object : EventDispatcher.JavaEventListener {
                 override fun onEvent(event: Any) {
                     if (event is AndroidEvent.LibraryArtworkChanged) {
@@ -948,7 +914,7 @@ internal fun UnifiedActivity.GameSettingsDialog(
                         val containerManager =
                             com.winlator.cmod.runtime.container
                                 .ContainerManager(context)
-                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
+                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom)
 
                         val dirsToZip = mutableListOf<java.io.File>()
 
@@ -1033,12 +999,12 @@ internal fun UnifiedActivity.GameSettingsDialog(
                         val containerManager =
                             com.winlator.cmod.runtime.container
                                 .ContainerManager(context)
-                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
+                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom)
 
                         val goldbergSavesParent =
                             java.io.File(
-                                if (isEpic) app.gameDir else SteamService.getAppDirPath(app.id),
-                                if (isEpic) "" else "steam_settings",
+                                SteamService.getAppDirPath(app.id),
+                                "steam_settings",
                             )
                         val prefixDir = shortcut?.let { java.io.File(it.container.getRootDir(), ".wine/drive_c/users/xuser") }
 
@@ -1110,16 +1076,15 @@ internal fun UnifiedActivity.GameSettingsDialog(
                             onClick = {
                                 val containerManager = ContainerManager(context)
                                 val shortcut =
-                                    findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
+                                    findLibraryShortcutForGame(containerManager, app, isCustom)
                                         ?: if (isCustom) {
                                             null
                                         } else {
                                             ShortcutSettingsComposeDialog.createLibraryShortcut(
                                                 context = context,
                                                 containerManager = containerManager,
-                                                source = if (isEpic) "EPIC" else "STEAM",
-                                                appId = if (isEpic) epicId else app.id,
-                                                gogId = null,
+                                                source = "STEAM",
+                                                appId = app.id,
                                                 appName = app.name,
                                             )
                                         }
@@ -1134,7 +1099,7 @@ internal fun UnifiedActivity.GameSettingsDialog(
                             icon = Icons.Outlined.DesktopWindows,
                             onClick = {
                                 val shortcut =
-                                    findLibraryShortcutForGame(ContainerManager(context), app, isCustom, isEpic, epicId)
+                                    findLibraryShortcutForGame(ContainerManager(context), app, isCustom)
                                 if (shortcut != null) {
                                     context.startActivity(
                                         Intent(context, XServerDisplayActivity::class.java)
@@ -1168,9 +1133,6 @@ internal fun UnifiedActivity.GameSettingsDialog(
                                                     context,
                                                     app,
                                                     isCustom,
-                                                    isEpic,
-                                                    epicId,
-                                                    epicArtworkUrl,
                                                 )
                                             }
                                         if (!created) {
@@ -1241,8 +1203,8 @@ internal fun UnifiedActivity.GameSettingsDialog(
             GameSettingsScreen.CloudSaves -> {
                 var isWorking by remember { mutableStateOf(false) }
                 val shortcut =
-                    remember(app.id, epicId, isCustom, isEpic) {
-                        findLibraryShortcutForGame(ContainerManager(context), app, isCustom, isEpic, epicId)
+                    remember(app.id, isCustom) {
+                        findLibraryShortcutForGame(ContainerManager(context), app, isCustom)
                     }
                 var cloudSyncEnabled by remember(shortcut?.file?.absolutePath) {
                     mutableStateOf(isShortcutCloudSyncEnabled(shortcut))
@@ -1253,20 +1215,16 @@ internal fun UnifiedActivity.GameSettingsDialog(
 
                 val gameSource =
                     when {
-                        isEpic -> GameSaveBackupManager.GameSource.EPIC
                         isCustom -> GameSaveBackupManager.GameSource.CUSTOM
                         else -> GameSaveBackupManager.GameSource.STEAM
                     }
                 val gameIdStr =
                     when {
-                        isEpic -> epicId.toString()
                         isCustom -> shortcut?.let { GameSaveBackupManager.customGameId(it) } ?: app.name
                         else -> app.id.toString()
                     }
                 val providerLabel =
                     when (gameSource) {
-                        GameSaveBackupManager.GameSource.EPIC ->
-                            stringResource(R.string.preloader_platform_epic)
                         GameSaveBackupManager.GameSource.CUSTOM ->
                             stringResource(R.string.preloader_platform_custom)
                         else ->
@@ -1355,7 +1313,7 @@ internal fun UnifiedActivity.GameSettingsDialog(
                         if (isCustom) {
                             scope.launch(Dispatchers.IO) {
                                 val cm = ContainerManager(context)
-                                val sc = findLibraryShortcutForGame(cm, app, isCustom, isEpic, epicId)
+                                val sc = findLibraryShortcutForGame(cm, app, isCustom)
                                 sc?.let { LibraryShortcutUtils.deleteShortcutArtifacts(context, it) }
                                 PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(app.id))
                                 withContext(Dispatchers.Main) {
@@ -1364,30 +1322,6 @@ internal fun UnifiedActivity.GameSettingsDialog(
                                         getString(R.string.library_games_game_removed, app.name),
                                         android.widget.Toast.LENGTH_SHORT,
                                     )
-                                    onDismissRequest()
-                                }
-                            }
-                        } else if (isEpic) {
-                            scope.launch(Dispatchers.IO) {
-                                val result = EpicService.deleteGame(context, epicId)
-                                withContext(Dispatchers.Main) {
-                                    if (result.isSuccess) {
-                                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                            context,
-                                            getString(R.string.library_games_game_uninstalled, app.name),
-                                            android.widget.Toast.LENGTH_SHORT,
-                                        )
-                                    } else {
-                                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                            context,
-                                            getString(
-                                                R.string.library_games_failed_to_uninstall_reason,
-                                                result.exceptionOrNull()?.message
-                                                    ?: getString(R.string.common_ui_unknown_error),
-                                            ),
-                                            android.widget.Toast.LENGTH_LONG,
-                                        )
-                                    }
                                     onDismissRequest()
                                 }
                             }
@@ -1417,269 +1351,11 @@ internal fun UnifiedActivity.GameSettingsDialog(
     }
 }
 
-@Composable
-internal fun UnifiedActivity.GOGGameSettingsDialog(
-    app: GOGGame,
-    onDismissRequest: () -> Unit,
-) {
-    val context = LocalContext.current
-    var currentTab by remember { mutableStateOf(GameSettingsScreen.Menu) }
-    val scope = rememberCoroutineScope()
-    var shortcutRefreshKey by remember(app.id) { mutableStateOf(0) }
-    var pinnedShortcutOverride by remember(app.id) { mutableStateOf<Boolean?>(null) }
-    val currentRefreshSignal = this@GOGGameSettingsDialog.libraryRefreshSignal
-    val homeShortcutState by produceState(
-        HomeShortcutUiState(),
-        app.id,
-        currentRefreshSignal,
-        shortcutRefreshKey,
-    ) {
-        value =
-            withContext(Dispatchers.IO) {
-                val shortcut =
-                    ContainerManager(context).loadShortcuts().find {
-                        it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == app.id
-                    }
-                HomeShortcutUiState(
-                    shortcut = shortcut,
-                    isPinned = shortcut?.let { LibraryShortcutUtils.hasPinnedHomeShortcut(context, it) } == true,
-                )
-            }
-    }
-    val hasPinnedShortcut = pinnedShortcutOverride ?: homeShortcutState.isPinned
 
-    GameSettingsDialogFrame(
-        title = app.title,
-        onDismissRequest = onDismissRequest,
-        wide = currentTab == GameSettingsScreen.CloudSaves,
-        contentKey = currentTab,
-    ) {
-        when (currentTab) {
-            GameSettingsScreen.Menu -> {
-                GameSettingsActionGrid(
-                    actions =
-                        listOf(
-                            GameSettingsActionItem(
-                                title = stringResource(R.string.common_ui_settings),
-                                icon = Icons.Outlined.Settings,
-                                onClick = {
-                                    val containerManager = ContainerManager(context)
-                                    val shortcut =
-                                        containerManager.loadShortcuts().find {
-                                            it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == app.id
-                                        } ?: ShortcutSettingsComposeDialog.createLibraryShortcut(
-                                            context = context,
-                                            containerManager = containerManager,
-                                            source = "GOG",
-                                            appId = gogPseudoId(app.id),
-                                            gogId = app.id,
-                                            appName = app.title,
-                                        )
-                                    if (shortcut != null) {
-                                        ShortcutSettingsComposeDialog(this@GOGGameSettingsDialog, shortcut).show()
-                                    }
-                                    onDismissRequest()
-                                },
-                            ),
-                            GameSettingsActionItem(
-                                title =
-                                    stringResource(
-                                        if (hasPinnedShortcut) {
-                                            R.string.common_ui_remove
-                                        } else {
-                                            R.string.common_ui_shortcut
-                                        },
-                                    ),
-                                icon = Icons.Outlined.Home,
-                                accentColor = if (hasPinnedShortcut) DangerRed else Accent,
-                                onClick = {
-                                    if (hasPinnedShortcut) {
-                                        currentTab = GameSettingsScreen.Shortcut
-                                    } else {
-                                        scope.launch {
-                                            val artworkUrl = app.imageUrl.ifEmpty { app.iconUrl }
-                                            val created =
-                                                withContext(Dispatchers.IO) {
-                                                    addGogShortcutToHomeScreen(context, app, artworkUrl)
-                                                }
-                                            if (!created) {
-                                                com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                                    context,
-                                                    context.getString(
-                                                        R.string.library_games_failed_to_create_shortcut,
-                                                        app.title,
-                                                    ),
-                                                )
-                                            }
-                                        }
-                                    }
-                                },
-                            ),
-                            GameSettingsActionItem(
-                                title = stringResource(R.string.cloud_saves_title),
-                                icon = Icons.Outlined.CloudSync,
-                                onClick = { currentTab = GameSettingsScreen.CloudSaves },
-                            ),
-                            GameSettingsActionItem(
-                                title = stringResource(R.string.common_ui_uninstall),
-                                icon = Icons.Outlined.Delete,
-                                accentColor = DangerRed,
-                                onClick = { currentTab = GameSettingsScreen.Uninstall },
-                            ),
-                        ),
-                )
-            }
-
-            GameSettingsScreen.Shortcut -> {
-                ShortcutRemovalConfirmation(
-                    message = stringResource(R.string.shortcuts_list_remove_game_shortcut_message, app.title),
-                    onConfirm = {
-                        scope.launch {
-                            val removed =
-                                withContext(Dispatchers.IO) {
-                                    homeShortcutState.shortcut?.let {
-                                        LibraryShortcutUtils.disablePinnedHomeShortcut(context, it)
-                                    } == true
-                                }
-                            pinnedShortcutOverride = if (removed) false else hasPinnedShortcut
-                            shortcutRefreshKey++
-                            currentTab = GameSettingsScreen.Menu
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                if (removed) {
-                                    context.getString(R.string.shortcuts_list_removed)
-                                } else {
-                                    context.getString(R.string.common_ui_unknown_error)
-                                },
-                                android.widget.Toast.LENGTH_SHORT,
-                            )
-                        }
-                    },
-                    onCancel = { currentTab = GameSettingsScreen.Menu },
-                )
-            }
-
-            GameSettingsScreen.CloudSaves -> {
-                var isWorking by remember { mutableStateOf(false) }
-                val shortcut =
-                    remember(app.id) {
-                        ContainerManager(context).loadShortcuts().find {
-                            it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == app.id
-                        }
-                    }
-                var cloudSyncEnabled by remember(shortcut?.file?.absolutePath) {
-                    mutableStateOf(isShortcutCloudSyncEnabled(shortcut))
-                }
-                var offlineModeEnabled by remember(shortcut?.file?.absolutePath) {
-                    mutableStateOf(isShortcutOfflineMode(shortcut))
-                }
-
-                val gogProviderLabel = stringResource(R.string.preloader_platform_gog)
-
-                CloudSavesContent(
-                    activity = this@GOGGameSettingsDialog,
-                    isWorking = isWorking,
-                    cloudSyncEnabled = cloudSyncEnabled,
-                    offlineModeEnabled = offlineModeEnabled,
-                    gameSource = GameSaveBackupManager.GameSource.GOG,
-                    gameId = app.id,
-                    gameName = app.title,
-                    shortcut = shortcut,
-                    onCloudSyncToggle = { enabled ->
-                        cloudSyncEnabled = enabled
-                        setShortcutCloudSyncEnabled(shortcut, enabled)
-                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                            context,
-                            if (enabled) {
-                                context.getString(R.string.cloud_sync_enabled_summary)
-                            } else {
-                                context.getString(R.string.cloud_sync_disabled_summary)
-                            },
-                            android.widget.Toast.LENGTH_SHORT,
-                        )
-                    },
-                    onOfflineModeToggle = { enabled ->
-                        offlineModeEnabled = enabled
-                        setShortcutOfflineMode(shortcut, enabled)
-                    },
-                    onSyncFromCloud = {
-                        if (!isWorking) {
-                            isWorking = true
-                            scope.launch(Dispatchers.IO) {
-                                val ok =
-                                    CloudSyncHelper.downloadCloudSaves(
-                                        context,
-                                        GameSaveBackupManager.GameSource.GOG,
-                                        app.id,
-                                        shortcut,
-                                    )
-                                withContext(Dispatchers.Main) {
-                                    isWorking = false
-                                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                        context,
-                                        if (ok) {
-                                            context.getString(
-                                                R.string.cloud_saves_sync_from_provider_success,
-                                                gogProviderLabel,
-                                            )
-                                        } else {
-                                            context.getString(
-                                                R.string.cloud_saves_sync_from_provider_failed,
-                                                gogProviderLabel,
-                                            )
-                                        },
-                                        android.widget.Toast.LENGTH_SHORT,
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    onBack = { currentTab = GameSettingsScreen.Menu },
-                )
-            }
-
-            GameSettingsScreen.Uninstall -> {
-                UninstallConfirmation(
-                    message = getString(R.string.library_games_uninstall_confirm, app.title),
-                    onConfirm = {
-                        scope.launch(Dispatchers.IO) {
-                            val result = GOGService.deleteGame(
-                                context,
-                                LibraryItem("GOG_${app.id}", app.title, com.winlator.cmod.feature.stores.steam.enums.GameSource.GOG),
-                            )
-                            withContext(Dispatchers.Main) {
-                                if (result.isSuccess) {
-                                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                        context,
-                                        getString(R.string.library_games_game_uninstalled, app.title),
-                                        android.widget.Toast.LENGTH_SHORT,
-                                    )
-                                } else {
-                                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                        context,
-                                        getString(
-                                            R.string.library_games_failed_to_uninstall_reason,
-                                            result.exceptionOrNull()?.message
-                                                ?: getString(R.string.common_ui_unknown_error),
-                                        ),
-                                        android.widget.Toast.LENGTH_LONG,
-                                    )
-                                }
-                                onDismissRequest()
-                            }
-                        }
-                    },
-                    onCancel = { currentTab = GameSettingsScreen.Menu },
-                )
-            }
-        }
-    }
-}
 
 @Composable
 internal fun UnifiedActivity.LibraryGameDetailDialog(
     app: SteamApp,
-    gogGame: GOGGame? = null,
     onDismissRequest: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1687,20 +1363,17 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
     var currentScreen by remember { mutableStateOf(LibraryDetailScreen.Main) }
     var activePopup by remember { mutableStateOf<LibraryDetailPopup?>(null) }
     var showAchievements by remember(app.id) { mutableStateOf(false) }
-    var shortcutRefreshKey by remember(app.id, gogGame?.id) { mutableStateOf(0) }
-    var pinnedShortcutOverride by remember(app.id, gogGame?.id) { mutableStateOf<Boolean?>(null) }
+    var shortcutRefreshKey by remember(app.id) { mutableStateOf(0) }
+    var pinnedShortcutOverride by remember(app.id) { mutableStateOf<Boolean?>(null) }
     var showWorkshopDialog by remember(app.id) { mutableStateOf(false) }
 
     val isCustom = app.id < 0
-    val isEpic = app.id >= 2000000000
-    val isGog = gogGame != null
-    val epicId = if (isEpic) app.id - 2000000000 else 0
 
     val libraryDownloadRecords by com.winlator.cmod.app.service.download.DownloadCoordinator.records.collectAsState(
         initial = com.winlator.cmod.app.service.download.DownloadCoordinator.snapshotRecords(),
     )
     val hasBlockingSteamDownloadForLibrary =
-        !isCustom && !isEpic && !isGog &&
+        !isCustom &&
             libraryDownloadRecords.any {
                 it.store == com.winlator.cmod.app.db.download.DownloadRecord.STORE_STEAM &&
                     it.storeGameId == app.id.toString() &&
@@ -1711,70 +1384,19 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                         com.winlator.cmod.app.db.download.DownloadRecord.STATUS_FAILED,
                     )
             }
-    val hasBlockingEpicDownloadForLibrary =
-        isEpic &&
-            libraryDownloadRecords.any {
-                it.store == com.winlator.cmod.app.db.download.DownloadRecord.STORE_EPIC &&
-                    it.storeGameId == epicId.toString() &&
-                    it.status in setOf(
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_QUEUED,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_DOWNLOADING,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_PAUSED,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_FAILED,
-                    )
-            }
-    val hasBlockingGogDownloadForLibrary =
-        isGog &&
-            libraryDownloadRecords.any {
-                it.store == com.winlator.cmod.app.db.download.DownloadRecord.STORE_GOG &&
-                    it.storeGameId == gogGame?.id &&
-                    it.status in setOf(
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_QUEUED,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_DOWNLOADING,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_PAUSED,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_FAILED,
-                    )
-            }
 
-    val epicGame by produceState<EpicGame?>(initialValue = null, key1 = epicId) {
-        value = if (isEpic) db.epicGameDao().getById(epicId) else null
-    }
-
-    val epicArtworkUrl by produceState<String?>(initialValue = null, key1 = isEpic, key2 = epicId) {
-        value =
-            if (isEpic) {
-                val eg = db.epicGameDao().getById(epicId)
-                eg?.primaryImageUrl ?: eg?.iconUrl
-            } else {
-                null
-            }
-    }
     val currentRefreshSignal = this@LibraryGameDetailDialog.libraryRefreshSignal
     val homeShortcutState by produceState(
         HomeShortcutUiState(),
         app.id,
-        gogGame?.id,
         isCustom,
-        isEpic,
-        isGog,
-        epicId,
         currentRefreshSignal,
         shortcutRefreshKey,
     ) {
         value =
             withContext(Dispatchers.IO) {
                 val shortcut =
-                    when {
-                        isGog -> {
-                            ContainerManager(context).loadShortcuts().find {
-                                it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == gogGame!!.id
-                            }
-                        }
-
-                        else -> {
-                            findLibraryShortcutForGame(ContainerManager(context), app, isCustom, isEpic, epicId)
-                        }
-                    }
+                    findLibraryShortcutForGame(ContainerManager(context), app, isCustom)
                 HomeShortcutUiState(
                     shortcut = shortcut,
                     isPinned = shortcut?.let { LibraryShortcutUtils.hasPinnedHomeShortcut(context, it) } == true,
@@ -1782,7 +1404,7 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
             }
     }
     val artworkRefreshListener =
-        remember(app.id, gogGame?.id) {
+        remember(app.id) {
             object : EventDispatcher.JavaEventListener {
                 override fun onEvent(event: Any) {
                     if (event is AndroidEvent.LibraryArtworkChanged) {
@@ -1816,14 +1438,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
         }
     val heroImageUrl: Any? =
         customHeroImageFile ?: when {
-            isGog -> {
-                StoreArtworkCache.imageModel(context, StoreArtworkCache.gogHeroRef(gogGame!!))
-            }
-
-            isEpic -> {
-                epicGame?.let { StoreArtworkCache.imageModel(context, StoreArtworkCache.epicHeroRef(it)) }
-            }
-
             isCustom -> {
                 val customCoverArt =
                     homeShortcutState.shortcut
@@ -1846,16 +1460,8 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
 
     val subtitle =
         when {
-            isGog -> {
-                gogGame!!.developer
-            }
-
             isCustom -> {
                 stringResource(R.string.library_games_custom_game)
-            }
-
-            isEpic -> {
-                epicGame?.developer ?: ""
             }
 
             else -> {
@@ -1873,7 +1479,7 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
         }
     val searchKey =
         remember(app) {
-            if (app.id >= 2000000000 || app.id < 0) {
+            if (app.id < 0) {
                 app.name
             } else {
                 app.name.replace(LIBRARY_NAME_SANITIZE_REGEX, "")
@@ -1885,24 +1491,14 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
 
     val sourceLabel =
         when {
-            isGog -> "GOG"
-            isEpic -> "Epic Games"
             isCustom -> "Custom"
             else -> "Steam"
         }
 
     // Install path
     val installPath =
-        remember(app, gogGame) {
+        remember(app) {
             when {
-                isGog -> {
-                    gogGame!!.installPath
-                }
-
-                isEpic -> {
-                    epicGame?.installPath ?: ""
-                }
-
                 isCustom -> {
                     app.gameDir
                 }
@@ -1944,7 +1540,7 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                         val os = context.contentResolver.openOutputStream(uri) ?: return@launch
                         val zos = java.util.zip.ZipOutputStream(java.io.BufferedOutputStream(os))
                         val containerManager = ContainerManager(context)
-                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
+                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom)
                         val dirsToZip = mutableListOf<java.io.File>()
                         val goldbergSaves = java.io.File(SteamService.getAppDirPath(app.id), "steam_settings/saves")
                         if (goldbergSaves.exists() && goldbergSaves.isDirectory) dirsToZip.add(goldbergSaves)
@@ -2009,11 +1605,11 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                         val inputStream = context.contentResolver.openInputStream(uri) ?: return@launch
                         val zis = java.util.zip.ZipInputStream(java.io.BufferedInputStream(inputStream))
                         val containerManager = ContainerManager(context)
-                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
+                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom)
                         val goldbergSavesParent =
                             java.io.File(
-                                if (isEpic) app.gameDir else SteamService.getAppDirPath(app.id),
-                                if (isEpic) "" else "steam_settings",
+                                SteamService.getAppDirPath(app.id),
+                                "steam_settings",
                             )
                         val prefixDir = shortcut?.let { java.io.File(it.container.getRootDir(), ".wine/drive_c/users/xuser") }
                         var ze: java.util.zip.ZipEntry?
@@ -2061,40 +1657,10 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
         }
 
     val uninstallGame: () -> Unit = {
-        if (isGog) {
-            scope.launch(Dispatchers.IO) {
-                val result = GOGService.deleteGame(
-                    context,
-                    LibraryItem(
-                        "GOG_${gogGame!!.id}",
-                        gogGame.title,
-                        com.winlator.cmod.feature.stores.steam.enums.GameSource.GOG,
-                    ),
-                )
-                withContext(Dispatchers.Main) {
-                    if (result.isSuccess) {
-                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                            context,
-                            getString(R.string.library_games_game_uninstalled, app.name),
-                            android.widget.Toast.LENGTH_SHORT,
-                        )
-                    } else {
-                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                            context,
-                            getString(
-                                R.string.library_games_failed_to_uninstall_reason,
-                                result.exceptionOrNull()?.message ?: getString(R.string.common_ui_unknown_error),
-                            ),
-                            android.widget.Toast.LENGTH_LONG,
-                        )
-                    }
-                    onDismissRequest()
-                }
-            }
-        } else if (isCustom) {
+        if (isCustom) {
             scope.launch(Dispatchers.IO) {
                 val cm = ContainerManager(context)
-                val sc = findLibraryShortcutForGame(cm, app, isCustom, isEpic, epicId)
+                val sc = findLibraryShortcutForGame(cm, app, isCustom)
                 sc?.let { LibraryShortcutUtils.deleteShortcutArtifacts(context, it) }
                 java.io
                     .File(
@@ -2108,29 +1674,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                         getString(R.string.library_games_game_removed, app.name),
                         android.widget.Toast.LENGTH_SHORT,
                     )
-                    onDismissRequest()
-                }
-            }
-        } else if (isEpic) {
-            scope.launch(Dispatchers.IO) {
-                val result = EpicService.deleteGame(context, epicId)
-                withContext(Dispatchers.Main) {
-                    if (result.isSuccess) {
-                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                            context,
-                            getString(R.string.library_games_game_uninstalled, app.name),
-                            android.widget.Toast.LENGTH_SHORT,
-                        )
-                    } else {
-                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                            context,
-                            getString(
-                                R.string.library_games_failed_to_uninstall_reason,
-                                result.exceptionOrNull()?.message ?: "",
-                            ),
-                            android.widget.Toast.LENGTH_LONG,
-                        )
-                    }
                     onDismissRequest()
                 }
             }
@@ -2226,42 +1769,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                             val activePlayBlockingTask =
                                 if (isCustom) {
                                     null
-                                } else if (isGog) {
-                                    val gogIdStr = gogGame!!.id
-                                    libraryDownloadRecords.firstOrNull { rec ->
-                                        rec.store == com.winlator.cmod.app.db.download
-                                            .DownloadRecord.STORE_GOG &&
-                                            rec.storeGameId == gogIdStr &&
-                                            rec.status ==
-                                            com.winlator.cmod.app.db.download
-                                                .DownloadRecord.STATUS_DOWNLOADING &&
-                                            (
-                                                rec.taskType ==
-                                                    com.winlator.cmod.app.db.download
-                                                        .DownloadRecord.TASK_VERIFY ||
-                                                    rec.taskType ==
-                                                        com.winlator.cmod.app.db.download
-                                                            .DownloadRecord.TASK_UPDATE
-                                            )
-                                    }?.taskType
-                                } else if (isEpic) {
-                                    val appIdStr = epicId.toString()
-                                    libraryDownloadRecords.firstOrNull { rec ->
-                                        rec.store == com.winlator.cmod.app.db.download
-                                            .DownloadRecord.STORE_EPIC &&
-                                            rec.storeGameId == appIdStr &&
-                                            rec.status ==
-                                            com.winlator.cmod.app.db.download
-                                                .DownloadRecord.STATUS_DOWNLOADING &&
-                                            (
-                                                rec.taskType ==
-                                                    com.winlator.cmod.app.db.download
-                                                        .DownloadRecord.TASK_VERIFY ||
-                                                    rec.taskType ==
-                                                        com.winlator.cmod.app.db.download
-                                                            .DownloadRecord.TASK_UPDATE
-                                            )
-                                    }?.taskType
                                 } else {
                                     val appIdStr = app.id.toString()
                                     libraryDownloadRecords.firstOrNull { rec ->
@@ -2294,38 +1801,21 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                 homeShortcutState.shortcut
                                     ?.getExtra("custom_name", "")
                                     ?.takeIf { it.isNotBlank() }
-                                    ?: when {
-                                        isEpic -> epicGame?.title?.takeIf { it.isNotBlank() } ?: app.name
-                                        isGog -> gogGame?.title?.takeIf { it.isNotBlank() } ?: app.name
-                                        else -> app.name
-                                    }
+                                    ?: app.name
                             val heroToastAnchor = LocalView.current
                             var heroPopup by remember { mutableStateOf<HeroLaunchPopup?>(null) }
                             var bootShortcut by remember { mutableStateOf<com.winlator.cmod.runtime.container.Shortcut?>(null) }
                             val resolveOrCreateShortcut: () -> com.winlator.cmod.runtime.container.Shortcut? = {
                                 val containerManager = ContainerManager(context)
                                 when {
-                                    isGog ->
-                                        containerManager.loadShortcuts().find {
-                                            it.getExtra("game_source") == "GOG" &&
-                                                it.getExtra("gog_id") == gogGame!!.id
-                                        } ?: ShortcutSettingsComposeDialog.createLibraryShortcut(
-                                            context = context,
-                                            containerManager = containerManager,
-                                            source = "GOG",
-                                            appId = gogPseudoId(gogGame!!.id),
-                                            gogId = gogGame.id,
-                                            appName = app.name,
-                                        )
-                                    isCustom -> findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
+                                    isCustom -> findLibraryShortcutForGame(containerManager, app, isCustom)
                                     else ->
-                                        findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
+                                        findLibraryShortcutForGame(containerManager, app, isCustom)
                                             ?: ShortcutSettingsComposeDialog.createLibraryShortcut(
                                                 context = context,
                                                 containerManager = containerManager,
-                                                source = if (isEpic) "EPIC" else "STEAM",
-                                                appId = if (isEpic) epicId else app.id,
-                                                gogId = null,
+                                                source = "STEAM",
+                                                appId = app.id,
                                                 appName = app.name,
                                             )
                                 }
@@ -2350,10 +1840,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                     val containerManager = ContainerManager(context)
                                     if (isCustom) {
                                         launchCustomGame(context, containerManager, app.name)
-                                    } else if (isGog) {
-                                        launchGogGame(context, containerManager, gogGame!!)
-                                    } else if (isEpic) {
-                                        epicGame?.let { launchEpicGame(context, containerManager, it) }
                                     } else {
                                         launchSteamGame(context, containerManager, app)
                                     }
@@ -2379,7 +1865,7 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                         )
                                     }
                                 },
-                                onAchievements = if (!isCustom && !isEpic && !isGog) {
+                                onAchievements = if (!isCustom) {
                                     { showAchievements = true }
                                 } else null,
                                 onShortcut = {
@@ -2389,19 +1875,11 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                         scope.launch {
                                             val created =
                                                 withContext(Dispatchers.IO) {
-                                                    if (isGog) {
-                                                        val artworkUrl = gogGame!!.imageUrl.ifEmpty { gogGame.iconUrl }
-                                                        addGogShortcutToHomeScreen(context, gogGame, artworkUrl)
-                                                    } else {
-                                                        addLibraryShortcutToHomeScreen(
-                                                            context,
-                                                            app,
-                                                            isCustom,
-                                                            isEpic,
-                                                            epicId,
-                                                            epicArtworkUrl,
-                                                        )
-                                                    }
+                                                    addLibraryShortcutToHomeScreen(
+                                                        context,
+                                                        app,
+                                                        isCustom,
+                                                    )
                                                 }
                                             if (!created) {
                                                 com.winlator.cmod.shared.ui.toast.WinToast.show(
@@ -2417,39 +1895,23 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                 },
                                 onCloudSaves = { activePopup = LibraryDetailPopup.CloudSaves },
                                 onUninstall = uninstallGame,
-                                // Store source tag actions. Steam exposes verify/update/workshop;
-                                // Epic and GOG expose verify/update for installed games.
-                                steamMenuEnabled = !isCustom &&
-                                    (!isEpic || epicGame?.isInstalled == true) &&
-                                    (!isGog || gogGame?.isInstalled == true),
-                                showVerifyFiles = !isCustom &&
-                                    (!isEpic || epicGame?.isInstalled == true) &&
-                                    (!isGog || gogGame?.isInstalled == true),
-                                showCheckForUpdate = !isCustom &&
-                                    (!isEpic || epicGame?.isInstalled == true) &&
-                                    (!isGog || gogGame?.isInstalled == true),
-                                showWorkshop = !isCustom && !isEpic && !isGog,
-                                areSteamActionsEnabled =
-                                    when {
-                                        isEpic -> !hasBlockingEpicDownloadForLibrary
-                                        isGog -> !hasBlockingGogDownloadForLibrary
-                                        else -> !hasBlockingSteamDownloadForLibrary
-                                    },
+                                // Store source tag actions. Steam exposes verify/update/workshop.
+                                steamMenuEnabled = !isCustom,
+                                showVerifyFiles = !isCustom,
+                                showCheckForUpdate = !isCustom,
+                                showWorkshop = !isCustom,
+                                areSteamActionsEnabled = !hasBlockingSteamDownloadForLibrary,
                                 onVerifyFiles = {
                                     context.runIfOnlineOrToast {
                                         scope.launch {
                                             val started =
                                                 withContext(Dispatchers.IO) {
-                                                    when {
-                                                        isEpic -> EpicService.verifyGameFiles(context, epicId)
-                                                        isGog -> GOGService.verifyGameFiles(context, gogGame!!.id)
-                                                        else -> SteamService.downloadAppForVerify(app.id)
-                                                    }
+                                                    SteamService.downloadAppForVerify(app.id)
                                                 }
                                             if (started != null) {
                                                 showTaskProgressPopup(
                                                     started,
-                                                    if (isGog) gogGame!!.title else app.name,
+                                                    app.name,
                                                     getString(R.string.store_game_verify_complete),
                                                     getString(R.string.store_game_verify_failed_notice),
                                                     completeAsToast = true,
@@ -2466,13 +1928,9 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                     }
                                 },
                                 onCheckForUpdate = {
-                                    when {
-                                        isEpic -> startEpicUpdateCheck(epicId, app.name)
-                                        isGog -> startGogUpdateCheck(gogGame!!.id, gogGame.title)
-                                        else -> startUpdateCheck(app.id, app.name)
-                                    }
+                                    startUpdateCheck(app.id, app.name)
                                 },
-                                onWorkshop = { if (!isEpic && !isGog && !isCustom) showWorkshopDialog = true },
+                                onWorkshop = { if (!isCustom) showWorkshopDialog = true },
                             )
 
                             when (heroPopup) {
@@ -2511,7 +1969,7 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                     )
                                 HeroLaunchPopup.RemoveShortcut ->
                                     HeroRemoveShortcutDialog(
-                                        gameName = if (isGog) gogGame!!.title else app.name,
+                                        gameName = app.name,
                                         onConfirm = {
                                             scope.launch {
                                                 val removed =
@@ -2561,7 +2019,7 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                     message =
                                         stringResource(
                                             R.string.shortcuts_list_remove_game_shortcut_message,
-                                            if (isGog) gogGame!!.title else app.name,
+                                            app.name,
                                         ),
                                     onConfirm = {
                                         scope.launch {
@@ -2601,30 +2059,16 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
 
                             val detailGameSource =
                                 when {
-                                    isGog -> GameSaveBackupManager.GameSource.GOG
-                                    isEpic -> GameSaveBackupManager.GameSource.EPIC
                                     else -> GameSaveBackupManager.GameSource.STEAM
                                 }
                             val detailGameId =
                                 when {
-                                    isGog -> gogGame!!.id
-                                    isEpic -> epicId.toString()
                                     else -> app.id.toString()
                                 }
                             val detailShortcut =
-                                remember(app.id, gogGame?.id, epicId, isGog, isEpic, isCustom) {
+                                remember(app.id, isCustom) {
                                     val containerManager = ContainerManager(context)
-                                    when {
-                                        isGog -> {
-                                            containerManager.loadShortcuts().find {
-                                                it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == gogGame!!.id
-                                            }
-                                        }
-
-                                        else -> {
-                                            findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
-                                        }
-                                    }
+                                    findLibraryShortcutForGame(containerManager, app, isCustom)
                                 }
                             var cloudSyncEnabled by remember(detailShortcut?.file?.absolutePath) {
                                 mutableStateOf(isShortcutCloudSyncEnabled(detailShortcut))
@@ -2635,10 +2079,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
 
                             val detailProviderLabel =
                                 when (detailGameSource) {
-                                    GameSaveBackupManager.GameSource.GOG ->
-                                        stringResource(R.string.preloader_platform_gog)
-                                    GameSaveBackupManager.GameSource.EPIC ->
-                                        stringResource(R.string.preloader_platform_epic)
                                     GameSaveBackupManager.GameSource.CUSTOM ->
                                         stringResource(R.string.preloader_platform_custom)
                                     GameSaveBackupManager.GameSource.STEAM ->
@@ -2773,8 +2213,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
                                     stringResource(
                                         R.string.cloud_saves_title_for_provider,
                                         when {
-                                            isGog -> stringResource(R.string.preloader_platform_gog)
-                                            isEpic -> stringResource(R.string.preloader_platform_epic)
                                             isCustom -> stringResource(R.string.preloader_platform_custom)
                                             else -> stringResource(R.string.preloader_platform_steam)
                                         },
@@ -2790,30 +2228,16 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
 
                                 val detailGameSource =
                                     when {
-                                        isGog -> GameSaveBackupManager.GameSource.GOG
-                                        isEpic -> GameSaveBackupManager.GameSource.EPIC
                                         isCustom -> GameSaveBackupManager.GameSource.CUSTOM
                                         else -> GameSaveBackupManager.GameSource.STEAM
                                     }
                                 val detailShortcut =
-                                    remember(app.id, gogGame?.id, epicId, isGog, isEpic, isCustom) {
+                                    remember(app.id, isCustom) {
                                         val containerManager = ContainerManager(context)
-                                        when {
-                                            isGog -> {
-                                                containerManager.loadShortcuts().find {
-                                                    it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == gogGame!!.id
-                                                }
-                                            }
-
-                                            else -> {
-                                                findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId)
-                                            }
-                                        }
+                                        findLibraryShortcutForGame(containerManager, app, isCustom)
                                     }
                                 val detailGameId =
                                     when {
-                                        isGog -> gogGame!!.id
-                                        isEpic -> epicId.toString()
                                         isCustom ->
                                             detailShortcut?.let { GameSaveBackupManager.customGameId(it) }
                                                 ?: app.name
@@ -2828,10 +2252,6 @@ internal fun UnifiedActivity.LibraryGameDetailDialog(
 
                                 val detailProviderLabel =
                                     when (detailGameSource) {
-                                        GameSaveBackupManager.GameSource.GOG ->
-                                            stringResource(R.string.preloader_platform_gog)
-                                        GameSaveBackupManager.GameSource.EPIC ->
-                                            stringResource(R.string.preloader_platform_epic)
                                         GameSaveBackupManager.GameSource.CUSTOM ->
                                             stringResource(R.string.preloader_platform_custom)
                                         GameSaveBackupManager.GameSource.STEAM ->

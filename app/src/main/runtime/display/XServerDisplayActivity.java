@@ -70,8 +70,6 @@ import com.winlator.cmod.feature.settings.DXVKConfigUtils;
 import com.winlator.cmod.feature.settings.GraphicsDriverConfigUtils;
 import com.winlator.cmod.feature.shortcuts.ShortcutsFragment;
 import com.winlator.cmod.feature.sync.CloudSyncHelper;
-import com.winlator.cmod.feature.sync.EpicLaunchCloudSync;
-import com.winlator.cmod.feature.sync.GogLaunchCloudSync;
 import com.winlator.cmod.feature.steamcloudsync.SteamExitCloudSync;
 import com.winlator.cmod.feature.steamcloudsync.SteamLaunchCloudSync;
 import com.winlator.cmod.feature.settings.WineD3DConfigUtils;
@@ -1862,65 +1860,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                         shortcut.saveData();
                     }
                 }
-            } else if ("EPIC".equals(gameSource)) {
-                String gameInstallPath = shortcut.getExtra("game_install_path");
-                if (gameInstallPath.isEmpty()) {
-                    String appIdStr = shortcut.getExtra("app_id");
-                    if (!appIdStr.isEmpty()) {
-                        try {
-                            com.winlator.cmod.feature.stores.epic.data.EpicGame epicGame = com.winlator.cmod.feature.stores.epic.service.EpicService.Companion.getEpicGameOf(Integer.parseInt(appIdStr));
-                            if (epicGame != null) {
-                                String resolved = epicGame.getInstallPath();
-                                if (resolved == null || resolved.isEmpty()) {
-                                    resolved = com.winlator.cmod.feature.stores.epic.service.EpicConstants.INSTANCE.getGameInstallPath(this, epicGame.getAppName());
-                                }
-                                if (resolved != null && !resolved.isEmpty()) {
-                                    gameInstallPath = resolved;
-                                    shortcut.putExtra("game_install_path", gameInstallPath);
-                                    shortcut.saveData();
-                                    Log.d("XServerDisplayActivity", "Resolved missing Epic install path from service: " + gameInstallPath);
-                                }
-                            }
-                        } catch (Exception e) {
-                            Log.e("XServerDisplayActivity", "Failed to resolve Epic install path from app_id", e);
-                        }
-                    }
-                }
-                if (!gameInstallPath.isEmpty() && new File(gameInstallPath).exists()) {
-                    shortcut.putExtra("game_install_path", gameInstallPath);
-                    shortcut.saveData();
-                } else {
-                    Log.e("XServerDisplayActivity", "EPIC install path missing or invalid: '" + gameInstallPath + "'");
-                }
-            } else if ("GOG".equals(gameSource)) {
-                String gameInstallPath = shortcut.getExtra("game_install_path");
-                if (gameInstallPath.isEmpty()) {
-                    String gogId = shortcut.getExtra("gog_id");
-                    if (!gogId.isEmpty()) {
-                        try {
-                            com.winlator.cmod.feature.stores.gog.data.GOGGame gogGame = com.winlator.cmod.feature.stores.gog.service.GOGService.Companion.getGOGGameOf(gogId);
-                            if (gogGame != null) {
-                                String resolved = gogGame.getInstallPath();
-                                if (resolved == null || resolved.isEmpty()) {
-                                    resolved = com.winlator.cmod.feature.stores.gog.service.GOGConstants.INSTANCE.getGameInstallPath(gogGame.getTitle());
-                                }
-                                if (resolved != null && !resolved.isEmpty()) {
-                                    gameInstallPath = resolved;
-                                    shortcut.putExtra("game_install_path", gameInstallPath);
-                                    shortcut.saveData();
-                                }
-                            }
-                        } catch (Exception e) {
-                            Log.e("XServerDisplayActivity", "Failed to resolve GOG install path", e);
-                        }
-                    }
-                }
-                if (!gameInstallPath.isEmpty() && new File(gameInstallPath).exists()) {
-                    shortcut.putExtra("game_install_path", gameInstallPath);
-                    shortcut.saveData();
-                } else {
-                    Log.e("XServerDisplayActivity", "GOG install path missing or invalid: '" + gameInstallPath + "'");
-                }
             } else if ("CUSTOM".equals(gameSource)) {
                 String customMountPath = resolveCustomMountPath(shortcut);
                 if (!customMountPath.isEmpty() && new File(customMountPath).isDirectory()) {
@@ -2179,12 +2118,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                     java.util.concurrent.Future<?> cloudFuture = prepExec.submit(() -> {
                         try {
                             SteamLaunchCloudSync.syncBeforeLaunch(
-                                    this, shortcut, isCloudSyncEnabledForShortcut(),
-                                    this::showLaunchPreloader);
-                            EpicLaunchCloudSync.syncBeforeLaunch(
-                                    this, shortcut, isCloudSyncEnabledForShortcut(),
-                                    this::showLaunchPreloader);
-                            GogLaunchCloudSync.syncBeforeLaunch(
                                     this, shortcut, isCloudSyncEnabledForShortcut(),
                                     this::showLaunchPreloader);
                         } catch (Throwable t) {
@@ -2504,44 +2437,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             content.append(execLine).append("\n");
         }
         FileUtils.writeString(shortcut.file, content.toString());
-    }
-
-    private String repairStoreExecutableWinPath(String source, String gameInstallPath, String currentPath) {
-        if (container == null
-                || source == null
-                || source.isEmpty()
-                || gameInstallPath == null
-                || gameInstallPath.isEmpty()
-                || currentPath == null
-                || currentPath.isEmpty()) {
-            return currentPath;
-        }
-
-        String relativePath = extractRelativeDriveCGameExecutablePath(currentPath, source);
-        if (relativePath == null || relativePath.isEmpty()) return currentPath;
-
-        File nativeExe = new File(gameInstallPath, relativePath.replace("\\", File.separator));
-        if (!nativeExe.isFile()) return currentPath;
-
-        String repairedPath =
-                WineUtils.getDriveCGameWindowsPath(
-                        container, source, gameInstallPath, nativeExe.getAbsolutePath());
-        if (repairedPath == null || repairedPath.isEmpty() || repairedPath.equals(currentPath)) {
-            return currentPath;
-        }
-
-        updateShortcutExecLine(repairedPath);
-        return repairedPath;
-    }
-
-    private String extractRelativeDriveCGameExecutablePath(String windowsPath, String source) {
-        String prefix = "C:\\WinNative\\Games\\" + source + "\\";
-        if (!windowsPath.regionMatches(true, 0, prefix, 0, prefix.length())) return null;
-
-        String remainder = windowsPath.substring(prefix.length());
-        int aliasSeparator = remainder.indexOf("\\");
-        if (aliasSeparator < 0 || aliasSeparator + 1 >= remainder.length()) return null;
-        return remainder.substring(aliasSeparator + 1);
     }
 
     private String getActiveGameDirectoryPath() {
@@ -3445,8 +3340,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         }
 
         new Thread(() -> {
-            performForcedEpicCloudUpload("forced cleanup (" + trigger + ")");
-            performForcedGogCloudUpload("forced cleanup (" + trigger + ")");
             sanitizeSteamStateForNextSession("forced cleanup (" + trigger + ")", true);
 
             try {
@@ -3612,16 +3505,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             return;
         }
 
-        if ("EPIC".equals(gameSource)) {
-            syncEpicCloudOnExit(afterStoreSync);
-            return;
-        }
-
-        if ("GOG".equals(gameSource)) {
-            syncGogCloudOnExit(afterStoreSync);
-            return;
-        }
-
         onComplete.run();
     }
 
@@ -3759,243 +3642,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                                                         result.getMessage(),
                                                         result.getRetryable()))),
                 onComplete);
-    }
-
-    private void syncEpicCloudOnExit(Runnable onComplete) {
-        if (shortcut != null && !shortcut.getExtra("cloud_force_download").isEmpty()) {
-            Log.i("XServerDisplayActivity",
-                    "Epic cloud sync skipped because a container-swap download is pending");
-            onComplete.run();
-            return;
-        }
-
-        String appIdStr = shortcut.getExtra("app_id");
-        if (appIdStr == null || appIdStr.isEmpty()) {
-            onComplete.run();
-            return;
-        }
-
-        final int appId;
-        try {
-            appId = Integer.parseInt(appIdStr);
-        } catch (NumberFormatException e) {
-            Log.w("XServerDisplayActivity", "Failed to parse Epic app_id for cloud sync", e);
-            onComplete.run();
-            return;
-        }
-
-        final Integer targetContainerId = container != null ? Integer.valueOf(container.id) : null;
-
-        // Skip permanent no-ops: unsupported cloud saves, signed-out user, or no saves.
-        if (!com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-                .canAttemptExitUpload(this, appId, targetContainerId)) {
-            Log.i("XServerDisplayActivity",
-                    "Epic cloud sync skipped for appId=" + appId
-                            + " (game does not support cloud saves, user signed out, or no local save files)");
-            onComplete.run();
-            return;
-        }
-
-        try {
-            Log.d("XServerDisplayActivity", "Syncing Epic cloud saves for appId=" + appId);
-            preloaderDialog.showOnUiThread(getString(R.string.preloader_checking_cloud));
-
-            runExitUploadWithRetries(
-                    "Epic cloud sync for appId=" + appId,
-                    getString(R.string.preloader_checking_cloud),
-                    callback -> runBlockingExitUpload(
-                            "EpicExitCloudSync",
-                            () -> {
-                                Object pendingAction = kotlinx.coroutines.BuildersKt.runBlocking(
-                                        kotlinx.coroutines.Dispatchers.getIO(),
-                                        (scope, continuation) -> com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager.INSTANCE.getPendingExitSyncAction(
-                                                this,
-                                                appId,
-                                                targetContainerId,
-                                                continuation
-                                        )
-                                );
-                                if (pendingAction == com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager.SyncAction.UPLOAD) {
-                                    runOnUiThread(() -> preloaderDialog.showOnUiThread(getString(R.string.preloader_uploading_cloud)));
-                                }
-
-                                Boolean syncSuccess = (Boolean) kotlinx.coroutines.BuildersKt.runBlocking(
-                                        kotlinx.coroutines.Dispatchers.getIO(),
-                                        (scope, continuation) -> com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager.INSTANCE.syncCloudSaves(
-                                                this,
-                                                appId,
-                                                "exit_upload",
-                                                targetContainerId,
-                                                continuation
-                                        )
-                                );
-                                boolean success = Boolean.TRUE.equals(syncSuccess);
-                                return new ExitUploadResult(
-                                        success,
-                                        success
-                                                ? "Epic cloud sync completed."
-                                                : "Epic cloud sync reported failure.",
-                                        true);
-                            },
-                            callback),
-                    onComplete);
-        } catch (Exception e) {
-            Log.w("XServerDisplayActivity", "Failed to start Epic cloud sync", e);
-            onComplete.run();
-        }
-    }
-
-    private void performForcedEpicCloudUpload(String reason) {
-        if (shortcut == null || !"EPIC".equals(shortcut.getExtra("game_source"))) return;
-        if (!isCloudSyncEnabledForShortcut() || CloudSyncHelper.isOfflineMode(shortcut)) return;
-        if (!shortcut.getExtra("cloud_force_download").isEmpty()) {
-            Log.i("XServerDisplayActivity",
-                    "Forced Epic cloud upload skipped because a container-swap download is pending during " + reason);
-            return;
-        }
-
-        String appIdStr = shortcut.getExtra("app_id");
-        if (appIdStr == null || appIdStr.isEmpty()) return;
-
-        final int appId;
-        try {
-            appId = Integer.parseInt(appIdStr);
-        } catch (NumberFormatException e) {
-            Log.w("XServerDisplayActivity", "Failed to parse Epic app_id for forced cloud sync", e);
-            return;
-        }
-
-        try {
-            final Integer targetContainerId = container != null ? Integer.valueOf(container.id) : null;
-            if (!com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-                    .canAttemptExitUpload(this, appId, targetContainerId)) {
-                Log.i("XServerDisplayActivity", "Forced Epic cloud upload skipped for appId=" + appId + " during " + reason);
-                return;
-            }
-
-            Log.i("XServerDisplayActivity", "Attempting forced Epic cloud upload for appId=" + appId + " during " + reason);
-            Boolean syncSuccess = (Boolean) kotlinx.coroutines.BuildersKt.runBlocking(
-                    kotlinx.coroutines.Dispatchers.getIO(),
-                    (scope, continuation) -> com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager.INSTANCE.syncCloudSaves(
-                            this,
-                            appId,
-                            "exit_upload",
-                            targetContainerId,
-                            continuation
-                    )
-            );
-            Log.i("XServerDisplayActivity", "Forced Epic cloud upload result for appId=" + appId + ": " + syncSuccess);
-        } catch (Exception e) {
-            Log.w("XServerDisplayActivity", "Forced Epic cloud upload failed during " + reason, e);
-        }
-    }
-
-    private void syncGogCloudOnExit(Runnable onComplete) {
-        if (shortcut != null && !shortcut.getExtra("cloud_force_download").isEmpty()) {
-            Log.i("XServerDisplayActivity",
-                    "GOG cloud sync skipped because a container-swap download is pending");
-            onComplete.run();
-            return;
-        }
-
-        String gogId = shortcut.getExtra("gog_id");
-        if (gogId == null || gogId.isEmpty()) {
-            onComplete.run();
-            return;
-        }
-        final String appId = "GOG_" + gogId;
-        final Integer targetContainerId = container != null ? Integer.valueOf(container.id) : null;
-
-        if (!com.winlator.cmod.feature.stores.gog.service.GOGService
-                .canAttemptExitUpload(this, appId, targetContainerId)) {
-            Log.i("XServerDisplayActivity",
-                    "GOG cloud sync skipped for " + appId
-                            + " (no cloud-save locations, user signed out, or no local save files)");
-            onComplete.run();
-            return;
-        }
-
-        Log.d("XServerDisplayActivity", "Syncing GOG cloud saves for gogId=" + gogId);
-        preloaderDialog.showOnUiThread(getString(R.string.preloader_checking_cloud));
-
-        runExitUploadWithRetries(
-                "GOG cloud sync for gogId=" + gogId,
-                getString(R.string.preloader_checking_cloud),
-                callback -> runBlockingExitUpload(
-                        "GogExitCloudSync",
-                        () -> {
-                            Object pendingAction = kotlinx.coroutines.BuildersKt.runBlocking(
-                                    kotlinx.coroutines.Dispatchers.getIO(),
-                                    (scope, continuation) -> com.winlator.cmod.feature.stores.gog.service.GOGService.Companion
-                                            .getPendingExitSyncAction(
-                                                    this,
-                                                    appId,
-                                                    targetContainerId,
-                                                    continuation
-                                            )
-                            );
-                            if (pendingAction == com.winlator.cmod.feature.stores.gog.service.GOGCloudSavesManager.SyncAction.UPLOAD) {
-                                runOnUiThread(() -> preloaderDialog.showOnUiThread(getString(R.string.preloader_uploading_cloud)));
-                            }
-
-                            Boolean syncSuccess = (Boolean) kotlinx.coroutines.BuildersKt.runBlocking(
-                                    kotlinx.coroutines.Dispatchers.getIO(),
-                                    (scope, continuation) -> com.winlator.cmod.feature.stores.gog.service.GOGService.Companion.syncCloudSaves(
-                                            this,
-                                            appId,
-                                            "exit_upload",
-                                            targetContainerId,
-                                            continuation
-                                    )
-                            );
-                            boolean success = Boolean.TRUE.equals(syncSuccess);
-                            return new ExitUploadResult(
-                                    success,
-                                    success
-                                            ? "GOG cloud upload completed."
-                                            : "GOG cloud upload reported failure.",
-                                    true);
-                        },
-                        callback),
-                onComplete);
-    }
-
-    private void performForcedGogCloudUpload(String reason) {
-        if (shortcut == null || !"GOG".equals(shortcut.getExtra("game_source"))) return;
-        if (!isCloudSyncEnabledForShortcut() || CloudSyncHelper.isOfflineMode(shortcut)) return;
-        if (!shortcut.getExtra("cloud_force_download").isEmpty()) {
-            Log.i("XServerDisplayActivity",
-                    "Forced GOG cloud upload skipped because a container-swap download is pending during " + reason);
-            return;
-        }
-
-        String gogId = shortcut.getExtra("gog_id");
-        if (gogId == null || gogId.isEmpty()) return;
-        final String appId = "GOG_" + gogId;
-
-        try {
-            final Integer targetContainerId = container != null ? Integer.valueOf(container.id) : null;
-            if (!com.winlator.cmod.feature.stores.gog.service.GOGService
-                    .canAttemptExitUpload(this, appId, targetContainerId)) {
-                Log.i("XServerDisplayActivity", "Forced GOG cloud upload skipped for " + appId + " during " + reason);
-                return;
-            }
-
-            Log.i("XServerDisplayActivity", "Attempting forced GOG cloud upload for " + appId + " during " + reason);
-            Boolean syncSuccess = (Boolean) kotlinx.coroutines.BuildersKt.runBlocking(
-                    kotlinx.coroutines.Dispatchers.getIO(),
-                    (scope, continuation) -> com.winlator.cmod.feature.stores.gog.service.GOGService.Companion.syncCloudSaves(
-                            this,
-                            appId,
-                            "exit_upload",
-                            targetContainerId,
-                            continuation
-                    )
-            );
-            Log.i("XServerDisplayActivity", "Forced GOG cloud upload result for " + appId + ": " + syncSuccess);
-        } catch (Exception e) {
-            Log.w("XServerDisplayActivity", "Forced GOG cloud upload failed during " + reason, e);
-        }
     }
 
     private void showLaunchPreloader(String text) {
@@ -4275,16 +3921,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             Log.e(tag, "MidiHandler socket still open");
         }
         cleanupDebugDialog("onDestroy");
-
-        // Ownership tokens are session-scoped.
-        if (shortcut != null && "EPIC".equals(shortcut.getExtra("game_source"))) {
-            try {
-                com.winlator.cmod.feature.stores.epic.service.EpicService.Companion
-                        .cleanupLaunchTokens(getApplicationContext(), container);
-            } catch (Exception e) {
-                Log.w("EPIC", "Failed to cleanup ownership tokens on game exit", e);
-            }
-        }
     }
 
     private boolean isCustomShortcut() {
@@ -7168,15 +6804,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                             Log.e("XServerDisplayActivity", "preUnpack failed", e);
                         }
                     });
-                } else if ("GOG".equals(prereqGameSource) || "EPIC".equals(prereqGameSource)) {
-                    guestProgramLauncherComponent.setPreUnpack(() -> {
-                        try {
-                            installMonoIfNeeded(guestProgramLauncherComponent);
-                            installGeckoIfNeeded(guestProgramLauncherComponent);
-                        } catch (Exception e) {
-                            Log.e("XServerDisplayActivity", "preUnpack failed", e);
-                        }
-                    });
                 }
         }
 
@@ -9362,81 +8989,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                         }
                     }
                 }
-            } else if (gameSource.equals("EPIC") || gameSource.equals("GOG")) {
-                String extraArgs = shortcut.getSettingExtra("execArgs", container.getExecArgs());
-                if (extraArgs == null || extraArgs.isEmpty()) {
-                    extraArgs = getIntent().getStringExtra("extra_exec_args");
-                }
-                extraArgs = (extraArgs != null && !extraArgs.isEmpty()) ? " " + extraArgs : "";
-                String gameInstallPath = shortcut.getExtra("game_install_path");
-
-                String storeInstallPath = shortcut.getExtra("game_install_path");
-                if (storeInstallPath != null && !storeInstallPath.isEmpty()
-                        && new File(storeInstallPath).exists()) {
-                    WineUtils.ensureDriveCGameSymlink(container, gameSource, storeInstallPath);
-                }
-
-                boolean needsAutoDetect = path == null || path.isEmpty()
-                        || "D:\\".equals(path) || "D:\\\\".equals(path)
-                        || "A:\\".equals(path) || "A:\\\\".equals(path);
-                if (needsAutoDetect) {
-                    if ((gameInstallPath == null || gameInstallPath.isEmpty()) && gameSource.equals("GOG")) {
-                        String gogId = shortcut.getExtra("gog_id");
-                        if (!gogId.isEmpty()) {
-                            try {
-                                com.winlator.cmod.feature.stores.gog.data.GOGGame gogGame = com.winlator.cmod.feature.stores.gog.service.GOGService.Companion.getGOGGameOf(gogId);
-                                if (gogGame != null) {
-                                    gameInstallPath = gogGame.getInstallPath();
-                                    if ((gameInstallPath == null || gameInstallPath.isEmpty()) && gogGame.getTitle() != null && !gogGame.getTitle().isEmpty()) {
-                                        gameInstallPath = com.winlator.cmod.feature.stores.gog.service.GOGConstants.INSTANCE.getGameInstallPath(gogGame.getTitle());
-                                    }
-                                }
-                            } catch (Exception e) {
-                                Log.e("XServerDisplayActivity", "Failed to resolve GOG install path for auto-detect", e);
-                            }
-                        }
-                    }
-
-                    if (gameInstallPath != null && !gameInstallPath.isEmpty()) {
-                        File gameDir = new File(gameInstallPath);
-                        String detectedPath = findGameExeWinPath(0, gameDir);
-                        if (detectedPath != null && !detectedPath.isEmpty()) {
-                            path = detectedPath;
-                            updateShortcutExecLine(detectedPath);
-                        }
-                    }
-                }
-                path = repairStoreExecutableWinPath(gameSource, gameInstallPath, path);
-                
-                String filename = path;
-                String dir = null;
-                
-                if (path != null && path.contains("\\")) {
-                    int lastBackslash = path.lastIndexOf("\\");
-                    filename = path.substring(lastBackslash + 1);
-                    dir = path.substring(0, lastBackslash);
-                    if (dir.endsWith(":")) dir += "\\";
-                } else if (path != null && path.contains(":")) {
-                    filename = path.substring(path.indexOf(":") + 1);
-                    dir = path.substring(0, path.indexOf(":") + 1) + "\\";
-                }
-                if ((dir == null || dir.isEmpty()) && gameInstallPath != null && !gameInstallPath.isEmpty()) {
-                    dir = com.winlator.cmod.runtime.wine.WineUtils.hostPathToRootWinePath(container, gameInstallPath);
-                    if (dir != null && dir.endsWith(":")) dir += "\\";
-                }
-                if (dir == null || dir.isEmpty()) {
-                    dir = "F:\\";
-                }
-
-                File nativeDir = com.winlator.cmod.runtime.wine.WineUtils.getNativePath(imageFs, dir);
-                if (nativeDir != null && nativeDir.exists()) {
-                    launcherComponent.setWorkingDir(nativeDir);
-                    Log.d("XServerDisplayActivity", "Set native working dir for store process: " + nativeDir.getPath());
-                }
-
-                String storeCommand = dir + (dir.endsWith("\\") ? "" : "\\") + filename;
-                args = "\"" + storeCommand + "\"" + extraArgs;
-                Log.d("XServerDisplayActivity", gameSource + " game launch: " + args);
             } else {
                 String extraArgs = shortcut.getSettingExtra("execArgs", container.getExecArgs());
                 extraArgs = (extraArgs != null && !extraArgs.isEmpty()) ? " " + extraArgs : "";

@@ -142,9 +142,7 @@ class SessionRecordingController(
     private fun resolveGameId(shortcut: Shortcut?, gameSource: String): String {
         if (shortcut == null) return ""
         val storeId = when (gameSource) {
-            "STEAM", "EPIC" -> shortcut.getExtra("app_id")?.takeIf { it.isNotBlank() }
-            "GOG" -> shortcut.getExtra("gog_id")?.takeIf { it.isNotBlank() }
-                ?: shortcut.getExtra("app_id")?.takeIf { it.isNotBlank() }
+            "STEAM" -> shortcut.getExtra("app_id")?.takeIf { it.isNotBlank() }
             else -> shortcut.path?.takeIf { it.isNotBlank() }
         }
         return storeId ?: shortcut.name ?: ""

@@ -4,8 +4,6 @@ import android.os.Environment
 import android.os.storage.StorageManager
 import com.winlator.cmod.R
 import com.winlator.cmod.app.PluviaApp
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.gog.service.GOGService
 import com.winlator.cmod.feature.stores.steam.service.SteamService
 import com.winlator.cmod.shared.io.StorageUtils
 import kotlinx.coroutines.Dispatchers
@@ -109,8 +107,6 @@ object DownloadService {
     fun getAllDownloads(): List<Pair<String, com.winlator.cmod.feature.stores.steam.data.DownloadInfo>> {
         val list = mutableListOf<Pair<String, com.winlator.cmod.feature.stores.steam.data.DownloadInfo>>()
         SteamService.getAllDownloads().forEach { (id, info) -> list.add("STEAM_$id" to info) }
-        EpicService.getAllDownloads().forEach { (id, info) -> list.add("EPIC_$id" to info) }
-        GOGService.getAllDownloads().forEach { (id, info) -> list.add("GOG_$id" to info) }
 
         // Cover the cross-restart case: the DownloadCoordinator may know about records
         // (PAUSED or QUEUED) for which no store has yet created an in-memory DownloadInfo.
@@ -186,8 +182,6 @@ object DownloadService {
 
     fun pauseAll() {
         SteamService.pauseAll()
-        EpicService.pauseAll()
-        GOGService.pauseAll()
     }
 
     fun pauseDownload(id: String) {
@@ -196,23 +190,11 @@ object DownloadService {
                 val appId = id.removePrefix("STEAM_").toIntOrNull() ?: return
                 SteamService.pauseDownload(appId)
             }
-
-            id.startsWith("EPIC_") -> {
-                val appId = id.removePrefix("EPIC_").toIntOrNull() ?: return
-                EpicService.pauseDownload(appId)
-            }
-
-            id.startsWith("GOG_") -> {
-                val gameId = id.removePrefix("GOG_")
-                GOGService.pauseDownload(gameId)
-            }
         }
     }
 
     fun resumeAll() {
         SteamService.resumeAll()
-        EpicService.resumeAll()
-        GOGService.resumeAll()
     }
 
     fun resumeDownload(id: String) {
@@ -221,29 +203,15 @@ object DownloadService {
                 val appId = id.removePrefix("STEAM_").toIntOrNull() ?: return
                 SteamService.resumeDownload(appId)
             }
-
-            id.startsWith("EPIC_") -> {
-                val appId = id.removePrefix("EPIC_").toIntOrNull() ?: return
-                EpicService.resumeDownload(appId)
-            }
-
-            id.startsWith("GOG_") -> {
-                val gameId = id.removePrefix("GOG_")
-                GOGService.resumeDownload(gameId)
-            }
         }
     }
 
     fun cancelAll() {
         SteamService.cancelAll()
-        EpicService.cancelAll()
-        GOGService.cancelAll()
     }
 
     fun clearCompletedDownloads() {
         SteamService.clearCompletedDownloads()
-        EpicService.clearCompletedDownloads()
-        GOGService.clearCompletedDownloads()
         // Sweep finished records from the cross-store coordinator table too.
         com.winlator.cmod.app.service.download.DownloadCoordinator.runOnScope {
             com.winlator.cmod.app.service.download.DownloadCoordinator.clear()
@@ -252,8 +220,6 @@ object DownloadService {
 
     fun clearCompletedDownloadsBlocking() {
         SteamService.clearCompletedDownloadsForShutdown()
-        EpicService.clearCompletedDownloads()
-        GOGService.clearCompletedDownloads()
         // Shutdown can kill the process immediately, so wait for persisted history cleanup.
         com.winlator.cmod.app.service.download.DownloadCoordinator.clearBlocking()
     }
@@ -263,16 +229,6 @@ object DownloadService {
             id.startsWith("STEAM_") -> {
                 val appId = id.removePrefix("STEAM_").toIntOrNull() ?: return
                 SteamService.cancelDownload(appId)
-            }
-
-            id.startsWith("EPIC_") -> {
-                val appId = id.removePrefix("EPIC_").toIntOrNull() ?: return
-                EpicService.cancelDownload(appId)
-            }
-
-            id.startsWith("GOG_") -> {
-                val gameId = id.removePrefix("GOG_")
-                GOGService.cancelDownload(gameId)
             }
         }
     }

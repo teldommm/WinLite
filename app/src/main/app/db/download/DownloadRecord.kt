@@ -6,7 +6,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
- * Single source of truth for one download across Steam / Epic / GOG. The DownloadCoordinator
+ * Single source of truth for one download across Steam. The DownloadCoordinator
  * owns this table and uses it to enforce a global concurrency limit and to restore in-progress
  * downloads after the app is restarted.
  */
@@ -51,8 +51,6 @@ data class DownloadRecord(
 ) {
     companion object {
         const val STORE_STEAM = "STEAM"
-        const val STORE_EPIC = "EPIC"
-        const val STORE_GOG = "GOG"
 
         const val TASK_INSTALL = "INSTALL"
         const val TASK_UPDATE = "UPDATE"

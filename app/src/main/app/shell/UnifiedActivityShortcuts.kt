@@ -164,27 +164,6 @@ import com.winlator.cmod.feature.shortcuts.ShortcutBroadcastReceiver
 import com.winlator.cmod.feature.shortcuts.ShortcutSettingsComposeDialog
 import com.winlator.cmod.feature.shortcuts.ShortcutsFragment
 import com.winlator.cmod.feature.stores.common.StoreArtworkCache
-import com.winlator.cmod.feature.stores.epic.data.EpicCredentials
-import com.winlator.cmod.feature.stores.epic.data.EpicGame
-import com.winlator.cmod.feature.stores.epic.data.EpicGameToken
-import com.winlator.cmod.feature.stores.epic.service.EpicAuthManager
-import com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-import com.winlator.cmod.feature.stores.epic.service.EpicConstants
-import com.winlator.cmod.feature.stores.epic.service.EpicDownloadManager
-import com.winlator.cmod.feature.stores.epic.service.EpicGameLauncher
-import com.winlator.cmod.feature.stores.epic.service.EpicManager
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.epic.service.EpicUpdateInfo
-import com.winlator.cmod.feature.stores.epic.ui.auth.EpicOAuthActivity
-import com.winlator.cmod.feature.stores.gog.data.GOGDlcInfo
-import com.winlator.cmod.feature.stores.gog.data.GOGGame
-import com.winlator.cmod.feature.stores.gog.data.LibraryItem
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGConstants
-import com.winlator.cmod.feature.stores.gog.service.GOGManifestSizes
-import com.winlator.cmod.feature.stores.gog.service.GOGService
-import com.winlator.cmod.feature.stores.gog.service.GOGUpdateInfo
-import com.winlator.cmod.feature.stores.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.feature.stores.steam.SteamLoginActivity
 import com.winlator.cmod.feature.stores.steam.data.DepotInfo
 import com.winlator.cmod.feature.stores.steam.data.DownloadInfo
@@ -254,72 +233,32 @@ internal fun UnifiedActivity.findLibraryShortcutForGame(
     containerManager: ContainerManager,
     app: SteamApp,
     isCustom: Boolean,
-    isEpic: Boolean,
-    epicId: Int,
-): Shortcut? = findShortcutForGame(containerManager.loadShortcuts(), app, isCustom, isEpic, epicId)
+): Shortcut? = findShortcutForGame(containerManager.loadShortcuts(), app, isCustom)
 
 
 internal fun UnifiedActivity.findShortcutForGame(
     shortcuts: List<Shortcut>,
     app: SteamApp,
     isCustom: Boolean,
-    isEpic: Boolean,
-    epicId: Int,
 ): Shortcut? =
-    when {
-        isEpic -> {
-            shortcuts.find {
-                it.getExtra("game_source") == "EPIC" && it.getExtra("app_id") == epicId.toString()
-            }
-        }
-
-        else -> {
-            shortcuts.find {
-                it.getExtra("app_id") == app.id.toString() || it.getExtra("custom_name") == app.name || it.name == app.name
-            }
-        }
+    shortcuts.find {
+        it.getExtra("app_id") == app.id.toString() || it.getExtra("custom_name") == app.name || it.name == app.name
     }
 
 
 internal fun UnifiedActivity.findLibraryArtworkShortcut(
     shortcuts: List<Shortcut>,
     app: SteamApp,
-    gogGame: GOGGame?,
-    epicGame: EpicGame?,
 ): Shortcut? =
+    findShortcutForGame(
+        shortcuts = shortcuts,
+        app = app,
+        isCustom = app.id < 0,
+    )
+
+
+internal fun UnifiedActivity.artworkCacheId(app: SteamApp): ArtworkCacheId? =
     when {
-        gogGame != null -> {
-            shortcuts.find {
-                it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == gogGame.id
-            }
-        }
-
-        epicGame != null -> {
-            shortcuts.find {
-                it.getExtra("game_source") == "EPIC" && it.getExtra("app_id") == epicGame.id.toString()
-            }
-        }
-
-        else -> {
-            findShortcutForGame(
-                shortcuts = shortcuts,
-                app = app,
-                isCustom = app.id < 0,
-                isEpic = app.id >= 2000000000,
-                epicId = if (app.id >= 2000000000) app.id - 2000000000 else 0,
-            )
-        }
-    }
-
-
-internal fun UnifiedActivity.artworkCacheId(
-    app: SteamApp,
-    gogGame: GOGGame?,
-    epicGame: EpicGame?,
-): ArtworkCacheId? =
-    when {
-        gogGame != null -> ArtworkCacheId("gog", gogGame.id)
-        epicGame != null -> ArtworkCacheId("epic", epicGame.id.toString())
         app.id >= 0 -> ArtworkCacheId("steam", app.id.toString())
         else -> null
     }
@@ -327,8 +266,6 @@ internal fun UnifiedActivity.artworkCacheId(
 
 internal fun UnifiedActivity.customArtworkOverrideSlots(
     app: SteamApp,
-    gogGame: GOGGame?,
-    epicGame: EpicGame?,
     hasDefaultCustomArt: Boolean,
     hasIconCustomArt: Boolean,
     hasHeroCustomArt: Boolean,
@@ -337,27 +274,6 @@ internal fun UnifiedActivity.customArtworkOverrideSlots(
     if (!overridesPrimary && !hasHeroCustomArt) return emptySet()
 
     return when {
-        gogGame != null -> {
-            buildSet {
-                if (overridesPrimary) {
-                    add("cover")
-                    add("icon")
-                }
-                if (hasHeroCustomArt) add("hero")
-            }
-        }
-
-        epicGame != null -> {
-            buildSet {
-                if (overridesPrimary) {
-                    add("cover")
-                    add("square")
-                    add("logo")
-                }
-                if (hasHeroCustomArt) add("hero")
-            }
-        }
-
         app.id >= 0 -> {
             buildSet {
                 if (overridesPrimary) {
@@ -457,18 +373,12 @@ internal fun UnifiedActivity.resolveLibraryShortcutArtworkModel(
     context: android.content.Context,
     app: SteamApp,
     isCustom: Boolean,
-    isEpic: Boolean,
-    epicArtworkUrl: String?,
 ): Any? =
     when {
         isCustom -> {
             val safeName = app.name.replace("/", "_").replace("\\", "_")
             val iconFile = java.io.File(context.filesDir, "custom_icons/$safeName.png")
             if (iconFile.exists()) iconFile else null
-        }
-
-        isEpic -> {
-            epicArtworkUrl?.takeIf { it.isNotBlank() }
         }
 
         else -> {
@@ -618,25 +528,10 @@ internal suspend fun UnifiedActivity.addLibraryShortcutToHomeScreen(
     context: android.content.Context,
     app: SteamApp,
     isCustom: Boolean,
-    isEpic: Boolean,
-    epicId: Int,
-    epicArtworkUrl: String? = null,
 ): Boolean {
     val containerManager = ContainerManager(context)
-    val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom, isEpic, epicId) ?: return false
-    val artworkModel = resolveLibraryShortcutArtworkModel(context, app, isCustom, isEpic, epicArtworkUrl)
+    val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom) ?: return false
+    val artworkModel = resolveLibraryShortcutArtworkModel(context, app, isCustom)
     return requestPinnedHomeShortcut(context, shortcut, artworkModel)
 }
 
-internal suspend fun UnifiedActivity.addGogShortcutToHomeScreen(
-    context: android.content.Context,
-    app: GOGGame,
-    artworkUrl: String?,
-): Boolean {
-    val shortcut =
-        ContainerManager(context).loadShortcuts().find {
-            it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == app.id
-        } ?: return false
-    val artworkModel = artworkUrl?.takeIf { it.isNotBlank() }
-    return requestPinnedHomeShortcut(context, shortcut, artworkModel)
-}

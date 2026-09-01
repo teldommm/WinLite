@@ -100,16 +100,12 @@ private val StatusGreen = Color(0xFF3FB950)
 // State
 data class StoreState(
     val isSteamLoggedIn: Boolean = false,
-    val isEpicLoggedIn: Boolean = false,
-    val isGogLoggedIn: Boolean = false,
     val sharedFolder: Boolean = true,
     val downloadSpeed: Int = 24,
     val downloadServer: Int = 0,
     val downloadServerManuallySet: Boolean = false,
     val defaultFolder: String = "",
     val steamFolder: String = "",
-    val epicFolder: String = "",
-    val gogFolder: String = "",
     val containerLanguageLabels: List<String> = emptyList(),
     val containerLanguageIndex: Int = 0,
 )
@@ -120,17 +116,11 @@ fun StoresScreen(
     serverOptions: List<Pair<Int, String>>,
     onSteamSignIn: () -> Unit,
     onSteamSignOut: () -> Unit,
-    onEpicSignIn: () -> Unit,
-    onEpicSignOut: () -> Unit,
-    onGogSignIn: () -> Unit,
-    onGogSignOut: () -> Unit,
     onSharedFolderChanged: (Boolean) -> Unit,
     onDownloadSpeedChanged: (Int) -> Unit,
     onDownloadServerChanged: (Int) -> Unit,
     onPickDefaultFolder: () -> Unit,
     onPickSteamFolder: () -> Unit,
-    onPickEpicFolder: () -> Unit,
-    onPickGogFolder: () -> Unit,
     onContainerLanguageSelected: (Int) -> Unit,
     bridge: SettingsNavBridge? = null,
 ) {
@@ -172,22 +162,6 @@ fun StoresScreen(
                 onSignIn = onSteamSignIn,
                 onSignOut = onSteamSignOut,
             )
-            StoreCard(
-                name = stringResource(R.string.preloader_platform_epic),
-                icon = Icons.Outlined.Gamepad,
-                accentColor = Color(0xFF8BAFD4),
-                isLoggedIn = state.isEpicLoggedIn,
-                onSignIn = onEpicSignIn,
-                onSignOut = onEpicSignOut,
-            )
-            StoreCard(
-                name = stringResource(R.string.preloader_platform_gog),
-                icon = Icons.Outlined.Gamepad,
-                accentColor = Color(0xFFA855F7),
-                isLoggedIn = state.isGogLoggedIn,
-                onSignIn = onGogSignIn,
-                onSignOut = onGogSignOut,
-            )
 
             SectionLabel(stringResource(R.string.stores_accounts_download_settings), modifier = Modifier.padding(top = 8.dp))
 
@@ -219,16 +193,6 @@ fun StoresScreen(
                             stringResource(R.string.stores_accounts_steam_downloads),
                             state.steamFolder,
                             onPickSteamFolder,
-                        )
-                        FolderPathCard(
-                            stringResource(R.string.stores_accounts_epic_downloads),
-                            state.epicFolder,
-                            onPickEpicFolder,
-                        )
-                        FolderPathCard(
-                            stringResource(R.string.stores_accounts_gog_downloads),
-                            state.gogFolder,
-                            onPickGogFolder,
                         )
                     }
                 }

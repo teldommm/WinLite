@@ -169,8 +169,6 @@ private val BricolageDisplayFont =
 private fun badgeStringRes(value: String): Int? =
     when (value.uppercase()) {
         "STEAM" -> R.string.preloader_platform_steam
-        "EPIC" -> R.string.preloader_platform_epic
-        "GOG" -> R.string.preloader_platform_gog
         "CUSTOM" -> R.string.preloader_platform_custom
         else -> null
     }
@@ -178,8 +176,6 @@ private fun badgeStringRes(value: String): Int? =
 private fun badgeColor(value: String): Color =
     when (value.uppercase()) {
         "STEAM" -> Color(0xFF66C0F4)
-        "EPIC" -> Color(0xFFB8BAC4)
-        "GOG" -> Color(0xFFC55CFF)
         "CUSTOM" -> Color(0xFF4FE3C1)
         else -> Color(0xFF57CBDE)
     }

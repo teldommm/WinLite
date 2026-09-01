@@ -19,11 +19,6 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.fragment.app.Fragment
 import com.winlator.cmod.R
 import com.winlator.cmod.app.shell.UnifiedActivity
-import com.winlator.cmod.feature.stores.epic.service.EpicAuthManager
-import com.winlator.cmod.feature.stores.epic.ui.auth.EpicOAuthActivity
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGService
-import com.winlator.cmod.feature.stores.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.feature.stores.steam.SteamLoginActivity
 import com.winlator.cmod.feature.stores.steam.enums.Language
 import com.winlator.cmod.feature.stores.steam.service.SteamService
@@ -32,51 +27,11 @@ import com.winlator.cmod.shared.android.DirectoryPickerDialog
 import com.winlator.cmod.shared.io.AssetPaths
 import com.winlator.cmod.shared.io.FileUtils
 import com.winlator.cmod.shared.theme.WinNativeTheme
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class StoresFragment : Fragment() {
     private var storeState by mutableStateOf(StoreState())
     private lateinit var serverOptions: List<Pair<Int, String>>
-
-    private val gogLoginLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult(),
-        ) { result ->
-            if (result.resultCode == android.app.Activity.RESULT_OK) {
-                val code = result.data?.getStringExtra(GOGOAuthActivity.EXTRA_AUTH_CODE)
-                if (!code.isNullOrBlank()) {
-                    CoroutineScope(Dispatchers.Main).launch {
-                        val authResult = GOGAuthManager.authenticateWithCode(requireContext(), code)
-                        if (authResult.isSuccess) {
-                            GOGService.start(requireContext())
-                        }
-                        refresh()
-                    }
-                }
-            }
-        }
-
-    private val epicLoginLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult(),
-        ) { result ->
-            if (result.resultCode == android.app.Activity.RESULT_OK) {
-                val code = result.data?.getStringExtra(EpicOAuthActivity.EXTRA_AUTH_CODE)
-                if (!code.isNullOrBlank()) {
-                    CoroutineScope(Dispatchers.Main).launch {
-                        EpicAuthManager.authenticateWithCode(requireContext(), code)
-                        refresh()
-                    }
-                } else {
-                    refresh()
-                }
-            } else {
-                refresh()
-            }
-        }
 
     private val steamLoginLauncher =
         registerForActivityResult(
@@ -122,18 +77,6 @@ class StoresFragment : Fragment() {
                             SteamService.logOut()
                             refresh()
                         },
-                        onEpicSignIn = { epicLoginLauncher.launch(Intent(requireContext(), EpicOAuthActivity::class.java)) },
-                        onEpicSignOut = {
-                            EpicAuthManager.logoutSync(requireContext())
-                            refresh()
-                        },
-                        onGogSignIn = { gogLoginLauncher.launch(Intent(requireContext(), GOGOAuthActivity::class.java)) },
-                        onGogSignOut = {
-                            CoroutineScope(Dispatchers.Main).launch {
-                                GOGService.logout(requireContext())
-                                refresh()
-                            }
-                        },
                         onSharedFolderChanged = {
                             PrefManager.useSingleDownloadFolder = it
                             refresh()
@@ -149,8 +92,6 @@ class StoresFragment : Fragment() {
                         },
                         onPickDefaultFolder = { pickFolder(PrefManager.defaultDownloadFolder) { PrefManager.defaultDownloadFolder = it } },
                         onPickSteamFolder = { pickFolder(PrefManager.steamDownloadFolder) { PrefManager.steamDownloadFolder = it } },
-                        onPickEpicFolder = { pickFolder(PrefManager.epicDownloadFolder) { PrefManager.epicDownloadFolder = it } },
-                        onPickGogFolder = { pickFolder(PrefManager.gogDownloadFolder) { PrefManager.gogDownloadFolder = it } },
                         onContainerLanguageSelected = { index ->
                             val langName = Language.containerLangForIndex(index)
                             PrefManager.containerLanguage = langName
@@ -176,16 +117,12 @@ class StoresFragment : Fragment() {
         storeState =
             StoreState(
                 isSteamLoggedIn = SteamService.isLoggedIn,
-                isEpicLoggedIn = EpicAuthManager.isLoggedIn(ctx),
-                isGogLoggedIn = GOGAuthManager.isLoggedIn(ctx),
                 sharedFolder = PrefManager.useSingleDownloadFolder,
                 downloadSpeed = PrefManager.downloadSpeed,
                 downloadServer = PrefManager.cellId,
                 downloadServerManuallySet = PrefManager.cellIdManuallySet,
                 defaultFolder = resolveUri(PrefManager.defaultDownloadFolder, ctx),
                 steamFolder = resolveUri(PrefManager.steamDownloadFolder, ctx),
-                epicFolder = resolveUri(PrefManager.epicDownloadFolder, ctx),
-                gogFolder = resolveUri(PrefManager.gogDownloadFolder, ctx),
                 containerLanguageLabels = containerLanguageLabels,
                 containerLanguageIndex = containerLanguageIndex,
             )

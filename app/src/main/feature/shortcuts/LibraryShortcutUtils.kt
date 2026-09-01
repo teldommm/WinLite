@@ -19,10 +19,6 @@ object LibraryShortcutUtils {
             return explicitSource.uppercase(Locale.US)
         }
 
-        if (shortcut.getExtra("gog_id").isNotEmpty()) {
-            return "GOG"
-        }
-
         if (shortcut.getExtra("app_id").toIntOrNull() != null) {
             return "STEAM"
         }
@@ -174,29 +170,6 @@ object LibraryShortcutUtils {
     ): Int =
         deleteMatchingShortcuts(context) { shortcut ->
             inferGameSource(shortcut) == "STEAM" && shortcut.getExtra("app_id") == appId.toString()
-        }
-
-    @JvmStatic
-    fun deleteEpicShortcuts(
-        context: Context,
-        appId: Int,
-    ): Int =
-        deleteMatchingShortcuts(context) { shortcut ->
-            inferGameSource(shortcut) == "EPIC" && shortcut.getExtra("app_id") == appId.toString()
-        }
-
-    @JvmStatic
-    fun deleteGogShortcuts(
-        context: Context,
-        gogId: String,
-        appId: String = "",
-    ): Int =
-        deleteMatchingShortcuts(context) { shortcut ->
-            inferGameSource(shortcut) == "GOG" &&
-                (
-                    shortcut.getExtra("gog_id") == gogId ||
-                        (appId.isNotEmpty() && shortcut.getExtra("app_id") == appId)
-                )
         }
 
     private inline fun deleteMatchingShortcuts(

@@ -164,27 +164,6 @@ import com.winlator.cmod.feature.shortcuts.ShortcutBroadcastReceiver
 import com.winlator.cmod.feature.shortcuts.ShortcutSettingsComposeDialog
 import com.winlator.cmod.feature.shortcuts.ShortcutsFragment
 import com.winlator.cmod.feature.stores.common.StoreArtworkCache
-import com.winlator.cmod.feature.stores.epic.data.EpicCredentials
-import com.winlator.cmod.feature.stores.epic.data.EpicGame
-import com.winlator.cmod.feature.stores.epic.data.EpicGameToken
-import com.winlator.cmod.feature.stores.epic.service.EpicAuthManager
-import com.winlator.cmod.feature.stores.epic.service.EpicCloudSavesManager
-import com.winlator.cmod.feature.stores.epic.service.EpicConstants
-import com.winlator.cmod.feature.stores.epic.service.EpicDownloadManager
-import com.winlator.cmod.feature.stores.epic.service.EpicGameLauncher
-import com.winlator.cmod.feature.stores.epic.service.EpicManager
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.epic.service.EpicUpdateInfo
-import com.winlator.cmod.feature.stores.epic.ui.auth.EpicOAuthActivity
-import com.winlator.cmod.feature.stores.gog.data.GOGDlcInfo
-import com.winlator.cmod.feature.stores.gog.data.GOGGame
-import com.winlator.cmod.feature.stores.gog.data.LibraryItem
-import com.winlator.cmod.feature.stores.gog.service.GOGAuthManager
-import com.winlator.cmod.feature.stores.gog.service.GOGConstants
-import com.winlator.cmod.feature.stores.gog.service.GOGManifestSizes
-import com.winlator.cmod.feature.stores.gog.service.GOGService
-import com.winlator.cmod.feature.stores.gog.service.GOGUpdateInfo
-import com.winlator.cmod.feature.stores.gog.ui.auth.GOGOAuthActivity
 import com.winlator.cmod.feature.stores.steam.SteamLoginActivity
 import com.winlator.cmod.feature.stores.steam.data.DepotInfo
 import com.winlator.cmod.feature.stores.steam.data.DownloadInfo
@@ -257,7 +236,7 @@ internal fun UnifiedActivity.UnifiedHub() {
     val horizontalNavigationInsets =
         WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)
     val initialLibraryLayoutMode = startupLibraryLayoutMode
-    val initialStoreVisible = startupStoreVisible ?: mapOf("steam" to true, "epic" to true, "gog" to true)
+    val initialStoreVisible = startupStoreVisible ?: mapOf("steam" to true)
     val initialContentFilters = startupContentFilters ?: mapOf("games" to true, "dlc" to false, "applications" to false, "tools" to false)
     if (!startupBootstrapReady || initialLibraryLayoutMode == null) {
         Box(
@@ -317,8 +296,6 @@ internal fun UnifiedActivity.UnifiedHub() {
     }
     val isLoggedIn by SteamService.isLoggedInFlow.collectAsState()
     val chatServiceEnabled by SteamService.chatServiceEnabledFlow.collectAsState()
-    val isEpicLoggedIn by EpicAuthManager.isLoggedInFlow.collectAsState()
-    val isGogLoggedIn by GOGAuthManager.isLoggedInFlow.collectAsState()
     val steamApps by db.steamAppDao().getAllOwnedApps().collectAsState(initial = emptyList())
     val context = LocalContext.current
     val persona by SteamService.instance?.localPersona?.collectAsState()
@@ -366,8 +343,6 @@ internal fun UnifiedActivity.UnifiedHub() {
         }
     }
 
-    val epicApps by db.epicGameDao().getAll().collectAsState(initial = emptyList())
-    val gogApps by db.gogGameDao().getAll().collectAsState(initial = emptyList())
 
     val controllerState = rememberControllerConnectionState()
     val isControllerConnected = controllerState.isConnected
@@ -401,73 +376,6 @@ internal fun UnifiedActivity.UnifiedHub() {
         }
     }
 
-    LaunchedEffect(isEpicLoggedIn) {
-        if (isEpicLoggedIn) {
-            EpicService.start(context)
-        }
-    }
-
-    LaunchedEffect(isGogLoggedIn) {
-        if (isGogLoggedIn) {
-            GOGService.start(context)
-        }
-    }
-
-    val epicLoginLauncher =
-        rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult(),
-        ) { result ->
-            if (result.resultCode == android.app.Activity.RESULT_OK) {
-                val code = result.data?.getStringExtra(EpicOAuthActivity.EXTRA_AUTH_CODE)
-                if (code != null) {
-                    scope.launch {
-                        val authResult = EpicAuthManager.authenticateWithCode(context, code)
-                        if (authResult.isSuccess) {
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                R.string.stores_accounts_logged_in_epic,
-                                android.widget.Toast.LENGTH_SHORT,
-                            )
-                        } else {
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                getString(R.string.stores_accounts_epic_login_failed, authResult.exceptionOrNull()?.message),
-                                android.widget.Toast.LENGTH_LONG,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-    val gogLoginLauncher =
-        rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult(),
-        ) { result ->
-            if (result.resultCode == android.app.Activity.RESULT_OK) {
-                val code = result.data?.getStringExtra(GOGOAuthActivity.EXTRA_AUTH_CODE)
-                if (!code.isNullOrBlank()) {
-                    scope.launch {
-                        val authResult = GOGAuthManager.authenticateWithCode(context, code)
-                        if (authResult.isSuccess) {
-                            GOGService.start(context)
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                R.string.stores_accounts_logged_in_gog,
-                                android.widget.Toast.LENGTH_SHORT,
-                            )
-                        } else {
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                getString(R.string.stores_accounts_gog_login_failed, authResult.exceptionOrNull()?.message),
-                                android.widget.Toast.LENGTH_LONG,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
     val filteredSteamApps =
         remember(steamApps, contentFilters.toMap()) {
             steamApps.filter { app ->
@@ -484,7 +392,6 @@ internal fun UnifiedActivity.UnifiedHub() {
         }
 
     var globalSettingsApp by remember { mutableStateOf<SteamApp?>(null) }
-    var globalSettingsGogGame by remember { mutableStateOf<GOGGame?>(null) }
 
     LaunchedEffect(tabs.size) { if (selectedIdx >= tabs.size) selectedIdx = 0 }
     LaunchedEffect(isLoggedIn, persona) {
@@ -518,7 +425,7 @@ internal fun UnifiedActivity.UnifiedHub() {
                 }
 
                 android.view.KeyEvent.KEYCODE_BUTTON_X -> {
-                    if (key == "library" && (selectedSteamAppId != 0 || selectedGogGameId.isNotEmpty())) {
+                    if (key == "library" && selectedSteamAppId != 0) {
                         activity?.openHeroForFocusedSignal?.tryEmit(Unit)
                     }
                 }
@@ -544,8 +451,6 @@ internal fun UnifiedActivity.UnifiedHub() {
                         drawerState.close()
                     } else if (globalSettingsApp != null) {
                         globalSettingsApp = null
-                    } else if (globalSettingsGogGame != null) {
-                        globalSettingsGogGame = null
                     } else if (showAddCustomGame) {
                         showAddCustomGame = false
                     } else {
@@ -554,26 +459,13 @@ internal fun UnifiedActivity.UnifiedHub() {
                 }
 
                 android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
-                    if (key == "library" && (selectedSteamAppId != 0 || selectedGogGameId.isNotEmpty())) {
-                        if (selectedLibrarySource == "GOG") {
-                            globalSettingsGogGame = gogApps.find { it.id == selectedGogGameId }
-                            return@collect
-                        }
+                    if (key == "library" && selectedSteamAppId != 0) {
                         val isCustom = selectedSteamAppId < 0
-                        val epicId = if (selectedSteamAppId >= 2000000000) selectedSteamAppId - 2000000000 else 0
 
                         globalSettingsApp = (
                             steamApps.find { it.id == selectedSteamAppId }
                                 ?: if (isCustom) {
                                     SteamApp(id = selectedSteamAppId, name = selectedSteamAppName, developer = "Custom")
-                                } else if (epicId > 0) {
-                                    val epic = epicApps.find { it.id == epicId }
-                                    SteamApp(
-                                        id = selectedSteamAppId,
-                                        name = selectedSteamAppName,
-                                        developer = epic?.developer ?: "Epic Games",
-                                        gameDir = epic?.installPath ?: "",
-                                    )
                                 } else {
                                     null
                                 }
@@ -582,23 +474,11 @@ internal fun UnifiedActivity.UnifiedHub() {
                 }
 
                 android.view.KeyEvent.KEYCODE_BUTTON_A, android.view.KeyEvent.KEYCODE_DPAD_CENTER -> {
-                    if (key == "library" && (selectedSteamAppId != 0 || selectedGogGameId.isNotEmpty())) {
+                    if (key == "library" && selectedSteamAppId != 0) {
                         val isCustom = selectedSteamAppId < 0
-                        val epicId = if (selectedSteamAppId >= 2000000000) selectedSteamAppId - 2000000000 else 0
                         val containerManager = ContainerManager(context)
                         if (isCustom) {
                             launchCustomGame(context, containerManager, selectedSteamAppName)
-                        } else if (selectedLibrarySource == "GOG") {
-                            gogApps.find { it.id == selectedGogGameId }?.let {
-                                launchGogGame(context, containerManager, it)
-                            }
-                        } else if (epicId > 0) {
-                            val epic = epicApps.find { it.id == epicId }
-                            if (epic != null && epic.isInstalled) {
-                                val dummyApp =
-                                    SteamApp(id = selectedSteamAppId, name = selectedSteamAppName, gameDir = epic.installPath)
-                                launchSteamGame(context, containerManager, dummyApp)
-                            }
                         } else {
                             val steam = steamApps.find { it.id == selectedSteamAppId }
                             if (steam != null) {
@@ -840,31 +720,18 @@ internal fun UnifiedActivity.UnifiedHub() {
                         searchQueryTfv =
                             it
                     }, onFilterClicked = { scope.launch { drawerState.open() } }, onFriendsClicked = { scope.launch { rightDrawerState.open() } }) {
-                        if (selectedLibrarySource == "GOG") {
-                            globalSettingsGogGame = gogApps.find { it.id == selectedGogGameId }
-                        } else {
-                            globalSettingsApp = (
-                                steamApps.find { it.id == selectedSteamAppId }
-                                    ?: if (selectedSteamAppId < 0) {
-                                        SteamApp(
-                                            id = selectedSteamAppId,
-                                            name = selectedSteamAppName,
-                                            developer = "Custom",
-                                        )
-                                    } else if (selectedSteamAppId >= 2000000000) {
-                                        val epicId = selectedSteamAppId - 2000000000
-                                        val epic = epicApps.find { it.id == epicId }
-                                        SteamApp(
-                                            id = selectedSteamAppId,
-                                            name = selectedSteamAppName,
-                                            developer = epic?.developer ?: "Epic Games",
-                                            gameDir = epic?.installPath ?: "",
-                                        )
-                                    } else {
-                                        null
-                                    }
-                            )
-                        }
+                        globalSettingsApp = (
+                            steamApps.find { it.id == selectedSteamAppId }
+                                ?: if (selectedSteamAppId < 0) {
+                                    SteamApp(
+                                        id = selectedSteamAppId,
+                                        name = selectedSteamAppName,
+                                        developer = "Custom",
+                                    )
+                                } else {
+                                    null
+                                }
+                        )
                     }
                 },
             ) { padding ->
@@ -894,8 +761,6 @@ internal fun UnifiedActivity.UnifiedHub() {
                         LibraryCarousel(
                             isLoggedIn = isLoggedIn,
                             steamApps = filteredSteamApps,
-                            epicApps = epicApps,
-                            gogApps = gogApps,
                             layoutMode = libraryLayoutMode,
                             libraryRefreshKey = libraryRefreshKey,
                             shortcutRefreshKey = shortcutRefreshKey,
@@ -925,18 +790,6 @@ internal fun UnifiedActivity.UnifiedHub() {
 
                                 "steam" -> {
                                     SteamStoreTab(isLoggedIn, filteredSteamApps, searchQuery, LibraryLayoutMode.GRID_4)
-                                }
-
-                                "epic" -> {
-                                    EpicStoreTab(isEpicLoggedIn, epicApps, searchQuery, LibraryLayoutMode.GRID_4) {
-                                        epicLoginLauncher.launch(Intent(this@UnifiedHub, EpicOAuthActivity::class.java))
-                                    }
-                                }
-
-                                "gog" -> {
-                                    GOGStoreTab(isGogLoggedIn, gogApps, searchQuery, LibraryLayoutMode.GRID_4) {
-                                        gogLoginLauncher.launch(Intent(this@UnifiedHub, GOGOAuthActivity::class.java))
-                                    }
                                 }
 
                                 else -> {}
@@ -1075,12 +928,6 @@ internal fun UnifiedActivity.UnifiedHub() {
             onDismissRequest = { globalSettingsApp = null },
         )
     }
-    if (globalSettingsGogGame != null) {
-        GOGGameSettingsDialog(
-            app = globalSettingsGogGame!!,
-            onDismissRequest = { globalSettingsGogGame = null },
-        )
-    }
 
     if (showAddCustomGame) {
         AddCustomGameDialog(onDismiss = {
@@ -1105,8 +952,6 @@ internal fun UnifiedActivity.UnifiedHub() {
             scope.launch { drawerState.close() }
         } else if (globalSettingsApp != null) {
             globalSettingsApp = null
-        } else if (globalSettingsGogGame != null) {
-            globalSettingsGogGame = null
         } else if (showAddCustomGame) {
             showAddCustomGame = false
         } else {
@@ -1868,8 +1713,6 @@ internal fun UnifiedActivity.TopBar(
 internal fun UnifiedActivity.LibraryCarousel(
     isLoggedIn: Boolean,
     steamApps: List<SteamApp>,
-    epicApps: List<EpicGame>,
-    gogApps: List<GOGGame>,
     layoutMode: LibraryLayoutMode,
     libraryRefreshKey: Int = 0,
     shortcutRefreshKey: Int = 0,
@@ -1953,10 +1796,6 @@ internal fun UnifiedActivity.LibraryCarousel(
     var mergedInstalledApps by remember { mutableStateOf<List<SteamApp>>(emptyList()) }
     var installedApps by remember { mutableStateOf<List<SteamApp>>(emptyList()) }
     var stableInstalledApps by remember { mutableStateOf<List<SteamApp>>(emptyList()) }
-    var gogByPseudoId by remember { mutableStateOf<Map<Int, GOGGame>>(emptyMap()) }
-    var epicByPseudoId by remember { mutableStateOf<Map<Int, EpicGame>>(emptyMap()) }
-    var stableGogByPseudoId by remember { mutableStateOf<Map<Int, GOGGame>>(emptyMap()) }
-    var stableEpicByPseudoId by remember { mutableStateOf<Map<Int, EpicGame>>(emptyMap()) }
     var customListArtworkPathByAppId by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     var customHeroArtworkPathByAppId by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     var customCarouselArtworkPathByAppId by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
@@ -1973,46 +1812,20 @@ internal fun UnifiedActivity.LibraryCarousel(
     var libraryLoaded by remember { mutableStateOf(false) }
     // Suppress transient empty states before background recomputation starts.
     val scanInputToken =
-        remember(steamApps, epicApps, gogApps, customApps, libraryRefreshKey, localLibraryRefreshKey) { Any() }
+        remember(steamApps, customApps, libraryRefreshKey, localLibraryRefreshKey) { Any() }
     var processedScanToken by remember { mutableStateOf<Any?>(null) }
 
     LaunchedEffect(scanInputToken) {
         withContext(Dispatchers.IO) {
             val steamInstalled = steamApps.filter { SteamService.isAppInstalled(it.id) }
 
-            val epicInstalled = epicApps.filter { it.isInstalled }
-
-            // Match Epic's DB-backed install filter during verify/update.
-            val gogInstalled = gogApps.filter { it.isInstalled }
-
-            val gogMap = gogInstalled.associateBy { gogPseudoId(it.id) }
-            val epicMap = epicInstalled.associateBy { 2000000000 + it.id }
-
             val playtimePrefs = context.getSharedPreferences("playtime_stats", android.content.Context.MODE_PRIVATE)
             val allPlaytime = playtimePrefs.all
-            val mappedEpic =
-                epicInstalled.map { epic ->
-                    SteamApp(
-                        id = 2000000000 + epic.id,
-                        name = epic.title,
-                        developer = epic.developer,
-                        gameDir = epic.installPath,
-                    )
-                }
-            val mappedGog =
-                gogInstalled.map { gog ->
-                    SteamApp(
-                        id = gogPseudoId(gog.id),
-                        name = gog.title,
-                        developer = gog.developer,
-                        gameDir = gog.installPath,
-                    )
-                }
-            val merged = (steamInstalled + customApps + mappedEpic + mappedGog).distinctBy { it.id }
+            val merged = (steamInstalled + customApps).distinctBy { it.id }
             val sorted =
                 merged.sortedByDescending { app ->
                     val searchKey =
-                        if (app.id >= 2000000000 || app.id < 0) {
+                        if (app.id < 0) {
                             app.name
                         } else {
                             app.name.replace(LIBRARY_NAME_SANITIZE_REGEX, "")
@@ -2021,14 +1834,10 @@ internal fun UnifiedActivity.LibraryCarousel(
                 }
 
             withContext(Dispatchers.Main) {
-                gogByPseudoId = gogMap
-                epicByPseudoId = epicMap
                 mergedInstalledApps = merged
                 installedApps = sorted
                 if (sorted.isNotEmpty()) {
                     stableInstalledApps = sorted
-                    stableGogByPseudoId = gogMap
-                    stableEpicByPseudoId = epicMap
                 }
                 libraryLoaded = true
                 processedScanToken = scanInputToken
@@ -2037,27 +1846,15 @@ internal fun UnifiedActivity.LibraryCarousel(
         }
     }
 
-    LaunchedEffect(installedApps, gogByPseudoId, cachedShortcuts, iconRefreshKey) {
+    LaunchedEffect(installedApps, cachedShortcuts, iconRefreshKey) {
         val appsSnapshot = installedApps
-        val gogSnapshot = gogByPseudoId
         val shortcutsSnapshot = cachedShortcuts
 
         val artworkPaths =
             withContext(Dispatchers.IO) {
                 buildMap<Int, String> {
                     appsSnapshot.forEach { app ->
-                        val gogGame = gogSnapshot[app.id]
-                        val isCustom = app.id < 0
-                        val isEpic = app.id >= 2000000000
-                        val epicId = if (isEpic) app.id - 2000000000 else 0
-                        val shortcut =
-                            if (gogGame != null) {
-                                shortcutsSnapshot.find {
-                                    it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == gogGame.id
-                                }
-                            } else {
-                                findShortcutForGame(shortcutsSnapshot, app, isCustom, isEpic, epicId)
-                            }
+                        val shortcut = findLibraryArtworkShortcut(shortcutsSnapshot, app)
                         val customPath =
                             shortcut
                                 ?.getExtra("customLibraryIconPath")
@@ -2073,18 +1870,7 @@ internal fun UnifiedActivity.LibraryCarousel(
             withContext(Dispatchers.IO) {
                 buildMap<Int, String> {
                     appsSnapshot.forEach { app ->
-                        val gogGame = gogSnapshot[app.id]
-                        val isCustom = app.id < 0
-                        val isEpic = app.id >= 2000000000
-                        val epicId = if (isEpic) app.id - 2000000000 else 0
-                        val shortcut =
-                            if (gogGame != null) {
-                                shortcutsSnapshot.find {
-                                    it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == gogGame.id
-                                }
-                            } else {
-                                findShortcutForGame(shortcutsSnapshot, app, isCustom, isEpic, epicId)
-                            }
+                        val shortcut = findLibraryArtworkShortcut(shortcutsSnapshot, app)
                         val customPath = shortcut?.let(LibraryShortcutArtwork::findIconArtworkPath)
                         if (customPath != null) {
                             put(app.id, customPath)
@@ -2098,7 +1884,7 @@ internal fun UnifiedActivity.LibraryCarousel(
                 buildMap<Int, String> {
                     appsSnapshot.forEach { app ->
                         if (app.id >= 0) return@forEach
-                        val shortcut = findShortcutForGame(shortcutsSnapshot, app, true, false, 0) ?: return@forEach
+                        val shortcut = findShortcutForGame(shortcutsSnapshot, app, true) ?: return@forEach
                         val heroPath = shortcut.getExtra("customLibraryHeroArtPath")
                         if (heroPath.isNullOrBlank() || !java.io.File(heroPath).isFile)
                             return@forEach
@@ -2112,7 +1898,7 @@ internal fun UnifiedActivity.LibraryCarousel(
                 buildMap<Int, String> {
                     appsSnapshot.forEach { app ->
                         if (app.id >= 0) return@forEach
-                        val shortcut = findShortcutForGame(shortcutsSnapshot, app, true, false, 0) ?: return@forEach
+                        val shortcut = findShortcutForGame(shortcutsSnapshot, app, true) ?: return@forEach
                         val carouselPath = shortcut.getExtra("customLibraryCarouselArtPath")
                         if (carouselPath.isNullOrBlank() || !java.io.File(carouselPath).isFile)
                             return@forEach
@@ -2126,7 +1912,7 @@ internal fun UnifiedActivity.LibraryCarousel(
                 buildMap<Int, String> {
                     appsSnapshot.forEach { app ->
                         if (app.id >= 0) return@forEach
-                        val shortcut = findShortcutForGame(shortcutsSnapshot, app, true, false, 0) ?: return@forEach
+                        val shortcut = findShortcutForGame(shortcutsSnapshot, app, true) ?: return@forEach
                         val listPath = shortcut.getExtra("customLibraryListArtPath")
                         if (listPath.isNullOrBlank() || !java.io.File(listPath).isFile)
                             return@forEach
@@ -2195,8 +1981,6 @@ internal fun UnifiedActivity.LibraryCarousel(
             stableInstalledApps.isNotEmpty() &&
             (processedScanToken !== scanInputToken || awaitingShortcutScan)
     val visibleInstalledApps = if (keepPreviousLibraryVisible) stableInstalledApps else installedApps
-    val visibleGogByPseudoId = if (keepPreviousLibraryVisible) stableGogByPseudoId else gogByPseudoId
-    val visibleEpicByPseudoId = if (keepPreviousLibraryVisible) stableEpicByPseudoId else epicByPseudoId
     val visibleCustomArtworkPathByAppId =
         if (keepPreviousLibraryVisible) stableCustomArtworkPathByAppId else customArtworkPathByAppId
     val visibleCustomIconArtworkPathByAppId =
@@ -2221,8 +2005,6 @@ internal fun UnifiedActivity.LibraryCarousel(
 
     LaunchedEffect(
         visibleInstalledApps,
-        visibleGogByPseudoId,
-        visibleEpicByPseudoId,
         visibleCustomArtworkPathByAppId,
         visibleCustomIconArtworkPathByAppId,
         cachedShortcuts,
@@ -2230,22 +2012,18 @@ internal fun UnifiedActivity.LibraryCarousel(
         var deletedCustomOverrides = false
         val refs =
             visibleInstalledApps.flatMap { app ->
-                val gogGame = visibleGogByPseudoId[app.id]
-                val epicGame = visibleEpicByPseudoId[app.id]
                 val overriddenSlots =
                     customArtworkOverrideSlots(
                         app = app,
-                        gogGame = gogGame,
-                        epicGame = epicGame,
                         hasDefaultCustomArt = visibleCustomArtworkPathByAppId[app.id] != null,
                         hasIconCustomArt = visibleCustomIconArtworkPathByAppId[app.id] != null,
                         hasHeroCustomArt =
-                            findLibraryArtworkShortcut(cachedShortcuts, app, gogGame, epicGame)
+                            findLibraryArtworkShortcut(cachedShortcuts, app)
                                 ?.hasExistingArtwork(LibraryShortcutArtwork.LibraryArtworkSlot.GAME_CARD.extraKey) == true,
                     )
 
                 if (overriddenSlots.isNotEmpty()) {
-                    val cacheId = artworkCacheId(app, gogGame, epicGame)
+                    val cacheId = artworkCacheId(app)
                     if (cacheId != null) {
                         val deleted =
                             withContext(Dispatchers.IO) {
@@ -2256,11 +2034,8 @@ internal fun UnifiedActivity.LibraryCarousel(
                 }
 
                 StoreArtworkCache
-                    .libraryRefs(
-                        app = app,
-                        gogGame = gogGame,
-                        epicGame = epicGame,
-                    ).filterNot { it.slot in overriddenSlots }
+                    .libraryRefs(app)
+                    .filterNot { it.slot in overriddenSlots }
             }
         val cachedAny =
             withContext(Dispatchers.IO) {
@@ -2275,14 +2050,9 @@ internal fun UnifiedActivity.LibraryCarousel(
     // A logged-in store whose owned-apps list is still empty hasn't finished
     // its initial library fetch yet — keep the spinner up instead of flashing
     // "No games installed". This resolves itself once the store populates its
-    // DB (steamApps/epicApps/gogApps become non-empty) or if other sources
-    // (custom apps, other stores) already have installed games.
-    val awaitingStoreSync =
-        installedApps.isEmpty() && (
-            (isLoggedIn && steamApps.isEmpty()) ||
-                (epicApps.isEmpty() && EpicService.hasStoredCredentials(context)) ||
-                (gogApps.isEmpty() && GOGAuthManager.isLoggedIn(context))
-        )
+    // DB (steamApps becomes non-empty) or if other sources
+    // (custom apps) already have installed games.
+    val awaitingStoreSync = installedApps.isEmpty() && isLoggedIn && steamApps.isEmpty()
     // Only block the surface while the first library result is unresolved.
     // After that, keep the current content/empty state visible during
     // background refreshes so the UI does not flicker back to a spinner.
@@ -2307,14 +2077,8 @@ internal fun UnifiedActivity.LibraryCarousel(
     }
 
     if (visibleInstalledApps.isEmpty()) {
-        val epicLoggedIn by EpicAuthManager.isLoggedInFlow.collectAsState()
-        val gogLoggedIn by GOGAuthManager.isLoggedInFlow.collectAsState()
-        val anyLoggedIn = isLoggedIn || epicLoggedIn || gogLoggedIn
-        val hasAnyCredentials =
-            anyLoggedIn ||
-                SteamService.hasStoredCredentials(context) ||
-                EpicService.hasStoredCredentials(context) ||
-                GOGAuthManager.isLoggedIn(context)
+        val anyLoggedIn = isLoggedIn
+        val hasAnyCredentials = anyLoggedIn || SteamService.hasStoredCredentials(context)
         if (!anyLoggedIn && !hasAnyCredentials) {
             LoginRequiredScreen("Library") {
                 navigateToSettings(SettingsNavItem.STORES)
@@ -2340,17 +2104,15 @@ internal fun UnifiedActivity.LibraryCarousel(
     }
 
     var selectedAppForSettings by remember { mutableStateOf<SteamApp?>(null) }
-    var selectedGogGameForSettings by remember { mutableStateOf<GOGGame?>(null) }
     var detailApp by remember { mutableStateOf<SteamApp?>(null) }
-    var detailGogGame by remember { mutableStateOf<GOGGame?>(null) }
     val gridState = rememberLazyGridState()
     val carouselState = rememberLazyListState()
     val activity = LocalContext.current as? UnifiedActivity
 
     // Pause chasing borders on library cards while any dialog is open.
-    LaunchedEffect(selectedAppForSettings, selectedGogGameForSettings, detailApp) {
+    LaunchedEffect(selectedAppForSettings, detailApp) {
         chasingBordersPaused.value =
-            selectedAppForSettings != null || selectedGogGameForSettings != null || detailApp != null
+            selectedAppForSettings != null || detailApp != null
     }
     DisposableEffect(Unit) {
         onDispose { chasingBordersPaused.value = false }
@@ -2396,27 +2158,21 @@ internal fun UnifiedActivity.LibraryCarousel(
         val app = displayedApps.getOrNull(focusIndex) ?: displayedApps.firstOrNull()
         selectedSteamAppId = app?.id ?: 0
         selectedSteamAppName = app?.name ?: ""
-        val gogGame = app?.let { visibleGogByPseudoId[it.id] }
         selectedLibrarySource =
             when {
-                gogGame != null -> "GOG"
                 app == null -> ""
-                app.id >= 2000000000 -> "EPIC"
                 app.id < 0 -> "CUSTOM"
                 else -> "STEAM"
             }
-        selectedGogGameId = gogGame?.id.orEmpty()
     }
 
     val heroApps = rememberUpdatedState(displayedApps)
     val heroFocus = rememberUpdatedState(focusIndex)
-    val heroGogMap = rememberUpdatedState(visibleGogByPseudoId)
     LaunchedEffect(Unit) {
         activity?.openHeroForFocusedSignal?.collect {
             val list = heroApps.value
             val app = list.getOrNull(heroFocus.value) ?: list.firstOrNull()
             if (app != null) {
-                detailGogGame = heroGogMap.value[app.id]
                 detailApp = app
             }
         }
@@ -2438,20 +2194,9 @@ internal fun UnifiedActivity.LibraryCarousel(
         }
         // Debounce so scrubbing the grid doesn't decode every intermediate hero.
         delay(200)
-        val gogGame = visibleGogByPseudoId[app.id]
-        val epicGame = visibleEpicByPseudoId[app.id]
         val isCustom = app.id < 0
-        val isEpic = app.id >= 2000000000
-        val epicId = if (isEpic) app.id - 2000000000 else 0
 
-        val shortcut =
-            when {
-                gogGame != null ->
-                    shortcuts.find {
-                        it.getExtra("game_source") == "GOG" && it.getExtra("gog_id") == gogGame.id
-                    }
-                else -> findShortcutForGame(shortcuts, app, isCustom, isEpic, epicId)
-            }
+        val shortcut = findShortcutForGame(shortcuts, app, isCustom)
         val customHeroFile =
             withContext(Dispatchers.IO) {
                 shortcut
@@ -2465,11 +2210,9 @@ internal fun UnifiedActivity.LibraryCarousel(
             customHeroFile
                 ?: run {
                     val ref =
-                        StoreArtworkCache.heroRef(app, gogGame, epicGame)
+                        StoreArtworkCache.heroRef(app)
                             ?: StoreArtworkCache.primaryRef(
                                 app,
-                                gogGame,
-                                epicGame,
                                 useLibraryCapsule = false,
                                 listMode = false,
                             )
@@ -2481,21 +2224,12 @@ internal fun UnifiedActivity.LibraryCarousel(
         activity?.libraryFocusIndex?.value = index
         selectedSteamAppId = app.id
         selectedSteamAppName = app.name
-        val gogGame = visibleGogByPseudoId[app.id]
         selectedLibrarySource =
             when {
-                gogGame != null -> "GOG"
-                app.id >= 2000000000 -> "EPIC"
                 app.id < 0 -> "CUSTOM"
                 else -> "STEAM"
             }
-        selectedGogGameId = gogGame?.id.orEmpty()
-
-        if (gogGame != null) {
-            selectedGogGameForSettings = gogGame
-        } else {
-            selectedAppForSettings = app
-        }
+        selectedAppForSettings = app
     }
 
     PullToRefreshBox(
@@ -2518,8 +2252,6 @@ internal fun UnifiedActivity.LibraryCarousel(
                 ) { app, index, rowHeight ->
                     GameCapsule(
                         app = app,
-                        gogGame = visibleGogByPseudoId[app.id],
-                        epicGame = visibleEpicByPseudoId[app.id],
                         iconRefreshKey = iconRefreshKey,
                         artworkCacheRefreshKey = artworkCacheRefreshKey,
                         isFocusedOverride = index == focusIndex,
@@ -2531,7 +2263,6 @@ internal fun UnifiedActivity.LibraryCarousel(
                         onClick = {
                             // Keeps the immersive background on the opened game after backing out.
                             activity?.libraryFocusIndex?.value = index
-                            detailGogGame = visibleGogByPseudoId[app.id]
                             detailApp = app
                         },
                         onLongClick = {
@@ -2570,8 +2301,6 @@ internal fun UnifiedActivity.LibraryCarousel(
                             ) { app, index, isSelected, cardWidth, cardHeight ->
                                 GameCapsule(
                                     app = app,
-                                    gogGame = visibleGogByPseudoId[app.id],
-                                    epicGame = visibleEpicByPseudoId[app.id],
                                     iconRefreshKey = iconRefreshKey,
                                     artworkCacheRefreshKey = artworkCacheRefreshKey,
                                     isFocusedOverride = isSelected,
@@ -2582,7 +2311,6 @@ internal fun UnifiedActivity.LibraryCarousel(
                                     customCarouselPath = visibleCustomCarouselPathByAppId[app.id],
                                     customHeroPath = visibleCustomHeroPathByAppId[app.id],
                                     onClick = {
-                                        detailGogGame = visibleGogByPseudoId[app.id]
                                         detailApp = app
                                     },
                                     onLongClick = { openSettingsForApp(index, app) },
@@ -2619,8 +2347,6 @@ internal fun UnifiedActivity.LibraryCarousel(
                 ) { app, index, isSelected ->
                     GameCapsule(
                         app = app,
-                        gogGame = visibleGogByPseudoId[app.id],
-                        epicGame = visibleEpicByPseudoId[app.id],
                         iconRefreshKey = iconRefreshKey,
                         artworkCacheRefreshKey = artworkCacheRefreshKey,
                         isFocusedOverride = isSelected,
@@ -2632,7 +2358,6 @@ internal fun UnifiedActivity.LibraryCarousel(
                         onClick = {
                             // Keeps the immersive background on the opened game after backing out.
                             activity?.libraryFocusIndex?.value = index
-                            detailGogGame = visibleGogByPseudoId[app.id]
                             detailApp = app
                         },
                         onLongClick = { openSettingsForApp(index, app) },
@@ -2665,19 +2390,11 @@ internal fun UnifiedActivity.LibraryCarousel(
             onDismissRequest = { selectedAppForSettings = null },
         )
     }
-    if (selectedGogGameForSettings != null) {
-        GOGGameSettingsDialog(
-            app = selectedGogGameForSettings!!,
-            onDismissRequest = { selectedGogGameForSettings = null },
-        )
-    }
     if (detailApp != null) {
         LibraryGameDetailDialog(
             app = detailApp!!,
-            gogGame = detailGogGame,
             onDismissRequest = {
                 detailApp = null
-                detailGogGame = null
             },
         )
     }

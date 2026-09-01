@@ -7,9 +7,6 @@ import android.os.Build
 import android.os.Process
 import com.winlator.cmod.app.PluviaApp
 import com.winlator.cmod.app.service.DownloadService
-import com.winlator.cmod.feature.stores.epic.service.EpicService
-import com.winlator.cmod.feature.stores.epic.service.EpicTokenRefreshWorker
-import com.winlator.cmod.feature.stores.gog.service.GOGService
 import com.winlator.cmod.feature.stores.steam.chat.ChatOverlayService
 import com.winlator.cmod.feature.stores.steam.events.AndroidEvent
 import com.winlator.cmod.feature.stores.steam.service.SteamService
@@ -36,9 +33,6 @@ object AppTerminationHelper {
         runCatching { DownloadService.clearCompletedDownloadsBlocking() }
             .onFailure { Timber.w(it, "Failed to clear completed download history during shutdown") }
 
-        runCatching { EpicTokenRefreshWorker.cancel(appContext) }
-            .onFailure { Timber.w(it, "Failed to cancel Epic refresh worker during shutdown") }
-
         if (!keepChatAlive) {
             runCatching { PluviaApp.events.emit(AndroidEvent.EndProcess) }
                 .onFailure { Timber.w(it, "Failed to emit EndProcess during shutdown") }
@@ -46,18 +40,12 @@ object AppTerminationHelper {
             runCatching { SteamService.stop() }
                 .onFailure { Timber.w(it, "Failed to stop SteamService during shutdown") }
         }
-        runCatching { EpicService.stop() }
-            .onFailure { Timber.w(it, "Failed to stop EpicService during shutdown") }
-        runCatching { GOGService.stop() }
-            .onFailure { Timber.w(it, "Failed to stop GOGService during shutdown") }
 
         if (!keepChatAlive) {
             stopServiceSafely<SteamService>(appContext)
             runCatching { ChatOverlayService.stop(appContext) }
                 .onFailure { Timber.w(it, "Failed to stop ChatOverlayService during shutdown") }
         }
-        stopServiceSafely<EpicService>(appContext)
-        stopServiceSafely<GOGService>(appContext)
     }
 
     @JvmStatic

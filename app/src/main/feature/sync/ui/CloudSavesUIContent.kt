@@ -84,9 +84,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.sp
 import com.winlator.cmod.R
 import com.winlator.cmod.app.shell.LaunchDangerConfirmDialog
-import com.winlator.cmod.feature.stores.epic.service.EpicCloudHistoryProvider
-import com.winlator.cmod.feature.stores.gog.service.GOGCloudHistoryProvider
-import com.winlator.cmod.feature.stores.gog.service.GOGService
 import com.winlator.cmod.feature.steamcloudsync.SteamCloudHistoryProvider
 import com.winlator.cmod.feature.steamcloudsync.SteamCloudSyncHelper
 import com.winlator.cmod.feature.steamcloudsync.SteamSaveSnapshotManager
@@ -173,7 +170,6 @@ internal fun CloudSavesContent(
         remember(shortcut, targetContainerId) {
             targetContainerId?.let { ContainerManager(context).getContainerById(it) } ?: shortcut?.container
         }
-    var gogZipBusy by remember { mutableStateOf(false) }
     var googleBackupBusy by remember { mutableStateOf(false) }
     var pendingCloudFileDownload by remember {
         mutableStateOf<GameSaveBackupManager.BackupHistoryEntry?>(null)
@@ -207,41 +203,6 @@ internal fun CloudSavesContent(
                 )
             }
         }
-    val gogZipLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-            if (uri == null) return@rememberLauncherForActivityResult
-            scope.launch {
-                gogZipBusy = true
-                val result =
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                            context.contentResolver.openOutputStream(uri)?.use { output ->
-                                GOGService.exportCloudSavesZip(
-                                    context = context,
-                                    appId = gameId,
-                                    outputStream = output,
-                                    targetContainerId = targetContainerId,
-                                )
-                            } ?: GameSaveBackupManager.BackupResult(
-                                false,
-                                context.getString(R.string.cloud_saves_gog_zip_failed),
-                            )
-                        }.getOrElse {
-                            GameSaveBackupManager.BackupResult(false, it.message ?: context.getString(R.string.cloud_saves_gog_zip_failed))
-                        }
-                    }
-                gogZipBusy = false
-                notify(
-                    if (result.success) {
-                        context.getString(R.string.cloud_saves_gog_zip_success)
-                    } else {
-                        result.message.ifBlank { context.getString(R.string.cloud_saves_gog_zip_failed) }
-                    },
-                    Toast.LENGTH_SHORT,
-                )
-            }
-        }
-
     LaunchedEffect(gameSource, gameId, targetContainerId, historyRefreshKey) {
         historyLoading = true
         historySteamUnreachable = false
@@ -273,23 +234,6 @@ internal fun CloudSavesContent(
                         emptyList()
                     }
                 }
-                GameSaveBackupManager.GameSource.EPIC -> {
-                    val appId = gameId.toIntOrNull()
-                    val epic =
-                        if (appId != null) {
-                            EpicCloudHistoryProvider.listCloudSaveGroups(context, appId)
-                        } else {
-                            emptyList()
-                        }
-                    // Surface "Backup To Google" copies alongside the provider history.
-                    val google = GameSaveBackupManager.listGoogleHistory(activity, gameSource, gameId)
-                    (epic + google).sortedByDescending { it.timestampMs }
-                }
-                GameSaveBackupManager.GameSource.GOG -> {
-                    val gog = GOGCloudHistoryProvider.listCloudSaveGroups(context, gameId, targetContainerId)
-                    val google = GameSaveBackupManager.listGoogleHistory(activity, gameSource, gameId)
-                    (gog + google).sortedByDescending { it.timestampMs }
-                }
                 GameSaveBackupManager.GameSource.CUSTOM ->
                     GameSaveBackupManager
                         .listGoogleHistory(activity, gameSource, gameId)
@@ -307,8 +251,6 @@ internal fun CloudSavesContent(
     val providerLabel =
         when (gameSource) {
             GameSaveBackupManager.GameSource.STEAM -> stringResource(R.string.preloader_platform_steam)
-            GameSaveBackupManager.GameSource.EPIC -> stringResource(R.string.preloader_platform_epic)
-            GameSaveBackupManager.GameSource.GOG -> stringResource(R.string.preloader_platform_gog)
             GameSaveBackupManager.GameSource.CUSTOM -> stringResource(R.string.preloader_platform_custom)
         }
 
@@ -389,7 +331,7 @@ internal fun CloudSavesContent(
             )
         }
 
-        if (isWorking || gogZipBusy) {
+        if (isWorking) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
                 color = Accent,
@@ -405,7 +347,6 @@ internal fun CloudSavesContent(
             val customPickerTitle = stringResource(R.string.cloud_saves_custom_picker_title)
             val customOutsideDriveC = stringResource(R.string.cloud_saves_custom_outside_drive_c)
             val customPathMapFailed = stringResource(R.string.cloud_saves_custom_path_map_failed)
-            val gogManageNoBrowser = stringResource(R.string.cloud_saves_gog_manage_no_browser)
             val firstAction: @Composable (Modifier) -> Unit = { mod ->
                 if (gameSource == GameSaveBackupManager.GameSource.CUSTOM) {
                     val pickerLabel =
@@ -477,67 +418,10 @@ internal fun CloudSavesContent(
                         helper = stringResource(R.string.cloud_saves_sync_summary, providerLabel),
                         tint = CloudAccent,
                         modifier = mod,
-                        enabled = !isWorking && !gogZipBusy,
-                        onClick = { if (!isWorking && !gogZipBusy) onSyncFromCloud() },
+                        enabled = !isWorking,
+                        onClick = { if (!isWorking) onSyncFromCloud() },
                     )
                 }
-            }
-            val manageGogAction: @Composable (Modifier) -> Unit = { mod ->
-                ActionWithHelper(
-                    icon = Icons.AutoMirrored.Outlined.OpenInNew,
-                    label = stringResource(R.string.cloud_saves_gog_manage_label),
-                    helper = stringResource(R.string.cloud_saves_gog_manage_helper),
-                    tint = CloudWarning,
-                    modifier = mod,
-                    enabled = !gogZipBusy,
-                    onClick = {
-                        val url = "https://www.gog.com/account/cloud-saves/page/1"
-                        runCatching {
-                            activity.startActivity(
-                                android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(url),
-                                ),
-                            )
-                        }.onFailure {
-                            notify(
-                                gogManageNoBrowser,
-                                Toast.LENGTH_SHORT,
-                            )
-                        }
-                    },
-                )
-            }
-            val downloadGogZipAction: @Composable (Modifier) -> Unit = { mod ->
-                ActionWithHelper(
-                    icon = Icons.Outlined.Download,
-                    label = stringResource(R.string.cloud_saves_gog_zip_label),
-                    helper = stringResource(R.string.cloud_saves_gog_zip_helper),
-                    tint = CloudSuccess,
-                    modifier = mod,
-                    enabled = !isWorking && !gogZipBusy,
-                    onClick = {
-                        if (isWorking || gogZipBusy) return@ActionWithHelper
-                        scope.launch {
-                            gogZipBusy = true
-                            val hasCloudFiles =
-                                withContext(Dispatchers.IO) {
-                                    GOGCloudHistoryProvider
-                                        .listCloudSaveGroups(context, gameId, targetContainerId)
-                                        .isNotEmpty()
-                                }
-                            gogZipBusy = false
-                            if (hasCloudFiles) {
-                                gogZipLauncher.launch("${safeZipFileName(gameName)}_GOG_Cloud_Saves.zip")
-                            } else {
-                                notify(
-                                    context.getString(R.string.cloud_saves_gog_zip_empty),
-                                    Toast.LENGTH_SHORT,
-                                )
-                            }
-                        }
-                    },
-                )
             }
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 val compact = maxWidth < 520.dp
@@ -551,12 +435,7 @@ internal fun CloudSavesContent(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             firstAction(Modifier.weight(1f))
-                            if (gameSource == GameSaveBackupManager.GameSource.GOG) {
-                                manageGogAction(Modifier.weight(1f))
-                                downloadGogZipAction(Modifier.weight(1f))
-                            } else {
-                                Spacer(Modifier.weight(1f))
-                            }
+                            Spacer(Modifier.weight(1f))
                         }
                     }
                 } else {
@@ -565,10 +444,6 @@ internal fun CloudSavesContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         firstAction(Modifier.weight(1f))
-                        if (gameSource == GameSaveBackupManager.GameSource.GOG) {
-                            manageGogAction(Modifier.weight(1f))
-                            downloadGogZipAction(Modifier.weight(1f))
-                        }
                     }
                 }
             }
@@ -936,23 +811,6 @@ internal fun CloudSavesContent(
                                     GameSaveBackupManager.BackupResult(false, context.getString(R.string.cloud_saves_invalid_app_id))
                                 }
                             }
-                            GameSaveBackupManager.BackupStorage.EPIC_CLOUD -> {
-                                val appId = gameId.toIntOrNull()
-                                if (appId != null) {
-                                    EpicCloudHistoryProvider
-                                        .restoreSaveGroup(
-                                            context,
-                                            appId,
-                                            target.fileId,
-                                        )
-                                } else {
-                                    GameSaveBackupManager.BackupResult(false, context.getString(R.string.cloud_saves_invalid_app_id))
-                                }
-                            }
-                            GameSaveBackupManager.BackupStorage.GOG_CLOUD -> {
-                                // GOG has no per-file rollback; restoring any entry re-pulls the full cloud state.
-                                GOGCloudHistoryProvider.restoreSaveGroup(context, gameId, targetContainerId)
-                            }
                             GameSaveBackupManager.BackupStorage.GOOGLE -> {
                                 GameSaveBackupManager.restoreFromGoogle(
                                     activity,
@@ -1091,14 +949,6 @@ internal fun CloudSavesContent(
                                         SteamCloudHistoryProvider
                                             .setLabel(context, target.fileId, null)
                                     }
-                                    GameSaveBackupManager.BackupStorage.EPIC_CLOUD -> {
-                                        EpicCloudHistoryProvider
-                                            .setLabel(context, target.fileId, null)
-                                    }
-                                    GameSaveBackupManager.BackupStorage.GOG_CLOUD -> {
-                                        GOGCloudHistoryProvider
-                                            .setLabel(context, target.fileId, null)
-                                    }
                                     GameSaveBackupManager.BackupStorage.STEAM_LOCAL -> {
                                         val appId = gameId.toIntOrNull()
                                         if (appId != null) {
@@ -1135,16 +985,6 @@ internal fun CloudSavesContent(
                                 when (target.storage) {
                                     GameSaveBackupManager.BackupStorage.STEAM_CLOUD -> {
                                         SteamCloudHistoryProvider
-                                            .setLabel(context, target.fileId, newLabel)
-                                        GameSaveBackupManager.BackupResult(true, context.getString(R.string.cloud_saves_label_saved))
-                                    }
-                                    GameSaveBackupManager.BackupStorage.EPIC_CLOUD -> {
-                                        EpicCloudHistoryProvider
-                                            .setLabel(context, target.fileId, newLabel)
-                                        GameSaveBackupManager.BackupResult(true, context.getString(R.string.cloud_saves_label_saved))
-                                    }
-                                    GameSaveBackupManager.BackupStorage.GOG_CLOUD -> {
-                                        GOGCloudHistoryProvider
                                             .setLabel(context, target.fileId, newLabel)
                                         GameSaveBackupManager.BackupResult(true, context.getString(R.string.cloud_saves_label_saved))
                                     }
@@ -1299,20 +1139,16 @@ private fun SaveHistoryRow(
                     android.text.format.DateUtils.MINUTE_IN_MILLIS,
                 ).toString()
         }
-    // Badge reflects where the save is backed up (Steam/Google/Epic/GOG), not the conflict side it came from.
+    // Badge reflects where the save is backed up (Steam/Google), not the conflict side it came from.
     val storageLabel =
         when (entry.storage) {
             GameSaveBackupManager.BackupStorage.STEAM_CLOUD,
             GameSaveBackupManager.BackupStorage.STEAM_LOCAL,
             -> stringResource(R.string.cloud_saves_history_storage_steam)
             GameSaveBackupManager.BackupStorage.GOOGLE -> stringResource(R.string.cloud_saves_history_storage_google)
-            GameSaveBackupManager.BackupStorage.EPIC_CLOUD -> stringResource(R.string.cloud_saves_history_storage_epic)
-            GameSaveBackupManager.BackupStorage.GOG_CLOUD -> stringResource(R.string.cloud_saves_history_storage_gog)
         }
     // STEAM_CLOUD entries mirror Steam's remote-storage website: one row per current cloud file, downloadable — no fake version history. Per-entry rollback lives in STEAM_LOCAL snapshots.
-    val canRestore =
-        entry.storage != GameSaveBackupManager.BackupStorage.GOG_CLOUD &&
-            entry.storage != GameSaveBackupManager.BackupStorage.STEAM_CLOUD
+    val canRestore = entry.storage != GameSaveBackupManager.BackupStorage.STEAM_CLOUD
     val canDownload = entry.storage == GameSaveBackupManager.BackupStorage.STEAM_CLOUD
     Row(
         modifier =
@@ -1499,12 +1335,6 @@ private fun formatBytes(bytes: Long): String =
         bytes < 1024L * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
         else -> "%.2f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
     }
-
-private fun safeZipFileName(name: String): String =
-    name
-        .replace(Regex("[^A-Za-z0-9._-]+"), "_")
-        .trim('_')
-        .ifEmpty { "GOG_Cloud_Saves" }
 
 @Composable
 private fun CompactRenameDialogButton(
