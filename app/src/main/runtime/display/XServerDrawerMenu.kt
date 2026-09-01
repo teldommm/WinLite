@@ -169,12 +169,12 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.winlator.cmod.R
 import com.winlator.cmod.shared.theme.SessionDrawerStyle
-import com.winlator.cmod.shared.theme.WinNativeTheme
-import com.winlator.cmod.shared.theme.WinNativeOutline
-import com.winlator.cmod.shared.theme.WinNativeSurface
-import com.winlator.cmod.shared.theme.WinNativeTextPrimary
-import com.winlator.cmod.shared.ui.dialog.WinNativeDialogButton
-import com.winlator.cmod.shared.ui.dialog.WinNativeDialogShell
+import com.winlator.cmod.shared.theme.WinLiteTheme
+import com.winlator.cmod.shared.theme.WinLiteOutline
+import com.winlator.cmod.shared.theme.WinLiteSurface
+import com.winlator.cmod.shared.theme.WinLiteTextPrimary
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogButton
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogShell
 import com.winlator.cmod.shared.ui.nav.DialogPaneNav
 import com.winlator.cmod.shared.ui.nav.LocalPaneNav as SharedLocalPaneNav
 import com.winlator.cmod.shared.ui.nav.PaneNavRegistry as SharedPaneNavRegistry
@@ -581,8 +581,8 @@ internal fun PaneOverlayDialog(
                             .fillMaxWidth()
                             .heightIn(max = maxCardHeight)
                             .clip(shape)
-                            .background(WinNativeSurface)
-                            .border(1.dp, WinNativeOutline, shape)
+                            .background(WinLiteSurface)
+                            .border(1.dp, WinLiteOutline, shape)
                             .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -594,7 +594,7 @@ internal fun PaneOverlayDialog(
                         Icon(
                             imageVector = Icons.Outlined.Settings,
                             contentDescription = null,
-                            tint = WinNativeTextPrimary,
+                            tint = WinLiteTextPrimary,
                             modifier = Modifier.size(20.dp),
                         )
                         Text(
@@ -623,7 +623,7 @@ internal fun PaneOverlayDialog(
                             )
                         }
                     }
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(WinNativeOutline))
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(WinLiteOutline))
                     Box(Modifier.weight(1f, fill = false)) {
                         content()
                     }
@@ -1601,7 +1601,7 @@ fun setupXServerDrawerComposeView(
     stateHolder.setPaneVisibilityListener(onPaneVisibilityChanged)
     composeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
     composeView.setContent {
-        WinNativeTheme {
+        WinLiteTheme {
             XServerDrawerContent(
                 state = stateHolder.state,
                 taskManagerState = stateHolder.taskManagerState,

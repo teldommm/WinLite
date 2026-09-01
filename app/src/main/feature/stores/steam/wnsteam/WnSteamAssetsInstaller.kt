@@ -99,13 +99,13 @@ object WnSteamAssetsInstaller {
         }
 
         val isArm64ec = lscArchive == LSC_ARM64EC
-        val winNative = if (isArm64ec) "aarch64-windows" else "x86_64-windows"
+        val winLite = if (isArm64ec) "aarch64-windows" else "x86_64-windows"
         val unixSide  = if (isArm64ec) "aarch64-unix"    else "x86_64-unix"
 
         val system32 = File(imageFs.wineprefix, "drive_c/windows/system32").apply { mkdirs() }
         val syswow64 = File(imageFs.wineprefix, "drive_c/windows/syswow64").apply { mkdirs() }
 
-        val systemSrc = File(stagingRoot, "$winNative/lsteamclient.dll")
+        val systemSrc = File(stagingRoot, "$winLite/lsteamclient.dll")
         val syswowSrc = File(stagingRoot, "i386-windows/lsteamclient.dll")
         if (!systemSrc.exists() || !syswowSrc.exists()) {
             Timber.tag(TAG).e("Staged lsteamclient.dlls missing in $stagingRoot")
@@ -275,14 +275,14 @@ object WnSteamAssetsInstaller {
             return false
         }
         val isArm64ec = archive == LSC_ARM64EC
-        val winNative = if (isArm64ec) "aarch64-windows" else "x86_64-windows"
+        val winLite = if (isArm64ec) "aarch64-windows" else "x86_64-windows"
         val unixSide = if (isArm64ec) "aarch64-unix" else "x86_64-unix"
         val system32 = File(container.rootDir, ".wine/drive_c/windows/system32")
             .apply { mkdirs() }
         val syswow64 = File(container.rootDir, ".wine/drive_c/windows/syswow64")
             .apply { mkdirs() }
         var placed64 = false
-        val src64 = File(staging, "$winNative/lsteamclient.dll")
+        val src64 = File(staging, "$winLite/lsteamclient.dll")
         val src32 = File(staging, "i386-windows/lsteamclient.dll")
         if (src64.exists()) {
             src64.copyTo(File(system32, "lsteamclient.dll"), overwrite = true)
@@ -472,7 +472,7 @@ object WnSteamAssetsInstaller {
     }
 
     private fun patchLsteamclientLibPath(soFile: File, context: Context) {
-        val marker = "/data/data/app.winnative/files/imagefs/usr/lib/libsteamclient.so"
+        val marker = "/data/data/app.winlite/files/imagefs/usr/lib/libsteamclient.so"
         val markerBytes = marker.toByteArray(Charsets.US_ASCII)
         val targetBytes = bridgeLibPath(context).absolutePath.toByteArray(Charsets.US_ASCII)
         if (targetBytes.size > markerBytes.size) {

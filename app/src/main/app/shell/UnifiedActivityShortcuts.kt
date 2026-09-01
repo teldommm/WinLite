@@ -213,7 +213,7 @@ import com.winlator.cmod.shared.ui.JoystickGridScroll
 import com.winlator.cmod.shared.ui.JoystickListScroll
 import com.winlator.cmod.shared.ui.ListView
 import com.winlator.cmod.shared.ui.widget.chasingBorder
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.Lazy
 import com.winlator.cmod.feature.stores.steam.enums.EPersonaState
@@ -441,7 +441,7 @@ internal suspend fun UnifiedActivity.requestPinnedHomeShortcut(
             val launchData =
                 Uri
                     .Builder()
-                    .scheme("winnative")
+                    .scheme("winlite")
                     .authority(BuildConfig.APPLICATION_ID)
                     .appendPath("shortcut")
                     .appendQueryParameter("uuid", shortcutId)

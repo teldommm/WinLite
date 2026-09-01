@@ -278,7 +278,7 @@ public abstract class WineUtils {
     if (safeSource.isEmpty()) safeSource = "Games";
 
     File parentDir =
-        new File(container.getRootDir(), ".wine/drive_c/WinNative/Games/" + safeSource);
+        new File(container.getRootDir(), ".wine/drive_c/WinLite/Games/" + safeSource);
     if (!parentDir.exists()) parentDir.mkdirs();
 
     File link = new File(parentDir, buildDriveCGameLinkName(canonicalGameDir));
@@ -356,7 +356,7 @@ public abstract class WineUtils {
           targetPath.substring(gameDirPath.length()).replace(File.separatorChar, '\\');
       if (relative.isEmpty()) relative = "\\";
       else if (!relative.startsWith("\\")) relative = "\\" + relative;
-      return "C:\\WinNative\\Games\\" + safeSource + "\\" + symlink.getName() + relative;
+      return "C:\\WinLite\\Games\\" + safeSource + "\\" + symlink.getName() + relative;
     } catch (IOException e) {
       Log.w("WineUtils", "Failed to resolve C: game path for " + nativePath, e);
       return null;
@@ -485,7 +485,7 @@ public abstract class WineUtils {
     if (!dosdevicesDir.exists()) dosdevicesDir.mkdirs();
     String dosdevicesPath = dosdevicesDir.getPath();
 
-    String packageStorageSuffix = "/com.winnative.cmod/storage";
+    String packageStorageSuffix = "/com.winlite.emu/storage";
     String legacyPackageStorageSuffix = "/com.winlator.cmod/storage";
     if (container.getManager() != null && container.getManager().getContext() != null) {
       packageStorageSuffix =

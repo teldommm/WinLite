@@ -13,12 +13,12 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName",      "WinNative"
-            VALUE "FileDescription",  "WinNative Refactor Size"
+            VALUE "CompanyName",      "WinLite"
+            VALUE "FileDescription",  "WinLite Refactor Size"
             VALUE "FileVersion",      "0.1.1"
             VALUE "InternalName",     "refactorsize"
             VALUE "OriginalFilename", "refactorsize.exe"
-            VALUE "ProductName",      "WinNative"
+            VALUE "ProductName",      "WinLite"
             VALUE "ProductVersion",   "0.1.1"
         END
     END

@@ -167,15 +167,15 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.winlator.cmod.R
-import com.winlator.cmod.shared.theme.WinNativeBackground
-import com.winlator.cmod.shared.theme.WinNativeOutline
-import com.winlator.cmod.shared.theme.WinNativePanel
-import com.winlator.cmod.shared.theme.WinNativeSurface
-import com.winlator.cmod.shared.theme.WinNativeTextPrimary
-import com.winlator.cmod.shared.theme.WinNativeTextSecondary
-import com.winlator.cmod.shared.theme.WinNativeTheme
-import com.winlator.cmod.shared.ui.dialog.WinNativeDialogButton
-import com.winlator.cmod.shared.ui.dialog.WinNativeDialogShell
+import com.winlator.cmod.shared.theme.WinLiteBackground
+import com.winlator.cmod.shared.theme.WinLiteOutline
+import com.winlator.cmod.shared.theme.WinLitePanel
+import com.winlator.cmod.shared.theme.WinLiteSurface
+import com.winlator.cmod.shared.theme.WinLiteTextPrimary
+import com.winlator.cmod.shared.theme.WinLiteTextSecondary
+import com.winlator.cmod.shared.theme.WinLiteTheme
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogButton
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogShell
 import com.winlator.cmod.shared.ui.nav.DialogPaneNav
 import com.winlator.cmod.shared.ui.nav.LocalPaneNav as SharedLocalPaneNav
 import com.winlator.cmod.shared.ui.nav.PaneNavRegistry as SharedPaneNavRegistry

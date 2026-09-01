@@ -1750,7 +1750,7 @@ class HybridModeReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        const val ACTION = "com.winnative.cmod.action.HYBRID_MODE"
+        const val ACTION = "com.winlite.emu.action.HYBRID_MODE"
         private const val TAG = "HybridModeReceiver"
     }
 }

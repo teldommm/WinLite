@@ -23,16 +23,16 @@ import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 /**
- * Native-backed component download helper with WinNative.dev-first URL resolution.
+ * Native-backed component download helper with WinLite.dev-first URL resolution.
  *
  * Large file transfers use [NativeContentIO] / libcurl. OkHttp is retained only for small metadata
- * requests such as remote JSON and WinNative.dev directory listings.
+ * requests such as remote JSON and WinLite.dev directory listings.
  */
 object Downloader {
     private const val TAG = "Downloader"
-    private const val WINNATIVE_ROOT = "https://WinNative.dev/Downloads/"
+    private const val WINLITE_ROOT = "https://WinLite.dev/Downloads/"
     private const val MAX_CRAWL_DEPTH = 10
-    private const val FILE_MAP_CACHE_NAME = "winnative_file_map_v1.txt"
+    private const val FILE_MAP_CACHE_NAME = "winlite_file_map_v1.txt"
     private const val FILE_MAP_CACHE_HEADER_PREFIX = "# timestamp="
     private const val FILE_MAP_CACHE_TTL_MS = 24L * 60L * 60L * 1000L
     private const val NATIVE_CA_BUNDLE_NAME = "native_curl_cacert.pem"
@@ -66,7 +66,7 @@ object Downloader {
     }
 
     @JvmStatic
-    fun downloadFileWinNativeFirst(
+    fun downloadFileWinLiteFirst(
         originalUrl: String,
         file: File,
         listener: DownloadListener?,
@@ -76,29 +76,29 @@ object Downloader {
             ensureFileMap()
             val winUrl = fileMap[filename.lowercase(Locale.ROOT)]
             if (winUrl != null) {
-                if (logEnabled()) Log.d(TAG, "WinNative URL resolved: $winUrl")
+                if (logEnabled()) Log.d(TAG, "WinLite URL resolved: $winUrl")
                 if (downloadFile(winUrl, file, listener)) {
-                    if (logEnabled()) Log.d(TAG, "Download succeeded from WinNative.dev")
+                    if (logEnabled()) Log.d(TAG, "Download succeeded from WinLite.dev")
                     return true
                 }
-                if (logEnabled()) Log.w(TAG, "WinNative download failed, falling back to: $originalUrl")
+                if (logEnabled()) Log.w(TAG, "WinLite download failed, falling back to: $originalUrl")
                 file.delete()
             } else if (logEnabled()) {
-                Log.d(TAG, "File not found on WinNative.dev, using original: $originalUrl")
+                Log.d(TAG, "File not found on WinLite.dev, using original: $originalUrl")
             }
         }
         return downloadFile(originalUrl, file, listener)
     }
 
     @JvmStatic
-    fun resolveWinNativeUrl(filename: String?): String? {
+    fun resolveWinLiteUrl(filename: String?): String? {
         if (filename == null) return null
         ensureFileMap()
         return fileMap[filename.lowercase(Locale.ROOT)]
     }
 
     @JvmStatic
-    fun resolveWinNativeUrl(contentType: String?, filename: String?): String? = resolveWinNativeUrl(filename)
+    fun resolveWinLiteUrl(contentType: String?, filename: String?): String? = resolveWinLiteUrl(filename)
 
     @JvmStatic
     fun clearFileMap() {
@@ -107,7 +107,7 @@ object Downloader {
             fileMapReady = false
             fileMapCacheFile()?.let {
                 if (it.exists() && !it.delete() && logEnabled()) {
-                    Log.w(TAG, "Unable to delete WinNative file map cache: ${it.absolutePath}")
+                    Log.w(TAG, "Unable to delete WinLite file map cache: ${it.absolutePath}")
                 }
             }
         }
@@ -196,12 +196,12 @@ object Downloader {
     }
 
     private fun buildFileMap() {
-        if (logEnabled()) Log.d(TAG, "Building WinNative file map from $WINNATIVE_ROOT")
+        if (logEnabled()) Log.d(TAG, "Building WinLite file map from $WINLITE_ROOT")
         val start = System.currentTimeMillis()
         fileMap.clear()
-        crawlDirectory(WINNATIVE_ROOT, 0)
+        crawlDirectory(WINLITE_ROOT, 0)
         if (logEnabled()) {
-            Log.d(TAG, "WinNative file map built: ${fileMap.size} files in ${System.currentTimeMillis() - start}ms")
+            Log.d(TAG, "WinLite file map built: ${fileMap.size} files in ${System.currentTimeMillis() - start}ms")
         }
     }
 
@@ -243,7 +243,7 @@ object Downloader {
                 val timestamp = header.removePrefix(FILE_MAP_CACHE_HEADER_PREFIX).trim().toLong()
                 if (System.currentTimeMillis() - timestamp > FILE_MAP_CACHE_TTL_MS) {
                     if (!cacheFile.delete() && logEnabled()) {
-                        Log.w(TAG, "Unable to delete expired WinNative file map cache")
+                        Log.w(TAG, "Unable to delete expired WinLite file map cache")
                     }
                     return false
                 }
@@ -256,13 +256,13 @@ object Downloader {
                 }
             }
         } catch (e: Exception) {
-            if (logEnabled()) Log.w(TAG, "Failed to load WinNative file map cache", e)
+            if (logEnabled()) Log.w(TAG, "Failed to load WinLite file map cache", e)
             fileMap.clear()
             return false
         }
 
         if (fileMap.isEmpty()) return false
-        if (logEnabled()) Log.d(TAG, "Loaded WinNative file map cache: ${fileMap.size} files")
+        if (logEnabled()) Log.d(TAG, "Loaded WinLite file map cache: ${fileMap.size} files")
         return true
     }
 
@@ -287,16 +287,16 @@ object Downloader {
                 }
             }
         } catch (e: Exception) {
-            if (logEnabled()) Log.w(TAG, "Failed to persist WinNative file map cache", e)
+            if (logEnabled()) Log.w(TAG, "Failed to persist WinLite file map cache", e)
             tempFile.delete()
             return
         }
 
         if (cacheFile.exists() && !cacheFile.delete() && logEnabled()) {
-            Log.w(TAG, "Unable to replace existing WinNative file map cache")
+            Log.w(TAG, "Unable to replace existing WinLite file map cache")
         }
         if (!tempFile.renameTo(cacheFile) && logEnabled()) {
-            Log.w(TAG, "Unable to finalize WinNative file map cache write")
+            Log.w(TAG, "Unable to finalize WinLite file map cache write")
         }
     }
 

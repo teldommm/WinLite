@@ -15,7 +15,7 @@ object SettingsConfig {
 
     @JvmField
     val DEFAULT_WINLATOR_PATH: String =
-        Environment.getExternalStorageDirectory().path + "/WinNative"
+        Environment.getExternalStorageDirectory().path + "/WinLite"
 
     @JvmField
     val DEFAULT_SHORTCUT_EXPORT_PATH: String =

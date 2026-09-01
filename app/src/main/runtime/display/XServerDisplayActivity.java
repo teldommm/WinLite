@@ -215,7 +215,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
     private static final String COLDCLIENT_STORE_RELATIVE_PATH = ".shared/coldclient-store";
     private static final String PREVIOUS_STEAM_CLIENT_STORE_RELATIVE_PATH = ".steam-client-store";
     private static final String PREVIOUS_CONTAINER_STEAM_CLIENT_STORE_RELATIVE_PATH = ".wine/.steam-client-store";
-    private static final String LEGACY_STEAM_CLIENT_STORE_RELATIVE_PATH = ".wine/drive_c/WinNative/SteamClient";
+    private static final String LEGACY_STEAM_CLIENT_STORE_RELATIVE_PATH = ".wine/drive_c/WinLite/SteamClient";
     public static final String EXTRA_LAUNCHED_FROM_PINNED_SHORTCUT = "launched_from_pinned_shortcut";
 
     // CEF GPU flags avoid steamwebhelper taking DXVK's dxgi path in FEX.
@@ -229,8 +229,8 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             "\"steampath\"",
             "\"steamclientdll\"",
             "\"steamclientdll64\"",
-            "winnative\\\\steamclient",
-            "winnative/steamclient",
+            "winlite\\\\steamclient",
+            "winlite/steamclient",
             ".shared\\\\steam-client-store",
             ".shared/steam-client-store",
             "steamclient_loader_x64.exe",
@@ -344,8 +344,8 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         "explorer.exe", "steamwebhelper.exe"
     };
     // assemblyIdentity names marking the SxS activeCodePage manifests we deploy; anything else is game-owned and never touched.
-    private static final String UTF8_MANIFEST_MARKER = "WinNative.Utf8CodePage";
-    private static final String LOCALE_MANIFEST_MARKER = "WinNative.LocaleCodePage";
+    private static final String UTF8_MANIFEST_MARKER = "WinLite.Utf8CodePage";
+    private static final String LOCALE_MANIFEST_MARKER = "WinLite.LocaleCodePage";
     private static final String UTF8_ACTIVE_CODEPAGE_MANIFEST = codePageManifest(UTF8_MANIFEST_MARKER, "UTF-8");
     private static final Pattern ACTIVE_CODE_PAGE_PATTERN =
         Pattern.compile("<activeCodePage[^>]*>([^<]*)</activeCodePage>", Pattern.CASE_INSENSITIVE);
@@ -780,20 +780,12 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         frameGenFlowScale = clampFrameGenFlowScale(
                 parseSettingInt(getFrameGenSetting("frameGenFlowScale", containerFlowScale), 70));
 
-        if (frameGenEnabled
-                || !com.winlator.cmod.runtime.display.lsfg.LosslessScaling.isInstalled(this)) {
-            int result = com.winlator.cmod.feature.library.LosslessAutoImport.INSTANCE.sync(this).getResult();
-            if (result != com.winlator.cmod.feature.library.LosslessAutoImport.RESULT_READY) {
-                Log.i("XServerDisplayActivity", "Lossless shader sync at launch: result=" + result);
-            }
-        }
-
-        java.io.File cache = com.winlator.cmod.runtime.display.lsfg.LosslessScaling
+        java.io.File cache = com.winlator.cmod.runtime.display.aifg.AifgFrameGen
                 .resolveCacheFile(this, true);
         frameGenCachePath = cache != null ? cache.getAbsolutePath() : null;
         if (frameGenCachePath == null) {
             if (frameGenEnabled) {
-                Log.w("XServerDisplayActivity", "frameGen requested but no Lossless shader cache");
+                Log.w("XServerDisplayActivity", "frameGen requested but no AIFG shader cache");
             }
             frameGenEnabled = false;
         }
@@ -1252,12 +1244,12 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         super.onNewIntent(intent);
         if (intent == null) return;
 
-        if ("com.winnative.cmod.DEBUG_INJECT_TAP".equals(intent.getAction())) {
+        if ("com.winlite.emu.DEBUG_INJECT_TAP".equals(intent.getAction())) {
             handleDebugInjectTap(intent);
             return;
         }
 
-        if ("com.winnative.cmod.DEBUG_INJECT_KEY".equals(intent.getAction())) {
+        if ("com.winlite.emu.DEBUG_INJECT_KEY".equals(intent.getAction())) {
             handleDebugInjectKey(intent);
             return;
         }
@@ -1453,7 +1445,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             android.net.wifi.WifiManager wifiManager = (android.net.wifi.WifiManager)
                     getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             if (wifiManager != null) {
-                multicastLock = wifiManager.createMulticastLock("winnative-xserver");
+                multicastLock = wifiManager.createMulticastLock("winlite-xserver");
                 multicastLock.setReferenceCounted(false);
                 multicastLock.acquire();
             }
@@ -3481,7 +3473,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
 
         android.net.Uri data = intent.getData();
         return data != null
-                && "winnative".equals(data.getScheme())
+                && "winlite".equals(data.getScheme())
                 && BuildConfig.APPLICATION_ID.equals(data.getAuthority())
                 && data.getPathSegments().contains("shortcut");
     }
@@ -5952,17 +5944,17 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
     private void applyRefactorSize(boolean enabled) {
         if (winHandler == null || container == null) return;
         if (enabled) stageRefactorSizeHelper();
-        winHandler.exec("\"C:\\WinNative\\refactorsize.exe\" " + (enabled ? "on" : "off"));
+        winHandler.exec("\"C:\\WinLite\\refactorsize.exe\" " + (enabled ? "on" : "off"));
         if (!enabled) unstageRefactorSizeHelper();
     }
 
     private void stageRefactorSizeHelper() {
         try {
-            File dir = new File(container.getRootDir(), ".wine/drive_c/WinNative");
+            File dir = new File(container.getRootDir(), ".wine/drive_c/WinLite");
             if (!dir.isDirectory() && !dir.mkdirs()) return;
             File dst = new File(dir, "refactorsize.exe");
             if (dst.exists() && dst.length() == REFACTOR_SIZE_EXE_BYTES) return;
-            try (java.io.InputStream in = getAssets().open("winnative/refactorsize.exe");
+            try (java.io.InputStream in = getAssets().open("winlite/refactorsize.exe");
                  java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
                 byte[] buf = new byte[64 * 1024];
                 int n;
@@ -5988,7 +5980,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
     private void stageBundledExe(File dir, String name, long expectedBytes) {
         File dst = new File(dir, name);
         if (dst.exists() && dst.length() == expectedBytes) return;
-        try (java.io.InputStream in = getAssets().open("winnative/" + name);
+        try (java.io.InputStream in = getAssets().open("winlite/" + name);
              java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
             byte[] buf = new byte[64 * 1024];
             int n;
@@ -5999,7 +5991,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
     }
 
     private void unstageRefactorSizeHelper() {
-        final File dst = new File(container.getRootDir(), ".wine/drive_c/WinNative/refactorsize.exe");
+        final File dst = new File(container.getRootDir(), ".wine/drive_c/WinLite/refactorsize.exe");
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
             if (!isRefactorSizeEnabled && dst.exists()) dst.delete();
         }, REFACTOR_SIZE_UNSTAGE_DELAY_MS);

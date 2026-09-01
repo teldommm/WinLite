@@ -37,7 +37,7 @@ import com.winlator.cmod.runtime.display.XServerDisplayActivity;
 import com.winlator.cmod.shared.ui.toast.WinToast;
 import com.winlator.cmod.shared.io.FileUtils;
 import com.winlator.cmod.shared.ui.dialog.ContentDialog;
-import com.winlator.cmod.shared.ui.dialog.WinNativeComposeDialogs;
+import com.winlator.cmod.shared.ui.dialog.WinLiteComposeDialogs;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -261,7 +261,7 @@ public class ShortcutsFragment extends Fragment {
     String playCountText = getString(R.string.library_games_times_played_label) + playCount;
     String playtimeText = getString(R.string.library_games_playtime_label) + playtimeFormatted;
 
-    if (WinNativeComposeDialogs.showShortcutProperties(
+    if (WinLiteComposeDialogs.showShortcutProperties(
         context,
         playCountText,
         playtimeText,
@@ -300,7 +300,7 @@ public class ShortcutsFragment extends Fragment {
       int shortcutPathHash = shortcutPath.hashCode();
       Uri launchData =
           new Uri.Builder()
-              .scheme("winnative")
+              .scheme("winlite")
               .authority(BuildConfig.APPLICATION_ID)
               .appendPath("shortcut")
               .appendQueryParameter("uuid", uuid)

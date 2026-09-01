@@ -28,7 +28,7 @@ import com.winlator.cmod.shared.ui.toast.WinToast
 import com.winlator.cmod.shared.android.DirectoryPickerDialog
 import com.winlator.cmod.shared.io.AssetPaths
 import com.winlator.cmod.shared.io.FileUtils
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import com.winlator.cmod.shared.util.StringUtils
 import org.json.JSONArray
 import java.io.File
@@ -89,7 +89,7 @@ class PresetsFragment : Fragment() {
         return ComposeView(ctx).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
-                WinNativeTheme(
+                WinLiteTheme(
                     colorScheme =
                         darkColorScheme(
                             primary = Color(0xFF1A9FFF),

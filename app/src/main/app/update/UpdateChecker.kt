@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.regex.Pattern
 
 object UpdateChecker {
-    private const val DOWNLOADS_PAGE_URL = "https://winnative.dev/Downloads/"
+    private const val DOWNLOADS_PAGE_URL = "https://winlite.dev/Downloads/"
     private const val RELEASE_NOTES_URL = "${DOWNLOADS_PAGE_URL}release.txt"
 
     private const val PREF_CHECK_FOR_UPDATES = "check_for_updates"
@@ -252,7 +252,7 @@ object UpdateChecker {
             return null
         }
 
-        // Only the Standard flavor remains (com.winnative.cmod), so this is always "standard"
+        // Only the Standard flavor remains (com.winlite.emu), so this is always "standard"
         // now — kept as a val (not inlined into the URL) in case flavors return later.
         val apkType = "standard"
         val downloadUrl = "${DOWNLOADS_PAGE_URL}download.php?type=$apkType"

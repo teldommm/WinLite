@@ -27,7 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Image
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 
 @Composable
 internal fun WinToastContent(
@@ -35,7 +35,7 @@ internal fun WinToastContent(
     icon: Bitmap?,
     visible: Boolean,
 ) {
-    WinNativeTheme {
+    WinLiteTheme {
         AnimatedVisibility(
             visible = visible,
             enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 4 },

@@ -6,16 +6,16 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [lib]
-name = "winnative_setxid_noop"
+name = "winlite_setxid_noop"
 crate-type = ["cdylib"]
 
 [[bin]]
-name = "winnative_steamwebhelper_wrapper"
-path = "src/bin/winnative_steamwebhelper_wrapper.rs"
+name = "winlite_steamwebhelper_wrapper"
+path = "src/bin/winlite_steamwebhelper_wrapper.rs"
 
 [[bin]]
-name = "winnative_driverquery_noop"
-path = "src/bin/winnative_driverquery_noop.rs"
+name = "winlite_driverquery_noop"
+path = "src/bin/winlite_driverquery_noop.rs"
 
 [dependencies]
 libc = "0.2"

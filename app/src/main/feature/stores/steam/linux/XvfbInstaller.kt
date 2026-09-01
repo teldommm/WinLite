@@ -55,13 +55,13 @@ object XvfbInstaller {
     )
 
     private val EXTRA_LIBS = listOf(
-        "libwinnative-setxid-noop.so",
-        "libwinnative-steamwebhelper-preload.so",
+        "libwinlite-setxid-noop.so",
+        "libwinlite-steamwebhelper-preload.so",
     )
 
     private val EXTRA_EXECUTABLES = listOf(
-        "winnative-steamwebhelper-wrapper",
-        "winnative-driverquery-noop",
+        "winlite-steamwebhelper-wrapper",
+        "winlite-driverquery-noop",
     )
 
     private val DBUS_BINARIES = listOf("dbus-daemon", "dbus-uuidgen")
@@ -75,10 +75,10 @@ object XvfbInstaller {
         "libxkbfile.so.1.0.2" to "8d8462b7082bd7eaf1ac03e0ea195e81c2bcd52d16db7a7bcd1a258c7322ad58",
         "libunwind.so.8.0.1" to "a6f1a0cb272655f942ae2f92334bd6b16469d0653ba533a91a7b2fe9005efe24",
         "libapparmor.so.1.6.3" to "bedf95282b1fca7a40593d555b25bf73c335183c23f78a4286ca18e2ba496210",
-        "libwinnative-setxid-noop.so" to "7ad09849847abdfc25b249cd1795eff118d3b1f6d0a8509dea08d08ac5cecc72",
-        "libwinnative-steamwebhelper-preload.so" to "adc7371649d2bc27cf4872795400e3d049670fd8a089f6efba7023037b86e8d8",
-        "winnative-steamwebhelper-wrapper" to "654b9a4f2d8f3035d181f5f1f3787bf0af567e0698d9552ddb5bb4b0215019ed",
-        "winnative-driverquery-noop" to "bbedfe5e93b424025ad0b92351d172790a05354b0f878da8f962c7730154b7a5",
+        "libwinlite-setxid-noop.so" to "cac770b87c5c0bff85a8e7934e7f00520f08f1b6293277346f0b7649a775d734",
+        "libwinlite-steamwebhelper-preload.so" to "083f62a67fe4010869116cc775c12bdf6135e08888c75e11f52b88bf6f252898",
+        "winlite-steamwebhelper-wrapper" to "a4fe3ec9295609e693a5a6efe14873ea99a427e6c0794f0cfb0bd72c8d83a721",
+        "winlite-driverquery-noop" to "cbf01e53743e6ea36eb883fe39b6510bfc50a357a0f56065f728e74c5c36b9e5",
         "dbus-daemon" to "2f50d490d9ce4e707b2253669e6f353da785a1b944bd9f10cbb98a6314dd8796",
         "dbus-uuidgen" to "e35b5c45f75d58c0fe6d77981810858ca4988cc34d3726be893d5496b6ece45a",
         "session.conf" to "5fd29a946587bc384d14859552bbdfd965ad1bdbc50db60b1b56b9ce8454711c",

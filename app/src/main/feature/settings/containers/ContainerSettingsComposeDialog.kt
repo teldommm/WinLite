@@ -55,7 +55,7 @@ import com.winlator.cmod.runtime.wine.EnvVars
 import com.winlator.cmod.runtime.wine.LocaleEnv
 import com.winlator.cmod.shared.io.FileUtils
 import com.winlator.cmod.shared.util.KeyValueSet
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import com.winlator.cmod.shared.util.StringUtils
 import com.winlator.cmod.runtime.wine.WineInfo
 import com.winlator.cmod.runtime.wine.WineRegistryEditor
@@ -73,7 +73,7 @@ import java.util.concurrent.Executors
 import kotlinx.coroutines.*
 import com.winlator.cmod.shared.ui.dialog.ContainerProgressPopup
 import com.winlator.cmod.shared.ui.dialog.PopupDialog
-import com.winlator.cmod.shared.ui.dialog.WinNativeComposeDialogs
+import com.winlator.cmod.shared.ui.dialog.WinLiteComposeDialogs
 import android.os.Environment
 
 /**
@@ -165,7 +165,7 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
             setViewTreeLifecycleOwner(activity as LifecycleOwner)
             setViewTreeSavedStateRegistryOwner(activity as SavedStateRegistryOwner)
             setContent {
-                WinNativeTheme {
+                WinLiteTheme {
                     val defaultDensity = LocalDensity.current
                     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
                     androidx.compose.runtime.LaunchedEffect(
@@ -1699,7 +1699,7 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         val sanitizedName = container.name.replace(" ", "_")
         val date = SimpleDateFormat("MMddyyyy_HHmmss", Locale.US).format(Date())
         val zipName = "${sanitizedName}_${date}.zip"
-        val exportDir = File(Environment.getExternalStorageDirectory(), "WinNative/saves")
+        val exportDir = File(Environment.getExternalStorageDirectory(), "WinLite/saves")
         if (!exportDir.exists()) exportDir.mkdirs()
         val zipFile = File(exportDir, zipName)
 
@@ -1725,7 +1725,7 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
 
                 withContext(Dispatchers.Main) {
                     onComplete()
-                    WinToast.show(context, context.getString(R.string.saves_export_success_path, "/WinNative/saves"), dialog.window?.decorView)
+                    WinToast.show(context, context.getString(R.string.saves_export_success_path, "/WinLite/saves"), dialog.window?.decorView)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -1830,7 +1830,7 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         val composeView = ComposeView(activity).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
-                WinNativeTheme {
+                WinLiteTheme {
                     PopupDialog(
                         title = title,
                         message = message,
@@ -1851,7 +1851,7 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         val container = this.container ?: return
         scope.launch(Dispatchers.IO) {
             val loadingDialog = withContext(Dispatchers.Main) {
-                WinNativeComposeDialogs.showLoading(context, context.getString(R.string.common_ui_loading))
+                WinLiteComposeDialogs.showLoading(context, context.getString(R.string.common_ui_loading))
             }
             try {
                 java.util.zip.ZipFile(zipFile).use { zf ->

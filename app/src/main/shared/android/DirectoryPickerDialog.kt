@@ -117,15 +117,15 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.winlator.cmod.R
 import com.winlator.cmod.shared.io.ArchiveExtractor
-import com.winlator.cmod.shared.theme.WinNativeAccent
-import com.winlator.cmod.shared.theme.WinNativeBackground
-import com.winlator.cmod.shared.theme.WinNativeFontFamily
-import com.winlator.cmod.shared.theme.WinNativeOutline
-import com.winlator.cmod.shared.theme.WinNativePanel
-import com.winlator.cmod.shared.theme.WinNativeSurface
-import com.winlator.cmod.shared.theme.WinNativeTextPrimary
-import com.winlator.cmod.shared.theme.WinNativeTextSecondary
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteAccent
+import com.winlator.cmod.shared.theme.WinLiteBackground
+import com.winlator.cmod.shared.theme.WinLiteFontFamily
+import com.winlator.cmod.shared.theme.WinLiteOutline
+import com.winlator.cmod.shared.theme.WinLitePanel
+import com.winlator.cmod.shared.theme.WinLiteSurface
+import com.winlator.cmod.shared.theme.WinLiteTextPrimary
+import com.winlator.cmod.shared.theme.WinLiteTextSecondary
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import com.winlator.cmod.shared.ui.toast.WinToast
 import com.winlator.cmod.shared.ui.nav.LocalPaneNav
 import com.winlator.cmod.shared.ui.nav.PaneNavRegistry
@@ -151,14 +151,14 @@ object DirectoryPickerDialog {
     private val DialogCutoutStartPadding = 14.dp
     private val CurrentPathHorizontalPadding = 10.dp
     private val FolderGridCardPadding = 6.dp
-    private val BgDark = WinNativeBackground
-    private val CardDark = WinNativeSurface
-    private val CardBorder = WinNativeOutline
+    private val BgDark = WinLiteBackground
+    private val CardDark = WinLiteSurface
+    private val CardBorder = WinLiteOutline
     private val IconBoxBg = Color(0xFF242434)
-    private val Accent = WinNativeAccent
+    private val Accent = WinLiteAccent
     private val NavHighlight = Color(0xFF4FC3F7)
-    private val TextPrimary = WinNativeTextPrimary
-    private val TextSecondary = WinNativeTextSecondary
+    private val TextPrimary = WinLiteTextPrimary
+    private val TextSecondary = WinLiteTextSecondary
 
     val ExecutableExtensions = setOf("exe", "bat", "cmd", "msi")
 
@@ -344,11 +344,11 @@ object DirectoryPickerDialog {
                     CompositionLocalProvider(
                         LocalDensity provides Density(defaultDensity.density, fontScale = 1f),
                     ) {
-                        WinNativeTheme {
+                        WinLiteTheme {
                             CompositionLocalProvider(
                                 LocalTextStyle provides
                                     LocalTextStyle.current.merge(
-                                        TextStyle(fontFamily = WinNativeFontFamily),
+                                        TextStyle(fontFamily = WinLiteFontFamily),
                                     ),
                             ) {
                                 fun dismissPicker() {
@@ -1597,7 +1597,7 @@ object DirectoryPickerDialog {
             when {
                 active -> Accent.copy(alpha = 0.22f)
                 accent -> Color.Transparent
-                else -> WinNativePanel
+                else -> WinLitePanel
             }
         val chipBorder = if (highlight) Accent.copy(alpha = if (active) 0.9f else 0.4f) else CardBorder
         val iconTint = if (highlight) Accent else TextSecondary
@@ -2028,7 +2028,7 @@ object DirectoryPickerDialog {
                                             cornerRadius = 10.dp,
                                             onActivate = { onPick(c.id) },
                                             isEntry = index == 0,
-                                        ).background(WinNativePanel)
+                                        ).background(WinLitePanel)
                                         .border(1.dp, CardBorder, RoundedCornerShape(10.dp))
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
@@ -2261,7 +2261,7 @@ object DirectoryPickerDialog {
                             .height(6.dp)
                             .clip(RoundedCornerShape(3.dp)),
                     color = Accent,
-                    trackColor = WinNativePanel,
+                    trackColor = WinLitePanel,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(

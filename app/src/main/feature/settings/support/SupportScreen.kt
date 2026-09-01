@@ -58,8 +58,8 @@ private val SUPPORT_LINKS =
     listOf(
         SupportLink(
             iconRes = R.drawable.ic_brand_discord,
-            titleRes = R.string.support_winnative_discord,
-            subtitleRes = R.string.support_winnative_discord_desc,
+            titleRes = R.string.support_winlite_discord,
+            subtitleRes = R.string.support_winlite_discord_desc,
             url = "https://discord.gg/8Gzh5mmBJg",
         ),
         SupportLink(

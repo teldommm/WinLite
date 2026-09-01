@@ -213,7 +213,7 @@
             android:name="com.winlator.cmod.feature.stores.steam.service.HybridModeReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.winnative.cmod.action.HYBRID_MODE" />
+                <action android:name="com.winlite.emu.action.HYBRID_MODE" />
             </intent-filter>
         </receiver>
 

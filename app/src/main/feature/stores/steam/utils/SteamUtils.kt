@@ -1305,7 +1305,7 @@ object SteamUtils {
             val appIniContent =
                 buildString {
                     // [app::general] — make Steam_Apps::GetCurrentBetaName()
-                    // deterministic; WinNative always installs the public branch.
+                    // deterministic; WinLite always installs the public branch.
                     appendLine("[app::general]")
                     appendLine("is_beta_branch=0")
                     appendLine("branch_name=public")

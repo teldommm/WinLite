@@ -84,7 +84,7 @@ public class PulseAudioComponent extends EnvironmentComponent {
               0,
               parseInt(
                   firstNonEmpty(
-                      envVars.get("WINNATIVE_PULSE_LATENCY_MS"),
+                      envVars.get("WINLITE_PULSE_LATENCY_MS"),
                       envVars.get("PULSE_LATENCY_MSEC")),
                   DEFAULT_LATENCY_MILLIS));
       options.fragmentMillis =
@@ -92,12 +92,12 @@ public class PulseAudioComponent extends EnvironmentComponent {
               1,
               parseInt(
                   firstNonEmpty(
-                      envVars.get("WINNATIVE_PULSE_FRAGMENT_MS"),
+                      envVars.get("WINLITE_PULSE_FRAGMENT_MS"),
                       envVars.get("ANDROID_PULSE_FRAGMENT_MS")),
                   DEFAULT_FRAGMENT_MILLIS));
       String sampleRate =
           firstNonEmpty(
-              envVars.get("WINNATIVE_PULSE_SAMPLE_RATE"),
+              envVars.get("WINLITE_PULSE_SAMPLE_RATE"),
               envVars.get("ANDROID_PULSE_SAMPLE_RATE"));
       options.sampleRateOverridden = !sampleRate.isEmpty();
       options.sampleRate =
@@ -107,7 +107,7 @@ public class PulseAudioComponent extends EnvironmentComponent {
 
       String alternateSampleRate =
           firstNonEmpty(
-              envVars.get("WINNATIVE_PULSE_ALTERNATE_SAMPLE_RATE"),
+              envVars.get("WINLITE_PULSE_ALTERNATE_SAMPLE_RATE"),
               envVars.get("ANDROID_PULSE_ALTERNATE_SAMPLE_RATE"));
       options.alternateSampleRateOverridden = !alternateSampleRate.isEmpty();
       options.alternateSampleRate =
@@ -121,7 +121,7 @@ public class PulseAudioComponent extends EnvironmentComponent {
                   2,
                   parseInt(
                       firstNonEmpty(
-                          envVars.get("WINNATIVE_PULSE_CHANNELS"),
+                          envVars.get("WINLITE_PULSE_CHANNELS"),
                           envVars.get("ANDROID_PULSE_CHANNELS")),
                       DEFAULT_CHANNELS)));
       options.volume =
@@ -130,14 +130,14 @@ public class PulseAudioComponent extends EnvironmentComponent {
               Math.min(
                   parseFloat(
                       firstNonEmpty(
-                          envVars.get("WINNATIVE_PULSE_VOLUME"),
+                          envVars.get("WINLITE_PULSE_VOLUME"),
                           envVars.get("ANDROID_PULSE_VOLUME")),
                       DEFAULT_VOLUME),
                   MAX_VOLUME));
 
       String performanceMode =
           firstNonEmpty(
-              envVars.get("WINNATIVE_PULSE_AAUDIO_PERFORMANCE_MODE"),
+              envVars.get("WINLITE_PULSE_AAUDIO_PERFORMANCE_MODE"),
               envVars.get("ANDROID_PULSE_AAUDIO_PERFORMANCE_MODE"));
       if (performanceMode.equalsIgnoreCase(PERFORMANCE_MODE_LOW_LATENCY)
           || performanceMode.equals("12")) {

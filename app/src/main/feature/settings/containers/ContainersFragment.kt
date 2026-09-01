@@ -29,7 +29,7 @@ import com.winlator.cmod.runtime.display.environment.ImageFs
 import com.winlator.cmod.shared.ui.toast.WinToast
 import com.winlator.cmod.shared.io.FileUtils
 import com.winlator.cmod.shared.ui.dialog.ContainerProgressPopup
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import java.io.File
 import java.nio.file.Files
 import kotlin.math.roundToInt
@@ -48,7 +48,7 @@ class ContainersFragment : Fragment() {
         ComposeView(requireContext()).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
-                WinNativeTheme(
+                WinLiteTheme(
                     colorScheme =
                         darkColorScheme(
                             primary = Color(0xFF1A9FFF),

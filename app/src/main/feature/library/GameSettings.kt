@@ -149,7 +149,7 @@ import com.winlator.cmod.shared.framegen.FrameGenPreset
 import com.winlator.cmod.shared.theme.GameSettingsStyle
 import com.winlator.cmod.runtime.wine.WineThemeManager
 import com.winlator.cmod.runtime.display.environment.ImageFs
-import com.winlator.cmod.runtime.display.lsfg.LosslessScaling
+import com.winlator.cmod.runtime.display.aifg.AifgFrameGen
 import com.winlator.cmod.shared.android.DirectoryPickerDialog
 import com.winlator.cmod.shared.ui.dialog.findActivity
 import kotlinx.coroutines.Dispatchers
@@ -671,7 +671,6 @@ const val FRAMEGEN_SHADERS_READY = 1
 const val FRAMEGEN_SHADERS_IMPORTING = 2
 const val FRAMEGEN_SHADERS_MISSING = 3
 const val FRAMEGEN_SHADERS_FAILED = 4
-const val FRAMEGEN_SHADERS_UPDATED = 5
 
 val FrameGenMultiplierOptions = listOf(2, 3, 4)
 val FrameGenTargetOptions = listOf(0, 60, 90, 120, 144)
@@ -1715,10 +1714,9 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
 
     LaunchedEffect(Unit) {
         if (state.frameGenShaderState.intValue != FRAMEGEN_SHADERS_CHECKING) return@LaunchedEffect
-        state.frameGenShaderState.intValue = FRAMEGEN_SHADERS_IMPORTING
-        val outcome = withContext(Dispatchers.IO) { LosslessAutoImport.sync(context) }
-        state.frameGenSourceName.value = outcome.sourceName
-        state.frameGenShaderState.intValue = frameGenStateFor(outcome.result)
+        val installed = withContext(Dispatchers.IO) { AifgFrameGen.isInstalled(context) }
+        state.frameGenShaderState.intValue =
+            if (installed) FRAMEGEN_SHADERS_READY else FRAMEGEN_SHADERS_MISSING
     }
 
     val scope = rememberCoroutineScope()
@@ -1747,7 +1745,7 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
                 state.frameGenShaderState.intValue = FRAMEGEN_SHADERS_IMPORTING
                 scope.launch {
                     val outcome =
-                        withContext(Dispatchers.IO) { LosslessAutoImport.importFrom(context, File(pickedPath)) }
+                        withContext(Dispatchers.IO) { AifgAutoImport.importFrom(context, File(pickedPath)) }
                     state.frameGenSourceName.value = outcome.sourceName
                     state.frameGenShaderState.intValue = frameGenStateFor(outcome.result)
                 }
@@ -1778,7 +1776,7 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
         Spacer(Modifier.height(SettingItemGap))
 
         // Enable + multiplier/target-rate/preset now live only in the in-session drawer
-        // (Effects tab). This card is shader-import only: locate/import the Lossless.dll
+        // (Effects tab). This card is shader-import only: manually locate/import the
         // frame-gen shaders so the drawer's toggle has something to enable.
         Text(
             text =
@@ -1794,11 +1792,6 @@ private fun FrameGenerationCard(state: GameSettingsStateHolder) {
                                 state.frameGenSourceName.value,
                             )
                         }
-                    FRAMEGEN_SHADERS_UPDATED ->
-                        stringResource(
-                            R.string.settings_frame_generation_updated,
-                            state.frameGenSourceName.value,
-                        )
                     FRAMEGEN_SHADERS_FAILED -> stringResource(R.string.settings_frame_generation_failed)
                     else -> stringResource(R.string.settings_frame_generation_not_found)
                 },
@@ -5482,9 +5475,7 @@ private fun SettingActionButton(
 
 private fun frameGenStateFor(result: Int): Int =
     when (result) {
-        LosslessAutoImport.RESULT_READY, LosslessAutoImport.RESULT_IMPORTED -> FRAMEGEN_SHADERS_READY
-        LosslessAutoImport.RESULT_UPDATED -> FRAMEGEN_SHADERS_UPDATED
-        LosslessAutoImport.RESULT_NOT_FOUND -> FRAMEGEN_SHADERS_MISSING
+        AifgAutoImport.RESULT_IMPORTED -> FRAMEGEN_SHADERS_READY
         else -> FRAMEGEN_SHADERS_FAILED
     }
 

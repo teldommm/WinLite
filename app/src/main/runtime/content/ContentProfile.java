@@ -62,6 +62,6 @@ public class ContentProfile {
   public String winePrefixPack;
   public String remoteUrl;
   public boolean isInstalled;
-  /** True for first-party "WinNative" builds, flagged via "official" in contents.json. */
+  /** True for first-party "WinLite" builds, flagged via "official" in contents.json. */
   public boolean isOfficial;
 }

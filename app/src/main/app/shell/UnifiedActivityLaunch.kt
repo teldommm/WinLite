@@ -212,7 +212,7 @@ import com.winlator.cmod.shared.ui.JoystickGridScroll
 import com.winlator.cmod.shared.ui.JoystickListScroll
 import com.winlator.cmod.shared.ui.ListView
 import com.winlator.cmod.shared.ui.widget.chasingBorder
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.Lazy
 import com.winlator.cmod.feature.stores.steam.enums.EPersonaState
@@ -426,7 +426,7 @@ internal fun UnifiedActivity.buildStoreWineExecCommand(
                 }
             val linkName =
                 com.winlator.cmod.runtime.wine.WineUtils.getDriveCGameLinkName(gameInstallPath)
-            "C:\\WinNative\\Games\\$source\\$linkName\\$relativePath"
+            "C:\\WinLite\\Games\\$source\\$linkName\\$relativePath"
     }
     return "wine \"$windowsPath\""
 }

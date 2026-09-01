@@ -93,13 +93,13 @@ import com.winlator.cmod.feature.sync.google.WinePathUtils
 import com.winlator.cmod.runtime.container.ContainerManager
 import com.winlator.cmod.runtime.container.Shortcut
 import com.winlator.cmod.shared.android.DirectoryPickerDialog
-import com.winlator.cmod.shared.theme.WinNativeAccent
-import com.winlator.cmod.shared.theme.WinNativeBackground
-import com.winlator.cmod.shared.theme.WinNativeOutline
-import com.winlator.cmod.shared.theme.WinNativeTextPrimary
-import com.winlator.cmod.shared.theme.WinNativeTextSecondary
-import com.winlator.cmod.shared.ui.dialog.WinNativeDialogButton
-import com.winlator.cmod.shared.ui.dialog.WinNativeDialogShell
+import com.winlator.cmod.shared.theme.WinLiteAccent
+import com.winlator.cmod.shared.theme.WinLiteBackground
+import com.winlator.cmod.shared.theme.WinLiteOutline
+import com.winlator.cmod.shared.theme.WinLiteTextPrimary
+import com.winlator.cmod.shared.theme.WinLiteTextSecondary
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogButton
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogShell
 import com.winlator.cmod.shared.ui.nav.paneNavItem
 import com.winlator.cmod.shared.ui.outlinedSwitchColors
 import com.winlator.cmod.shared.ui.toast.WinToast
@@ -868,14 +868,14 @@ internal fun CloudSavesContent(
 
     entryPendingRename?.let { entry ->
         var labelInput by remember(entry.fileId) { mutableStateOf(entry.label.orEmpty()) }
-        WinNativeDialogShell(
+        WinLiteDialogShell(
             onDismiss = { entryPendingRename = null },
             maxWidth = 336.dp,
             contentPadding = PaddingValues(start = 18.dp, top = 16.dp, end = 18.dp, bottom = 12.dp),
         ) {
             Text(
                 text = stringResource(R.string.cloud_saves_history_rename_title),
-                color = WinNativeTextPrimary,
+                color = WinLiteTextPrimary,
                 fontSize = 13.sp,
                 lineHeight = 15.sp,
                 fontWeight = FontWeight.Bold,
@@ -886,7 +886,7 @@ internal fun CloudSavesContent(
                     Modifier
                         .fillMaxWidth()
                         .height(1.dp)
-                        .background(WinNativeOutline),
+                        .background(WinLiteOutline),
             )
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
@@ -898,26 +898,26 @@ internal fun CloudSavesContent(
                 placeholder = {
                     Text(
                         stringResource(R.string.cloud_saves_history_rename_hint),
-                        color = WinNativeTextSecondary,
+                        color = WinLiteTextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 14.sp,
                     )
                 },
                 textStyle =
                     MaterialTheme.typography.bodySmall.copy(
-                        color = WinNativeTextPrimary,
+                        color = WinLiteTextPrimary,
                         fontSize = 12.sp,
                         lineHeight = 14.sp,
                     ),
                 colors =
                     OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = WinNativeAccent,
-                        unfocusedBorderColor = WinNativeOutline,
-                        focusedTextColor = WinNativeTextPrimary,
-                        unfocusedTextColor = WinNativeTextPrimary,
-                        focusedContainerColor = WinNativeBackground,
-                        unfocusedContainerColor = WinNativeBackground,
-                        cursorColor = WinNativeAccent,
+                        focusedBorderColor = WinLiteAccent,
+                        unfocusedBorderColor = WinLiteOutline,
+                        focusedTextColor = WinLiteTextPrimary,
+                        unfocusedTextColor = WinLiteTextPrimary,
+                        focusedContainerColor = WinLiteBackground,
+                        unfocusedContainerColor = WinLiteBackground,
+                        cursorColor = WinLiteAccent,
                     ),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -928,7 +928,7 @@ internal fun CloudSavesContent(
                     Modifier
                         .fillMaxWidth()
                         .height(1.dp)
-                        .background(WinNativeOutline),
+                        .background(WinLiteOutline),
             )
             Spacer(Modifier.height(10.dp))
             Row(
@@ -939,7 +939,7 @@ internal fun CloudSavesContent(
                 if (!entry.label.isNullOrBlank()) {
                     CompactRenameDialogButton(
                         label = stringResource(R.string.cloud_saves_history_rename_clear),
-                        textColor = WinNativeTextSecondary,
+                        textColor = WinLiteTextSecondary,
                         onClick = {
                             val target = entryPendingRename ?: return@CompactRenameDialogButton
                             entryPendingRename = null
@@ -968,14 +968,14 @@ internal fun CloudSavesContent(
                 }
                 CompactRenameDialogButton(
                     label = stringResource(R.string.common_ui_cancel),
-                    textColor = WinNativeTextPrimary,
+                    textColor = WinLiteTextPrimary,
                     onClick = { entryPendingRename = null },
                 )
                 CompactRenameDialogButton(
                     label = stringResource(R.string.cloud_saves_history_rename_save),
-                    textColor = WinNativeAccent,
-                    backgroundColor = WinNativeAccent.copy(alpha = 0.12f),
-                    borderColor = WinNativeAccent.copy(alpha = 0.3f),
+                    textColor = WinLiteAccent,
+                    backgroundColor = WinLiteAccent.copy(alpha = 0.12f),
+                    borderColor = WinLiteAccent.copy(alpha = 0.3f),
                     onClick = {
                         val target = entryPendingRename ?: return@CompactRenameDialogButton
                         val newLabel = labelInput

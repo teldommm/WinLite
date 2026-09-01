@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Common > UI Labels -->
-    <string name="common_ui_app_name">WinNative</string>
+    <string name="common_ui_app_name">WinLite</string>
     <string name="common_ui_run">Запустить</string>
     <string name="common_ui_edit">Редактировать</string>
     <string name="common_ui_remove">Удалить</string>
@@ -134,7 +134,7 @@
     <string name="common_ui_grant_all_files_access_browse">Предоставьте полный доступ к файлам, чтобы просматривать папки напрямую.</string>
     <string name="common_ui_not_configured">Не настроено</string>
     <string name="common_ui_reinstall">Переустановить</string>
-    <string name="common_ui_exit_app_confirm">Выйти из WinNative?</string>
+    <string name="common_ui_exit_app_confirm">Выйти из WinLite?</string>
     <string name="common_ui_elements_count">%1$d элементов</string>
     <string name="common_ui_disabled_placeholder">-- Отключено --</string>
     <string name="common_ui_enabled">Включено</string>
@@ -571,8 +571,8 @@
     <string name="session_xserver_pref_kbd">Клавиатура</string>
     <string name="session_xserver_pref_other">Другое</string>
     <string name="session_xserver_pref_version">Версия</string>
-    <string name="session_xserver_notification_description">Сообщения WinNative XServer</string>
-    <string name="session_xserver_notification_content">WinNative запущен, не уничтожайте и не смахивайте это уведомление</string>
+    <string name="session_xserver_notification_description">Сообщения WinLite XServer</string>
+    <string name="session_xserver_notification_content">WinLite запущен, не уничтожайте и не смахивайте это уведомление</string>
     <!-- Session > Drawer Menu -->
     <string name="session_drawer_keyboard">Клавиатура</string>
     <string name="session_drawer_fps_monitor">Монитор ФПС</string>
@@ -861,8 +861,8 @@
     <string name="settings_general_xinput_toggle_title">Отключить XInput</string>
     <string name="settings_general_xinput_toggle_summary">Отключает обработку XInput, если вам требуется единоличное управление мышью и клавиатурой.</string>
     <string name="settings_external_display_output_summary">Переносит игру на подключённый внешний дисплей вместо зеркалирования этого экрана. Очки всегда используют собственный дисплей.</string>
-    <string name="settings_general_file_provider_summary">Предоставляйте файлы WinNative средствам выбора документов и файловым менеджерам Android.</string>
-    <string name="settings_general_auto_scraping_summary">Этот параметр позволяет WinNative автоматически загружать обложки пользовательских игр.</string>
+    <string name="settings_general_file_provider_summary">Предоставляйте файлы WinLite средствам выбора документов и файловым менеджерам Android.</string>
+    <string name="settings_general_auto_scraping_summary">Этот параметр позволяет WinLite автоматически загружать обложки пользовательских игр.</string>
     <string name="settings_general_open_browser_summary">Открывайте поддерживаемые веб-ссылки в браузере Android, а не внутри Wine.</string>
     <string name="settings_general_clipboard_summary">Разрешить копирование и вставку между сеансами Android и Wine.</string>
     <string name="settings_general_imagefs_summary">Восстановите связанные системные файлы, не удаляя существующие контейнеры.</string>
@@ -902,7 +902,7 @@
     <string name="settings_debug_input_logs">Входные журналы</string>
     <string name="settings_debug_input_logs_description">Записывать события ввода с геймпада, сенсорного экрана и клавиатуры.</string>
     <string name="settings_debug_download_logs">Журналы загрузок</string>
-    <string name="settings_debug_download_logs_description">Записывать события загрузок и резервного копирования WinNative</string>
+    <string name="settings_debug_download_logs_description">Записывать события загрузок и резервного копирования WinLite</string>
     <string name="settings_debug_vulkan_validation_layers_title">Слои валидации Vulkan</string>
     <string name="settings_debug_vulkan_validation_layers_subtitle">Перезапустите дисплей, чтобы применить.</string>
     <string name="settings_debug_share_logs">Поделиться журналами</string>
@@ -918,10 +918,10 @@
     <string name="settings_debug_delete_logs_confirm_message">Это навсегда удалит все сохраненные файлы журналов (%1$s). Действие нельзя отменить.</string>
     <string name="settings_debug_logs_browser_title">Журналы</string>
     <string name="settings_debug_log_truncated">Показаны последние %1$s этого журнала</string>
-    <string name="settings_debug_logs_subject">Журналы WinNative (%1$s)</string>
+    <string name="settings_debug_logs_subject">Журналы WinLite (%1$s)</string>
     <string name="settings_debug_no_logs_available">Журналы отладки отсутствуют. Сначала включите параметры отладки и запустите игру.</string>
     <string name="settings_debug_capture_failed">Не удалось записать журналы: %1$s</string>
-    <string name="settings_debug_log_to_file_desc">Записывать ошибки процесса WinNative, предупреждения и сбои в файл.</string>
+    <string name="settings_debug_log_to_file_desc">Записывать ошибки процесса WinLite, предупреждения и сбои в файл.</string>
     <string name="settings_debug_section_emulation">Эмуляция</string>
     <string name="settings_debug_section_subsystems">Подсистемы</string>
     <string name="settings_debug_section_tools">Инструменты</string>
@@ -1219,11 +1219,11 @@
     <string name="preloader_platform_custom">Пользовательская игра</string>
     <!-- Performance recording settings -->
     <string name="settings_hud_record_to_file_title">Записывать производительность в файл</string>
-    <string name="settings_hud_record_to_file_summary">Экспортировать ежесекундные показатели FPS, CPU, GPU, температуры и батареи в /WinNative/logs/ во время игры.</string>
+    <string name="settings_hud_record_to_file_summary">Экспортировать ежесекундные показатели FPS, CPU, GPU, температуры и батареи в /WinLite/logs/ во время игры.</string>
     <string name="settings_leaderboard_category">Производительность</string>
     <string name="saves_import_warning_title">Это перезапишет существующие сохранения в этом контейнере</string>
     <string name="saves_import_warning_body">При восстановлении старой резервной копии с несколькими играми сначала скопируйте более новые сохранения в zip-файл с помощью файлового менеджера. Будут затронуты только сохранения, имеющиеся в .zip-файле. Управляйте сохранениями разумно.</string>
-    <string name="saves_export_path_summary">Сохранения будут экспортированы в /WinNative/saves</string>
+    <string name="saves_export_path_summary">Сохранения будут экспортированы в /WinLite/saves</string>
     <string name="saves_export_success_path">Экспортировано в %1$s</string>
     <string name="saves_export_warning_title">Используйте только для пользовательских игр</string>
     <string name="saves_export_warning_body">Экспорт может включать сохранения из игр, установленных через Steam, или игр с облачной синхронизацией.</string>
@@ -1232,7 +1232,7 @@
     <string name="downloads_queue_this_game">эта игра</string>
     <string name="shortcuts_properties_use_legacy_launcher">Использовать устаревший лаунчер</string>
     <string name="shortcuts_properties_use_legacy_launcher_description">Устаревшая эмуляция Steam: запускает игру через лаунчер ColdClient и удаляет SteamStub DRM из exe. Используйте только для старых игр, которые не работают со Steam Launcher.</string>
-    <string name="steam_section_real_client">Настоящий клиент Steam WinNative</string>
+    <string name="steam_section_real_client">Настоящий клиент Steam WinLite</string>
     <string name="steam_section_emulator">Устаревший эмулятор Steam</string>
     <string name="shortcuts_properties_steam_offline_mode_description">Заставляет эмулируемый клиент Steam сообщать, что он офлайн, чтобы игра не пыталась подключаться к сети. Используйте для игр, которые зависают на сетевой проверке Steam.</string>
     <string name="cloud_sync_disable_title">Отключить облачные сохранения</string>
@@ -1494,21 +1494,21 @@
     <string name="session_record_now">Записать сейчас</string>
     <string name="session_record_quality">Качество</string>
     <string name="session_record_resolution">Разрешение</string>
-    <string name="session_record_saved">Запись сохранена в WinNative/Recordings</string>
+    <string name="session_record_saved">Запись сохранена в WinLite/Recordings</string>
     <string name="session_record_settings_title">Настройки записи</string>
     <string name="session_record_started">Запись начата</string>
     <string name="steam_chat_setting_stay_running">Работать в фоне</string>
-    <string name="steam_chat_setting_stay_running_desc">Оставлять чат активным после выхода из WinNative</string>
+    <string name="steam_chat_setting_stay_running_desc">Оставлять чат активным после выхода из WinLite</string>
     <string name="settings_content_refresh">Обновить</string>
 
     <string name="settings_support_title">Поддержка</string>
     <string name="support_heading">ПОМОЩЬ</string>
     <string name="support_desc">Задавайте вопросы, сообщайте о проблемах или следите за разработкой. Каждая ссылка открывается в браузере.</string>
-    <string name="support_winnative_discord_desc">Discord • поддержка и разработка</string>
+    <string name="support_winlite_discord_desc">Discord • поддержка и разработка</string>
     <string name="support_maxstechreview_discord_desc">Discord • сообщество</string>
     <string name="support_youtube_desc">YouTube • руководства и новости</string>
     <string name="support_reddit_desc">Reddit • сообщество</string>
-    <string name="support_winnative_discord">#WinNative</string>
+    <string name="support_winlite_discord">#WinLite</string>
     <string name="support_maxstechreview_discord">#MaxsTechReview</string>
     <string name="support_youtube">@MaxsTechReview</string>
     <string name="support_reddit">r/EmulatorsForAndroid</string>
@@ -1560,9 +1560,9 @@
     <string name="session_drawer_frame_generation_target">Адаптивная цель</string>
     <string name="session_drawer_frame_generation_target_off">Фиксированный</string>
     <string name="session_drawer_frame_generation_target_value">%1$d fps</string>
-    <string name="session_drawer_frame_generation_note">Интерполирует между отрисованными кадрами с помощью Lossless Scaling. Движение плавнее, но задержка ввода увеличивается на один кадр.</string>
+    <string name="session_drawer_frame_generation_note">Интерполирует между отрисованными кадрами с помощью AI Frame Generation. Движение плавнее, но задержка ввода увеличивается на один кадр.</string>
     <string name="session_drawer_frame_generation_target_note">Повышается к цели только пока это даёт измеримый выигрыш, вместо удержания фиксированного множителя.</string>
-    <string name="session_drawer_frame_generation_missing">Установите Lossless Scaling в настройках контейнера, чтобы использовать генерацию кадров.</string>
+    <string name="session_drawer_frame_generation_missing">Установите AI Frame Generation в настройках контейнера, чтобы использовать генерацию кадров.</string>
     <string name="frame_generation_preset">Пресет качества</string>
     <string name="frame_generation_preset_ultra_performance">Ультрапроизводительность</string>
     <string name="frame_generation_preset_performance">Производительность</string>
@@ -1577,11 +1577,10 @@
     <string name="frame_generation_preset_balanced_note" formatted="false">Движение вычисляется при 70 % разрешения. Около 61 % нагрузки на GPU режима «Качество». Рекомендуется для портативных устройств.</string>
     <string name="frame_generation_preset_quality_note" formatted="false">Движение вычисляется при полном разрешении. Максимальная нагрузка; используйте, только когда у игры есть запас GPU.</string>
     <string name="settings_frame_generation_title">Генерация кадров</string>
-    <string name="settings_frame_generation_importing">Поиск Lossless Scaling…</string>
-    <string name="settings_frame_generation_ready">Шейдеры Lossless Scaling готовы.</string>
+    <string name="settings_frame_generation_importing">Поиск AI Frame Generation…</string>
+    <string name="settings_frame_generation_ready">Шейдеры AI Frame Generation готовы.</string>
     <string name="settings_frame_generation_imported">Импортировано из %1$s.</string>
-    <string name="settings_frame_generation_not_found">Lossless Scaling не найден. Установите его из Steam и снова откройте этот экран, чтобы импортировать автоматически.</string>
-    <string name="settings_frame_generation_failed">Lossless.dll найден, но его шейдеры не удалось прочитать. Проверьте файлы Steam и попробуйте снова.</string>
-    <string name="settings_frame_generation_updated">Обновлено из %1$s.</string>
-    <string name="settings_frame_generation_locate">Выбрать Lossless.dll…</string>
+    <string name="settings_frame_generation_not_found">AI Frame Generation не найден. Выберите файл ниже, чтобы импортировать его.</string>
+    <string name="settings_frame_generation_failed">Файл AI Frame Generation найден, но его шейдеры не удалось прочитать. Проверьте файлы Steam и попробуйте снова.</string>
+    <string name="settings_frame_generation_locate">Выбрать файл AI Frame Generation…</string>
 </resources>

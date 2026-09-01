@@ -2,7 +2,7 @@
 
 <resources>
     <!-- Common > UI Labels -->
-    <string name="common_ui_app_name">WinNative</string>
+    <string name="common_ui_app_name">WinLite</string>
     <string name="common_ui_run">Run</string>
     <string name="common_ui_edit">Edit</string>
     <string name="common_ui_remove">Remove</string>
@@ -136,7 +136,7 @@
     <string name="common_ui_grant_all_files_access_browse">Grant all file access to browse folders directly.</string>
     <string name="common_ui_not_configured">Not configured</string>
     <string name="common_ui_reinstall">Reinstall</string>
-    <string name="common_ui_exit_app_confirm">Exit WinNative?</string>
+    <string name="common_ui_exit_app_confirm">Exit WinLite?</string>
     <string name="common_ui_elements_count">%1$d elements</string>
     <string name="common_ui_disabled_placeholder">-- Disabled --</string>
     <string name="common_ui_enabled">Enabled</string>
@@ -329,7 +329,7 @@
     <string name="shortcuts_properties_runtime_patcher">Runtime DRM Patcher</string>
     <string name="shortcuts_properties_runtime_patcher_description">Injects a DRM patcher DLL at launch. Reduces FPS — only use if the Legacy Launcher alone fails.</string>
     <string name="steam_section_title">Steam</string>
-    <string name="steam_section_real_client">WinNative Real Steam Client</string>
+    <string name="steam_section_real_client">WinLite Real Steam Client</string>
     <string name="steam_section_emulator">Legacy Steam Emulator</string>
     <string name="shortcuts_properties_use_steam_input">Use Steam Input</string>
     <string name="shortcuts_properties_steam_offline_mode">Steam Offline Mode</string>
@@ -689,8 +689,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="session_xserver_pref_kbd">Keyboard</string>
     <string name="session_xserver_pref_other">Other</string>
     <string name="session_xserver_pref_version">Version</string>
-    <string name="session_xserver_notification_description">WinNative XServer Messages</string>
-    <string name="session_xserver_notification_content">WinNative is running, do not kill or swipe this notification</string>
+    <string name="session_xserver_notification_description">WinLite XServer Messages</string>
+    <string name="session_xserver_notification_content">WinLite is running, do not kill or swipe this notification</string>
 
     <!-- Session > Drawer Menu -->
     <string name="session_drawer_keyboard">Keyboard</string>
@@ -779,17 +779,16 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="frame_generation_preset_performance_note" formatted="false">Motion estimated at 50% resolution. Around 46% of Quality\'s GPU cost, with almost no visible loss.</string>
     <string name="frame_generation_preset_balanced_note" formatted="false">Motion estimated at 70% resolution. Around 61% of Quality\'s GPU cost. Recommended for handhelds.</string>
     <string name="frame_generation_preset_quality_note" formatted="false">Motion estimated at full resolution. Highest cost; use it only when the game has GPU headroom to spare.</string>
-    <string name="session_drawer_frame_generation_note">Interpolates between rendered frames with Lossless Scaling. Smoother motion, but one extra frame of input latency.</string>
+    <string name="session_drawer_frame_generation_note">Interpolates between rendered frames with AI Frame Generation. Smoother motion, but one extra frame of input latency.</string>
     <string name="session_drawer_frame_generation_target_note">Climbs toward the target only while it measurably helps, instead of holding a fixed multiplier.</string>
-    <string name="session_drawer_frame_generation_missing">Install Lossless Scaling in container settings to use frame generation.</string>
+    <string name="session_drawer_frame_generation_missing">Install AI Frame Generation in container settings to use frame generation.</string>
     <string name="settings_frame_generation_title">Frame Generation</string>
-    <string name="settings_frame_generation_importing">Looking for Lossless Scaling…</string>
-    <string name="settings_frame_generation_ready">Lossless Scaling shaders ready.</string>
+    <string name="settings_frame_generation_importing">Looking for AI Frame Generation…</string>
+    <string name="settings_frame_generation_ready">AI Frame Generation shaders ready.</string>
     <string name="settings_frame_generation_imported">Imported from %1$s.</string>
-    <string name="settings_frame_generation_not_found">Lossless Scaling was not found. Install it from Steam and reopen this screen to import it automatically.</string>
-    <string name="settings_frame_generation_failed">Lossless.dll was found but its shaders could not be read. Verify the Steam files and try again.</string>
-    <string name="settings_frame_generation_updated">Updated from %1$s.</string>
-    <string name="settings_frame_generation_locate">Select Lossless.dll…</string>
+    <string name="settings_frame_generation_not_found">AI Frame Generation was not found. Select the file below to import it.</string>
+    <string name="settings_frame_generation_failed">The AI Frame Generation file was found but its shaders could not be read. Verify the Steam files and try again.</string>
+    <string name="settings_frame_generation_locate">Select AI Frame Generation file…</string>
     <string name="session_drawer_vivid">Vivid</string>
     <string name="session_drawer_vivid_strength">Vivid Strength</string>
     <string name="session_drawer_color_profile">Color Effect</string>
@@ -953,7 +952,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="session_drawer_rail_label_record">Record</string>
     <string name="session_drawer_rail_label_logs">Logs</string>
     <string name="session_record_started">Recording started</string>
-    <string name="session_record_saved">Recording saved to WinNative/Recordings</string>
+    <string name="session_record_saved">Recording saved to WinLite/Recordings</string>
     <string name="session_record_failed">Couldn\'t start recording</string>
     <string name="session_locale_manifest_embedded">Locale override (%1$s) may not apply: this game embeds its own manifest</string>
     <string name="session_locale_manifest_embedded_codepage">Locale override ignored: this game sets its own code page (%1$s)</string>
@@ -1149,8 +1148,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_general_xinput_toggle_title">Disable XInput</string>
     <string name="settings_general_xinput_toggle_summary">Turns off XInput handling when you want exclusive mouse and keyboard control.</string>
     <string name="settings_external_display_output_summary">Move the game to a connected external display instead of mirroring this screen. Glasses always use their own display.</string>
-    <string name="settings_general_file_provider_summary">Expose WinNative files to Android document pickers and file managers.</string>
-    <string name="settings_general_auto_scraping_summary">This setting allows WinNative to automatically pull custom game artwork.</string>
+    <string name="settings_general_file_provider_summary">Expose WinLite files to Android document pickers and file managers.</string>
+    <string name="settings_general_auto_scraping_summary">This setting allows WinLite to automatically pull custom game artwork.</string>
     <string name="settings_general_open_browser_summary">Open supported web links in the Android browser instead of inside Wine.</string>
     <string name="settings_general_clipboard_summary">Allow copy and paste between Android and Wine sessions.</string>
     <string name="settings_general_imagefs_summary">Restore bundled system files without removing your existing containers.</string>
@@ -1192,7 +1191,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_debug_input_logs">Input Logs</string>
     <string name="settings_debug_input_logs_description">Log gamepad, touch, and keyboard input events</string>
     <string name="settings_debug_download_logs">Download Logs</string>
-    <string name="settings_debug_download_logs_description">Log download resolver and WinNative fallback events</string>
+    <string name="settings_debug_download_logs_description">Log download resolver and WinLite fallback events</string>
     <string name="settings_debug_vulkan_validation_layers_title">Vulkan Validation Layers</string>
     <string name="settings_debug_vulkan_validation_layers_subtitle">Restart display to apply.</string>
     <string name="settings_debug_share_logs">Share Logs</string>
@@ -1208,10 +1207,10 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_debug_delete_logs_confirm_message">This permanently deletes all saved log files (%1$s). This can\'t be undone.</string>
     <string name="settings_debug_logs_browser_title">Logs</string>
     <string name="settings_debug_log_truncated">Showing last %1$s of this log</string>
-    <string name="settings_debug_logs_subject">WinNative Logs (%1$s)</string>
+    <string name="settings_debug_logs_subject">WinLite Logs (%1$s)</string>
     <string name="settings_debug_no_logs_available">No debug logs available. Enable debugging options first and launch a game.</string>
     <string name="settings_debug_capture_failed">Failed to capture logs: %1$s</string>
-    <string name="settings_debug_log_to_file_desc">Log WinNative process errors, warnings and crashes to file</string>
+    <string name="settings_debug_log_to_file_desc">Log WinLite process errors, warnings and crashes to file</string>
     <string name="settings_debug_section_emulation">Emulation</string>
     <string name="settings_debug_section_subsystems">Subsystems</string>
     <string name="settings_debug_section_tools">Tools</string>
@@ -1514,7 +1513,7 @@ Installed path:
     <string name="saves_import_export_exported_failed">Failed to export saves: %1$s</string>
     <string name="saves_import_export_imported">Saves imported successfully</string>
     <string name="saves_import_export_imported_failed">Failed to import saves: %1$s</string>
-    <string name="saves_export_path_summary">Saves will be exported to /WinNative/saves</string>
+    <string name="saves_export_path_summary">Saves will be exported to /WinLite/saves</string>
     <string name="saves_export_success_path">Exported to %1$s</string>
     <string name="saves_export_warning_title">Only use this with custom games</string>
     <string name="saves_export_warning_body">Export may include saves from Steam-installed or cloud-sync games.</string>
@@ -1564,7 +1563,7 @@ Installed path:
 
     <!-- Performance recording settings -->
     <string name="settings_hud_record_to_file_title">Record performance to file</string>
-    <string name="settings_hud_record_to_file_summary">Exports per-second FPS, CPU, GPU, temperature, and battery metrics to /WinNative/logs/ during gameplay.</string>
+    <string name="settings_hud_record_to_file_summary">Exports per-second FPS, CPU, GPU, temperature, and battery metrics to /WinLite/logs/ during gameplay.</string>
     <string name="settings_leaderboard_category">Performance</string>
     <!-- Workshop -->
     <string name="workshop_loading_items">Loading Workshop items</string>
@@ -1624,7 +1623,7 @@ Installed path:
     <string name="steam_chat_setting_ingame">Enable Chat in Game</string>
     <string name="steam_chat_setting_ingame_desc">Receive and send messages while playing</string>
     <string name="steam_chat_setting_stay_running">Run in Background</string>
-    <string name="steam_chat_setting_stay_running_desc">Keep chat running after you exit WinNative</string>
+    <string name="steam_chat_setting_stay_running_desc">Keep chat running after you exit WinLite</string>
     <string name="steam_chat_settings_overlay_needed">Allow display over other apps to use chat heads</string>
     <string name="steam_chat_heads_title">Messages</string>
     <string name="steam_chat_heads_recent_title">Recent</string>
@@ -1672,8 +1671,8 @@ Installed path:
     <string name="settings_support_title">Support</string>
     <string name="support_heading">GET HELP</string>
     <string name="support_desc">Ask questions, report problems, or see what is being worked on. Each opens in your browser.</string>
-    <string name="support_winnative_discord">#WinNative</string>
-    <string name="support_winnative_discord_desc">Discord • support and development</string>
+    <string name="support_winlite_discord">#WinLite</string>
+    <string name="support_winlite_discord_desc">Discord • support and development</string>
     <string name="support_maxstechreview_discord">#MaxsTechReview</string>
     <string name="support_maxstechreview_discord_desc">Discord • community</string>
     <string name="support_youtube">@MaxsTechReview</string>

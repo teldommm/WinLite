@@ -14,7 +14,7 @@ object WinePathUtils {
 
     /**
      * Container's drive_c root on the Android filesystem.
-     * Containers built by WinNative store their wine prefix at `<container.rootDir>/.wine`.
+     * Containers built by WinLite store their wine prefix at `<container.rootDir>/.wine`.
      */
     fun driveCRoot(container: Container): File =
         File(container.rootDir, ".wine/drive_c")

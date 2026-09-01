@@ -1,7 +1,7 @@
 /* Borderless-fullscreen toggle for the foreground guest window (arg "on"/"off").
  * Build:
  *   x86_64-w64-mingw32-windres refactorsize.rc -O coff -o refactorsize.res.o
- *   x86_64-w64-mingw32-gcc -O2 -s -mwindows refactorsize.c refactorsize.res.o -o ../../assets/winnative/refactorsize.exe -luser32 */
+ *   x86_64-w64-mingw32-gcc -O2 -s -mwindows refactorsize.c refactorsize.res.o -o ../../assets/winlite/refactorsize.exe -luser32 */
 #include <windows.h>
 #include <stdint.h>
 
@@ -33,7 +33,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     state_path(path, sizeof(path));
 
     /* Argument is "on" or "off". Tolerate the exe path being prepended:
-       neither "on" nor "off" occurs in "C:\winnative\refactorsize.exe". */
+       neither "on" nor "off" occurs in "C:\winlite\refactorsize.exe". */
     int enable = contains(cmd, "on") && !contains(cmd, "off");
 
     if (enable) {

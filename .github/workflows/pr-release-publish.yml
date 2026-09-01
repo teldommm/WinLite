@@ -24,7 +24,7 @@ jobs:
       pull-requests: read
     env:
       SOURCE_REPO: ${{ github.repository }}
-      TARGET_REPO: WinNative-Emu/WinNative-CI
+      TARGET_REPO: WinLite-Emu/WinLite-CI
       RUN_ID: ${{ github.event.workflow_run.id }}
       HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
       HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
@@ -82,8 +82,8 @@ jobs:
           release_label=$(printf '%s' "$label" | tr '#' '.')
           {
             echo "label=$label"
-            echo "standard=WinNative-Debug-Standard-${label}.apk"
-            echo "release_standard=WinNative-Debug-Standard-${release_label}.apk"
+            echo "standard=WinLite-Debug-Standard-${label}.apk"
+            echo "release_standard=WinLite-Debug-Standard-${release_label}.apk"
           } >> "$GITHUB_OUTPUT"
 
       - name: Download PR build artifacts
@@ -145,13 +145,13 @@ jobs:
             printf '\nBuilt from source commit `%s`.\n' "$short_sha"
           } > release-notes.md
 
-      - name: Create or update release in WinNative-CI
+      - name: Create or update release in WinLite-CI
         if: ${{ steps.scope.outputs.allowed == 'true' }}
         id: release
         env:
-          # Use a fine-grained PAT scoped only to WinNative-Emu/WinNative-CI
+          # Use a fine-grained PAT scoped only to WinLite-Emu/WinLite-CI
           # with "Contents" repository permission set to write.
-          GH_TOKEN: ${{ secrets.WINNATIVE_CI_TOKEN }}
+          GH_TOKEN: ${{ secrets.WINLITE_CI_TOKEN }}
           PR_NUMBER: ${{ steps.scope.outputs.pr_number }}
         run: |
           tag="${{ steps.pr.outputs.tag }}"
@@ -276,7 +276,7 @@ jobs:
       - name: Mark Discord post on release
         if: ${{ steps.scope.outputs.allowed == 'true' && steps.release.outputs.discord_posted != 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.WINNATIVE_CI_TOKEN }}
+          GH_TOKEN: ${{ secrets.WINLITE_CI_TOKEN }}
           PR_NUMBER: ${{ steps.scope.outputs.pr_number }}
           RELEASE_TITLE: ${{ steps.pr.outputs.title }}
           RELEASE_TAG: ${{ steps.pr.outputs.tag }}

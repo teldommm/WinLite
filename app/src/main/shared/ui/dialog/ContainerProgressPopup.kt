@@ -32,7 +32,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.winlator.cmod.R
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 
 /**
  * Lightweight popup shown while a container action (create/remove/
@@ -73,7 +73,7 @@ class ContainerProgressPopup(
             setViewTreeLifecycleOwner(activity as LifecycleOwner)
             setViewTreeSavedStateRegistryOwner(activity as SavedStateRegistryOwner)
             setContent {
-                WinNativeTheme {
+                WinLiteTheme {
                     Box(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                         contentAlignment = Alignment.Center,

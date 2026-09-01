@@ -1,4 +1,4 @@
-//! Rust implementation of the WinNative Steam client.
+//! Rust implementation of the WinLite Steam client.
 //!
 //! The crate is intentionally split along the existing C++ module boundaries
 //! so JNI and `wn_cm_*` C-ABI exports can migrate without changing the Kotlin

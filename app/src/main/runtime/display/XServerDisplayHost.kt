@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.winlator.cmod.R
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -179,7 +179,7 @@ private fun XServerDisplayHost(
         if (stateHolder.phoneRelayoutTick > 0) displayFrame.requestLayout()
     }
 
-    WinNativeTheme {
+    WinLiteTheme {
         BoxWithConstraints(
             modifier =
                 Modifier

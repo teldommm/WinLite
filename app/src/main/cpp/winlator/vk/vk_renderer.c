@@ -71,8 +71,8 @@ static bool create_composite_targets(VkRenderer* r, uint32_t w, uint32_t h, uint
 static bool composite_format_supported(VkRenderer* r);
 static void blit_composite_to_swapchain(VkRenderer* r, VkCommandBuffer cmd,
                                         VkCompositeTarget* src, VkImage dst);
-static void create_lsfg(VkRenderer* r);
-static void destroy_lsfg(VkRenderer* r);
+static void create_aifg(VkRenderer* r);
+static void destroy_aifg(VkRenderer* r);
 static uint32_t framegen_extra_images(const VkRenderer* r);
 static void framegen_rebuild_swapchain(VkRenderer* r);
 static bool create_quad_vbo(VkRenderer* r);
@@ -226,9 +226,9 @@ static bool create_instance(VkRenderer* r) {
     free(exts);
 
     VkApplicationInfo app = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
-    app.pApplicationName = "WinNative";
+    app.pApplicationName = "WinLite";
     app.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    app.pEngineName = "WinNativeVk";
+    app.pEngineName = "WinLiteVk";
     app.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     app.apiVersion = VK_API_VERSION_1_1;
 
@@ -612,7 +612,7 @@ static bool create_command_pool(VkRenderer* r) {
         VkFrame* f = &r->frames[i];
         if (vkAllocateCommandBuffers(r->device, &ai, &f->cmd) != VK_SUCCESS) return false;
         if (vkCreateSemaphore(r->device, &si, NULL, &f->image_available) != VK_SUCCESS) return false;
-        for (uint32_t g = 0; g < VKR_LSFG_MAX_GENERATIONS; g++) {
+        for (uint32_t g = 0; g < VKR_AIFG_MAX_GENERATIONS; g++) {
             if (vkCreateSemaphore(r->device, &si, NULL, &f->image_available_gen[g]) != VK_SUCCESS) {
                 return false;
             }
@@ -1359,10 +1359,10 @@ static bool create_swapchain(VkRenderer* r, uint32_t fallback_width, uint32_t fa
         goto fail;
     }
     r->swapchain_image_count = got;
-    if (r->swapchain_storage && got > VKR_LSFG_MAX_TARGETS) {
+    if (r->swapchain_storage && got > VKR_AIFG_MAX_TARGETS) {
         r->swapchain_storage = false;
         VK_LOGI("Swapchain has %u images, more than the %u frame generation targets; "
-                "keeping the composite path", got, VKR_LSFG_MAX_TARGETS);
+                "keeping the composite path", got, VKR_AIFG_MAX_TARGETS);
     }
     r->framegen_supported = transfer_dst_capable && composite_format_supported(r);
     VK_LOGI("Swapchain images requested=%u actual=%u caps.min=%u caps.max=%u framegen_extra=%u",
@@ -1890,10 +1890,10 @@ static bool create_composite_targets(VkRenderer* r, uint32_t w, uint32_t h, uint
     return true;
 }
 
-static void destroy_lsfg(VkRenderer* r) {
-    if (!r->lsfg) return;
-    vkr_lsfg_destroy(r->lsfg);
-    r->lsfg = NULL;
+static void destroy_aifg(VkRenderer* r) {
+    if (!r->aifg) return;
+    vkr_aifg_destroy(r->aifg);
+    r->aifg = NULL;
     r->framegen_real_frames = 0;
     r->framegen_made_frames = 0;
     r->framegen_draw_ns = 0;
@@ -1902,15 +1902,15 @@ static void destroy_lsfg(VkRenderer* r) {
     r->framegen_timed_frames = 0;
 }
 
-static void create_lsfg(VkRenderer* r) {
-    if (r->lsfg || !r->lsfg_cache_path || !r->device || !r->physical_device) return;
+static void create_aifg(VkRenderer* r) {
+    if (r->aifg || !r->aifg_cache_path || !r->device || !r->physical_device) return;
 
-    r->lsfg = vkr_lsfg_create(r->device, r->physical_device, r->lsfg_cache_path);
-    if (!r->lsfg) {
-        VK_LOGW("LSFG shaders unavailable at %s; frame generation stays off", r->lsfg_cache_path);
+    r->aifg = vkr_aifg_create(r->device, r->physical_device, r->aifg_cache_path);
+    if (!r->aifg) {
+        VK_LOGW("AIFG shaders unavailable at %s; frame generation stays off", r->aifg_cache_path);
         return;
     }
-    vkr_lsfg_configure(r->lsfg, r->framegen_multiplier ? r->framegen_multiplier : 2u,
+    vkr_aifg_configure(r->aifg, r->framegen_multiplier ? r->framegen_multiplier : 2u,
                        r->framegen_target_rate,
                        r->framegen_flow_scale > 0.0f ? r->framegen_flow_scale : 0.7f,
                        r->framegen_refresh_rate);
@@ -1918,10 +1918,10 @@ static void create_lsfg(VkRenderer* r) {
 
 static uint32_t framegen_extra_images(const VkRenderer* r) {
     if (!r->framegen_requested) return 0;
-    if (r->framegen_target_rate != 0) return VKR_LSFG_MAX_GENERATIONS;
+    if (r->framegen_target_rate != 0) return VKR_AIFG_MAX_GENERATIONS;
 
     uint32_t generations = r->framegen_multiplier > 1 ? r->framegen_multiplier - 1 : 1;
-    return generations > VKR_LSFG_MAX_GENERATIONS ? VKR_LSFG_MAX_GENERATIONS : generations;
+    return generations > VKR_AIFG_MAX_GENERATIONS ? VKR_AIFG_MAX_GENERATIONS : generations;
 }
 
 static void framegen_rebuild_swapchain(VkRenderer* r) {
@@ -2500,16 +2500,16 @@ static bool record_and_submit_frame(VkRenderer* r) {
     bool via_composite = r->framegen_requested && r->framegen_supported
                       && r->swapchain_transfer_dst;
 
-    if (via_composite && r->lsfg) {
+    if (via_composite && r->aifg) {
         VkExtent2D guest = compute_sgsr1_source_extent(r, &snap);
-        vkr_lsfg_set_guest_extent(r->lsfg, guest.width, guest.height);
+        vkr_aifg_set_guest_extent(r->aifg, guest.width, guest.height);
     }
 
     uint32_t framegen_capacity = 0;
-    if (via_composite && r->lsfg && r->swapchain_image_count > 2) {
+    if (via_composite && r->aifg && r->swapchain_image_count > 2) {
         framegen_capacity = r->swapchain_image_count - 2;
-        if (framegen_capacity > VKR_LSFG_MAX_GENERATIONS) {
-            framegen_capacity = VKR_LSFG_MAX_GENERATIONS;
+        if (framegen_capacity > VKR_AIFG_MAX_GENERATIONS) {
+            framegen_capacity = VKR_AIFG_MAX_GENERATIONS;
         }
         if (VK_FRAMES_IN_FLIGHT + framegen_capacity > VK_MAX_COMPOSITE_TARGETS) {
             framegen_capacity = VK_MAX_COMPOSITE_TARGETS - VK_FRAMES_IN_FLIGHT;
@@ -2522,8 +2522,8 @@ static bool record_and_submit_frame(VkRenderer* r) {
             || r->composite_count != composite_needed
             || r->composite[0].width != r->swapchain_extent.width
             || r->composite[0].height != r->swapchain_extent.height;
-        bool chain_stale = r->lsfg
-            && vkr_lsfg_needs_rebuild(r->lsfg, r->swapchain_extent.width,
+        bool chain_stale = r->aifg
+            && vkr_aifg_needs_rebuild(r->aifg, r->swapchain_extent.width,
                                       r->swapchain_extent.height, r->swapchain_format);
         if (composite_stale || chain_stale) {
             wait_inflight_frames(r);
@@ -2533,9 +2533,9 @@ static bool record_and_submit_frame(VkRenderer* r) {
                 r->framegen_supported = false;
                 via_composite = false;
                 framegen_capacity = 0;
-            } else if (r->lsfg) {
-                vkr_lsfg_forget_targets(r->lsfg);
-                if (!vkr_lsfg_prepare(r->lsfg, r->swapchain_extent.width,
+            } else if (r->aifg) {
+                vkr_aifg_forget_targets(r->aifg);
+                if (!vkr_aifg_prepare(r->aifg, r->swapchain_extent.width,
                                       r->swapchain_extent.height, r->swapchain_format)) {
                     framegen_capacity = 0;
                 }
@@ -2547,11 +2547,11 @@ static bool record_and_submit_frame(VkRenderer* r) {
     }
 
     uint32_t framegen_planned = 0;
-    if (via_composite && r->lsfg) {
+    if (via_composite && r->aifg) {
         const int32_t pending_mhz = __atomic_load_n(&r->framegen_refresh_mhz, __ATOMIC_RELAXED);
         r->framegen_refresh_rate = pending_mhz > 0 ? (float)pending_mhz / 1000.0f : 0.0f;
-        vkr_lsfg_set_refresh_rate(r->lsfg, r->framegen_refresh_rate);
-        framegen_planned = vkr_lsfg_plan(r->lsfg, framegen_capacity,
+        vkr_aifg_set_refresh_rate(r->aifg, r->framegen_refresh_rate);
+        framegen_planned = vkr_aifg_plan(r->aifg, framegen_capacity,
                                          __atomic_load_n(&r->framegen_source_frames,
                                                          __ATOMIC_RELAXED));
     }
@@ -2592,7 +2592,7 @@ static bool record_and_submit_frame(VkRenderer* r) {
     }
 
     uint32_t gen_count = 0;
-    uint32_t gen_image_index[VKR_LSFG_MAX_GENERATIONS] = {0};
+    uint32_t gen_image_index[VKR_AIFG_MAX_GENERATIONS] = {0};
     for (uint32_t g = 0; g < framegen_planned; g++) {
         uint32_t idx = 0;
         VkResult ga = vkAcquireNextImageKHR(r->device, r->swapchain, gen_acquire_timeout,
@@ -2730,14 +2730,14 @@ static bool record_and_submit_frame(VkRenderer* r) {
     }
 
     if (composite) {
-        if (r->lsfg && framegen_capacity > 0) {
-            vkr_lsfg_process(r->lsfg, f->cmd, composite->image,
+        if (r->aifg && framegen_capacity > 0) {
+            vkr_aifg_process(r->aifg, f->cmd, composite->image,
                              r->swapchain_extent.width, r->swapchain_extent.height, gen_count);
 
             for (uint32_t g = 0; g < gen_count; g++) {
                 const uint32_t idx = gen_image_index[g];
                 if (r->swapchain_storage) {
-                    vkr_lsfg_generate_into(r->lsfg, f->cmd, g, idx,
+                    vkr_aifg_generate_into(r->aifg, f->cmd, g, idx,
                                            r->swapchain_images[idx], r->swapchain_views[idx],
                                            r->swapchain_extent.width,
                                            r->swapchain_extent.height);
@@ -2749,7 +2749,7 @@ static bool record_and_submit_frame(VkRenderer* r) {
                                       VK_ACCESS_SHADER_WRITE_BIT, 0);
                 } else {
                     VkCompositeTarget* gt = &r->composite[VK_FRAMES_IN_FLIGHT + g];
-                    vkr_lsfg_generate_into(r->lsfg, f->cmd, g, VK_FRAMES_IN_FLIGHT + g,
+                    vkr_aifg_generate_into(r->aifg, f->cmd, g, VK_FRAMES_IN_FLIGHT + g,
                                            gt->image, gt->view,
                                            r->swapchain_extent.width,
                                            r->swapchain_extent.height);
@@ -2853,7 +2853,7 @@ static bool record_and_submit_frame(VkRenderer* r) {
 
     vkEndCommandBuffer(f->cmd);
 
-    #define VK_MAX_FRAME_SEMAPHORES (2 + VKR_LSFG_MAX_GENERATIONS)
+    #define VK_MAX_FRAME_SEMAPHORES (2 + VKR_AIFG_MAX_GENERATIONS)
     VkSemaphore wait_sems[VK_MAX_FRAME_SEMAPHORES];
     VkPipelineStageFlags wait_stages[VK_MAX_FRAME_SEMAPHORES];
     VkSemaphore signal_sems[VK_MAX_FRAME_SEMAPHORES];
@@ -2913,7 +2913,7 @@ static bool record_and_submit_frame(VkRenderer* r) {
             f->image_available = VK_NULL_HANDLE;
             vkCreateSemaphore(r->device, &asi, NULL, &f->image_available);
         }
-        for (uint32_t g = 0; g < VKR_LSFG_MAX_GENERATIONS; g++) {
+        for (uint32_t g = 0; g < VKR_AIFG_MAX_GENERATIONS; g++) {
             if (!f->image_available_gen[g]) continue;
             vkDestroySemaphore(r->device, f->image_available_gen[g], NULL);
             f->image_available_gen[g] = VK_NULL_HANDLE;
@@ -3128,9 +3128,9 @@ JNIEXPORT void JNICALL JNI_FN(nativeDestroy)(JNIEnv* env, jclass clazz, jlong ha
     destroy_record_swapchain(r);
     destroy_sgsr1_resources(r);
     destroy_offscreen(r);
-    destroy_lsfg(r);
-    free(r->lsfg_cache_path);
-    r->lsfg_cache_path = NULL;
+    destroy_aifg(r);
+    free(r->aifg_cache_path);
+    r->aifg_cache_path = NULL;
 
     destroy_swapchain(r);
     destroy_pipelines(r);
@@ -3139,7 +3139,7 @@ JNIEXPORT void JNICALL JNI_FN(nativeDestroy)(JNIEnv* env, jclass clazz, jlong ha
     for (uint32_t i = 0; i < VK_FRAMES_IN_FLIGHT; i++) {
         VkFrame* f = &r->frames[i];
         if (f->image_available) vkDestroySemaphore(r->device, f->image_available, NULL);
-        for (uint32_t g = 0; g < VKR_LSFG_MAX_GENERATIONS; g++) {
+        for (uint32_t g = 0; g < VKR_AIFG_MAX_GENERATIONS; g++) {
             if (f->image_available_gen[g]) {
                 vkDestroySemaphore(r->device, f->image_available_gen[g], NULL);
             }
@@ -3648,9 +3648,9 @@ JNIEXPORT void JNICALL JNI_FN(nativeSetFrameGenerationEnabled)(JNIEnv* env, jcla
     r->framegen_requested = want;
     if (!want) {
         wait_inflight_frames(r);
-        destroy_lsfg(r);
-    } else if (r->device && r->lsfg_cache_path) {
-        create_lsfg(r);
+        destroy_aifg(r);
+    } else if (r->device && r->aifg_cache_path) {
+        create_aifg(r);
     }
     framegen_rebuild_swapchain(r);
     pthread_mutex_unlock(&r->render_mutex);
@@ -3674,18 +3674,18 @@ JNIEXPORT void JNICALL JNI_FN(nativeSetFrameGenerationShaders)(JNIEnv* env, jcla
 
     pthread_mutex_lock(&r->render_mutex);
     wait_inflight_frames(r);
-    destroy_lsfg(r);
-    free(r->lsfg_cache_path);
-    r->lsfg_cache_path = NULL;
+    destroy_aifg(r);
+    free(r->aifg_cache_path);
+    r->aifg_cache_path = NULL;
 
     if (cachePath != NULL) {
         const char* path = (*env)->GetStringUTFChars(env, cachePath, NULL);
         if (path != NULL) {
-            r->lsfg_cache_path = strdup(path);
+            r->aifg_cache_path = strdup(path);
             (*env)->ReleaseStringUTFChars(env, cachePath, path);
         }
     }
-    if (r->framegen_requested && r->device && r->lsfg_cache_path) create_lsfg(r);
+    if (r->framegen_requested && r->device && r->aifg_cache_path) create_aifg(r);
     pthread_mutex_unlock(&r->render_mutex);
 }
 
@@ -3719,8 +3719,8 @@ JNIEXPORT void JNICALL JNI_FN(nativeSetFrameGenerationMode)(JNIEnv* env, jclass 
     r->framegen_multiplier = multiplier < 2 ? 2u : (uint32_t)multiplier;
     r->framegen_target_rate = targetRate < 0 ? 0u : (uint32_t)targetRate;
     r->framegen_flow_scale = flowScalePct <= 0 ? 0.7f : (float)flowScalePct / 100.0f;
-    if (r->lsfg) {
-        vkr_lsfg_configure(r->lsfg, r->framegen_multiplier, r->framegen_target_rate,
+    if (r->aifg) {
+        vkr_aifg_configure(r->aifg, r->framegen_multiplier, r->framegen_target_rate,
                            r->framegen_flow_scale, r->framegen_refresh_rate);
     }
     if (framegen_extra_images(r) != previous_images) {

@@ -46,7 +46,7 @@ import com.winlator.cmod.shared.io.FileUtils
 import com.winlator.cmod.shared.io.HttpUtils
 import com.winlator.cmod.shared.math.Mathf
 import com.winlator.cmod.shared.ui.dialog.ContentDialog
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -114,7 +114,7 @@ class InputControlsFragment : Fragment() {
         ComposeView(requireContext()).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
-                WinNativeTheme(
+                WinLiteTheme(
                     colorScheme =
                         darkColorScheme(
                             primary = Color(0xFF1A9FFF),
@@ -1363,7 +1363,7 @@ class InputControlsFragment : Fragment() {
     companion object {
         private const val ARG_SELECTED_PROFILE_ID = "selectedProfileId"
         private const val INPUT_CONTROLS_URL =
-            "https://raw.githubusercontent.com/nicholasx417/WinNative-Components/main/Profiles/%s"
+            "https://raw.githubusercontent.com/nicholasx417/WinLite-Components/main/Profiles/%s"
         private const val PREF_SELECTED_PROFILE_ID = "input_controls_selected_profile_id"
 
         fun newInstance(profileId: Int = 0): InputControlsFragment =

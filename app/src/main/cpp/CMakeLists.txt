@@ -148,21 +148,21 @@ add_library(winlator SHARED
         winlator/vk/vk_dispatch.c
         winlator/vk/vk_image.c
         winlator/vk/vk_renderer.c
-        winlator/vk/lsfg/lsfg_dll.c
-        winlator/vk/lsfg/lsfg_dxbc.cpp
-        winlator/vk/lsfg/lsfg_common.cpp
-        winlator/vk/lsfg/lsfg_shaders.cpp
-        winlator/vk/lsfg/lsfg_mipmaps.cpp
-        winlator/vk/lsfg/lsfg_generate.cpp
-        winlator/vk/lsfg/lsfg_alpha.cpp
-        winlator/vk/lsfg/lsfg_beta.cpp
-        winlator/vk/lsfg/lsfg_gamma.cpp
-        winlator/vk/lsfg/lsfg_delta.cpp
-        winlator/vk/lsfg/lsfg_chain.cpp
-        winlator/vk/lsfg/lsfg_pacer.cpp
-        winlator/vk/lsfg/vkr_lsfg.cpp
-        winlator/vk/lsfg/lsfg_probe.c
-        winlator/vk/lsfg/lsfg_jni.c
+        winlator/vk/aifg/aifg_dll.c
+        winlator/vk/aifg/aifg_dxbc.cpp
+        winlator/vk/aifg/aifg_common.cpp
+        winlator/vk/aifg/aifg_shaders.cpp
+        winlator/vk/aifg/aifg_mipmaps.cpp
+        winlator/vk/aifg/aifg_generate.cpp
+        winlator/vk/aifg/aifg_alpha.cpp
+        winlator/vk/aifg/aifg_beta.cpp
+        winlator/vk/aifg/aifg_gamma.cpp
+        winlator/vk/aifg/aifg_delta.cpp
+        winlator/vk/aifg/aifg_chain.cpp
+        winlator/vk/aifg/aifg_pacer.cpp
+        winlator/vk/aifg/vkr_aifg.cpp
+        winlator/vk/aifg/aifg_probe.c
+        winlator/vk/aifg/aifg_jni.c
 )
 
 add_dependencies(winlator winlator_shaders)

@@ -42,7 +42,7 @@ class SteamArtworkScraper(private val context: Context) : ArtworkScraper() {
                 val request = Request.Builder()
                     .url("https://www.steamgriddb.com/api/public/search/main/games")
                     .post(requestBody.toRequestBody("application/json".toMediaType()))
-                    .header("User-Agent", "WinNative/1.0")
+                    .header("User-Agent", "WinLite/1.0")
                     .header("Accept", "application/json, text/plain, */*")
                     .header("Accept-Language", "en-US,en;q=0.9")
                     .header("Content-Type", "application/json")
@@ -82,7 +82,7 @@ class SteamArtworkScraper(private val context: Context) : ArtworkScraper() {
         try {
             val request = Request.Builder()
                 .url(String.format("https://www.steamgriddb.com/api/public/game/%s/home", gameId.toString()))
-                .header("User-Agent", "WinNative/1.0")
+                .header("User-Agent", "WinLite/1.0")
                 .header("Accept", "application/json, text/plain, */*")
                 .header("Referer", "https://www.steamgriddb.com/game/")
                 .build()
@@ -118,7 +118,7 @@ class SteamArtworkScraper(private val context: Context) : ArtworkScraper() {
                 val storagePath = File(storageDir, gameId.toString()).absolutePath
                 val request = Request.Builder()
                     .url(String.format("https://www.steamgriddb.com/api/public/game/%s", gameId.toString()))
-                    .header("User-Agent", "WinNative/1.0")
+                    .header("User-Agent", "WinLite/1.0")
                     .header("Accept", "application/json, text/plain, */*")
                     .header("Accept-Language", "en-US,en;q=0.9")
                     .header("Connection", "keep-alive")

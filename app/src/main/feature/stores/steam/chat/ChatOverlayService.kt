@@ -104,7 +104,7 @@ import com.winlator.cmod.feature.stores.steam.data.SteamChatMessage
 import com.winlator.cmod.feature.stores.steam.data.SteamFriendEntry
 import com.winlator.cmod.feature.stores.steam.service.SteamService
 import com.winlator.cmod.feature.stores.steam.utils.PrefManager
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -285,7 +285,7 @@ class ChatOverlayService : Service() {
         bubbleParams.y = bubbleY.intValue
         val composeView = ComposeView(this).apply {
             setContent {
-                WinNativeTheme {
+                WinLiteTheme {
                     val svc = remember { SteamService.instance }
                     val friends by svc?.friendsList?.collectAsState() ?: remember { mutableStateOf(emptyList<SteamFriendEntry>()) }
                     val unread by svc?.unreadCounts?.collectAsState() ?: remember { mutableStateOf(emptyMap<Long, Int>()) }
@@ -324,7 +324,7 @@ class ChatOverlayService : Service() {
         if (panelView?.parent != null) return
         val compose = ComposeView(this).apply {
             setContent {
-                WinNativeTheme {
+                WinLiteTheme {
                     PanelContent()
                 }
             }
@@ -416,7 +416,7 @@ class ChatOverlayService : Service() {
     private fun showTarget() {
         if (targetView?.parent != null) return
         val view = ComposeView(this).apply {
-            setContent { WinNativeTheme { DismissTarget(dragging.value) } }
+            setContent { WinLiteTheme { DismissTarget(dragging.value) } }
         }
         prepare(view)
         targetView = view

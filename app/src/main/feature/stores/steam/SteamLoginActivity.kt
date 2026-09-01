@@ -50,7 +50,7 @@ import com.winlator.cmod.feature.stores.steam.ui.SteamLoginViewModel
 import com.winlator.cmod.feature.stores.steam.ui.components.QrCodeImage
 import com.winlator.cmod.feature.stores.steam.ui.data.UserLoginState
 import com.winlator.cmod.shared.android.FixedFontScaleComponentActivity
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import com.winlator.cmod.shared.ui.outlinedSwitchColors
 import timber.log.Timber
 
@@ -77,7 +77,7 @@ class SteamLoginActivity : FixedFontScaleComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         setContent {
-            WinNativeTheme(
+            WinLiteTheme(
                 colorScheme =
                     darkColorScheme(
                         primary = Accent,

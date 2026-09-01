@@ -800,7 +800,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
       File udevData = new File(udevDataDir, "c13:" + eventMinor);
       String vendor = String.format(java.util.Locale.US, "%04x", vendorId);
       String product = String.format(java.util.Locale.US, "%04x", productId);
-      String symlink = "input/by-id/usb-WinNative_Generic_HID_Gamepad_" + slot + "-event-joystick";
+      String symlink = "input/by-id/usb-WinLite_Generic_HID_Gamepad_" + slot + "-event-joystick";
       String content =
           "I:"
               + slot
@@ -817,7 +817,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
               + "E:ID_INPUT=1\n"
               + "E:ID_INPUT_JOYSTICK=1\n"
               + "E:ID_BUS=usb\n"
-              + "E:ID_VENDOR=WinNative\n"
+              + "E:ID_VENDOR=WinLite\n"
               + "E:ID_VENDOR_ID="
               + vendor
               + "\n"
@@ -827,7 +827,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
               + "E:ID_MODEL_ID="
               + product
               + "\n"
-              + "E:ID_SERIAL=WinNative_Generic_HID_Gamepad_"
+              + "E:ID_SERIAL=WinLite_Generic_HID_Gamepad_"
               + slot
               + "\n"
               + "E:NAME=\""
@@ -845,7 +845,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
       }
 
-      File byIdLink = new File(byIdDir, "usb-WinNative_Generic_HID_Gamepad_" + slot + "-event-joystick");
+      File byIdLink = new File(byIdDir, "usb-WinLite_Generic_HID_Gamepad_" + slot + "-event-joystick");
       if (!byIdLink.exists()) {
         try {
           FileUtils.symlink("../event" + slot, byIdLink.getPath());
@@ -995,7 +995,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
       File etcDir = imageFs.getEtcDir();
       if (etcDir.isDirectory() || etcDir.mkdirs()) {
         StringBuilder resolv = new StringBuilder();
-        resolv.append("# Generated at launch by WinNative from Android DNS.\n");
+        resolv.append("# Generated at launch by WinLite from Android DNS.\n");
         for (String dns : orderedDns) {
           resolv.append("nameserver ").append(dns).append('\n');
         }

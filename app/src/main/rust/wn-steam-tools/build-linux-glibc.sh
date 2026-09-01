@@ -28,26 +28,26 @@ fi
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER:-aarch64-linux-gnu-gcc}"
 
 RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target "$target" --manifest-path "$manifest" \
-    --bin winnative_steamwebhelper_wrapper \
-    --bin winnative_driverquery_noop
+    --bin winlite_steamwebhelper_wrapper \
+    --bin winlite_driverquery_noop
 cargo build --release --target "$target" --manifest-path "$manifest" --lib
 
 mkdir -p "$asset_dir"
-cp -f "$target_dir/$target/release/winnative_steamwebhelper_wrapper" \
-    "$asset_dir/winnative-steamwebhelper-wrapper"
-cp -f "$target_dir/$target/release/winnative_driverquery_noop" \
-    "$asset_dir/winnative-driverquery-noop"
-cp -f "$target_dir/$target/release/libwinnative_setxid_noop.so" \
-    "$asset_dir/libwinnative-setxid-noop.so"
+cp -f "$target_dir/$target/release/winlite_steamwebhelper_wrapper" \
+    "$asset_dir/winlite-steamwebhelper-wrapper"
+cp -f "$target_dir/$target/release/winlite_driverquery_noop" \
+    "$asset_dir/winlite-driverquery-noop"
+cp -f "$target_dir/$target/release/libwinlite_setxid_noop.so" \
+    "$asset_dir/libwinlite-setxid-noop.so"
 
 if command -v aarch64-linux-gnu-strip >/dev/null 2>&1; then
     aarch64-linux-gnu-strip \
-        "$asset_dir/winnative-steamwebhelper-wrapper" \
-        "$asset_dir/winnative-driverquery-noop" \
-        "$asset_dir/libwinnative-setxid-noop.so"
+        "$asset_dir/winlite-steamwebhelper-wrapper" \
+        "$asset_dir/winlite-driverquery-noop" \
+        "$asset_dir/libwinlite-setxid-noop.so"
 fi
 
 sha256sum \
-    "$asset_dir/winnative-steamwebhelper-wrapper" \
-    "$asset_dir/winnative-driverquery-noop" \
-    "$asset_dir/libwinnative-setxid-noop.so"
+    "$asset_dir/winlite-steamwebhelper-wrapper" \
+    "$asset_dir/winlite-driverquery-noop" \
+    "$asset_dir/libwinlite-setxid-noop.so"

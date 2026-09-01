@@ -1,6 +1,6 @@
 # ----------------------------------------------------------------------------
 # wn-steam-client
-# Rust native Steam protocol client for WinNative.
+# Rust native Steam protocol client for WinLite.
 # ----------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.22.1)

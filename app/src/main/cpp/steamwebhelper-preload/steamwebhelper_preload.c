@@ -63,7 +63,7 @@ static int sidecar_path(const char *path, char *out, size_t out_size) {
     if (!is_steam_singleton_path(path)) {
         return -1;
     }
-    if (snprintf(out, out_size, "%s.winnative-readlink-target", path) >= (int)out_size) {
+    if (snprintf(out, out_size, "%s.winlite-readlink-target", path) >= (int)out_size) {
         return -1;
     }
     return 0;
@@ -85,7 +85,7 @@ static void write_sidecar_link(const char *path, const char *target) {
 
     len = strlen(target);
     if (write(fd, target, len) != (ssize_t)len) {
-        log_msg("winnative steamwebhelper preload: sidecar write failed path=%s errno=%d",
+        log_msg("winlite steamwebhelper preload: sidecar write failed path=%s errno=%d",
                 sidecar, errno);
     }
     close(fd);
@@ -138,7 +138,7 @@ static int sidecar_link_exists(const char *path, char *target, size_t target_siz
 }
 
 static void init_log_path(void) {
-    const char *override = getenv("WINNATIVE_STEAMWEBHELPER_LOG");
+    const char *override = getenv("WINLITE_STEAMWEBHELPER_LOG");
     const char *home = getenv("HOME");
 
     if (g_log_path[0] != '\0') {
@@ -160,7 +160,7 @@ static void init_log_path(void) {
         return;
     }
     if (snprintf(g_log_path, sizeof(g_log_path),
-                 "/tmp/winnative-steamwebhelper.log") >= (int)sizeof(g_log_path)) {
+                 "/tmp/winlite-steamwebhelper.log") >= (int)sizeof(g_log_path)) {
         g_log_path[0] = '\0';
     }
 }
@@ -246,7 +246,7 @@ static ssize_t copy_target(const char *path, const char *target, char *buf, size
     if (out > 0) {
         memcpy(buf, target, out);
     }
-    log_msg("winnative steamwebhelper preload: readlink shim path=%s target=%s", path, target);
+    log_msg("winlite steamwebhelper preload: readlink shim path=%s target=%s", path, target);
     return (ssize_t)out;
 }
 
@@ -267,7 +267,7 @@ static int fake_lstat_if_sidecar(const char *path, struct stat *st) {
         return -1;
     }
     fill_symlink_stat(st, target);
-    log_msg("winnative steamwebhelper preload: lstat shim path=%s target=%s",
+    log_msg("winlite steamwebhelper preload: lstat shim path=%s target=%s",
             path, target);
     errno = 0;
     return 0;
@@ -280,7 +280,7 @@ int symlink(const char *target, const char *linkpath) {
         cache_link(linkpath, target);
     } else if (errno == ENOSYS && is_steam_singleton_path(linkpath)) {
         cache_link(linkpath, target);
-        log_msg("winnative steamwebhelper preload: symlink ENOSYS shim link=%s target=%s",
+        log_msg("winlite steamwebhelper preload: symlink ENOSYS shim link=%s target=%s",
                 linkpath, target);
         errno = 0;
         return 0;
@@ -295,7 +295,7 @@ int symlinkat(const char *target, int newdirfd, const char *linkpath) {
         cache_link(linkpath, target);
     } else if (errno == ENOSYS && is_steam_singleton_path(linkpath)) {
         cache_link(linkpath, target);
-        log_msg("winnative steamwebhelper preload: symlinkat ENOSYS shim link=%s target=%s",
+        log_msg("winlite steamwebhelper preload: symlinkat ENOSYS shim link=%s target=%s",
                 linkpath, target);
         errno = 0;
         return 0;
@@ -380,7 +380,7 @@ int access(const char *path, int mode) {
         return rc;
     }
     if ((mode & X_OK) == 0 && sidecar_link_exists(path, (char[PATH_MAX]){0}, PATH_MAX)) {
-        log_msg("winnative steamwebhelper preload: access shim path=%s mode=%d",
+        log_msg("winlite steamwebhelper preload: access shim path=%s mode=%d",
                 path, mode);
         errno = 0;
         return 0;
@@ -395,7 +395,7 @@ int faccessat(int dirfd, const char *path, int mode, int flags) {
         return rc;
     }
     if ((mode & X_OK) == 0 && sidecar_link_exists(path, (char[PATH_MAX]){0}, PATH_MAX)) {
-        log_msg("winnative steamwebhelper preload: faccessat shim path=%s mode=%d",
+        log_msg("winlite steamwebhelper preload: faccessat shim path=%s mode=%d",
                 path, mode);
         errno = 0;
         return 0;
@@ -419,7 +419,7 @@ int unlink(const char *path) {
     }
     errno = saved_errno;
     if (errno == ENOENT && had_sidecar) {
-        log_msg("winnative steamwebhelper preload: unlink sidecar-only path=%s",
+        log_msg("winlite steamwebhelper preload: unlink sidecar-only path=%s",
                 path);
         errno = 0;
         return 0;
@@ -483,7 +483,7 @@ static void raw_log_signal(const char *kind, int value) {
         return;
     }
     pos = append_literal(line, pos, sizeof(line),
-                         "winnative steamwebhelper preload: ");
+                         "winlite steamwebhelper preload: ");
     pos = append_literal(line, pos, sizeof(line), kind);
     pos = append_literal(line, pos, sizeof(line), " pid=");
     pos = append_long(line, pos, sizeof(line),
@@ -526,7 +526,7 @@ static void raw_log_signal_context(const char *kind, int sig, void *context) {
         return;
     }
     pos = append_literal(line, pos, sizeof(line),
-                         "winnative steamwebhelper preload: ");
+                         "winlite steamwebhelper preload: ");
     pos = append_literal(line, pos, sizeof(line), kind);
     pos = append_literal(line, pos, sizeof(line), " pid=");
     pos = append_long(line, pos, sizeof(line),
@@ -555,7 +555,7 @@ static void raw_log_signal_context(const char *kind, int sig, void *context) {
 }
 
 static int should_block_crashpad_ptrace(long request) {
-    const char *visible = getenv("WINNATIVE_STEAM_VISIBLE_UI");
+    const char *visible = getenv("WINLITE_STEAM_VISIBLE_UI");
 
     if (visible == NULL || strcmp(visible, "1") != 0) {
         return 0;
@@ -577,7 +577,7 @@ long ptrace(enum __ptrace_request request, ...) {
     va_end(ap);
 
     if (should_block_crashpad_ptrace((long)request)) {
-        log_msg("winnative steamwebhelper preload: ptrace attach shim request=%ld pid=%ld EPERM",
+        log_msg("winlite steamwebhelper preload: ptrace attach shim request=%ld pid=%ld EPERM",
                 (long)request, pid);
         errno = EPERM;
         return -1;
@@ -639,14 +639,14 @@ long syscall(long number, ...) {
     va_end(ap);
 
     if (number == SYS_landlock_create_ruleset) {
-        log_msg("winnative steamwebhelper preload: landlock_create_ruleset shim flags=%ld ENOSYS->EOPNOTSUPP",
+        log_msg("winlite steamwebhelper preload: landlock_create_ruleset shim flags=%ld ENOSYS->EOPNOTSUPP",
                 a3);
         errno = EOPNOTSUPP;
         return -1;
     }
 
     if (number == SYS_ptrace && should_block_crashpad_ptrace(a1)) {
-        log_msg("winnative steamwebhelper preload: syscall ptrace attach shim request=%ld pid=%ld EPERM",
+        log_msg("winlite steamwebhelper preload: syscall ptrace attach shim request=%ld pid=%ld EPERM",
                 a1, a2);
         errno = EPERM;
         return -1;
@@ -659,7 +659,7 @@ long syscall(long number, ...) {
 
     if (number == SYS_symlinkat && is_steam_singleton_path((const char *)a3)) {
         cache_link((const char *)a3, (const char *)a1);
-        log_msg("winnative steamwebhelper preload: syscall symlinkat ENOSYS shim link=%s target=%s",
+        log_msg("winlite steamwebhelper preload: syscall symlinkat ENOSYS shim link=%s target=%s",
                 (const char *)a3, (const char *)a1);
         errno = 0;
         return 0;

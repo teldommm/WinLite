@@ -31,7 +31,7 @@ import com.winlator.cmod.shared.android.DirectoryPickerDialog
 import com.winlator.cmod.shared.io.FileUtils
 import com.winlator.cmod.shared.io.StorageUtils
 import com.winlator.cmod.shared.ui.dialog.ContentDialog
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -85,7 +85,7 @@ class ContentsFragment : Fragment() {
         return ComposeView(ctx).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
-                WinNativeTheme(
+                WinLiteTheme(
                     colorScheme =
                         darkColorScheme(
                             primary = Color(0xFF1A9FFF),
@@ -626,14 +626,14 @@ class ContentsFragment : Fragment() {
             val output = File(requireContext().cacheDir, "temp_${System.currentTimeMillis()}")
             val success =
                 withContext(Dispatchers.IO) {
-                    Downloader.downloadFileWinNativeFirst(remoteUrl, output) { downloadedBytes, totalBytes ->
+                    Downloader.downloadFileWinLiteFirst(remoteUrl, output) { downloadedBytes, totalBytes ->
                         if (totalBytes <= 0L) {
                             updateDownloadProgress(
                                 title = getString(R.string.settings_content_downloading_title),
                                 message = profile.verName,
                                 indeterminate = true,
                             )
-                            return@downloadFileWinNativeFirst
+                            return@downloadFileWinLiteFirst
                         }
                         val fraction =
                             (downloadedBytes.toFloat() / totalBytes.toFloat())

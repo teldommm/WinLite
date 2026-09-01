@@ -22,14 +22,14 @@ class NotificationHelper
     ) {
         companion object {
             private const val CHANNEL_ID = "pluvia_foreground_service"
-            private const val CHANNEL_NAME = "WinNative Foreground Service"
+            private const val CHANNEL_NAME = "WinLite Foreground Service"
             private const val NOTIFICATION_ID = 1
 
-            private const val CHAT_CHANNEL_ID = "winnative_steam_chat"
+            private const val CHAT_CHANNEL_ID = "winlite_steam_chat"
             private const val CHAT_CHANNEL_NAME = "Steam Chat"
 
             const val BACKGROUND_RUNNING_NOTIFICATION_ID = 3
-            private const val CHAT_BG_CHANNEL_ID = "winnative_chat_background"
+            private const val CHAT_BG_CHANNEL_ID = "winlite_chat_background"
             private const val CHAT_BG_CHANNEL_NAME = "Steam Background"
 
             const val ACTION_EXIT = BuildConfig.APPLICATION_ID + ".EXIT"
@@ -50,7 +50,7 @@ class NotificationHelper
                     CHANNEL_NAME,
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "Allows to display WinNative foreground notifications"
+                    description = "Allows to display WinLite foreground notifications"
                     setShowBadge(false)
                 }
 

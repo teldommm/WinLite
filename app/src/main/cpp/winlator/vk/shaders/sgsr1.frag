@@ -2,7 +2,7 @@
 
 // Snapdragon Game Super Resolution 1 spatial upscale pass.
 //
-// Adapted for WinNative's Vulkan compositor from Qualcomm's SGSR v1 mobile
+// Adapted for WinLite's Vulkan compositor from Qualcomm's SGSR v1 mobile
 // fragment shader.
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause

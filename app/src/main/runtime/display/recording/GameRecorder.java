@@ -412,19 +412,19 @@ public final class GameRecorder {
         return (int) Math.max(4_000_000L, Math.min(bps, 50_000_000L));
     }
 
-    // ── Output (WinNative/Recordings in the app's external files dir) ────────
+    // ── Output (WinLite/Recordings in the app's external files dir) ────────
 
-    /** /sdcard/WinNative/Recordings (alongside logs/profiles/saves; needs MANAGE_EXTERNAL_STORAGE). */
+    /** /sdcard/WinLite/Recordings (alongside logs/profiles/saves; needs MANAGE_EXTERNAL_STORAGE). */
     private File recordingsDir() {
         File ext = Environment.getExternalStorageDirectory();
-        if (ext != null) return new File(ext, "WinNative/Recordings");
+        if (ext != null) return new File(ext, "WinLite/Recordings");
         File base = appContext.getExternalFilesDir(null);
         if (base == null) base = appContext.getFilesDir();
         return new File(base, "Recordings");
     }
 
     private boolean openOutput() {
-        String name = "WinNative_" + System.currentTimeMillis() + ".mp4";
+        String name = "WinLite_" + System.currentTimeMillis() + ".mp4";
         try {
             File dir = recordingsDir();
             if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {

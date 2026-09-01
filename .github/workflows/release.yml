@@ -188,7 +188,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          cp "$APK_PATH" "artifacts/WinNative-${VERSION}-${VARIANT_NAME}-signed.apk"
+          cp "$APK_PATH" "artifacts/WinLite-${VERSION}-${VARIANT_NAME}-signed.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v7

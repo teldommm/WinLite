@@ -45,14 +45,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.winlator.cmod.R
 import com.winlator.cmod.runtime.container.Shortcut
-import com.winlator.cmod.shared.theme.WinNativeAccent
-import com.winlator.cmod.shared.theme.WinNativeBackground
-import com.winlator.cmod.shared.theme.WinNativeOutline
-import com.winlator.cmod.shared.theme.WinNativePanel
-import com.winlator.cmod.shared.theme.WinNativeSurface
-import com.winlator.cmod.shared.theme.WinNativeTextPrimary
-import com.winlator.cmod.shared.theme.WinNativeTextSecondary
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteAccent
+import com.winlator.cmod.shared.theme.WinLiteBackground
+import com.winlator.cmod.shared.theme.WinLiteOutline
+import com.winlator.cmod.shared.theme.WinLitePanel
+import com.winlator.cmod.shared.theme.WinLiteSurface
+import com.winlator.cmod.shared.theme.WinLiteTextPrimary
+import com.winlator.cmod.shared.theme.WinLiteTextSecondary
+import com.winlator.cmod.shared.theme.WinLiteTheme
 
 interface ShortcutsActionListener {
     fun onRunShortcut(shortcut: Shortcut)
@@ -77,7 +77,7 @@ fun setupShortcutsComposeView(
 ) {
     composeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
     composeView.setContent {
-        WinNativeTheme {
+        WinLiteTheme {
             ShortcutsScreen(shortcuts = shortcuts, listener = listener)
         }
     }
@@ -92,12 +92,12 @@ private fun ShortcutsScreen(
         modifier =
             Modifier
                 .fillMaxSize()
-                .background(WinNativeBackground)
+                .background(WinLiteBackground)
                 .padding(start = 16.dp, top = 16.dp, end = 26.dp, bottom = 16.dp),
     ) {
         Text(
             text = stringResource(R.string.common_ui_shortcuts).uppercase(),
-            color = WinNativeTextSecondary,
+            color = WinLiteTextSecondary,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.2.sp,
@@ -106,7 +106,7 @@ private fun ShortcutsScreen(
         if (shortcuts.isEmpty()) {
             Text(
                 text = stringResource(R.string.common_ui_no_items_to_display),
-                color = WinNativeTextSecondary,
+                color = WinLiteTextSecondary,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
                 modifier =
@@ -143,8 +143,8 @@ private fun ShortcutRow(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(WinNativeSurface)
-                .border(1.dp, WinNativeOutline, RoundedCornerShape(12.dp))
+                .background(WinLiteSurface)
+                .border(1.dp, WinLiteOutline, RoundedCornerShape(12.dp))
                 .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -164,7 +164,7 @@ private fun ShortcutRow(
                     Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .background(WinNativePanel),
+                        .background(WinLitePanel),
                 contentAlignment = Alignment.Center,
             ) {
                 val bitmap = shortcut.icon
@@ -178,7 +178,7 @@ private fun ShortcutRow(
                     Icon(
                         painter = painterResource(R.drawable.icon_shortcut),
                         contentDescription = null,
-                        tint = WinNativeAccent,
+                        tint = WinLiteAccent,
                         modifier = Modifier.size(24.dp),
                     )
                 }
@@ -187,7 +187,7 @@ private fun ShortcutRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = shortcut.name,
-                    color = WinNativeTextPrimary,
+                    color = WinLiteTextPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -196,7 +196,7 @@ private fun ShortcutRow(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = shortcut.container.name,
-                    color = WinNativeTextSecondary,
+                    color = WinLiteTextSecondary,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -220,51 +220,51 @@ private fun ShortcutRow(
                 Icon(
                     imageVector = Icons.Outlined.MoreVert,
                     contentDescription = null,
-                    tint = WinNativeTextPrimary,
+                    tint = WinLiteTextPrimary,
                 )
             }
             DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = { menuExpanded = false },
-                containerColor = WinNativeSurface,
+                containerColor = WinLiteSurface,
             ) {
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.shortcuts_properties_custom_game_settings), color = WinNativeTextPrimary) },
+                    text = { Text(stringResource(R.string.shortcuts_properties_custom_game_settings), color = WinLiteTextPrimary) },
                     onClick = {
                         menuExpanded = false
                         listener.onEditShortcut(shortcut)
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.shortcuts_list_add_to_home_screen), color = WinNativeTextPrimary) },
+                    text = { Text(stringResource(R.string.shortcuts_list_add_to_home_screen), color = WinLiteTextPrimary) },
                     onClick = {
                         menuExpanded = false
                         listener.onAddToHomeScreen(shortcut)
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.common_ui_remove), color = WinNativeTextPrimary) },
+                    text = { Text(stringResource(R.string.common_ui_remove), color = WinLiteTextPrimary) },
                     onClick = {
                         menuExpanded = false
                         listener.onRemoveShortcut(shortcut)
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.common_ui_export), color = WinNativeTextPrimary) },
+                    text = { Text(stringResource(R.string.common_ui_export), color = WinLiteTextPrimary) },
                     onClick = {
                         menuExpanded = false
                         listener.onExportShortcut(shortcut)
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.common_ui_clone), color = WinNativeTextPrimary) },
+                    text = { Text(stringResource(R.string.common_ui_clone), color = WinLiteTextPrimary) },
                     onClick = {
                         menuExpanded = false
                         listener.onCloneShortcut(shortcut)
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.common_ui_properties), color = WinNativeTextPrimary) },
+                    text = { Text(stringResource(R.string.common_ui_properties), color = WinLiteTextPrimary) },
                     onClick = {
                         menuExpanded = false
                         listener.onShowProperties(shortcut)

@@ -101,11 +101,11 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_FILE"
         else
           export KEYSTORE_PASSWORD="dummypass"
-          export KEY_ALIAS="winnative"
+          export KEY_ALIAS="winlite"
           export KEY_PASSWORD="dummypass"
           keytool -genkey -v \
             -keystore "$KEYSTORE_FILE" \
-            -alias winnative \
+            -alias winlite \
             -keyalg RSA -keysize 2048 -validity 1 \
             -storepass dummypass -keypass dummypass \
             -dname "CN=CI, OU=CI, O=CI, L=CI, ST=CI, C=US"
@@ -139,7 +139,7 @@ jobs:
       run: |
         upload_dir="artifacts/${{ matrix.flavor.artifactName }}"
         mkdir -p "$upload_dir"
-        cp ${{ matrix.flavor.apkPath }} "$upload_dir/WinNative-Debug-${{ matrix.flavor.name }}-${{ steps.label.outputs.name }}.apk"
+        cp ${{ matrix.flavor.apkPath }} "$upload_dir/WinLite-Debug-${{ matrix.flavor.name }}-${{ steps.label.outputs.name }}.apk"
 
     - name: Upload APK
       uses: actions/upload-artifact@v7

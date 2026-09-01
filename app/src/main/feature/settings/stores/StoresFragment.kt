@@ -26,7 +26,7 @@ import com.winlator.cmod.feature.stores.steam.utils.PrefManager
 import com.winlator.cmod.shared.android.DirectoryPickerDialog
 import com.winlator.cmod.shared.io.AssetPaths
 import com.winlator.cmod.shared.io.FileUtils
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import org.json.JSONObject
 
 class StoresFragment : Fragment() {
@@ -61,7 +61,7 @@ class StoresFragment : Fragment() {
         return ComposeView(requireContext()).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
-                WinNativeTheme(
+                WinLiteTheme(
                     colorScheme =
                         darkColorScheme(
                             primary = Color(0xFF1A9FFF),

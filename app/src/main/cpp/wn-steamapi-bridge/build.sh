@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 OUT="build/steam_api64.dll"
 ASSET_DIR="../../assets/wnsteam/steampipe"
 ASSET="$ASSET_DIR/steam_api64.dll"
-GBE_SOURCE="../../../../../References/WinNative/app/src/main/assets/steampipe/steam_api64.dll"
+GBE_SOURCE="../../../../../References/WinLite/app/src/main/assets/steampipe/steam_api64.dll"
 
 # Refresh gbe_fork export list → /tmp/gbe_real.txt (input to gen_forward_def.py).
 if [ -f "$GBE_SOURCE" ]; then

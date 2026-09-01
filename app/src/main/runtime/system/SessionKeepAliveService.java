@@ -28,7 +28,7 @@ import java.util.HashSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Foreground service that keeps the WinNative process alive while a wine
+ * Foreground service that keeps the WinLite process alive while a wine
  * session is in the background or while a component download/install is
  * running. Without it, Android can reap the app process when the screen is
  * locked, taking the wine container (and any in-flight download) with it.
@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class SessionKeepAliveService extends Service {
     private static final String TAG = "SessionKeepAlive";
 
-    private static final String CHANNEL_ID = "winnative_session_keepalive";
+    private static final String CHANNEL_ID = "winlite_session_keepalive";
 
     private static final String ACTION_SESSION_START = "com.winlator.cmod.action.SESSION_START";
     private static final String ACTION_SESSION_STOP = "com.winlator.cmod.action.SESSION_STOP";
@@ -185,7 +185,7 @@ public class SessionKeepAliveService extends Service {
         // Keep the CPU alive to prevent OS from killing the process when the screen is off.
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null) {
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WinNative:KeepAlive");
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WinLite:KeepAlive");
 //            wakeLock.acquire();
         }
 
@@ -196,7 +196,7 @@ public class SessionKeepAliveService extends Service {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 lockType = WifiManager.WIFI_MODE_FULL_HIGH_PERF;
             }
-            wifiLock = wm.createWifiLock(lockType, "WinNative:WifiKeepAlive");
+            wifiLock = wm.createWifiLock(lockType, "WinLite:WifiKeepAlive");
         }
 
         ensureChannel();
@@ -303,10 +303,10 @@ public class SessionKeepAliveService extends Service {
         if (nm.getNotificationChannel(CHANNEL_ID) != null) return;
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "WinNative session keep-alive",
+                "WinLite session keep-alive",
                 NotificationManager.IMPORTANCE_LOW);
         channel.setDescription(
-                "Keeps WinNative running in the background so a paused game session or "
+                "Keeps WinLite running in the background so a paused game session or "
                         + "an active component download is not interrupted by screen lock.");
         channel.setShowBadge(false);
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
@@ -330,7 +330,7 @@ public class SessionKeepAliveService extends Service {
         } else if (dl) {
             content = "Downloading components in the background";
         } else {
-            content = "WinNative is running in the background";
+            content = "WinLite is running in the background";
         }
 
         Intent openIntent = new Intent(this, XServerDisplayActivity.class);
@@ -343,7 +343,7 @@ public class SessionKeepAliveService extends Service {
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("WinNative")
+                .setContentTitle("WinLite")
                 .setContentText(content)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -415,7 +415,7 @@ public class SessionKeepAliveService extends Service {
 
     private void generateNotificationId() {
         // Generate a unique ID based on the package name to avoid conflicts with other forks/flavors.
-        String contextKey = getPackageName() + ".winnative.keepAlive";
+        String contextKey = getPackageName() + ".winlite.keepAlive";
         notificationId = contextKey.hashCode() & 0x7FFFFFFF; // Avoid negative IDs
     }
 }

@@ -62,7 +62,7 @@ public class ALSAClient {
               firstNonEmpty(
                   envVars.get("ALSA_LATENCY_MS"),
                   envVars.get("ANDROID_ALSA_LATENCY_MS"),
-                  envVars.get("WINNATIVE_ALSA_LATENCY_MS")),
+                  envVars.get("WINLITE_ALSA_LATENCY_MS")),
               DEFAULT_LATENCY_MILLIS);
       options.latencyMillis = Math.max(0, options.latencyMillis);
 
@@ -71,7 +71,7 @@ public class ALSAClient {
               firstNonEmpty(
                   envVars.get("ALSA_VOLUME"),
                   envVars.get("ANDROID_ALSA_VOLUME"),
-                  envVars.get("WINNATIVE_ALSA_VOLUME")),
+                  envVars.get("WINLITE_ALSA_VOLUME")),
               DEFAULT_VOLUME);
       options.volume = Math.max(0.0f, Math.min(options.volume, MAX_VOLUME));
 
@@ -80,7 +80,7 @@ public class ALSAClient {
               firstNonEmpty(
                   envVars.get("ALSA_BASS_BOOST"),
                   envVars.get("ANDROID_ALSA_BASS_BOOST"),
-                  envVars.get("WINNATIVE_ALSA_BASS_BOOST")),
+                  envVars.get("WINLITE_ALSA_BASS_BOOST")),
               DEFAULT_BASS_BOOST);
       options.bassBoost = Math.max(0.0f, Math.min(options.bassBoost, MAX_BASS_BOOST));
 
@@ -88,7 +88,7 @@ public class ALSAClient {
           firstNonEmpty(
               envVars.get("ALSA_PERFORMANCE_MODE"),
               envVars.get("ANDROID_ALSA_PERFORMANCE_MODE"),
-              envVars.get("WINNATIVE_ALSA_PERFORMANCE_MODE"));
+              envVars.get("WINLITE_ALSA_PERFORMANCE_MODE"));
       if (performanceMode.equalsIgnoreCase("low_latency") || performanceMode.equals("1")) {
         options.performanceMode = AudioTrack.PERFORMANCE_MODE_LOW_LATENCY;
       } else if (performanceMode.equalsIgnoreCase("power_saving") || performanceMode.equals("2")) {

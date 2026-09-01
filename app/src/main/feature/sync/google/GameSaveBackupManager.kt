@@ -907,7 +907,7 @@ object GameSaveBackupManager {
                         activity,
                         client,
                         uniqueName = name,
-                        description = "WinNative save part ${index + 1}/${partNames.size} (do not select)",
+                        description = "WinLite save part ${index + 1}/${partNames.size} (do not select)",
                         playedTimeMs = 0L,
                         data = data,
                     )

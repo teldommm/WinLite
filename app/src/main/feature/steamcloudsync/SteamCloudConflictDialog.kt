@@ -13,7 +13,7 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.winlator.cmod.feature.sync.google.GameSaveBackupManager
-import com.winlator.cmod.shared.theme.WinNativeTheme
+import com.winlator.cmod.shared.theme.WinLiteTheme
 import com.winlator.cmod.shared.ui.nav.PaneNavRegistry
 import com.winlator.cmod.shared.ui.nav.bindPaneNav
 
@@ -53,7 +53,7 @@ object SteamCloudConflictDialog {
                     setViewTreeSavedStateRegistryOwner(it)
                 }
                 setContent {
-                    WinNativeTheme(
+                    WinLiteTheme(
                         colorScheme =
                             darkColorScheme(
                                 primary = SteamCloudConflictBlue,

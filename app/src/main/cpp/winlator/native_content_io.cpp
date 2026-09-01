@@ -768,7 +768,7 @@ void configure_curl_common(CURL* curl, const std::string& url, const std::string
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "WinNative/1.0");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "WinLite/1.0");
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "identity");
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
