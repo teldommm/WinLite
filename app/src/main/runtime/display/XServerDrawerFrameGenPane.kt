@@ -116,8 +116,6 @@ private fun FrameGenerationSection(
     paneScale: Float,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
-        PaneSectionLabel(stringResource(R.string.session_drawer_frame_generation))
-
         if (!state.frameGenAvailable) {
             FrameGenNote(stringResource(R.string.session_drawer_frame_generation_missing), paneScale)
         } else {

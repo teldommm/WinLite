@@ -480,6 +480,7 @@ class GameSettingsStateHolder {
     val dxvkSelectedVersion = mutableIntStateOf(0)
     val dxvkAsync = mutableStateOf(false)
     val dxvkAsyncCache = mutableStateOf(false)
+    val dxvkMaxFrameLatency = mutableStateOf(false)
     val dxvkDdrawWrapperEntries = mutableStateOf<List<String>>(emptyList())
     val dxvkSelectedDdrawWrapper = mutableIntStateOf(0)
 
@@ -2365,6 +2366,19 @@ private fun DXVKConfigCard(
                             onCheckedChange = { if (asyncCacheEnabled) state.dxvkAsyncCache.value = it }
                         )
                     }
+                }
+
+                Spacer(Modifier.height(SettingItemGap))
+
+                SettingPairRow {
+                    Box(Modifier.weight(1f)) {
+                        SettingCheckbox(
+                            label = stringResource(R.string.container_wine_max_frame_latency),
+                            checked = state.dxvkMaxFrameLatency.value,
+                            onCheckedChange = { state.dxvkMaxFrameLatency.value = it }
+                        )
+                    }
+                    Box(Modifier.weight(1f)) {}
                 }
             }
         }

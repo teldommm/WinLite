@@ -469,6 +469,7 @@
     </string>
     <string name="container_wine_enabled_async">Enable Async</string>
     <string name="container_wine_enabled_async_cache">Enable Async Cache</string>
+    <string name="container_wine_max_frame_latency">Reduce Frame Latency</string>
     <string name="container_wine_vkd3d_feature_level">VKD3D Feature Level</string>
     <string name="container_wine_ddraw_wrapper">DDraw Wrapper</string>
     <string name="container_wine_error_not_installed">Wine/Proton package \'%1$s\' is not installed and could not be downloaded.</string>

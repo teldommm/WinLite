@@ -677,7 +677,7 @@
     <string name="session_drawer_rail_label_effects">Эффекты</string>
     <string name="session_drawer_rail_label_apps">Еще</string>
     <string name="session_drawer_rail_label_keyboard">Клавиатура</string>
-    <string name="session_drawer_rail_label_input_controls">Элементы управления</string>
+    <string name="session_drawer_rail_label_input_controls">Управление</string>
     <string name="session_drawer_rail_label_relative_mouse">Отн. мышь</string>
     <string name="session_drawer_rail_label_mouse">Мышь</string>
     <string name="session_drawer_rail_label_fullscreen">Полноэкранный</string>

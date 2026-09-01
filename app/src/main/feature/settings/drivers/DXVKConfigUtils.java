@@ -29,6 +29,14 @@ public final class DXVKConfigUtils {
             envVars.put("DXVK_GPLASYNCCACHE", "1");
         }
 
+        // Caps DXVK's internal frame queue to 1, so the CPU can't get more than one frame
+        // ahead of the GPU. Trades a little throughput for noticeably lower input lag -
+        // most useful on the tight frame budgets typical of mobile Adreno/Mali GPUs.
+        String maxFrameLatency = config.get("maxFrameLatency");
+        if (!maxFrameLatency.isEmpty() && !maxFrameLatency.equals("0")) {
+            envVars.put("DXVK_CONFIG", "dxgi.maxFrameLatency = 1");
+        }
+
         envVars.put("VKD3D_FEATURE_LEVEL", config.get("vkd3dLevel"));
         envVars.put("DXVK_STATE_CACHE_PATH", context.getFilesDir() + "/imagefs/" + ImageFs.CACHE_PATH);
     }

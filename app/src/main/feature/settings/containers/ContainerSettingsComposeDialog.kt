@@ -1312,6 +1312,7 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         selectByIdentifier(state.dxvkDdrawWrapperEntries.value, config.get("ddrawrapper"), state.dxvkSelectedDdrawWrapper)
         state.dxvkAsync.value = config.get("async") == "1"
         state.dxvkAsyncCache.value = config.get("asyncCache") == "1"
+        state.dxvkMaxFrameLatency.value = config.get("maxFrameLatency") == "1"
     }
 
     private fun loadDxvkVersions() {
@@ -1410,7 +1411,8 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         val ddrawWrapper = StringUtils.parseIdentifier(
             state.dxvkDdrawWrapperEntries.value.getOrElse(state.dxvkSelectedDdrawWrapper.intValue) { Container.DEFAULT_DDRAWRAPPER }
         )
-        return "version=$version,async=$async,asyncCache=$asyncCache," +
+        val maxFrameLatency = if (state.dxvkMaxFrameLatency.value) "1" else "0"
+        return "version=$version,async=$async,asyncCache=$asyncCache,maxFrameLatency=$maxFrameLatency," +
             "vkd3dVersion=$vkd3dVersion,vkd3dLevel=$vkd3dLevel,ddrawrapper=$ddrawWrapper"
     }
 

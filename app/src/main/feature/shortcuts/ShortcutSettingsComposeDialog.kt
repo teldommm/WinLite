@@ -1960,8 +1960,9 @@ class ShortcutSettingsComposeDialog private constructor(
         val ddrawWrapper = StringUtils.parseIdentifier(
             state.dxvkDdrawWrapperEntries.value.getOrElse(state.dxvkSelectedDdrawWrapper.intValue) { Container.DEFAULT_DDRAWRAPPER }
         )
+        val maxFrameLatency = if (state.dxvkMaxFrameLatency.value) "1" else "0"
 
-        return "version=$version,async=$async,asyncCache=$asyncCache," +
+        return "version=$version,async=$async,asyncCache=$asyncCache,maxFrameLatency=$maxFrameLatency," +
                 "vkd3dVersion=$vkd3dVersion,vkd3dLevel=$vkd3dLevel,ddrawrapper=$ddrawWrapper"
     }
 
@@ -2114,6 +2115,7 @@ class ShortcutSettingsComposeDialog private constructor(
 
         state.dxvkAsync.value = config.get("async") == "1"
         state.dxvkAsyncCache.value = config.get("asyncCache") == "1"
+        state.dxvkMaxFrameLatency.value = config.get("maxFrameLatency") == "1"
     }
 
     private fun loadDxvkVersions(container: Container = shortcut.container) {
