@@ -445,6 +445,7 @@
     <string name="container_wine_dxwrapper_help_content">&lt;i&gt;&lt;b&gt;WineD3D&lt;/b&gt;&lt;/i&gt; — это слой трансляции DirectX 1–11 в OpenGL.&lt;br /&gt;&lt;br /&gt;\n &lt;i&gt;&lt;b&gt;DXVK&lt;/b&gt;&lt;/i&gt; — это слой трансляции Direct3D 9–11 в Vulkan.&lt;br /&gt;&lt;br /&gt;\n &lt;i&gt;&lt;b&gt;VKD3D&lt;/b&gt;&lt;/i&gt; — это слой трансляции API Direct3D 12 в Vulkan.&lt;br /&gt;&lt;br /&gt;\n &lt;i&gt;&lt;b&gt;CNC DDraw&lt;/b&gt;&lt;/i&gt; — это реализация DirectDraw для лучшей совместимости с классическими играми.</string>
     <string name="container_wine_enabled_async">Включить асинхронность</string>
     <string name="container_wine_enabled_async_cache">Включить асинхронный кеш</string>
+    <string name="container_wine_max_frame_latency">Уменьшить задержку кадра</string>
     <string name="container_wine_vkd3d_feature_level">Уровень функций VKD3D</string>
     <string name="container_wine_ddraw_wrapper">Обертка DDraw</string>
     <string name="container_wine_error_not_installed">Пакет Wine/Proton «%1$s» не установлен и не может быть загружен.</string>
