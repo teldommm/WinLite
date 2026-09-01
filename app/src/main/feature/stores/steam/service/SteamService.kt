@@ -139,14 +139,10 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.FormBody
-import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
-import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
 import java.lang.NullPointerException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -329,7 +325,6 @@ class SteamService : Service() {
         internal const val DOWNLOAD_INFO_DIR = ".DownloadInfo"
         internal const val DOWNLOAD_INFO_FILE = "depot_bytes.json"
         internal const val LEGACY_DOWNLOAD_INFO_FILE = "bytes_downloaded.txt"
-        internal const val COMPONENTS_BASE_URL = "https://github.com/maxjivi05/Components/releases/download/Components"
         @Volatile
         private var startupMetadataRepairJob: Job? = null
 
@@ -1702,100 +1697,6 @@ class SteamService : Service() {
             context: Context,
             filename: String,
         ): Boolean = File(context.filesDir, filename).exists()
-
-        suspend fun fetchFile(
-            url: String,
-            dest: File,
-            onProgress: (Float) -> Unit,
-        ) = withContext(Dispatchers.IO) {
-            val tmp = File(dest.absolutePath + ".part")
-            try {
-                val http = SteamUtils.http
-
-                val req = Request.Builder().url(url).build()
-                http.newCall(req).execute().use { rsp ->
-                    check(rsp.isSuccessful) { "HTTP ${rsp.code}" }
-                    val body = rsp.body ?: error("empty body")
-                    val total = body.contentLength()
-                    tmp.outputStream().use { out ->
-                        body.byteStream().copyTo(out, 8 * 1024) { read ->
-                            onProgress(read.toFloat() / total)
-                        }
-                    }
-                    if (total > 0 && tmp.length() != total) {
-                        tmp.delete()
-                        error("incomplete download")
-                    }
-                    if (!tmp.renameTo(dest)) {
-                        tmp.copyTo(dest, overwrite = true)
-                        tmp.delete()
-                    }
-                }
-            } catch (e: Exception) {
-                tmp.delete()
-                throw e
-            }
-        }
-
-        suspend fun fetchFileWithFallback(
-            fileName: String,
-            dest: File,
-            context: Context,
-            onProgress: (Float) -> Unit,
-        ) = withContext(Dispatchers.IO) {
-            val urls = downloadUrlsFor(fileName)
-            var lastError: Exception? = null
-            for ((index, url) in urls.withIndex()) {
-                try {
-                    fetchFile(url, dest, onProgress)
-                    return@withContext
-                } catch (e: Exception) {
-                    lastError = e
-                    if (index < urls.lastIndex) {
-                        Timber.w(e, "Download failed from $url; retrying with next URL")
-                    }
-                }
-            }
-
-            dest.delete()
-            withContext(Dispatchers.Main) {
-                val msg = "Download failed with ${lastError?.message ?: "unknown error"}. Please disable VPN or try a different network."
-                WinToast.show(context.applicationContext, msg, android.widget.Toast.LENGTH_LONG)
-            }
-            throw IOException(
-                "Failed to download $fileName. Please check your network connection or try a VPN.",
-                lastError,
-            )
-        }
-
-        /** copyTo with progress callback */
-        private inline fun InputStream.copyTo(
-            out: OutputStream,
-            bufferSize: Int = DEFAULT_BUFFER_SIZE,
-            progress: (Long) -> Unit,
-        ) {
-            val buf = ByteArray(bufferSize)
-            var bytesRead: Int
-            var total = 0L
-            while (read(buf).also { bytesRead = it } >= 0) {
-                if (bytesRead == 0) continue
-                out.write(buf, 0, bytesRead)
-                total += bytesRead
-                progress(total)
-            }
-        }
-
-        fun downloadFile(
-            onDownloadProgress: (Float) -> Unit,
-            parentScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
-            context: Context,
-            fileName: String,
-        ) = parentScope.async {
-            Timber.i("$fileName will be downloaded")
-            val dest = File(context.filesDir, fileName)
-            Timber.d("Downloading $fileName to " + dest.toString())
-            fetchFileWithFallback(fileName, dest, context, onDownloadProgress)
-        }
 
         fun resolveSteamControllerVdfText(appId: Int): String? {
             val config = getAppInfoOf(appId)?.config ?: return null

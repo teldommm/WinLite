@@ -195,22 +195,6 @@ internal suspend fun SteamService.Companion.mergeAchievementUnlockState(
     }
 }
 
-internal fun SteamService.Companion.downloadUrlsFor(fileName: String): List<String> {
-    val alternate =
-        when (fileName) {
-            "steam-token.tzst" -> "steam-token-r2.tzst"
-            else -> null
-        }
-    return if (alternate != null) {
-        listOf(
-            "$COMPONENTS_BASE_URL/$fileName",
-            "$COMPONENTS_BASE_URL/$alternate",
-        )
-    } else {
-        listOf("$COMPONENTS_BASE_URL/$fileName")
-    }
-}
-
 internal fun SteamService.Companion.notifyDownloadStarted(appId: Int) {
     PluviaApp.events.emit(AndroidEvent.DownloadStatusChanged(appId, true))
 }

@@ -1,14 +1,10 @@
 package com.winlator.cmod.feature.stores.steam
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import android.widget.Toast
 import com.winlator.cmod.BuildConfig
 import com.winlator.cmod.runtime.container.ContainerManager
 import com.winlator.cmod.runtime.display.environment.ImageFs
 import com.winlator.cmod.runtime.wine.WineUtils
-import com.winlator.cmod.shared.ui.toast.WinToast
 import com.winlator.cmod.shared.io.FileUtils
 import com.winlator.cmod.shared.io.TarCompressorUtils
 import java.io.File
@@ -21,7 +17,6 @@ import java.nio.file.StandardCopyOption
 // Manages ColdClient and Steamless support assets.
 object SteamClientManager {
     private const val TAG = "SteamClientManager"
-    private const val COMPONENTS_BASE_URL = "https://github.com/maxjivi05/Components/releases/download/Components"
 
     interface ShellCommandRunner {
         fun exec(command: String): String
@@ -33,92 +28,6 @@ object SteamClientManager {
         val loaderExe = File(imageFs.rootDir, "${ImageFs.WINEPREFIX}/drive_c/Program Files (x86)/Steam/steamclient_loader_x64.exe")
         val extraDll = File(imageFs.rootDir, "${ImageFs.WINEPREFIX}/drive_c/Program Files (x86)/Steam/extra_dlls/StubDRM64.dll")
         return loaderExe.exists() && loaderExe.length() > 0 && extraDll.exists() && extraDll.length() > 0
-    }
-
-    private fun downloadFile(
-        urlStr: String,
-        dest: File,
-    ) {
-        var conn: HttpURLConnection? = null
-        try {
-            conn = URL(urlStr).openConnection() as HttpURLConnection
-            conn.connectTimeout = 15000
-            conn.readTimeout = 30000
-            conn.instanceFollowRedirects = true
-
-            val responseCode = conn.responseCode
-            if (responseCode != HttpURLConnection.HTTP_OK) {
-                throw Exception("HTTP $responseCode")
-            }
-
-            conn.inputStream.use { input ->
-                FileOutputStream(dest).use { output ->
-                    val buf = ByteArray(8192)
-                    var bytesRead: Int
-                    while (input.read(buf).also { bytesRead = it } >= 0) {
-                        output.write(buf, 0, bytesRead)
-                    }
-                }
-            }
-
-            val total = conn.contentLength.toLong()
-            if (total > 0 && dest.length() != total) {
-                dest.delete()
-                throw Exception("Incomplete download: ${dest.length()}/$total")
-            }
-        } finally {
-            conn?.disconnect()
-        }
-    }
-
-    private fun downloadUrlsFor(fileName: String): Array<String> {
-        val alternate =
-            when (fileName) {
-                "steam-token.tzst" -> "steam-token-r2.tzst"
-                else -> null
-            }
-        return if (alternate != null) {
-            arrayOf(
-                "$COMPONENTS_BASE_URL/$fileName",
-                "$COMPONENTS_BASE_URL/$alternate",
-            )
-        } else {
-            arrayOf("$COMPONENTS_BASE_URL/$fileName")
-        }
-    }
-
-    private fun ensureArchiveReady(
-        context: Context,
-        fileName: String,
-        failureMessage: String,
-    ): Boolean {
-        val dest = File(context.filesDir, fileName)
-        if (dest.exists() && dest.length() > 0) return true
-
-        val tmp = File("${dest.absolutePath}.part")
-        for (urlStr in downloadUrlsFor(fileName)) {
-            try {
-                Log.d(TAG, "Downloading $fileName from: $urlStr")
-                downloadFile(urlStr, tmp)
-                if (tmp.exists() && tmp.length() > 0) {
-                    if (!tmp.renameTo(dest)) {
-                        Files.copy(tmp.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
-                        tmp.delete()
-                    }
-                    Log.d(TAG, "Download completed for $fileName: ${dest.length()} bytes")
-                    return true
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Download failed from $urlStr: ${e.message}")
-                tmp.delete()
-            }
-        }
-
-        Log.e(TAG, "Failed to download $fileName from all sources")
-        Handler(Looper.getMainLooper()).post {
-            WinToast.show(context, failureMessage, Toast.LENGTH_LONG)
-        }
-        return false
     }
 
     @JvmStatic
