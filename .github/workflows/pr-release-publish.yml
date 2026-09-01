@@ -24,7 +24,7 @@ jobs:
       pull-requests: read
     env:
       SOURCE_REPO: ${{ github.repository }}
-      TARGET_REPO: WinLite-Emu/WinLite-CI
+      TARGET_REPO: teldommm/WinLite
       RUN_ID: ${{ github.event.workflow_run.id }}
       HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
       HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
@@ -149,7 +149,7 @@ jobs:
         if: ${{ steps.scope.outputs.allowed == 'true' }}
         id: release
         env:
-          # Use a fine-grained PAT scoped only to WinLite-Emu/WinLite-CI
+          # Use a fine-grained PAT scoped only to teldommm/WinLite
           # with "Contents" repository permission set to write.
           GH_TOKEN: ${{ secrets.WINLITE_CI_TOKEN }}
           PR_NUMBER: ${{ steps.scope.outputs.pr_number }}
