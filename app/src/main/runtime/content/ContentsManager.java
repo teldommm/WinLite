@@ -162,7 +162,7 @@ public class ContentsManager {
           ContentProfile profile = new ContentProfile();
           profile.type = type;
           profile.verName = stripExtension(fileName);
-          profile.verCode = parseEpochSeconds(asset.optString("updated_at"));
+          profile.verCode = 0; // no ranking/version concept — every matching asset is listed as-is
           profile.remoteUrl = downloadUrl;
           profile.isOfficial = true; // everything here comes from our own repo
           result.add(profile);
@@ -191,19 +191,6 @@ public class ContentsManager {
   private static String stripExtension(String fileName) {
     int dot = fileName.lastIndexOf('.');
     return dot > 0 ? fileName.substring(0, dot) : fileName;
-  }
-
-  // GitHub's REST API always returns timestamps in strict ISO-8601 UTC ("2026-09-01T12:34:56Z").
-  private static int parseEpochSeconds(String iso8601) {
-    if (iso8601 == null || iso8601.isEmpty()) return 0;
-    try {
-      java.text.SimpleDateFormat sdf =
-          new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
-      sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
-      return (int) (sdf.parse(iso8601).getTime() / 1000L);
-    } catch (Exception e) {
-      return 0;
-    }
   }
 
   /**
