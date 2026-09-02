@@ -45,7 +45,6 @@ class ContentsFragment : Fragment() {
     private lateinit var manager: ContentsManager
 
     private var componentsState by mutableStateOf(ComponentsState())
-    private var currentContentType = ContentProfile.ContentType.CONTENT_TYPE_WINE
 
     private var profilesByKey = emptyMap<String, ContentProfile>()
 
@@ -59,20 +58,17 @@ class ContentsFragment : Fragment() {
     private var isRefreshing = false
     private var loadFailed = false
     private var componentRepos by mutableStateOf<List<ComponentRepo>>(emptyList())
+    private var profilesByRepo by mutableStateOf<Map<ComponentRepo, List<ContentProfile>>>(emptyMap())
     private var repoManagerOpen by mutableStateOf(false)
     private var addRepoDialogOpen by mutableStateOf(false)
     private var editingRepo by mutableStateOf<ComponentRepo?>(null)
+    private var expandedRepoApiUrl by mutableStateOf<String?>(null)
 
     private var autoCreateContainer = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         manager = ContentsManager(requireContext())
-
-        savedInstanceState
-            ?.getString(STATE_CONTENT_TYPE)
-            ?.let(ContentProfile.ContentType::getTypeByName)
-            ?.let { currentContentType = it }
 
         autoCreateContainer =
             PreferenceManager
@@ -102,7 +98,10 @@ class ContentsFragment : Fragment() {
                     ComponentsScreen(
                         bridge = (requireActivity() as? UnifiedActivity)?.settingsNavBridge,
                         state = componentsState,
-                        onTypeSelected = { type -> selectContentType(type) },
+                        onToggleRepoExpanded = { repo ->
+                            expandedRepoApiUrl = if (expandedRepoApiUrl == repo.apiUrl) null else repo.apiUrl
+                            publishState()
+                        },
                         onInstallFromFile = { promptInstallFromFile() },
                         onDownloadItem = { item ->
                             profilesByKey[item.key]?.let { downloadRemoteContent(it) }
@@ -187,7 +186,6 @@ class ContentsFragment : Fragment() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putString(STATE_CONTENT_TYPE, currentContentType.toString())
         super.onSaveInstanceState(outState)
     }
 
@@ -198,60 +196,63 @@ class ContentsFragment : Fragment() {
 
     // State management
 
-    private fun selectContentType(type: ContentProfile.ContentType) {
-        if (type == currentContentType) return
-        currentContentType = type
-        publishState()
-    }
-
     private fun publishState() {
-        val profiles = manager.getProfiles(currentContentType).orEmpty()
+        val keyedProfiles = linkedMapOf<String, ContentProfile>()
 
-        val installed =
-            profiles
+        // Installed is global now — not scoped to a selected type, matching how Drivers shows
+        // every installed driver regardless of which repo card is expanded.
+        val installedItems = mutableListOf<ComponentItem>()
+        for (type in ContentProfile.ContentType.values()) {
+            manager
+                .getProfiles(type)
+                .orEmpty()
                 .filter { it.isInstalled }
                 .sortedWith(
                     compareByDescending<ContentProfile> { it.isOfficial }
-                        .thenBy { it.verName.lowercase() }
-                        .thenByDescending { it.verCode },
-                )
-        val available =
-            profiles
-                .filterNot { it.isInstalled }
-                .sortedWith(
-                    compareByDescending<ContentProfile> { it.isOfficial }
-                        .thenBy { it.verName.lowercase() }
-                        .thenByDescending { it.verCode },
-                )
+                        .thenBy { it.verName.lowercase() },
+                ).forEach { profile ->
+                    val item = profile.toItem()
+                    keyedProfiles[item.key] = profile
+                    installedItems.add(item)
+                }
+        }
 
-        val keyedProfiles = linkedMapOf<String, ContentProfile>()
-        val installedItems =
-            installed.map { profile ->
-                val item = profile.toItem()
-                keyedProfiles[item.key] = profile
-                item
-            }
-        val availableItems =
-            available.map { profile ->
-                val item = profile.toItem()
-                keyedProfiles[item.key] = profile
-                item
+        // Available is grouped per configured repo, then per type within that repo — only
+        // types that repo actually has assets for show up (no empty placeholders).
+        val repoSections =
+            componentRepos.map { repo ->
+                val itemsByType =
+                    profilesByRepo[repo]
+                        .orEmpty()
+                        .filterNot { it.isInstalled }
+                        .groupBy { it.type }
+                        .toSortedMap(compareBy { it.ordinal })
+                        .mapValues { (_, profiles) ->
+                            profiles
+                                .sortedBy { it.verName.lowercase() }
+                                .map { profile ->
+                                    val item = profile.toItem()
+                                    keyedProfiles[item.key] = profile
+                                    item
+                                }
+                        }
+                ComponentRepoSection(repo = repo, itemsByType = itemsByType)
             }
 
         profilesByKey = keyedProfiles
         componentsState =
             ComponentsState(
-                currentType = currentContentType,
                 installed = installedItems,
-                available = availableItems,
+                repoSections = repoSections,
                 downloadProgress = downloadProgress,
                 conflict = conflictingContentPath?.let(::ComponentsConflict),
                 autoCreateContainer = autoCreateContainer,
                 isRefreshing = isRefreshing,
                 loadFailed = loadFailed,
+                expandedRepoApiUrl = expandedRepoApiUrl,
             )
 
-        scheduleRemoteSizeFetches(availableItems)
+        scheduleRemoteSizeFetches(repoSections.flatMap { it.itemsByType.values.flatten() })
         scheduleInstalledSizeFetches(installedItems)
     }
 
@@ -516,17 +517,23 @@ class ContentsFragment : Fragment() {
             var failed = false
             try {
                 val repos = componentRepos.ifEmpty { defaultComponentRepoList() }
-                val merged =
+                val perRepo =
                     withContext(Dispatchers.IO) {
                         repos
-                            .map { repo -> async { runCatching { Downloader.downloadString(repo.apiUrl) }.getOrNull() } }
-                            .awaitAll()
-                            .filterNotNull()
-                            .flatMap { json -> ContentsManager.parseReleasesJson(json) }
+                            .map { repo ->
+                                async {
+                                    val json = runCatching { Downloader.downloadString(repo.apiUrl) }.getOrNull()
+                                    val profiles = json?.let { ContentsManager.parseReleasesJson(it) }.orEmpty()
+                                    repo to profiles
+                                }
+                            }.awaitAll()
+                            .toMap()
                     }
 
-                if (merged.isNotEmpty()) {
-                    withContext(Dispatchers.IO) { manager.setRemoteProfiles(merged) }
+                val flattened = perRepo.values.flatten()
+                if (flattened.isNotEmpty()) {
+                    withContext(Dispatchers.IO) { manager.setRemoteProfiles(flattened) }
+                    profilesByRepo = perRepo
                 } else {
                     failed = true
                 }
@@ -610,7 +617,6 @@ class ContentsFragment : Fragment() {
 
                     runOnMain {
                         WinToast.show(requireContext(), completionMessage)
-                        currentContentType = profile.type
                         publishState()
 
                         val willAutoCreate = autoCreateContainer && (
@@ -799,7 +805,6 @@ class ContentsFragment : Fragment() {
     }
 
     companion object {
-        private const val STATE_CONTENT_TYPE = "state_content_type"
         private const val TAG = "ContentsFragment"
         private const val PREF_COMPONENT_REPOS = "custom_component_repos"
         private const val PREF_AUTO_CREATE_CONTAINER = "components_auto_create_container"

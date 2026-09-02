@@ -1,19 +1,13 @@
 package com.winlator.cmod.feature.settings
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.MarqueeSpacing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -45,10 +39,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeveloperBoard
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Refresh
@@ -70,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -85,7 +82,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -144,15 +140,22 @@ data class ComponentRepo(
     val apiUrl: String,
 )
 
+data class ComponentRepoSection(
+    val repo: ComponentRepo,
+    val itemsByType: Map<ContentProfile.ContentType, List<ComponentItem>>,
+) {
+    val totalCount: Int get() = itemsByType.values.sumOf { it.size }
+}
+
 data class ComponentsState(
-    val currentType: ContentProfile.ContentType = ContentProfile.ContentType.CONTENT_TYPE_WINE,
     val installed: List<ComponentItem> = emptyList(),
-    val available: List<ComponentItem> = emptyList(),
+    val repoSections: List<ComponentRepoSection> = emptyList(),
     val downloadProgress: ComponentsDownloadProgress? = null,
     val conflict: ComponentsConflict? = null,
     val autoCreateContainer: Boolean = true,
     val isRefreshing: Boolean = false,
     val loadFailed: Boolean = false,
+    val expandedRepoApiUrl: String? = null,
 )
 
 // Root
@@ -161,7 +164,7 @@ data class ComponentsState(
 fun ComponentsScreen(
     bridge: SettingsNavBridge? = null,
     state: ComponentsState,
-    onTypeSelected: (ContentProfile.ContentType) -> Unit,
+    onToggleRepoExpanded: (ComponentRepo) -> Unit,
     onInstallFromFile: () -> Unit,
     onDownloadItem: (ComponentItem) -> Unit,
     onRemoveItem: (ComponentItem) -> Unit,
@@ -178,17 +181,18 @@ fun ComponentsScreen(
     val navBarBottomPadding = navBarPadding.calculateBottomPadding()
     val contentNav = rememberSettingsContentNav(bridge)
 
-    // L1/R1 cycle the component type (Wine -> Proton -> DXVK …) while navigating the list.
+    // L1/R1 cycle which repo card is expanded, mirroring what used to cycle component types.
     val sectionSignal = bridge?.contentSectionSignal ?: 0
     var lastSectionSignal by remember { mutableStateOf(sectionSignal) }
     LaunchedEffect(sectionSignal) {
         if (sectionSignal != lastSectionSignal) {
             lastSectionSignal = sectionSignal
             val dir = bridge?.contentSectionDir ?: 0
-            if (dir != 0) {
-                val types = ContentProfile.ContentType.values()
-                val idx = types.indexOf(state.currentType).coerceAtLeast(0)
-                onTypeSelected(types[((idx + dir) % types.size + types.size) % types.size])
+            if (dir != 0 && state.repoSections.isNotEmpty()) {
+                val repos = state.repoSections.map { it.repo }
+                val idx = repos.indexOfFirst { it.apiUrl == state.expandedRepoApiUrl }.coerceAtLeast(0)
+                val next = repos[((idx + dir) % repos.size + repos.size) % repos.size]
+                onToggleRepoExpanded(next)
             }
         }
     }
@@ -254,19 +258,17 @@ fun ComponentsScreen(
         ) {
             HeroHeader(
                 installedCount = state.installed.size,
-                availableCount = state.available.size,
-                currentType = state.currentType,
+                availableCount = state.repoSections.sumOf { it.totalCount },
                 autoCreateContainer = state.autoCreateContainer,
                 isRefreshing = state.isRefreshing,
                 loadFailed = state.loadFailed,
-                onTypeSelected = onTypeSelected,
                 onInstallFromFile = onInstallFromFile,
                 onToggleAutoCreateContainer = onToggleAutoCreateContainer,
                 onRefresh = onRefresh,
                 onManageSources = onManageSources,
             )
 
-            if (state.installed.isEmpty() && state.available.isEmpty() && !state.isRefreshing) {
+            if (state.installed.isEmpty() && state.repoSections.isEmpty() && !state.isRefreshing) {
                 EmptyState()
             }
 
@@ -276,7 +278,7 @@ fun ComponentsScreen(
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 state.installed.forEach { item ->
-                    key("installed_${state.currentType.name}_${item.key}") {
+                    key("installed_${item.key}") {
                         ComponentItemCard(
                             item = item,
                             onDownload = { onDownloadItem(item) },
@@ -286,17 +288,18 @@ fun ComponentsScreen(
                 }
             }
 
-            if (state.available.isNotEmpty()) {
+            if (state.repoSections.isNotEmpty()) {
                 SectionLabel(
-                    text = stringResource(R.string.common_ui_available),
+                    text = stringResource(R.string.settings_content_sources_label),
                     modifier = Modifier.padding(top = 6.dp),
                 )
-                state.available.forEach { item ->
-                    key("available_${state.currentType.name}_${item.key}") {
-                        ComponentItemCard(
-                            item = item,
-                            onDownload = { onDownloadItem(item) },
-                            onRemove = { itemPendingRemoval = item },
+                state.repoSections.forEach { section ->
+                    key(section.repo.apiUrl) {
+                        ComponentRepoCard(
+                            section = section,
+                            isExpanded = state.expandedRepoApiUrl == section.repo.apiUrl,
+                            onTap = { onToggleRepoExpanded(section.repo) },
+                            onDownloadItem = onDownloadItem,
                         )
                     }
                 }
@@ -313,11 +316,9 @@ fun ComponentsScreen(
 private fun HeroHeader(
     installedCount: Int,
     availableCount: Int,
-    currentType: ContentProfile.ContentType,
     autoCreateContainer: Boolean,
     isRefreshing: Boolean,
     loadFailed: Boolean,
-    onTypeSelected: (ContentProfile.ContentType) -> Unit,
     onInstallFromFile: () -> Unit,
     onToggleAutoCreateContainer: (Boolean) -> Unit,
     onRefresh: () -> Unit,
@@ -355,9 +356,11 @@ private fun HeroHeader(
                 )
             }
             val sources: @Composable () -> Unit = {
-                IconTapButton(
+                SmallPillButton(
+                    label = stringResource(R.string.settings_content_sources_action),
                     icon = Icons.Outlined.Settings,
-                    tint = TextSecondary,
+                    tint = Accent,
+                    compact = true,
                     onClick = onManageSources,
                 )
             }
@@ -382,8 +385,6 @@ private fun HeroHeader(
                 ) {
                     counts()
                     Spacer(Modifier.weight(1f))
-                    sources()
-                    Spacer(Modifier.width(6.dp))
                     refresh()
                 }
                 Spacer(Modifier.height(8.dp))
@@ -397,6 +398,10 @@ private fun HeroHeader(
                     toggle(Modifier.weight(1f))
                     Spacer(Modifier.width(16.dp))
                     install()
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    sources()
                 }
             } else {
                 Row(
@@ -419,12 +424,6 @@ private fun HeroHeader(
                     install()
                 }
             }
-
-            Spacer(Modifier.height(12.dp))
-            TypeTabsContent(
-                currentType = currentType,
-                onTypeSelected = onTypeSelected,
-            )
         }
     }
 }
@@ -563,54 +562,6 @@ private fun CountPill(
     }
 }
 
-// Content type tabs
-
-@Composable
-private fun TypeTabsContent(
-    currentType: ContentProfile.ContentType,
-    onTypeSelected: (ContentProfile.ContentType) -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val types = ContentProfile.ContentType.values()
-            types.forEachIndexed { index, type ->
-                TypeTabChip(
-                    label = type.toString(),
-                    selected = type == currentType,
-                    onClick = { onTypeSelected(type) },
-                )
-                if (index < types.lastIndex) {
-                    Spacer(Modifier.width(8.dp))
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Crossfade(
-            targetState = currentType,
-            animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
-            label = "componentsTypeDescription",
-        ) { type ->
-            Text(
-                text = stringResource(descriptionResFor(type)),
-                color = TextPrimary,
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
-                textAlign = TextAlign.Center,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 2.dp),
-            )
-        }
-    }
-}
-
 private fun descriptionResFor(type: ContentProfile.ContentType): Int =
     when (type) {
         ContentProfile.ContentType.CONTENT_TYPE_WINE -> R.string.settings_content_desc_wine
@@ -622,40 +573,6 @@ private fun descriptionResFor(type: ContentProfile.ContentType): Int =
         ContentProfile.ContentType.CONTENT_TYPE_FEXCORE -> R.string.settings_content_desc_fexcore
         ContentProfile.ContentType.CONTENT_TYPE_D7VK -> R.string.settings_content_desc_d7vk
     }
-
-@Composable
-private fun TypeTabChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val background = if (selected) Accent.copy(alpha = 0.18f) else SurfaceDark
-    val borderColor = if (selected) Accent.copy(alpha = 0.45f) else CardBorder
-    val textColor = if (selected) Accent else TextSecondary
-    Box(
-        modifier =
-            Modifier
-                .height(32.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(background)
-                .border(1.dp, borderColor, RoundedCornerShape(16.dp))
-                .paneNavItem(
-                    cornerRadius = 16.dp,
-                    onActivate = onClick,
-                    highlightColor = NavHighlight,
-                    tapToSelect = true,
-                )
-                .padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            color = textColor,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-    }
-}
 
 // Section label
 
@@ -672,6 +589,127 @@ private fun SectionLabel(
         letterSpacing = 1.4.sp,
         modifier = modifier.padding(bottom = 4.dp),
     )
+}
+
+// Component repo card
+
+@Composable
+private fun ComponentRepoCard(
+    section: ComponentRepoSection,
+    isExpanded: Boolean,
+    onTap: () -> Unit,
+    onDownloadItem: (ComponentItem) -> Unit,
+) {
+    val borderColor = if (isExpanded) Accent.copy(alpha = 0.45f) else CardBorder
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (isExpanded) 90f else 0f,
+        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+        label = "componentRepoChevron_${section.repo.apiUrl}",
+    )
+
+    Box(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(CardDark)
+                .border(1.dp, borderColor, RoundedCornerShape(12.dp)),
+    ) {
+        Column {
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .paneNavItem(
+                            cornerRadius = 12.dp,
+                            onActivate = onTap,
+                            highlightColor = NavHighlight,
+                            tapToSelect = true,
+                        ).padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier =
+                        Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(IconBoxBg),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Folder,
+                        contentDescription = null,
+                        tint = if (isExpanded) Accent else TextSecondary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                Spacer(Modifier.width(13.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = section.repo.name,
+                        color = TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text =
+                            if (section.totalCount > 0) {
+                                stringResource(R.string.settings_content_repo_item_count, section.totalCount)
+                            } else {
+                                stringResource(R.string.settings_content_repo_empty)
+                            },
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Outlined.ChevronRight,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier.size(18.dp).rotate(chevronRotation),
+                )
+            }
+
+            if (isExpanded) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (section.itemsByType.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.settings_content_repo_empty),
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                        )
+                    } else {
+                        section.itemsByType.forEach { (type, items) ->
+                            Text(
+                                text = type.toString().uppercase(),
+                                color = TextSecondary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.2.sp,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                            )
+                            items.forEach { item ->
+                                key(item.key) {
+                                    ComponentItemCard(
+                                        item = item,
+                                        onDownload = { onDownloadItem(item) },
+                                        onRemove = {},
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Component item card

@@ -944,6 +944,10 @@
     <string name="settings_content_components">Компоненты</string>
     <string name="settings_content_repo_manager_title">Источники компонентов</string>
     <string name="settings_content_repo_add">Добавить репозиторий</string>
+    <string name="settings_content_sources_label">Источники компонентов</string>
+    <string name="settings_content_sources_action">Источники</string>
+    <string name="settings_content_repo_item_count">%1$d компонентов</string>
+    <string name="settings_content_repo_empty">Ничего не найдено в этом репозитории</string>
     <string name="settings_content_repo_edit">Редактировать репозиторий</string>
     <string name="settings_content_repo_name">Название</string>
     <string name="settings_content_repo_url">URL GitHub</string>
