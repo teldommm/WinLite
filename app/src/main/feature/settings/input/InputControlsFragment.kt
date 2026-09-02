@@ -43,14 +43,11 @@ import com.winlator.cmod.runtime.input.ui.TouchGestureConfig
 import com.winlator.cmod.shared.ui.toast.WinToast
 import com.winlator.cmod.shared.android.DirectoryPickerDialog
 import com.winlator.cmod.shared.io.FileUtils
-import com.winlator.cmod.shared.io.HttpUtils
 import com.winlator.cmod.shared.math.Mathf
 import com.winlator.cmod.shared.ui.dialog.ContentDialog
 import com.winlator.cmod.shared.theme.WinLiteTheme
 import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,7 +79,6 @@ class InputControlsFragment : Fragment() {
     private var gyroSensorManager: SensorManager? = null
     private var gyroListener: SensorEventListener? = null
     private var gyroPreviewView: InputControlsView? = null
-    private val remoteProfileRequestInFlight = AtomicBoolean(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -214,7 +210,6 @@ class InputControlsFragment : Fragment() {
                                     publishUiState()
                                 },
                                 onImportProfile = { promptImportProfile() },
-                                onDownloadProfile = ::downloadProfileList,
                                 onExportProfile = ::exportProfile,
                                 onControllerExpandedToggle = ::toggleControllerExpanded,
                                 onRemoveController = ::removeController,
@@ -575,159 +570,6 @@ class InputControlsFragment : Fragment() {
         } else {
             WinToast.show(requireContext(), R.string.input_controls_editor_no_profile_selected)
         }
-    }
-
-    private fun downloadProfileList() {
-        val activity = activity ?: return
-        if (!remoteProfileRequestInFlight.compareAndSet(false, true)) return
-        HttpUtils.download(String.format(INPUT_CONTROLS_URL, "index.txt")) { content ->
-            if (!isAdded) {
-                remoteProfileRequestInFlight.set(false)
-                return@download
-            }
-            activity.runOnUiThread {
-                remoteProfileRequestInFlight.set(false)
-                if (content != null) {
-                    val items =
-                        content
-                            .split("\n")
-                            .map { it.trim() }
-                            .filter { it.isNotEmpty() }
-                            .toTypedArray()
-                    if (items.isNotEmpty()) {
-                        val installedNames = installedProfileKeys()
-                        val disabledIndices =
-                            items
-                                .mapIndexedNotNull { index, item ->
-                                    if (installedNames.contains(normalizeProfileKey(item))) index else null
-                                }.toSet()
-                        showMultiChoiceDialog(
-                            title = getString(R.string.input_controls_editor_download_profile),
-                            items = items,
-                            disabledIndices = disabledIndices,
-                            confirmLabel = getString(R.string.common_ui_download),
-                        ) { selectedIndices ->
-                            if (selectedIndices.isNotEmpty()) {
-                                downloadSelectedProfiles(items, selectedIndices.sorted())
-                            }
-                        }
-                    } else {
-                        WinToast.show(activity, R.string.input_controls_editor_unable_to_load_list)
-                    }
-                } else {
-                    WinToast.show(activity, R.string.input_controls_editor_unable_to_load_list)
-                }
-            }
-        }
-    }
-
-    private fun downloadSelectedProfiles(
-        items: Array<String>,
-        positions: List<Int>,
-    ) {
-        val activity = activity ?: return
-        if (positions.isEmpty()) return
-        val installedNames = installedProfileKeys()
-        val eligiblePositions =
-            positions.filterNot { index ->
-                installedNames.contains(normalizeProfileKey(items[index]))
-            }
-        if (eligiblePositions.isEmpty()) return
-        if (!remoteProfileRequestInFlight.compareAndSet(false, true)) return
-        currentProfile = null
-        persistSelectedProfileId()
-        expandedControllerIds.clear()
-        stopControllerInputCapture()
-        val processedCount = AtomicInteger()
-        val importedCount = AtomicInteger()
-
-        for (position in eligiblePositions) {
-            val itemName = items[position].trim()
-            HttpUtils.download(buildRemoteProfileUrl(itemName)) { content ->
-                try {
-                    if (content != null) {
-                        val profileData =
-                            JSONObject(content).apply {
-                                put("downloadSource", itemName)
-                            }
-                        if (manager.importProfile(profileData) != null) {
-                            importedCount.incrementAndGet()
-                        } else {
-                            Log.e("InputControls", "Import failed for remote profile: $itemName")
-                        }
-                    } else {
-                        Log.e("InputControls", "Download failed for remote profile: $itemName")
-                    }
-                } catch (e: Exception) {
-                    Log.e("InputControls", "Exception importing remote profile: $itemName", e)
-                }
-                if (processedCount.incrementAndGet() == eligiblePositions.size) {
-                    if (!isAdded) {
-                        remoteProfileRequestInFlight.set(false)
-                        return@download
-                    }
-                    activity.runOnUiThread {
-                        remoteProfileRequestInFlight.set(false)
-                        refreshVisibleControllers()
-                        publishUiState()
-                        WinToast.show(
-                            activity,
-                            if (importedCount.get() > 0) {
-                                R.string.settings_content_download_complete
-                            } else {
-                                R.string.input_controls_editor_unable_to_import
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private fun buildRemoteProfileUrl(itemName: String): String {
-        val remoteName = if (itemName.endsWith(".icp", ignoreCase = true)) itemName else "$itemName.icp"
-        return String.format(INPUT_CONTROLS_URL, android.net.Uri.encode(remoteName))
-    }
-
-    private fun installedProfileKeys(): Set<String> {
-        val context = context ?: return emptySet()
-        return manager
-            .getProfiles(true)
-            .flatMap { profile ->
-                buildList {
-                    normalizeProfileKey(profile.name).takeIf { it.isNotEmpty() }?.let(::add)
-                    readStoredDownloadSource(context, profile.id)
-                        ?.let(::normalizeProfileKey)
-                        ?.takeIf { it.isNotEmpty() }
-                        ?.let(::add)
-                }
-            }.toSet()
-    }
-
-    private fun normalizeProfileKey(value: String?): String {
-        val trimmed = value?.trim().orEmpty()
-        if (trimmed.isEmpty()) return ""
-        val withoutExtension =
-            if (trimmed.endsWith(".icp", ignoreCase = true)) {
-                trimmed.dropLast(4)
-            } else {
-                trimmed
-            }
-        return withoutExtension.trim().lowercase()
-    }
-
-    private fun readStoredDownloadSource(
-        context: android.content.Context,
-        profileId: Int,
-    ): String? {
-        val file = ControlsProfile.getProfileFile(context, profileId)
-        if (!file.isFile) return null
-        val json = FileUtils.readString(file) ?: return null
-        return runCatching {
-            JSONObject(json).let { data ->
-                if (data.has("downloadSource")) data.optString("downloadSource") else null
-            }
-        }.getOrNull()
     }
 
     private fun promptImportProfile() {
@@ -1362,8 +1204,6 @@ class InputControlsFragment : Fragment() {
 
     companion object {
         private const val ARG_SELECTED_PROFILE_ID = "selectedProfileId"
-        private const val INPUT_CONTROLS_URL =
-            "https://raw.githubusercontent.com/teldommm/WinLite-Components/main/Profiles/%s"
         private const val PREF_SELECTED_PROFILE_ID = "input_controls_selected_profile_id"
 
         fun newInstance(profileId: Int = 0): InputControlsFragment =

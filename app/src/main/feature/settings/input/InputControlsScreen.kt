@@ -49,7 +49,6 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FileDownload
@@ -282,7 +281,6 @@ data class InputControlsScreenActions(
     val onTriggerTypeSelected: (Int) -> Unit,
     val onTriggerCardExpandedChanged: (Boolean) -> Unit,
     val onImportProfile: () -> Unit,
-    val onDownloadProfile: () -> Unit,
     val onExportProfile: () -> Unit,
     val onControllerExpandedToggle: (String) -> Unit,
     val onRemoveController: (String) -> Unit,
@@ -331,11 +329,6 @@ fun InputControlsScreen(
                     icon = Icons.Outlined.FileDownload,
                     title = stringResource(R.string.input_controls_editor_import_profile),
                     onClick = actions.onImportProfile,
-                )
-                ActionCard(
-                    icon = Icons.Outlined.Download,
-                    title = stringResource(R.string.common_ui_download),
-                    onClick = actions.onDownloadProfile,
                 )
                 ActionCard(
                     icon = Icons.Outlined.FileUpload,
