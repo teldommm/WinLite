@@ -26,7 +26,7 @@ import org.json.JSONObject;
 public class ContentsManager {
   public static final String PROFILE_NAME = "profile.json";
   public static final String REMOTE_PROFILES =
-      "https://raw.githubusercontent.com/nicholasx417/WinLite-Components/refs/heads/main/contents.json";
+      "https://raw.githubusercontent.com/teldommm/WinLite-Components/refs/heads/main/contents.json";
   private static final long EXTRACTION_PROGRESS_INTERVAL_MS = 120L;
   private static final String REMOTE_ALIAS_PREFIX = "remote_profile_alias_";
   public static final String[] DXVK_TRUST_FILES = {

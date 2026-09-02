@@ -70,7 +70,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-private const val DATASET_BASE = "https://huggingface.co/datasets/Xnick417x/WN-Components/resolve/main"
+private const val DATASET_BASE = "https://raw.githubusercontent.com/teldommm/WinLite-Components/main/redistributables"
 private const val INDEX_URL = "$DATASET_BASE/index.json"
 
 // One install at a time across the app (the boot session + result bridge are single-instance).

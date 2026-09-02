@@ -105,7 +105,6 @@ android {
         resConfigs "en", "ru"
 
         buildConfigField("String", "COLD_CLIENT_VERSION", "\"${coldClientVersion}\"")
-        buildConfigField "String", "RESHADE_CATALOG_URL", "\"https://raw.githubusercontent.com/nicholasx417/WinLite-Components/main/Reshade.json\""
     }
 
     androidResources {

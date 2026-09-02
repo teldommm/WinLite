@@ -589,8 +589,8 @@ class DriversFragment : Fragment() {
 
     companion object {
         private const val WINLITE_COMPONENTS_REPO_NAME = "WinLite Components"
-        private const val WINLITE_COMPONENTS_REPO_URL = "https://github.com/nicholasx417/WinLite-Components/releases"
-        private const val WINLITE_COMPONENTS_API_URL = "https://api.github.com/repos/nicholasx417/WinLite-Components/releases"
+        private const val WINLITE_COMPONENTS_REPO_URL = "https://github.com/teldommm/WinLite-Components/releases"
+        private const val WINLITE_COMPONENTS_API_URL = "https://api.github.com/repos/teldommm/WinLite-Components/releases"
     }
 }
 

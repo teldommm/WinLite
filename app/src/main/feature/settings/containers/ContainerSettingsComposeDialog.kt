@@ -568,17 +568,6 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         state.frameGenFlowScale.intValue =
             c?.getExtra("frameGenFlowScale", "70")?.toIntOrNull()?.coerceIn(25, 100) ?: 70
 
-        // init() migrates a legacy single reshadeEffect / flat reshadeParams into the loadout model
-        val reshadeEffects = com.winlator.cmod.runtime.reshade.ReshadeManager.scanEffects(context)
-        state.reshadeEffects.value = reshadeEffects
-        state.reshadeLoadout.init(
-            reshadeEffects,
-            c?.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_LOADOUT, null),
-            c?.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_MODE, null),
-            c?.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, null),
-            c?.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, null),
-        )
-
         val audioDriverArr = context.resources.getStringArray(R.array.audio_driver_entries).toList()
         state.audioDriverEntries.value = audioDriverArr
         selectByIdentifier(
@@ -850,20 +839,6 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
             c.putExtra("swapRB", if (state.selectedSurfaceEffect.intValue == 1) "1" else "0")
             c.putExtra("refreshRate", getRefreshRateFromState())
             writeFrameGenExtras(c)
-            run {
-                // reshadeEffect stays coherent (= first effect) for legacy readers; all null when empty
-                val loadoutJson = state.reshadeLoadout.loadoutJsonOrNull()
-                c.putExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_LOADOUT, loadoutJson)
-                c.putExtra(
-                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_MODE,
-                    if (loadoutJson == null) null else state.reshadeLoadout.mode)
-                c.putExtra(
-                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS,
-                    if (loadoutJson == null) null else state.reshadeLoadout.paramsJsonOrNull())
-                c.putExtra(
-                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT,
-                    if (loadoutJson == null) null else state.reshadeLoadout.firstEffectName())
-            }
             c.setAudioDriver(audioDriver)
             c.setEmulator(emulator)
             c.setEmulator64(emulator64)

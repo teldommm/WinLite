@@ -29,11 +29,9 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import java.util.regex.Pattern
 
 object UpdateChecker {
-    private const val DOWNLOADS_PAGE_URL = "https://winlite.dev/Downloads/"
-    private const val RELEASE_NOTES_URL = "${DOWNLOADS_PAGE_URL}release.txt"
+    private const val RELEASES_API_URL = "https://api.github.com/repos/teldommm/WinLite/releases/latest"
 
     private const val PREF_CHECK_FOR_UPDATES = "check_for_updates"
     private const val PREF_INSTALL_TIMESTAMP = "app_install_timestamp"
@@ -209,39 +207,37 @@ object UpdateChecker {
         val releaseNotes: String?,
     )
 
-    // Fetch the downloads page and compare its "Last Updated" date.
+    // Fetch the latest GitHub release and compare its publish date against install time.
     private fun fetchUpdateInfo(context: Context): UpdateInfo? {
-        val pageRequest =
+        val request =
             Request
                 .Builder()
-                .url(DOWNLOADS_PAGE_URL)
+                .url(RELEASES_API_URL)
+                .header("Accept", "application/vnd.github+json")
                 .header("Cache-Control", "no-cache")
                 .build()
 
-        val pageBody =
-            client.newCall(pageRequest).execute().use { pageResponse ->
-                if (!pageResponse.isSuccessful) {
-                    Timber.w("Update check page request failed: ${pageResponse.code}")
+        val body =
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Timber.w("Update check request failed: ${response.code}")
                     return null
                 }
-                pageResponse.body?.string() ?: return null
+                response.body?.string() ?: return null
             }
 
-        val pattern =
-            Pattern.compile(
-                """Last\s+Updated:\s*(.+?)(?:\r?\n|<)""",
-                Pattern.CASE_INSENSITIVE,
-            )
-        val matcher = pattern.matcher(pageBody)
-        if (!matcher.find()) {
-            Timber.w("Could not find 'Last Updated' on downloads page")
-            return null
-        }
+        val json =
+            try {
+                org.json.JSONObject(body)
+            } catch (e: Exception) {
+                Timber.w(e, "Could not parse release JSON")
+                return null
+            }
 
-        val lastUpdatedStr = matcher.group(1)?.trim() ?: return null
+        val publishedAtStr = json.optString("published_at").takeIf { it.isNotBlank() } ?: return null
         val serverDate =
-            parseLastUpdatedDate(lastUpdatedStr) ?: run {
-                Timber.w("Could not parse 'Last Updated' date: $lastUpdatedStr")
+            parseGitHubDate(publishedAtStr) ?: run {
+                Timber.w("Could not parse 'published_at' date: $publishedAtStr")
                 return null
             }
 
@@ -252,12 +248,22 @@ object UpdateChecker {
             return null
         }
 
-        // Only the Standard flavor remains (com.winlite.emu), so this is always "standard"
-        // now — kept as a val (not inlined into the URL) in case flavors return later.
-        val apkType = "standard"
-        val downloadUrl = "${DOWNLOADS_PAGE_URL}download.php?type=$apkType"
+        val versionName = json.optString("tag_name").takeIf { it.isNotBlank() }
+        val releaseNotes = json.optString("body").takeIf { it.isNotBlank() }
 
-        val releaseNotes = fetchReleaseNotes()
+        var downloadUrl: String? = null
+        val assets = json.optJSONArray("assets")
+        if (assets != null) {
+            for (i in 0 until assets.length()) {
+                val asset = assets.optJSONObject(i) ?: continue
+                if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
+                    downloadUrl = asset.optString("browser_download_url").takeIf { it.isNotBlank() }
+                    break
+                }
+            }
+        }
+        // Fall back to the release page itself if no .apk asset is attached.
+        val finalDownloadUrl = downloadUrl ?: json.optString("html_url").takeIf { it.isNotBlank() } ?: return null
 
         val dateFormat = SimpleDateFormat("MMM dd, yyyy 'at' hh:mm a", Locale.US)
         dateFormat.timeZone = TimeZone.getDefault()
@@ -265,54 +271,19 @@ object UpdateChecker {
         return UpdateInfo(
             serverModified = serverDate,
             serverModifiedFormatted = dateFormat.format(serverDate),
-            serverVersionName = null,
-            downloadUrl = downloadUrl,
+            serverVersionName = versionName,
+            downloadUrl = finalDownloadUrl,
             releaseNotes = releaseNotes,
         )
     }
 
-    private fun parseLastUpdatedDate(dateStr: String): Date? {
-        val formats =
-            arrayOf(
-                "MMMM d, yyyy, h:mm a z",
-                "MMMM d, yyyy, h:mm a zzz",
-                "MMMM dd, yyyy, h:mm a z",
-                "MMMM dd, yyyy, h:mm a zzz",
-                "MMMM d, yyyy, hh:mm a z",
-                "MMMM d, yyyy, hh:mm a zzz",
-                "MMMM dd, yyyy, hh:mm a z",
-                "MMMM dd, yyyy, hh:mm a zzz",
-            )
-        for (format in formats) {
-            try {
-                val sdf = SimpleDateFormat(format, Locale.US)
-                return sdf.parse(dateStr)
-            } catch (_: Exception) {
-            }
-        }
-        return null
-    }
-
-    private fun fetchReleaseNotes(): String? =
+    // GitHub's REST API always returns timestamps in strict ISO-8601 UTC ("2026-09-01T12:34:56Z").
+    private fun parseGitHubDate(dateStr: String): Date? =
         try {
-            val request =
-                Request
-                    .Builder()
-                    .url(RELEASE_NOTES_URL)
-                    .build()
-
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    response.body
-                        ?.string()
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                } else {
-                    null
-                }
-            }
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            sdf.parse(dateStr)
         } catch (e: Exception) {
-            Timber.d(e, "Could not fetch release notes")
             null
         }
 
@@ -390,8 +361,13 @@ object UpdateChecker {
         val dialog =
             AlertDialog
                 .Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Update Available")
-                .setView(container)
+                .setTitle(
+                    if (info.serverVersionName.isNullOrBlank()) {
+                        "Update Available"
+                    } else {
+                        "Update Available (${info.serverVersionName})"
+                    },
+                ).setView(container)
                 .setPositiveButton("Download") { _, _ ->
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl))
                     context.startActivity(intent)

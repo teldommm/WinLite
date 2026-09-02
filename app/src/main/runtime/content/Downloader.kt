@@ -15,26 +15,17 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
-import java.net.URL
 import java.nio.charset.StandardCharsets
-import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import java.util.regex.Pattern
 
 /**
- * Native-backed component download helper with WinLite.dev-first URL resolution.
+ * Native-backed component download helper.
  *
- * Large file transfers use [NativeContentIO] / libcurl. OkHttp is retained only for small metadata
- * requests such as remote JSON and WinLite.dev directory listings.
+ * Large file transfers use [NativeContentIO] / libcurl. OkHttp is retained only for small
+ * metadata requests such as remote JSON manifests.
  */
 object Downloader {
     private const val TAG = "Downloader"
-    private const val WINLITE_ROOT = "https://WinLite.dev/Downloads/"
-    private const val MAX_CRAWL_DEPTH = 10
-    private const val FILE_MAP_CACHE_NAME = "winlite_file_map_v1.txt"
-    private const val FILE_MAP_CACHE_HEADER_PREFIX = "# timestamp="
-    private const val FILE_MAP_CACHE_TTL_MS = 24L * 60L * 60L * 1000L
     private const val NATIVE_CA_BUNDLE_NAME = "native_curl_cacert.pem"
     private const val SYSTEM_CA_DIR = "/system/etc/security/cacerts"
 
@@ -49,11 +40,6 @@ object Downloader {
             .followSslRedirects(true)
             .build()
 
-    private val hrefPattern = Pattern.compile("href=\"([^\"?]+)\"")
-    private val fileMap = ConcurrentHashMap<String, String>()
-    private val mapLock = Any()
-
-    @Volatile private var fileMapReady = false
     @Volatile private var logEnabledCached = false
     @Volatile private var logEnabledResolved = false
     @Volatile private var nativeCaBundlePath: String? = null
@@ -63,83 +49,6 @@ object Downloader {
             downloadedBytes: Long,
             totalBytes: Long,
         )
-    }
-
-    @JvmStatic
-    fun downloadFileWinLiteFirst(
-        originalUrl: String,
-        file: File,
-        listener: DownloadListener?,
-    ): Boolean {
-        val filename = extractFilename(originalUrl)
-        if (filename != null) {
-            ensureFileMap()
-            val winUrl = fileMap[filename.lowercase(Locale.ROOT)]
-            if (winUrl != null) {
-                if (logEnabled()) Log.d(TAG, "WinLite URL resolved: $winUrl")
-                if (downloadFile(winUrl, file, listener)) {
-                    if (logEnabled()) Log.d(TAG, "Download succeeded from WinLite.dev")
-                    return true
-                }
-                if (logEnabled()) Log.w(TAG, "WinLite download failed, falling back to: $originalUrl")
-                file.delete()
-            } else if (logEnabled()) {
-                Log.d(TAG, "File not found on WinLite.dev, using original: $originalUrl")
-            }
-        }
-        return downloadFile(originalUrl, file, listener)
-    }
-
-    @JvmStatic
-    fun resolveWinLiteUrl(filename: String?): String? {
-        if (filename == null) return null
-        ensureFileMap()
-        return fileMap[filename.lowercase(Locale.ROOT)]
-    }
-
-    @JvmStatic
-    fun resolveWinLiteUrl(contentType: String?, filename: String?): String? = resolveWinLiteUrl(filename)
-
-    @JvmStatic
-    fun clearFileMap() {
-        synchronized(mapLock) {
-            fileMap.clear()
-            fileMapReady = false
-            fileMapCacheFile()?.let {
-                if (it.exists() && !it.delete() && logEnabled()) {
-                    Log.w(TAG, "Unable to delete WinLite file map cache: ${it.absolutePath}")
-                }
-            }
-        }
-    }
-
-    @JvmStatic
-    @Deprecated("Use clearFileMap() instead.", ReplaceWith("clearFileMap()"))
-    fun clearDirectoryCache() = clearFileMap()
-
-    @JvmStatic
-    fun ensureFileMap() {
-        if (fileMapReady) return
-        synchronized(mapLock) {
-            if (fileMapReady) return
-            refreshLogEnabled()
-            if (!loadFileMapFromDisk()) {
-                buildFileMap()
-                persistFileMap()
-            }
-            fileMapReady = true
-        }
-    }
-
-    private fun extractFilename(url: String?): String? {
-        if (url == null) return null
-        return try {
-            val path = URL(url).path
-            path.substringAfterLast('/').takeIf { it.isNotEmpty() }
-        } catch (_: Exception) {
-            val pathOnly = url.substringBefore('?')
-            pathOnly.substringAfterLast('/').takeIf { it.isNotEmpty() }
-        }
     }
 
     @JvmStatic
@@ -192,111 +101,6 @@ object Downloader {
         } catch (e: Exception) {
             if (logEnabled()) Log.w(TAG, "String download failed for $address", e)
             null
-        }
-    }
-
-    private fun buildFileMap() {
-        if (logEnabled()) Log.d(TAG, "Building WinLite file map from $WINLITE_ROOT")
-        val start = System.currentTimeMillis()
-        fileMap.clear()
-        crawlDirectory(WINLITE_ROOT, 0)
-        if (logEnabled()) {
-            Log.d(TAG, "WinLite file map built: ${fileMap.size} files in ${System.currentTimeMillis() - start}ms")
-        }
-    }
-
-    private fun crawlDirectory(
-        dirUrl: String,
-        depth: Int,
-    ) {
-        if (depth > MAX_CRAWL_DEPTH) return
-        val html = downloadString(dirUrl) ?: return
-        val matcher = hrefPattern.matcher(html)
-        val subdirs = ArrayList<String>()
-
-        while (matcher.find()) {
-            val href = matcher.group(1) ?: continue
-            if (href.startsWith("/") || href.startsWith("..") || href.startsWith("?") || href.startsWith("http")) {
-                continue
-            }
-
-            if (href.endsWith("/")) {
-                subdirs.add(dirUrl + href)
-            } else {
-                fileMap.putIfAbsent(href.lowercase(Locale.ROOT), dirUrl + href)
-            }
-        }
-
-        subdirs.forEach { crawlDirectory(it, depth + 1) }
-    }
-
-    private fun loadFileMapFromDisk(): Boolean {
-        val cacheFile = fileMapCacheFile()
-        if (cacheFile?.isFile != true) return false
-
-        fileMap.clear()
-        try {
-            BufferedReader(InputStreamReader(FileInputStream(cacheFile), StandardCharsets.UTF_8)).use { reader ->
-                val header = reader.readLine()
-                if (header == null || !header.startsWith(FILE_MAP_CACHE_HEADER_PREFIX)) return false
-
-                val timestamp = header.removePrefix(FILE_MAP_CACHE_HEADER_PREFIX).trim().toLong()
-                if (System.currentTimeMillis() - timestamp > FILE_MAP_CACHE_TTL_MS) {
-                    if (!cacheFile.delete() && logEnabled()) {
-                        Log.w(TAG, "Unable to delete expired WinLite file map cache")
-                    }
-                    return false
-                }
-
-                reader.lineSequence().forEach { line ->
-                    val separator = line.indexOf('\t')
-                    if (separator > 0 && separator < line.length - 1) {
-                        fileMap.putIfAbsent(line.substring(0, separator), line.substring(separator + 1))
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            if (logEnabled()) Log.w(TAG, "Failed to load WinLite file map cache", e)
-            fileMap.clear()
-            return false
-        }
-
-        if (fileMap.isEmpty()) return false
-        if (logEnabled()) Log.d(TAG, "Loaded WinLite file map cache: ${fileMap.size} files")
-        return true
-    }
-
-    private fun persistFileMap() {
-        if (fileMap.isEmpty()) return
-        val cacheFile = fileMapCacheFile() ?: return
-        val tempFile = File(cacheFile.parentFile, "${cacheFile.name}.tmp")
-
-        try {
-            BufferedWriter(OutputStreamWriter(FileOutputStream(tempFile), StandardCharsets.UTF_8)).use { writer ->
-                writer.write(FILE_MAP_CACHE_HEADER_PREFIX)
-                writer.write(System.currentTimeMillis().toString())
-                writer.newLine()
-
-                fileMap.forEach { (key, value) ->
-                    if (value.isNotEmpty()) {
-                        writer.write(key)
-                        writer.write('\t'.code)
-                        writer.write(value)
-                        writer.newLine()
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            if (logEnabled()) Log.w(TAG, "Failed to persist WinLite file map cache", e)
-            tempFile.delete()
-            return
-        }
-
-        if (cacheFile.exists() && !cacheFile.delete() && logEnabled()) {
-            Log.w(TAG, "Unable to replace existing WinLite file map cache")
-        }
-        if (!tempFile.renameTo(cacheFile) && logEnabled()) {
-            Log.w(TAG, "Unable to finalize WinLite file map cache write")
         }
     }
 
@@ -374,8 +178,6 @@ object Downloader {
             false
         }
     }
-
-    private fun fileMapCacheFile(): File? = appContext()?.let { File(it.filesDir, FILE_MAP_CACHE_NAME) }
 
     private fun appContext(): Context? =
         try {

@@ -473,9 +473,6 @@ internal enum class HUDMetricEditor(
 // FRAME_GEN, GYROSCOPE and OUTPUT are no longer standalone panes: Frame Gen lives behind a
 // gear inside SCREEN_EFFECTS (FPS limiter is inline there too), Gyroscope behind a gear
 // inside INPUT_CONTROLS, and Output content sits inline at the bottom of SCREEN_EFFECTS.
-// RESHADE is no longer a standalone pane either: it now lives behind a gear inside
-// SCREEN_EFFECTS, same treatment as Frame Gen (its settings are large enough to warrant
-// a popup rather than inline content).
 internal enum class DrawerPane { INPUT_CONTROLS, HUD, SCREEN_EFFECTS, TASK_MANAGER, LOGS, TOUCH }
 
 internal const val LogsPaneMaxLines = 2000
@@ -547,7 +544,6 @@ private val FOLDED_INTO_PANE_ITEM_IDS =
         R.id.main_menu_frame_generation,
         R.id.main_menu_gyroscope,
         R.id.main_menu_output,
-        R.id.main_menu_reshade,
     )
 
 // Generic gear-triggered settings popup, shared by rows that used to be their own top-rail
@@ -773,10 +769,6 @@ data class XServerDrawerState(
     val pixelateEnabled: Boolean = false,
     val pixelateBlock: Int = 6,
     val colorBlind: Int = 0,
-    // reshadeMode is "solo" (one effect bypasses the rest) or "stack"; param keys follow ReshadeManager.seedValues.
-    val reshadeMasterEnabled: Boolean = false,
-    val reshadeMode: String = "solo",
-    val reshadeLoadout: List<ReshadeLoadoutItem> = emptyList(),
     val inputControlsProfileNames: List<String> = emptyList(),
     val inputControlsSelectedProfileIndex: Int = 0,
     val inputControlsStyleNames: List<String> = emptyList(),
@@ -1231,18 +1223,6 @@ interface XServerDrawerActionListener {
     fun onColorBlindSelected(mode: Int)
 
     fun onResetEffects()
-
-    fun onReshadeMasterEnabledChanged(enabled: Boolean)
-
-    // In solo mode enabling one effect bypasses the others (host-side).
-    fun onReshadeEffectEnabledChanged(index: Int, enabled: Boolean)
-
-    fun onReshadeModeChanged(mode: String)
-
-    // key = ReshadeManager.seedValues scheme.
-    fun onReshadeParamChanged(index: Int, key: String, value: Float)
-
-    fun onReshadeReset(index: Int)
 
     fun onInputControlsProfileSelected(index: Int)
 
@@ -1713,30 +1693,6 @@ fun withVitureState(
         outputVitureVolume = volume,
         outputVitureVolumeMax = volumeMax,
     )
-
-// Call only when a ReShade effect was applied at launch (Vulkan wrapper) so the vkBasalt layer is loaded.
-fun withReshadeState(
-    state: XServerDrawerState,
-    masterEnabled: Boolean,
-    mode: String,
-    loadout: List<ReshadeLoadoutItem>,
-    reshadeTitle: String,
-): XServerDrawerState {
-    val reshadeItem =
-        XServerDrawerItem(
-            itemId = R.id.main_menu_reshade,
-            title = reshadeTitle,
-            subtitle = "",
-            icon = Icons.Outlined.AutoAwesome,
-            active = masterEnabled,
-        )
-    return state.copy(
-        items = state.items + reshadeItem,
-        reshadeMasterEnabled = masterEnabled,
-        reshadeMode = mode,
-        reshadeLoadout = loadout,
-    )
-}
 
 @Composable
 internal fun XServerDrawerContent(

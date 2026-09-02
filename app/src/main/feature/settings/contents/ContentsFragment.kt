@@ -626,14 +626,14 @@ class ContentsFragment : Fragment() {
             val output = File(requireContext().cacheDir, "temp_${System.currentTimeMillis()}")
             val success =
                 withContext(Dispatchers.IO) {
-                    Downloader.downloadFileWinLiteFirst(remoteUrl, output) { downloadedBytes, totalBytes ->
+                    Downloader.downloadFile(remoteUrl, output) { downloadedBytes, totalBytes ->
                         if (totalBytes <= 0L) {
                             updateDownloadProgress(
                                 title = getString(R.string.settings_content_downloading_title),
                                 message = profile.verName,
                                 indeterminate = true,
                             )
-                            return@downloadFileWinLiteFirst
+                            return@downloadFile
                         }
                         val fraction =
                             (downloadedBytes.toFloat() / totalBytes.toFloat())

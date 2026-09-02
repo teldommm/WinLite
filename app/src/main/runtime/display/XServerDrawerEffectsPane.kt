@@ -497,35 +497,6 @@ internal fun ScreenEffectsPaneContent(
 
                 ThinDivider()
 
-                // ReShade, folded in from the old standalone RESHADE rail tab: its settings
-                // are large (mode + per-effect stack), so — same as Frame Gen — just a
-                // summary toggle + gear that opens the full ReshadePaneContent as a popup.
-                // Shown only when the host added a main_menu_reshade item (same condition
-                // the rail used before).
-                if (state.items.any { it.itemId == R.id.main_menu_reshade }) {
-                    Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
-                        PaneSectionLabel(stringResource(R.string.reshade_section_title))
-
-                        var reshadeSettingsOpen by remember { mutableStateOf(false) }
-                        GearToggleRow(
-                            title = stringResource(R.string.reshade_drawer_enable),
-                            checked = state.reshadeMasterEnabled,
-                            onCheckedChange = listener::onReshadeMasterEnabledChanged,
-                            onGearClick = { reshadeSettingsOpen = true },
-                        )
-                        if (reshadeSettingsOpen) {
-                            PaneOverlayDialog(
-                                title = stringResource(R.string.reshade_section_title),
-                                onDismiss = { reshadeSettingsOpen = false },
-                            ) {
-                                ReshadePaneContent(state = state, listener = listener)
-                            }
-                        }
-                    }
-
-                    ThinDivider()
-                }
-
                 // Output, folded in from the old standalone OUTPUT rail tab — placed at the
                 // very bottom of Effects, shown inline (no gear) same as it was on its own tab.
                 Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
