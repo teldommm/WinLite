@@ -1196,6 +1196,11 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_content_install">Install Content</string>
     <string name="settings_content_type">Category</string>
     <string name="settings_content_components">Components</string>
+    <string name="settings_content_repo_manager_title">Component Sources</string>
+    <string name="settings_content_repo_add">Add Repository</string>
+    <string name="settings_content_repo_edit">Edit Repository</string>
+    <string name="settings_content_repo_name">Name</string>
+    <string name="settings_content_repo_url">GitHub URL</string>
     <string name="settings_content_auto_create_container">Auto-create container</string>
     <string name="settings_content_remove_title">Remove component?</string>
     <string name="settings_content_empty_subtitle">Install a package or switch type to get started.</string>

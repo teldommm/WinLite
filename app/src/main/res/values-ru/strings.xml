@@ -942,6 +942,11 @@
     <string name="settings_content_install">Установить контент</string>
     <string name="settings_content_type">Категория</string>
     <string name="settings_content_components">Компоненты</string>
+    <string name="settings_content_repo_manager_title">Источники компонентов</string>
+    <string name="settings_content_repo_add">Добавить репозиторий</string>
+    <string name="settings_content_repo_edit">Редактировать репозиторий</string>
+    <string name="settings_content_repo_name">Название</string>
+    <string name="settings_content_repo_url">URL GitHub</string>
     <string name="settings_content_auto_create_container">Автоматическое создание контейнера</string>
     <string name="settings_content_remove_title">Удалить компонент?</string>
     <string name="settings_content_empty_subtitle">Чтобы начать работу, установите пакет или переключите тип.</string>

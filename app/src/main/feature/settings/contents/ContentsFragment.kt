@@ -37,6 +37,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 
 class ContentsFragment : Fragment() {
@@ -56,6 +58,10 @@ class ContentsFragment : Fragment() {
     private var conflictingContentPath: String? = null
     private var isRefreshing = false
     private var loadFailed = false
+    private var componentRepos by mutableStateOf<List<ComponentRepo>>(emptyList())
+    private var repoManagerOpen by mutableStateOf(false)
+    private var addRepoDialogOpen by mutableStateOf(false)
+    private var editingRepo by mutableStateOf<ComponentRepo?>(null)
 
     private var autoCreateContainer = true
 
@@ -118,7 +124,40 @@ class ContentsFragment : Fragment() {
                             publishState()
                         },
                         onRefresh = { refreshRemoteProfiles() },
+                        onManageSources = { repoManagerOpen = true },
                     )
+
+                    if (repoManagerOpen) {
+                        ComponentRepoManagerDialog(
+                            repos = componentRepos,
+                            onDismiss = { repoManagerOpen = false },
+                            onAddRepo = { addRepoDialogOpen = true },
+                            onEditRepo = { repo -> editingRepo = repo },
+                            onDeleteRepo = { repo -> removeRepo(repo) },
+                        )
+                    }
+
+                    if (addRepoDialogOpen) {
+                        ComponentRepoEditDialog(
+                            existing = null,
+                            onDismiss = { addRepoDialogOpen = false },
+                            onConfirm = { name, url ->
+                                addOrUpdateRepo(existing = null, name = name, rawUrl = url)
+                                addRepoDialogOpen = false
+                            },
+                        )
+                    }
+
+                    editingRepo?.let { repo ->
+                        ComponentRepoEditDialog(
+                            existing = repo,
+                            onDismiss = { editingRepo = null },
+                            onConfirm = { name, url ->
+                                addOrUpdateRepo(existing = repo, name = name, rawUrl = url)
+                                editingRepo = null
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -130,6 +169,7 @@ class ContentsFragment : Fragment() {
     ) {
         super.onViewCreated(view, savedInstanceState)
         (activity as? AppCompatActivity)?.supportActionBar?.setTitle(R.string.settings_content_components)
+        loadComponentRepos()
         syncAndPublish()
     }
 
@@ -374,6 +414,96 @@ class ContentsFragment : Fragment() {
         }
     }
 
+    private fun defaultComponentRepoList(): List<ComponentRepo> =
+        listOf(ComponentRepo(name = "WinLite Components", apiUrl = ContentsManager.REMOTE_RELEASES_API))
+
+    private fun loadComponentRepos() {
+        val context = context ?: return
+        val jsonStr =
+            PreferenceManager
+                .getDefaultSharedPreferences(context)
+                .getString(PREF_COMPONENT_REPOS, null)
+        val loaded = mutableListOf<ComponentRepo>()
+        if (jsonStr == null) {
+            loaded.addAll(defaultComponentRepoList())
+        } else {
+            try {
+                val array = JSONArray(jsonStr)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    loaded.add(
+                        ComponentRepo(
+                            name = obj.optString("name", "Unknown Repo"),
+                            apiUrl = obj.optString("apiUrl", ""),
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load component repos.", e)
+                loaded.addAll(defaultComponentRepoList())
+            }
+        }
+        componentRepos = loaded
+    }
+
+    private fun saveComponentRepos() {
+        val context = context ?: return
+        val array = JSONArray()
+        componentRepos.forEach { repo ->
+            array.put(
+                JSONObject().apply {
+                    put("name", repo.name)
+                    put("apiUrl", repo.apiUrl)
+                },
+            )
+        }
+        PreferenceManager
+            .getDefaultSharedPreferences(context)
+            .edit()
+            .putString(PREF_COMPONENT_REPOS, array.toString())
+            .apply()
+    }
+
+    // Accepts a plain "https://github.com/owner/repo" link (or its /releases page) and
+    // converts it to the API endpoint the fetch actually needs — same convenience as the
+    // driver repo picker.
+    private fun normalizeRepoInput(
+        name: String,
+        rawUrl: String,
+    ): ComponentRepo {
+        var url = rawUrl.trim()
+        if (url.startsWith("https://github.com/") && !url.contains("api.github.com")) {
+            url = url.replace("https://github.com/", "https://api.github.com/repos/")
+            url = url.removeSuffix("/releases")
+            if (!url.endsWith("/releases")) {
+                url = "$url/releases"
+            }
+        }
+        return ComponentRepo(name = name, apiUrl = url)
+    }
+
+    private fun addOrUpdateRepo(
+        existing: ComponentRepo?,
+        name: String,
+        rawUrl: String,
+    ) {
+        val normalized = normalizeRepoInput(name, rawUrl)
+        componentRepos =
+            if (existing != null) {
+                componentRepos.map { if (it == existing) normalized else it }
+            } else {
+                componentRepos + normalized
+            }
+        saveComponentRepos()
+        refreshRemoteProfiles()
+    }
+
+    private fun removeRepo(repo: ComponentRepo) {
+        componentRepos = componentRepos - repo
+        saveComponentRepos()
+        refreshRemoteProfiles()
+    }
+
     private fun refreshRemoteProfiles() {
         if (isRefreshing) return
         isRefreshing = true
@@ -385,24 +515,18 @@ class ContentsFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             var failed = false
             try {
-                val context = context
-                val contentsUrl =
-                    if (context != null) {
-                        PreferenceManager
-                            .getDefaultSharedPreferences(context)
-                            .getString("downloadable_contents_url", ContentsManager.REMOTE_RELEASES_API)
-                            ?: ContentsManager.REMOTE_RELEASES_API
-                    } else {
-                        ContentsManager.REMOTE_RELEASES_API
-                    }
-
-                val json =
+                val repos = componentRepos.ifEmpty { defaultComponentRepoList() }
+                val merged =
                     withContext(Dispatchers.IO) {
-                        Downloader.downloadString(contentsUrl)
+                        repos
+                            .map { repo -> async { runCatching { Downloader.downloadString(repo.apiUrl) }.getOrNull() } }
+                            .awaitAll()
+                            .filterNotNull()
+                            .flatMap { json -> ContentsManager.parseReleasesJson(json) }
                     }
 
-                if (json != null) {
-                    withContext(Dispatchers.IO) { manager.setRemoteProfiles(json) }
+                if (merged.isNotEmpty()) {
+                    withContext(Dispatchers.IO) { manager.setRemoteProfiles(merged) }
                 } else {
                     failed = true
                 }
@@ -677,6 +801,7 @@ class ContentsFragment : Fragment() {
     companion object {
         private const val STATE_CONTENT_TYPE = "state_content_type"
         private const val TAG = "ContentsFragment"
+        private const val PREF_COMPONENT_REPOS = "custom_component_repos"
         private const val PREF_AUTO_CREATE_CONTAINER = "components_auto_create_container"
     }
 }

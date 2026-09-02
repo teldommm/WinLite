@@ -126,8 +126,8 @@ public class ContentsManager {
     default void onByteProgress(long bytesExtracted) {}
   }
 
-  public void setRemoteProfiles(String json) {
-    remoteProfiles = new ArrayList<>(parseReleasesJson(json));
+  public void setRemoteProfiles(List<ContentProfile> profiles) {
+    remoteProfiles = new ArrayList<>(profiles);
     syncContents();
   }
 

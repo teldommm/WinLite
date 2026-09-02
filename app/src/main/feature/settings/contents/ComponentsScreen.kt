@@ -16,6 +16,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -29,11 +30,15 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -42,10 +47,12 @@ import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeveloperBoard
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Science
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.CircularProgressIndicator
@@ -63,11 +70,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -122,6 +138,11 @@ data class ComponentsConflict(
     val path: String,
 )
 
+data class ComponentRepo(
+    val name: String,
+    val apiUrl: String,
+)
+
 data class ComponentsState(
     val currentType: ContentProfile.ContentType = ContentProfile.ContentType.CONTENT_TYPE_WINE,
     val installed: List<ComponentItem> = emptyList(),
@@ -146,6 +167,7 @@ fun ComponentsScreen(
     onDismissConflict: () -> Unit,
     onToggleAutoCreateContainer: (Boolean) -> Unit,
     onRefresh: () -> Unit,
+    onManageSources: () -> Unit,
 ) {
     var itemPendingRemoval by remember { mutableStateOf<ComponentItem?>(null) }
     val layoutDirection = LocalLayoutDirection.current
@@ -240,6 +262,7 @@ fun ComponentsScreen(
                 onInstallFromFile = onInstallFromFile,
                 onToggleAutoCreateContainer = onToggleAutoCreateContainer,
                 onRefresh = onRefresh,
+                onManageSources = onManageSources,
             )
 
             if (state.installed.isEmpty() && state.available.isEmpty() && !state.isRefreshing) {
@@ -297,6 +320,7 @@ private fun HeroHeader(
     onInstallFromFile: () -> Unit,
     onToggleAutoCreateContainer: (Boolean) -> Unit,
     onRefresh: () -> Unit,
+    onManageSources: () -> Unit,
 ) {
     Box(
         modifier =
@@ -329,6 +353,13 @@ private fun HeroHeader(
                     onRefresh = onRefresh,
                 )
             }
+            val sources: @Composable () -> Unit = {
+                IconTapButton(
+                    icon = Icons.Outlined.Settings,
+                    tint = TextSecondary,
+                    onClick = onManageSources,
+                )
+            }
             val install: @Composable () -> Unit = {
                 SmallPillButton(
                     label = stringResource(R.string.settings_content_install),
@@ -350,6 +381,8 @@ private fun HeroHeader(
                 ) {
                     counts()
                     Spacer(Modifier.weight(1f))
+                    sources()
+                    Spacer(Modifier.width(6.dp))
                     refresh()
                 }
                 Spacer(Modifier.height(8.dp))
@@ -377,6 +410,8 @@ private fun HeroHeader(
                     }
                     Spacer(Modifier.width(10.dp))
                     toggle(Modifier)
+                    Spacer(Modifier.width(6.dp))
+                    sources()
                     Spacer(Modifier.width(6.dp))
                     refresh()
                     Spacer(Modifier.width(8.dp))
@@ -938,7 +973,291 @@ private fun DownloadProgressDialog(progress: ComponentsDownloadProgress) {
     }
 }
 
-// Helpers
+// Component source repositories — list + add/edit, mirrors the driver repo picker's storage
+// model but without the expand-to-browse-releases behavior (the catalog itself is browsed
+// via the type tabs above, not per-repo).
+
+@Composable
+fun ComponentRepoManagerDialog(
+    repos: List<ComponentRepo>,
+    onDismiss: () -> Unit,
+    onAddRepo: () -> Unit,
+    onEditRepo: (ComponentRepo) -> Unit,
+    onDeleteRepo: (ComponentRepo) -> Unit,
+) {
+    val registry = remember { PaneNavRegistry() }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        DialogPaneNav(registry, onDismiss = onDismiss)
+        CompositionLocalProvider(LocalPaneNav provides registry) {
+            BoxWithConstraints(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier =
+                        Modifier
+                            .widthIn(max = 440.dp)
+                            .fillMaxWidth()
+                            .heightIn(max = maxHeight)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(CardDark)
+                            .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                ) {
+                    Column(modifier = Modifier.wrapContentHeight()) {
+                        Text(
+                            text = stringResource(R.string.settings_content_repo_manager_title),
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(8.dp))
+
+                        Column(
+                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            repos.forEach { repo ->
+                                ComponentRepoRow(
+                                    repo = repo,
+                                    onEdit = { onEditRepo(repo) },
+                                    onDelete = { onDeleteRepo(repo) },
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        ) {
+                            SmallDialogButton(
+                                label = stringResource(R.string.common_ui_close),
+                                textColor = TextSecondary,
+                                onClick = onDismiss,
+                            )
+                            SmallDialogButton(
+                                label = stringResource(R.string.settings_content_repo_add),
+                                textColor = Accent,
+                                onClick = onAddRepo,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComponentRepoRow(
+    repo: ComponentRepo,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(CardDarker)
+                .border(1.dp, CardBorder, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = repo.name,
+                color = TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = repo.apiUrl,
+                color = TextSecondary,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        IconTapButton(icon = Icons.Outlined.Edit, tint = TextSecondary, onClick = onEdit)
+        Spacer(Modifier.width(6.dp))
+        IconTapButton(icon = Icons.Outlined.Delete, tint = DangerRed, onClick = onDelete)
+    }
+}
+
+@Composable
+fun ComponentRepoEditDialog(
+    existing: ComponentRepo?,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, apiUrl: String) -> Unit,
+) {
+    var name by remember { mutableStateOf(existing?.name.orEmpty()) }
+    var url by remember { mutableStateOf(existing?.apiUrl.orEmpty()) }
+    val registry = remember { PaneNavRegistry() }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        DialogPaneNav(registry, onDismiss = onDismiss)
+        CompositionLocalProvider(LocalPaneNav provides registry) {
+            BoxWithConstraints(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier =
+                        Modifier
+                            .widthIn(max = 440.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(CardDark)
+                            .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                ) {
+                    Column(modifier = Modifier.wrapContentHeight()) {
+                        Text(
+                            text =
+                                if (existing == null) {
+                                    stringResource(R.string.settings_content_repo_add)
+                                } else {
+                                    stringResource(R.string.settings_content_repo_edit)
+                                },
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(8.dp))
+
+                        SmallLabeledField(
+                            label = stringResource(R.string.settings_content_repo_name),
+                            value = name,
+                            onValueChange = { name = it },
+                            placeholder = "Display name",
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        SmallLabeledField(
+                            label = stringResource(R.string.settings_content_repo_url),
+                            value = url,
+                            onValueChange = { url = it },
+                            placeholder = "https://github.com/owner/repo/releases",
+                            keyboardType = KeyboardType.Uri,
+                        )
+
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        ) {
+                            SmallDialogButton(label = stringResource(R.string.common_ui_cancel), textColor = TextSecondary, onClick = onDismiss)
+                            SmallDialogButton(
+                                label =
+                                    if (existing == null) {
+                                        stringResource(R.string.settings_content_repo_add)
+                                    } else {
+                                        stringResource(R.string.common_ui_save)
+                                    },
+                                textColor = Accent,
+                                onClick = {
+                                    val trimmedName = name.trim()
+                                    val trimmedUrl = url.trim()
+                                    if (trimmedName.isNotEmpty() && trimmedUrl.isNotEmpty()) {
+                                        onConfirm(trimmedName, trimmedUrl)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmallLabeledField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    keyboardType: KeyboardType = KeyboardType.Text,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label.uppercase(),
+            color = TextSecondary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+        )
+        Spacer(Modifier.height(4.dp))
+        val interactionSource = remember { MutableInteractionSource() }
+        val isFocused by interactionSource.collectIsFocusedAsState()
+        val borderColor = if (isFocused) Accent else CardBorder
+        val fieldFocus = remember { FocusRequester() }
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .requiredHeightIn(min = 40.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(CardDarker)
+                    .border(if (isFocused) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(9.dp))
+                    .padding(horizontal = 11.dp, vertical = 8.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent),
+                keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Done),
+                interactionSource = interactionSource,
+                modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
+                decorationBox = { innerTextField ->
+                    if (value.isEmpty()) {
+                        Text(text = placeholder, color = TextSecondary.copy(alpha = 0.6f), fontSize = 13.sp)
+                    }
+                    innerTextField()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmallDialogButton(
+    label: String,
+    textColor: Color,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .paneNavItem(cornerRadius = 8.dp, onActivate = onClick, highlightColor = NavHighlight, tapToSelect = true)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(text = label, color = textColor, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
 
 @Composable
 private fun formatSizeLabel(item: ComponentItem): String? {
