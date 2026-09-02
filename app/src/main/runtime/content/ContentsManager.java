@@ -25,8 +25,8 @@ import org.json.JSONObject;
 
 public class ContentsManager {
   public static final String PROFILE_NAME = "profile.json";
-  public static final String REMOTE_PROFILES =
-      "https://raw.githubusercontent.com/teldommm/WinLite-Components/refs/heads/main/contents.json";
+  public static final String REMOTE_RELEASES_API =
+      "https://api.github.com/repos/teldommm/WinLite-Components/releases";
   private static final long EXTRACTION_PROGRESS_INTERVAL_MS = 120L;
   private static final String REMOTE_ALIAS_PREFIX = "remote_profile_alias_";
   public static final String[] DXVK_TRUST_FILES = {
@@ -127,28 +127,83 @@ public class ContentsManager {
   }
 
   public void setRemoteProfiles(String json) {
+    remoteProfiles = new ArrayList<>(parseReleasesJson(json));
+    syncContents();
+  }
+
+  /**
+   * Scans every release's assets under WinLite-Components and classifies each recognized file
+   * name into a ContentProfile. Adding/replacing an asset in the repo is enough to change what
+   * shows up here — no manifest to keep in sync. verCode is derived from the asset's upload
+   * timestamp (epoch seconds) so "picked as best/newest" always tracks "uploaded most recently".
+   */
+  public static List<ContentProfile> parseReleasesJson(String json) {
+    List<ContentProfile> result = new ArrayList<>();
+    if (json == null || json.isEmpty()) return result;
     try {
-      remoteProfiles = new ArrayList<>();
-      JSONArray content = new JSONArray(json);
-      for (int i = 0; i < content.length(); i++) {
-        try {
-          JSONObject object = content.getJSONObject(i);
-          ContentProfile remoteProfile = new ContentProfile();
-          remoteProfile.remoteUrl = object.getString("remoteUrl");
-          remoteProfile.type = ContentProfile.ContentType.getTypeByName(object.getString("type"));
-          remoteProfile.verName = object.getString("verName");
-          remoteProfile.verCode = object.getInt("verCode");
-          remoteProfile.isOfficial =
-              parseOfficialFlag(object.opt(ContentProfile.MARK_OFFICIAL));
-          remoteProfiles.add(remoteProfile);
-        } catch (JSONException e) {
-          e.printStackTrace();
+      JSONArray releases = new JSONArray(json);
+      for (int i = 0; i < releases.length(); i++) {
+        JSONObject release = releases.optJSONObject(i);
+        if (release == null) continue;
+        JSONArray assets = release.optJSONArray("assets");
+        if (assets == null) continue;
+
+        for (int j = 0; j < assets.length(); j++) {
+          JSONObject asset = assets.optJSONObject(j);
+          if (asset == null) continue;
+
+          String fileName = asset.optString("name");
+          String downloadUrl = asset.optString("browser_download_url");
+          if (fileName.isEmpty() || downloadUrl.isEmpty()) continue;
+
+          ContentProfile.ContentType type = classifyAssetType(fileName);
+          if (type == null) continue;
+
+          ContentProfile profile = new ContentProfile();
+          profile.type = type;
+          profile.verName = stripExtension(fileName);
+          profile.verCode = parseEpochSeconds(asset.optString("updated_at"));
+          profile.remoteUrl = downloadUrl;
+          profile.isOfficial = true; // everything here comes from our own repo
+          result.add(profile);
         }
       }
     } catch (JSONException e) {
       e.printStackTrace();
     }
-    syncContents();
+    return result;
+  }
+
+  // WOWBox64 is checked before Box64 since its filename contains "box64" as a substring.
+  private static ContentProfile.ContentType classifyAssetType(String fileName) {
+    String n = fileName.toLowerCase(Locale.ROOT);
+    if (n.contains("wowbox64")) return ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64;
+    if (n.contains("box64")) return ContentProfile.ContentType.CONTENT_TYPE_BOX64;
+    if (n.contains("vkd3d")) return ContentProfile.ContentType.CONTENT_TYPE_VKD3D;
+    if (n.contains("d7vk")) return ContentProfile.ContentType.CONTENT_TYPE_D7VK;
+    if (n.contains("dxvk")) return ContentProfile.ContentType.CONTENT_TYPE_DXVK;
+    if (n.contains("fex")) return ContentProfile.ContentType.CONTENT_TYPE_FEXCORE;
+    if (n.contains("proton")) return ContentProfile.ContentType.CONTENT_TYPE_PROTON;
+    if (n.contains("wine")) return ContentProfile.ContentType.CONTENT_TYPE_WINE;
+    return null;
+  }
+
+  private static String stripExtension(String fileName) {
+    int dot = fileName.lastIndexOf('.');
+    return dot > 0 ? fileName.substring(0, dot) : fileName;
+  }
+
+  // GitHub's REST API always returns timestamps in strict ISO-8601 UTC ("2026-09-01T12:34:56Z").
+  private static int parseEpochSeconds(String iso8601) {
+    if (iso8601 == null || iso8601.isEmpty()) return 0;
+    try {
+      java.text.SimpleDateFormat sdf =
+          new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+      sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+      return (int) (sdf.parse(iso8601).getTime() / 1000L);
+    } catch (Exception e) {
+      return 0;
+    }
   }
 
   /**

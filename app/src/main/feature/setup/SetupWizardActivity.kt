@@ -223,9 +223,9 @@ class SetupWizardActivity : FixedFontScaleFragmentActivity() {
         private const val KEY_DEFAULT_ARM64_SETTINGS_DONE = "default_arm64_settings_done"
         private const val KEY_LAST_DRIVER_ID = "last_driver_id"
         private const val KEY_LAST_CONTENT_PREFIX = "last_content_"
-        private const val KEY_DEFAULT_JSON_CACHE = "default_json_cache"
-        private const val DEFAULT_JSON_URL =
-            "https://github.com/teldommm/WinLite-Components/blob/main/default.json"
+        private const val KEY_RECOMMENDED_CACHE = "recommended_json_cache"
+        private const val RECOMMENDED_JSON_URL =
+            "https://raw.githubusercontent.com/teldommm/WinLite-Components/main/recommended.json"
 
         @JvmStatic
         fun isSetupComplete(context: Context): Boolean = prefs(context).getBoolean(KEY_SETUP_COMPLETE, false)
@@ -430,18 +430,6 @@ class SetupWizardActivity : FixedFontScaleFragmentActivity() {
             )
     }
 
-    private data class PackageSpec(
-        val label: String,
-        val type: ContentProfile.ContentType,
-        val url: String,
-    )
-
-    private data class RuntimeSpec(
-        val label: String,
-        val fallbackType: ContentProfile.ContentType,
-        val fallbackUrl: String,
-    )
-
     private data class RemotePackageSpec(
         val type: ContentProfile.ContentType,
         val verName: String,
@@ -456,82 +444,9 @@ class SetupWizardActivity : FixedFontScaleFragmentActivity() {
         val progress: Float? = null,
     )
 
-    private val recommendedComponents =
-        listOf(
-            PackageSpec(
-                label = "DXVK 2.7.1 GPLAsync",
-                type = ContentProfile.ContentType.CONTENT_TYPE_DXVK,
-                url = "https://github.com/teldommm/WinLite-Components/releases/download/Stable-Dxvk/Dxvk-2.7.1-gplasync.wcp",
-            ),
-            PackageSpec(
-                label = "DXVK 2.7.1 ARM64EC GPLAsync",
-                type = ContentProfile.ContentType.CONTENT_TYPE_DXVK,
-                url = "https://github.com/teldommm/WinLite-Components/releases/download/Stable-Arm64ec-Dxvk/Dxvk-2.7.1-arm64ec-gplasync.wcp",
-            ),
-            PackageSpec(
-                label = "VKD3D Proton 3.0.1",
-                type = ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
-                url = "https://github.com/teldommm/WinLite-Components/releases/download/Stable-VKD3D/Vkd3d-proton-3.0.1.wcp",
-            ),
-            PackageSpec(
-                label = "VKD3D ARM64EC 3.0.1",
-                type = ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
-                url = "https://github.com/teldommm/WinLite-Components/releases/download/Stable-arm64ec-VKD3D/Vkd3d-arm64ec-3.0.1.wcp",
-            ),
-            PackageSpec(
-                label = "DXVK 2.4.1 pre-reg",
-                type = ContentProfile.ContentType.CONTENT_TYPE_DXVK,
-                url = "https://github.com/teldommm/WinLite-Components/releases/download/Stable-Dxvk/Dxvk-2.4.1-pre-reg.wcp",
-            ),
-            PackageSpec(
-                label = "FEX 2605",
-                type = ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
-                url = "https://github.com/teldommm/WinLite-Components/releases/download/Stable-FEX/FEX-2605.wcp",
-            ),
-            PackageSpec(
-                label = "Box64 0.4.2",
-                type = ContentProfile.ContentType.CONTENT_TYPE_BOX64,
-                url = "https://github.com/teldommm/WinLite-Components/releases/download/Stable-Box64/Box64-0.4.2.wcp",
-            ),
-            PackageSpec(
-                label = "Wowbox64 0.4.2",
-                type = ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64,
-                url = "https://github.com/teldommm/WinLite-Components/releases/download/Stable-wowbox64/Wowbox64-0.4.2.wcp",
-            ),
-        )
-
-    private val x86ProtonSpec =
-        RuntimeSpec(
-            label = "Recommended x86-64",
-            fallbackType = ContentProfile.ContentType.CONTENT_TYPE_WINE,
-            fallbackUrl = "https://github.com/teldommm/WinLite-Components/releases/download/Wine/wine-9.20-x86_64.wcp",
-        )
-
     private val recommendedUrlsState = mutableStateOf<Set<String>>(emptySet())
 
-    private val fallbackRecommendedUrls: Set<String> by lazy {
-        buildSet {
-            recommendedComponents.forEach { add(it.url) }
-            add(x86ProtonSpec.fallbackUrl)
-            add(arm64ProtonSpec.fallbackUrl)
-        }
-    }
-
-    private fun isRecommendedSpec(spec: RemotePackageSpec): Boolean {
-        val remote = recommendedUrlsState.value
-        return if (remote.isNotEmpty()) {
-            spec.remoteUrl in remote
-        } else {
-            spec.remoteUrl in fallbackRecommendedUrls
-        }
-    }
-
-    private val arm64ProtonSpec =
-        RuntimeSpec(
-            label = "Recommended ARM64EC",
-            fallbackType = ContentProfile.ContentType.CONTENT_TYPE_PROTON,
-            fallbackUrl = "https://github.com/teldommm/WinLite-Components/releases/download/Proton/Proton-10-arm64ec-coffincolors.wcp",
-        )
+    private fun isRecommendedSpec(spec: RemotePackageSpec): Boolean = spec.remoteUrl in recommendedUrlsState.value
 
     private val storageGranted = mutableStateOf(false)
     private val notifGranted = mutableStateOf(false)
@@ -1210,14 +1125,14 @@ class SetupWizardActivity : FixedFontScaleFragmentActivity() {
         lifecycleScope.launch {
             val profiles =
                 withContext(Dispatchers.IO) {
-                    // 1. Fetch recommended (default.json)
+                    // 1. Fetch recommended (recommended.json)
                     val recommended = fetchRecommendedPackages()
 
-                    // 2. Fetch full catalog (content.json)
+                    // 2. Fetch full catalog (scans every WinLite-Components release's assets)
                     val fullCatalog =
-                        parseRecommendedPackages(
-                            Downloader.downloadString(ContentsManager.REMOTE_PROFILES),
-                        )
+                        ContentsManager
+                            .parseReleasesJson(Downloader.downloadString(ContentsManager.REMOTE_RELEASES_API))
+                            .map { RemotePackageSpec(it.type, it.verName, it.remoteUrl) }
 
                     // 3. Merge: start with recommended, then add any full catalog entries not already present
                     val seen = recommended.map { it.remoteUrl }.toMutableSet()
@@ -1229,10 +1144,6 @@ class SetupWizardActivity : FixedFontScaleFragmentActivity() {
                         }
                     }
 
-                    // 4. Emergency Fallback: If everything failed and we have no profiles, use hardcoded ones
-                    if (merged.isEmpty()) {
-                        merged.addAll(getFallbackRemoteSpecs())
-                    }
                     merged
                 }
             advancedProfiles.clear()
@@ -1261,19 +1172,13 @@ class SetupWizardActivity : FixedFontScaleFragmentActivity() {
     private fun formatSizeMb(bytes: Long): String =
         String.format(java.util.Locale.US, "%.1f MB", bytes.toDouble() / (1024.0 * 1024.0))
 
-    private fun getFallbackRemoteSpecs(): List<RemotePackageSpec> =
-        buildList {
-            recommendedComponents.forEach {
-                add(RemotePackageSpec(it.type, it.label, it.url))
-            }
-            add(RemotePackageSpec(x86ProtonSpec.fallbackType, x86ProtonSpec.label, x86ProtonSpec.fallbackUrl))
-            add(RemotePackageSpec(arm64ProtonSpec.fallbackType, arm64ProtonSpec.label, arm64ProtonSpec.fallbackUrl))
-        }
-
+    // recommended.json entries are {type, verName, remoteUrl} — remoteUrl points directly at
+    // an asset already published under the normal Stable-* release tags (same ones
+    // ContentsManager's full catalog uses). Nothing gets uploaded twice.
     private fun fetchRecommendedPackages(): List<RemotePackageSpec> {
-        val json = Downloader.downloadString(resolveJsonDownloadUrl(DEFAULT_JSON_URL))
+        val json = Downloader.downloadString(RECOMMENDED_JSON_URL)
         if (!json.isNullOrBlank()) {
-            prefs(this).edit().putString(KEY_DEFAULT_JSON_CACHE, json).apply()
+            prefs(this).edit().putString(KEY_RECOMMENDED_CACHE, json).apply()
             val specs = parseRecommendedPackages(json)
             if (specs.isNotEmpty()) {
                 updateRecommendedUrls(specs.map { it.remoteUrl }.toSet())
@@ -1304,7 +1209,7 @@ class SetupWizardActivity : FixedFontScaleFragmentActivity() {
     }
 
     private fun getCachedRecommendedPackages(): List<RemotePackageSpec> {
-        val cachedJson = prefs(this).getString(KEY_DEFAULT_JSON_CACHE, null)
+        val cachedJson = prefs(this).getString(KEY_RECOMMENDED_CACHE, null)
         return parseRecommendedPackages(cachedJson)
     }
 
@@ -3275,21 +3180,3 @@ class SetupWizardActivity : FixedFontScaleFragmentActivity() {
 }
 
 private fun contentVersionIdentifier(profile: ContentProfile): String = ContentsManager.getEntryName(profile).substringAfter('-')
-
-private fun resolveJsonDownloadUrl(url: String): String {
-    val githubPrefix = "https://github.com/"
-    if (!url.startsWith(githubPrefix) || "/blob/" !in url) {
-        return url
-    }
-
-    val path = url.removePrefix(githubPrefix)
-    val ownerRepo = path.substringBefore("/blob/")
-    val blobPath = path.substringAfter("/blob/")
-    val branch = blobPath.substringBefore('/')
-    val filePath = blobPath.substringAfter('/', "")
-    if (ownerRepo.isBlank() || branch.isBlank() || filePath.isBlank()) {
-        return url
-    }
-
-    return "https://raw.githubusercontent.com/$ownerRepo/$branch/$filePath"
-}

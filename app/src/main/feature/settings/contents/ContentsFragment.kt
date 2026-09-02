@@ -390,10 +390,10 @@ class ContentsFragment : Fragment() {
                     if (context != null) {
                         PreferenceManager
                             .getDefaultSharedPreferences(context)
-                            .getString("downloadable_contents_url", ContentsManager.REMOTE_PROFILES)
-                            ?: ContentsManager.REMOTE_PROFILES
+                            .getString("downloadable_contents_url", ContentsManager.REMOTE_RELEASES_API)
+                            ?: ContentsManager.REMOTE_RELEASES_API
                     } else {
-                        ContentsManager.REMOTE_PROFILES
+                        ContentsManager.REMOTE_RELEASES_API
                     }
 
                 val json =
