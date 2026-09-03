@@ -545,10 +545,10 @@ private fun TypeSubLabel(
 ) {
     Text(
         text = text,
-        color = TextSecondary,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = modifier.padding(top = 6.dp, bottom = 2.dp, start = 2.dp),
+        color = TextPrimary,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier.padding(top = 8.dp, bottom = 3.dp, start = 2.dp),
     )
 }
 

@@ -1083,7 +1083,7 @@ private fun InstalledPill() {
         )
         Spacer(Modifier.width(5.dp))
         Text(
-            text = "Installed",
+            text = stringResource(R.string.common_ui_installed),
             color = SuccessGreen,
             fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold,

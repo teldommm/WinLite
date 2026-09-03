@@ -260,33 +260,43 @@ public class ContentsManager {
       if (remoteProfiles != null) {
         for (ContentProfile remote : remoteProfiles) {
           if (remote.type == type) {
-            remote.isInstalled = isInstalled(context, remote);
+            // Find whatever installed profile this remote release corresponds to, trying
+            // progressively looser matches. Whichever one hits, mark `remote` itself as
+            // installed — repo cards render this exact object, so only mutating the local
+            // counterpart (mergeRemoteMetadata) would leave the "Download" button showing.
+            ContentProfile matchedLocal = null;
 
             String aliasProfileKey = getRemoteProfileAlias(remote.remoteUrl);
             if (aliasProfileKey != null) {
               ContentProfile aliasedProfile = mergedProfiles.get(aliasProfileKey);
               if (aliasedProfile != null && aliasedProfile.isInstalled) {
-                mergeRemoteMetadata(aliasedProfile, remote);
-                continue;
+                matchedLocal = aliasedProfile;
               }
             }
 
             String profileKey = getProfileKey(remote);
-            ContentProfile existingProfile = mergedProfiles.get(profileKey);
-            if (existingProfile == null) {
+            if (matchedLocal == null) {
+              matchedLocal = mergedProfiles.get(profileKey);
+            }
+
+            if (matchedLocal == null) {
               // Soft fallback: the remote verName comes from the raw GitHub asset filename,
               // while an installed copy's verName comes from its own profile.json — these
               // often name the exact same release differently (case, dashes vs. spaces).
               // Match on normalized name within the same type rather than losing the link.
-              ContentProfile softMatch = findInstalledByNormalizedName(mergedProfiles, remote);
-              if (softMatch != null) {
-                mergeRemoteMetadata(softMatch, remote);
-                continue;
-              }
+              matchedLocal = findInstalledByNormalizedName(mergedProfiles, remote);
+            }
+
+            if (matchedLocal != null) {
+              remote.isInstalled = true;
+              mergeRemoteMetadata(matchedLocal, remote);
+              continue;
+            }
+
+            remote.isInstalled = isInstalled(context, remote);
+            if (!mergedProfiles.containsKey(profileKey)) {
               mergedProfiles.put(profileKey, remote);
               Log.d("ContentsManager", "Remote profile added: " + remote.verName);
-            } else {
-              mergeRemoteMetadata(existingProfile, remote);
             }
           }
         }
