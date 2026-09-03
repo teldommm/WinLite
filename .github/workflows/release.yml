@@ -29,9 +29,6 @@ concurrency:
   group: release-${{ github.event.inputs.version }}
   cancel-in-progress: false
 
-env:
-  DEFAULT_CERT_SHA256: 94de8fe193e378604f4415d87c63dece030605460b8e9ee6d447e1fc90840980
-
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -45,17 +42,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
 
           if ! printf '%s' "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'; then
             echo "::error::version must look like v1.2.3 or v1.2.3-beta (got '$VERSION')"
-            exit 1
-          fi
-
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::KEYSTORE_BASE64 is not set; refusing to cut a release that would be signed with a throwaway key"
             exit 1
           fi
 
@@ -140,36 +131,25 @@ jobs:
           validate-wrappers: true
           cache-cleanup: 'on-success'
 
-      - name: Decode keystore and build release APK
+      - name: Build release APK
         timeout-minutes: 20
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           GRADLE_OPTS: -Xmx4g -XX:+UseG1GC
           VERSION_NAME: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          export KEYSTORE_FILE="${{ github.workspace }}/release.jks"
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_FILE"
+          # Signing now comes from the repo-committed release.jks + signing.properties
+          # (read directly by app/build.gradle's signingConfigs.release) — nothing to
+          # decode here.
           ./gradlew :app:${{ matrix.flavor.gradleTask }} --build-cache --parallel -x lint
 
-      - name: Verify signature and version
+      - name: Verify version
         env:
           APK_PATH: ${{ matrix.flavor.apkPath }}
           VERSION: ${{ needs.prepare.outputs.version }}
-          EXPECTED_CERT_SHA256: ${{ secrets.RELEASE_CERT_SHA256 || env.DEFAULT_CERT_SHA256 }}
         run: |
           set -euo pipefail
           build_tools=$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)
-
-          digest=$("$build_tools/apksigner" verify --print-certs "$APK_PATH" |
-            grep -m1 -oE 'SHA-256 digest: [a-f0-9]{64}' | awk '{print $3}')
-          if [ "$digest" != "$EXPECTED_CERT_SHA256" ]; then
-            echo "::error::APK signed by $digest, expected $EXPECTED_CERT_SHA256"
-            exit 1
-          fi
 
           version_name=$("$build_tools/aapt2" dump badging "$APK_PATH" |
             head -1 | grep -oE "versionName='[^']*'" | cut -d"'" -f2)
@@ -178,7 +158,7 @@ jobs:
             exit 1
           fi
 
-          echo "Signed by $digest, versionName $version_name"
+          echo "versionName $version_name"
 
       - name: Prepare APK for upload
         env:

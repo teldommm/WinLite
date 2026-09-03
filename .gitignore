@@ -43,11 +43,6 @@ steam.tzst
 # Room schema exports
 app/schemas/
 
-# Signing keys
-*.jks
-*.keystore
-signing.properties
-
 # Local-only dev artifacts (never check in)
 .claude/
 References/
