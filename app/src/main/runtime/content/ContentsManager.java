@@ -138,38 +138,48 @@ public class ContentsManager {
    * timestamp (epoch seconds) so "picked as best/newest" always tracks "uploaded most recently".
    */
   public static List<ContentProfile> parseReleasesJson(String json) {
-    List<ContentProfile> result = new ArrayList<>();
-    if (json == null || json.isEmpty()) return result;
+    if (json == null || json.isEmpty()) return new ArrayList<>();
     try {
-      JSONArray releases = new JSONArray(json);
-      for (int i = 0; i < releases.length(); i++) {
-        JSONObject release = releases.optJSONObject(i);
-        if (release == null) continue;
-        JSONArray assets = release.optJSONArray("assets");
-        if (assets == null) continue;
-
-        for (int j = 0; j < assets.length(); j++) {
-          JSONObject asset = assets.optJSONObject(j);
-          if (asset == null) continue;
-
-          String fileName = asset.optString("name");
-          String downloadUrl = asset.optString("browser_download_url");
-          if (fileName.isEmpty() || downloadUrl.isEmpty()) continue;
-
-          ContentProfile.ContentType type = classifyAssetType(fileName);
-          if (type == null) continue;
-
-          ContentProfile profile = new ContentProfile();
-          profile.type = type;
-          profile.verName = stripExtension(fileName);
-          profile.verCode = 0; // no ranking/version concept — every matching asset is listed as-is
-          profile.remoteUrl = downloadUrl;
-          profile.isOfficial = true; // everything here comes from our own repo
-          result.add(profile);
-        }
-      }
+      return parseReleasesJson(new JSONArray(json));
     } catch (JSONException e) {
       e.printStackTrace();
+      return new ArrayList<>();
+    }
+  }
+
+  /**
+   * Same as {@link #parseReleasesJson(String)} but takes an already-parsed releases array —
+   * used when the caller merged multiple paginated API pages into one array beforehand (see
+   * {@code Downloader.fetchGithubReleases}).
+   */
+  public static List<ContentProfile> parseReleasesJson(JSONArray releases) {
+    List<ContentProfile> result = new ArrayList<>();
+    if (releases == null) return result;
+    for (int i = 0; i < releases.length(); i++) {
+      JSONObject release = releases.optJSONObject(i);
+      if (release == null) continue;
+      JSONArray assets = release.optJSONArray("assets");
+      if (assets == null) continue;
+
+      for (int j = 0; j < assets.length(); j++) {
+        JSONObject asset = assets.optJSONObject(j);
+        if (asset == null) continue;
+
+        String fileName = asset.optString("name");
+        String downloadUrl = asset.optString("browser_download_url");
+        if (fileName.isEmpty() || downloadUrl.isEmpty()) continue;
+
+        ContentProfile.ContentType type = classifyAssetType(fileName);
+        if (type == null) continue;
+
+        ContentProfile profile = new ContentProfile();
+        profile.type = type;
+        profile.verName = stripExtension(fileName);
+        profile.verCode = 0; // no ranking/version concept — every matching asset is listed as-is
+        profile.remoteUrl = downloadUrl;
+        profile.isOfficial = true; // everything here comes from our own repo
+        result.add(profile);
+      }
     }
     return result;
   }

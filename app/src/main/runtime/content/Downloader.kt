@@ -8,6 +8,7 @@ import com.winlator.cmod.shared.io.NativeContentIO
 import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.File
@@ -89,8 +90,13 @@ object Downloader {
     }
 
     @JvmStatic
-    fun downloadString(address: String): String? {
-        val request = Request.Builder().url(address).build()
+    fun downloadString(
+        address: String,
+        headers: Map<String, String> = emptyMap(),
+    ): String? {
+        val requestBuilder = Request.Builder().url(address)
+        headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
+        val request = requestBuilder.build()
         return try {
             metadataClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
@@ -102,6 +108,45 @@ object Downloader {
             if (logEnabled()) Log.w(TAG, "String download failed for $address", e)
             null
         }
+    }
+
+    /**
+     * Fetches a GitHub REST "list" endpoint (releases, etc.) via the shared OkHttp client,
+     * paginating through up to [maxPages] pages of [perPage] items each and merging the
+     * results into one JSONArray — matches GitHub's own pagination contract (a page shorter
+     * than [perPage] means there's nothing left).
+     *
+     * URLs that aren't api.github.com (a self-hosted/custom release feed) are trusted to
+     * return everything in a single response, since we don't know their pagination contract.
+     */
+    @JvmStatic
+    fun fetchGithubReleases(
+        apiUrl: String,
+        perPage: Int = 100,
+        maxPages: Int = 2,
+    ): JSONArray {
+        val headers = mapOf("Accept" to "application/vnd.github+json", "User-Agent" to "WinLite")
+        val merged = JSONArray()
+
+        if (!apiUrl.contains("api.github.com")) {
+            val body = downloadString(apiUrl, headers) ?: return merged
+            runCatching { JSONArray(body) }.getOrNull()?.let { page ->
+                for (i in 0 until page.length()) merged.put(page.get(i))
+            }
+            return merged
+        }
+
+        var page = 1
+        while (page <= maxPages) {
+            val separator = if (apiUrl.contains("?")) "&" else "?"
+            val pageUrl = "$apiUrl${separator}per_page=$perPage&page=$page"
+            val body = downloadString(pageUrl, headers) ?: break
+            val pageArray = runCatching { JSONArray(body) }.getOrNull() ?: break
+            for (i in 0 until pageArray.length()) merged.put(pageArray.get(i))
+            if (pageArray.length() < perPage) break
+            page++
+        }
+        return merged
     }
 
     private fun ensureNativeCaBundle(): String {

@@ -34,8 +34,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -354,60 +352,28 @@ class DriversFragment : Fragment() {
     }
 
     private fun fetchGithubReleases(source: DriverRepo): List<DriverReleaseItem> {
-        if (!source.apiUrl.contains("api.github.com")) {
-            return fetchReleasePage(source.apiUrl).second
-        }
+        val releases = Downloader.fetchGithubReleases(source.apiUrl)
+        return buildList {
+            for (index in 0 until releases.length()) {
+                val releaseObject = releases.optJSONObject(index) ?: continue
+                val assets = releaseObject.optJSONArray("assets").toZipAssets()
+                if (assets.isEmpty()) continue
 
-        val perPage = 100
-        val maxPages = 2
-        val items = mutableListOf<DriverReleaseItem>()
-        var page = 1
-        while (page <= maxPages) {
-            val separator = if (source.apiUrl.contains("?")) "&" else "?"
-            val pageUrl = "${source.apiUrl}${separator}per_page=$perPage&page=$page"
-            val (rawCount, pageItems) = fetchReleasePage(pageUrl)
-            items += pageItems
-            if (rawCount < perPage) break
-            page++
-        }
-        return items
-    }
+                val tagName = releaseObject.optString("tag_name")
+                val releaseName = releaseObject.optString("name").ifBlank { tagName }
+                val publishedAt = releaseObject.optString("published_at")
+                val releaseNotes = releaseObject.optString("body").toReleaseNotes()
 
-    private fun fetchReleasePage(apiUrl: String): Pair<Int, List<DriverReleaseItem>> {
-        val connection =
-            (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 15000
-                readTimeout = 15000
-                setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("User-Agent", "WinLite")
+                add(
+                    DriverReleaseItem(
+                        id = releaseObject.optLong("id"),
+                        title = releaseName.ifBlank { getString(R.string.common_ui_unnamed) },
+                        subtitle = buildReleaseSubtitle(tagName, publishedAt, assets.size),
+                        notes = releaseNotes,
+                        assets = assets,
+                    ),
+                )
             }
-
-        return connection.useResponse { responseText ->
-            val json = JSONArray(responseText)
-            val parsed = buildList {
-                for (index in 0 until json.length()) {
-                    val releaseObject = json.optJSONObject(index) ?: continue
-                    val assets = releaseObject.optJSONArray("assets").toZipAssets()
-                    if (assets.isEmpty()) continue
-
-                    val tagName = releaseObject.optString("tag_name")
-                    val releaseName = releaseObject.optString("name").ifBlank { tagName }
-                    val publishedAt = releaseObject.optString("published_at")
-                    val releaseNotes = releaseObject.optString("body").toReleaseNotes()
-
-                    add(
-                        DriverReleaseItem(
-                            id = releaseObject.optLong("id"),
-                            title = releaseName.ifBlank { getString(R.string.common_ui_unnamed) },
-                            subtitle = buildReleaseSubtitle(tagName, publishedAt, assets.size),
-                            notes = releaseNotes,
-                            assets = assets,
-                        ),
-                    )
-                }
-            }
-            json.length() to parsed
         }
     }
 
@@ -634,15 +600,3 @@ class DriversFragment : Fragment() {
         private const val WINLITE_COMPONENTS_API_URL = "https://api.github.com/repos/teldommm/WinLite-Components/releases"
     }
 }
-
-private inline fun <T> HttpURLConnection.useResponse(block: (String) -> T): T =
-    try {
-        val inputStream = if (responseCode in 200..299) inputStream else errorStream
-        val body = inputStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (responseCode !in 200..299) {
-            throw IllegalStateException(body.ifBlank { "GitHub request failed with HTTP $responseCode" })
-        }
-        block(body)
-    } finally {
-        disconnect()
-    }

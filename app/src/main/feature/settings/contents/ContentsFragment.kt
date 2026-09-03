@@ -508,8 +508,8 @@ class ContentsFragment : Fragment() {
                         repos
                             .map { repo ->
                                 async {
-                                    val json = runCatching { Downloader.downloadString(repo.apiUrl) }.getOrNull()
-                                    val profiles = json?.let { ContentsManager.parseReleasesJson(it) }.orEmpty()
+                                    val releases = runCatching { Downloader.fetchGithubReleases(repo.apiUrl) }.getOrNull()
+                                    val profiles = releases?.let { ContentsManager.parseReleasesJson(it) }.orEmpty()
                                     repo to profiles
                                 }
                             }.awaitAll()
