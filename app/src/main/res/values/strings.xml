@@ -172,6 +172,8 @@
     <string name="library_games_last_played">Last Played</string>
     <string name="library_games_playtime">Playtime</string>
     <string name="library_games_plays">Plays</string>
+    <string name="library_games_stats_title">Stats</string>
+    <string name="library_games_no_stats_yet">No stats yet — play the game once to start tracking playtime and launches.</string>
     <string name="library_games_dlcs">DLCs</string>
     <string name="library_games_uninstall_game">UNINSTALL GAME</string>
     <string name="library_games_remove_game">REMOVE GAME</string>

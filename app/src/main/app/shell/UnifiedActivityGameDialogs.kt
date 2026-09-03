@@ -2,10 +2,7 @@ package com.winlator.cmod.app.shell
 import com.winlator.cmod.app.shell.UnifiedActivity.GameSettingsActionItem
 import com.winlator.cmod.app.shell.UnifiedActivity.GameSettingsScreen
 import com.winlator.cmod.app.shell.UnifiedActivity.HeroBootChoice
-import com.winlator.cmod.app.shell.UnifiedActivity.HeroLaunchPopup
 import com.winlator.cmod.app.shell.UnifiedActivity.HomeShortcutUiState
-import com.winlator.cmod.app.shell.UnifiedActivity.LibraryDetailPopup
-import com.winlator.cmod.app.shell.UnifiedActivity.LibraryDetailScreen
 
 import android.app.Activity
 import android.app.PendingIntent
@@ -236,108 +233,6 @@ import kotlin.math.roundToInt
 // Game settings/detail dialogs, split out of UnifiedActivity.kt (behavior-identical).
 
 @Composable
-internal fun UnifiedActivity.LibraryDetailPopupFrame(
-    title: String,
-    onDismissRequest: () -> Unit,
-    wide: Boolean = false,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val dismissInteractionSource = remember { MutableInteractionSource() }
-    val panelInteractionSource = remember { MutableInteractionSource() }
-    val registry = remember { PaneNavRegistry() }
-
-    CompositionLocalProvider(LocalPaneNav provides registry) {
-    DialogPaneNav(registry, onDismiss = onDismissRequest)
-    Box(
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.58f))
-                .clickable(
-                    interactionSource = dismissInteractionSource,
-                    indication = null,
-                    onClick = onDismissRequest,
-                ),
-    ) {
-        BoxWithConstraints(
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .padding(16.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            val panelMaxWidth = if (wide) 440.dp else 360.dp
-            val panelWidthFraction = if (wide) 0.72f else 0.58f
-            val panelMaxHeight = (maxHeight - 16.dp).coerceAtLeast(240.dp)
-
-            Surface(
-                modifier =
-                    Modifier
-                        .fillMaxWidth(panelWidthFraction)
-                        .widthIn(max = panelMaxWidth)
-                        .heightIn(max = panelMaxHeight)
-                        .clickable(
-                            interactionSource = panelInteractionSource,
-                            indication = null,
-                            onClick = {},
-                        ),
-                shape = RoundedCornerShape(16.dp),
-                color = CardDark,
-                border = BorderStroke(1.dp, CardBorder),
-                tonalElevation = 8.dp,
-                shadowElevation = 12.dp,
-            ) {
-                Column {
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontSize = 13.sp,
-                            color = TextPrimary,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = onDismissRequest,
-                            modifier =
-                                Modifier
-                                    .size(34.dp)
-                                    .paneNavItem(cornerRadius = 8.dp, onActivate = onDismissRequest),
-                        ) {
-                            Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = stringResource(R.string.common_ui_close),
-                                tint = TextSecondary,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                    HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
-                    Column(
-                        modifier =
-                            Modifier
-                                .weight(1f, fill = false)
-                                .verticalScroll(rememberScrollState()),
-                    ) {
-                        content()
-                    }
-                }
-            }
-        }
-    }
-    }
-}
-
-@Composable
 internal fun UnifiedActivity.GameSettingsDialogFrame(
     title: String,
     onDismissRequest: () -> Unit,
@@ -526,9 +421,44 @@ internal fun UnifiedActivity.GameSettingsInfoCard(
     }
 }
 
+/** A single label/value stat line used on the Stats tab (playtime, plays, last played, size). */
+@Composable
+internal fun UnifiedActivity.GameSettingsStatRow(
+    icon: ImageVector,
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = TextSecondary,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextPrimary,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
 /**
- * Shared uninstall/remove confirmation UI used by GameSettingsDialog
- * and LibraryGameDetailDialog.
+ * Shared uninstall/remove confirmation UI, used by GameSettingsDialog.
  */
 @Composable
 internal fun UnifiedActivity.UninstallConfirmation(
@@ -857,6 +787,20 @@ internal fun UnifiedActivity.HeroRemoveShortcutDialog(
     }
 }
 
+private fun formatLibraryPlaytime(playtimeMillis: Long): String {
+    val totalMinutes = (playtimeMillis / 60000L).coerceAtLeast(1L)
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    return when {
+        hours > 0L && minutes > 0L -> "${hours}h ${minutes}m"
+        hours > 0L -> "${hours}h"
+        else -> "${minutes}m"
+    }
+}
+
+private fun formatLibraryLastPlayed(lastPlayedMillis: Long): String =
+    java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(lastPlayedMillis))
+
 @Composable
 internal fun UnifiedActivity.GameSettingsDialog(
     app: SteamApp,
@@ -902,6 +846,53 @@ internal fun UnifiedActivity.GameSettingsDialog(
         }
     }
     val hasPinnedShortcut = pinnedShortcutOverride ?: homeShortcutState.isPinned
+
+    // Stats + achievements (folded into the "Stats" tab below).
+    var showAchievements by remember(app.id) { mutableStateOf(false) }
+    var showBootDialog by remember(app.id) { mutableStateOf(false) }
+    var bootShortcut by remember(app.id) { mutableStateOf<com.winlator.cmod.runtime.container.Shortcut?>(null) }
+    val playtimePrefs =
+        remember {
+            context.getSharedPreferences("playtime_stats", android.content.Context.MODE_PRIVATE)
+        }
+    val statsSearchKey =
+        remember(app) {
+            if (isCustom) {
+                app.name
+            } else {
+                app.name.replace(LIBRARY_NAME_SANITIZE_REGEX, "")
+            }
+        }
+    val lastPlayed = playtimePrefs.getLong("${statsSearchKey}_last_played", 0L)
+    val totalPlaytime = playtimePrefs.getLong("${statsSearchKey}_playtime", 0L)
+    val playCount = playtimePrefs.getInt("${statsSearchKey}_play_count", 0)
+    val installPath =
+        remember(app) {
+            if (isCustom) {
+                app.gameDir
+            } else {
+                try {
+                    SteamService.getAppDirPath(app.id)
+                } catch (_: Exception) {
+                    ""
+                }
+            }
+        }
+    val installSizeText by produceState<String?>(initialValue = null, key1 = installPath) {
+        value =
+            if (installPath.isNotBlank()) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val bytes = StorageUtils.getFolderSize(installPath)
+                        if (bytes > 0) StorageUtils.formatBinarySize(bytes) else null
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            } else {
+                null
+            }
+    }
 
     val exportLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
@@ -1101,14 +1092,11 @@ internal fun UnifiedActivity.GameSettingsDialog(
                                 val shortcut =
                                     findLibraryShortcutForGame(ContainerManager(context), app, isCustom)
                                 if (shortcut != null) {
-                                    context.startActivity(
-                                        Intent(context, XServerDisplayActivity::class.java)
-                                            .putExtra("container_id", shortcut.container.id),
-                                    )
+                                    bootShortcut = shortcut
+                                    showBootDialog = true
                                 } else {
                                     com.winlator.cmod.shared.ui.toast.WinToast.show(context, R.string.shortcuts_list_not_available)
                                 }
-                                onDismissRequest()
                             },
                         ),
                         GameSettingsActionItem(
@@ -1152,6 +1140,12 @@ internal fun UnifiedActivity.GameSettingsDialog(
                             title = stringResource(R.string.cloud_saves_title),
                             icon = Icons.Outlined.CloudSync,
                             onClick = { currentTab = GameSettingsScreen.CloudSaves },
+                        ),
+
+                        GameSettingsActionItem(
+                            title = stringResource(R.string.library_games_stats_title),
+                            icon = Icons.Outlined.QueryStats,
+                            onClick = { currentTab = GameSettingsScreen.Stats },
                         ),
 
                         GameSettingsActionItem(
@@ -1293,6 +1287,63 @@ internal fun UnifiedActivity.GameSettingsDialog(
                 )
             }
 
+            GameSettingsScreen.Stats -> {
+                val hasAnyStat =
+                    totalPlaytime > 0L || playCount > 0 || lastPlayed > 0L || installSizeText != null
+                if (hasAnyStat) {
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        if (totalPlaytime > 0L) {
+                            GameSettingsStatRow(
+                                icon = Icons.Outlined.Schedule,
+                                label = stringResource(R.string.library_games_playtime),
+                                value = formatLibraryPlaytime(totalPlaytime),
+                            )
+                        }
+                        if (playCount > 0) {
+                            GameSettingsStatRow(
+                                icon = Icons.Outlined.SportsEsports,
+                                label = stringResource(R.string.library_games_plays),
+                                value = playCount.toString(),
+                            )
+                        }
+                        if (lastPlayed > 0L) {
+                            GameSettingsStatRow(
+                                icon = Icons.Outlined.History,
+                                label = stringResource(R.string.library_games_last_played),
+                                value = formatLibraryLastPlayed(lastPlayed),
+                            )
+                        }
+                        installSizeText?.let { sizeText ->
+                            GameSettingsStatRow(
+                                icon = Icons.Outlined.Storage,
+                                label = stringResource(R.string.common_ui_size),
+                                value = sizeText,
+                            )
+                        }
+                    }
+                } else {
+                    GameSettingsInfoCard(message = stringResource(R.string.library_games_no_stats_yet))
+                }
+
+                if (!isCustom) {
+                    HorizontalDivider(
+                        color = CardBorder.copy(alpha = 0.5f),
+                        thickness = 0.5.dp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = if (hasAnyStat) 4.dp else 0.dp),
+                    )
+                    GameSettingsActionGrid(
+                        actions =
+                            listOf(
+                                GameSettingsActionItem(
+                                    title = stringResource(R.string.steam_achievements_title),
+                                    icon = Icons.Outlined.EmojiEvents,
+                                    onClick = { showAchievements = true },
+                                ),
+                            ),
+                    )
+                }
+            }
+
             GameSettingsScreen.Uninstall -> {
                 UninstallConfirmation(
                     message =
@@ -1349,1010 +1400,58 @@ internal fun UnifiedActivity.GameSettingsDialog(
             }
         }
     }
-}
 
-
-
-@Composable
-internal fun UnifiedActivity.LibraryGameDetailDialog(
-    app: SteamApp,
-    onDismissRequest: () -> Unit,
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var currentScreen by remember { mutableStateOf(LibraryDetailScreen.Main) }
-    var activePopup by remember { mutableStateOf<LibraryDetailPopup?>(null) }
-    var showAchievements by remember(app.id) { mutableStateOf(false) }
-    var shortcutRefreshKey by remember(app.id) { mutableStateOf(0) }
-    var pinnedShortcutOverride by remember(app.id) { mutableStateOf<Boolean?>(null) }
-    var showWorkshopDialog by remember(app.id) { mutableStateOf(false) }
-
-    val isCustom = app.id < 0
-
-    val libraryDownloadRecords by com.winlator.cmod.app.service.download.DownloadCoordinator.records.collectAsState(
-        initial = com.winlator.cmod.app.service.download.DownloadCoordinator.snapshotRecords(),
-    )
-    val hasBlockingSteamDownloadForLibrary =
-        !isCustom &&
-            libraryDownloadRecords.any {
-                it.store == com.winlator.cmod.app.db.download.DownloadRecord.STORE_STEAM &&
-                    it.storeGameId == app.id.toString() &&
-                    it.status in setOf(
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_QUEUED,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_DOWNLOADING,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_PAUSED,
-                        com.winlator.cmod.app.db.download.DownloadRecord.STATUS_FAILED,
-                    )
-            }
-
-    val currentRefreshSignal = this@LibraryGameDetailDialog.libraryRefreshSignal
-    val homeShortcutState by produceState(
-        HomeShortcutUiState(),
-        app.id,
-        isCustom,
-        currentRefreshSignal,
-        shortcutRefreshKey,
-    ) {
-        value =
-            withContext(Dispatchers.IO) {
-                val shortcut =
-                    findLibraryShortcutForGame(ContainerManager(context), app, isCustom)
-                HomeShortcutUiState(
-                    shortcut = shortcut,
-                    isPinned = shortcut?.let { LibraryShortcutUtils.hasPinnedHomeShortcut(context, it) } == true,
-                )
-            }
-    }
-    val artworkRefreshListener =
-        remember(app.id) {
-            object : EventDispatcher.JavaEventListener {
-                override fun onEvent(event: Any) {
-                    if (event is AndroidEvent.LibraryArtworkChanged) {
-                        shortcutRefreshKey++
+    if (showBootDialog) {
+        HeroBootDialog(
+            onConfirm = { choice ->
+                showBootDialog = false
+                bootShortcut?.let { sc ->
+                    val intent =
+                        Intent(context, XServerDisplayActivity::class.java)
+                            .putExtra("container_id", sc.container.id)
+                    when (choice) {
+                        HeroBootChoice.Desktop -> {}
+                        HeroBootChoice.Cube32 ->
+                            intent
+                                .putExtra("shortcut_path", sc.file.absolutePath)
+                                .putExtra("boot_exe", "C:\\ProgramData\\Microsoft\\Windows\\Graphics-Test-32bit.exe")
+                        HeroBootChoice.Cube64 ->
+                            intent
+                                .putExtra("shortcut_path", sc.file.absolutePath)
+                                .putExtra("boot_exe", "C:\\ProgramData\\Microsoft\\Windows\\Graphics-Test-64bit.exe")
+                        HeroBootChoice.Input32 ->
+                            intent
+                                .putExtra("shortcut_path", sc.file.absolutePath)
+                                .putExtra("boot_exe", "C:\\ProgramData\\Microsoft\\Windows\\InputControl32.exe")
+                        HeroBootChoice.Input64 ->
+                            intent
+                                .putExtra("shortcut_path", sc.file.absolutePath)
+                                .putExtra("boot_exe", "C:\\ProgramData\\Microsoft\\Windows\\InputControl64.exe")
                     }
-                }
-            }
-        }
-    DisposableEffect(artworkRefreshListener) {
-        PluviaApp.events.onJava(AndroidEvent.LibraryArtworkChanged::class, artworkRefreshListener)
-        onDispose {
-            PluviaApp.events.offJava(AndroidEvent.LibraryArtworkChanged::class, artworkRefreshListener)
-        }
-    }
-    val hasPinnedShortcut = pinnedShortcutOverride ?: homeShortcutState.isPinned
-
-    BackHandler(enabled = activePopup != null) {
-        activePopup = null
-    }
-
-    // Hero image
-    val customHeroImageFile =
-        homeShortcutState.shortcut
-            ?.getExtra("customLibraryHeroArtPath")
-            ?.takeIf { it.isNotBlank() }
-            ?.let { java.io.File(it) }
-            ?.takeIf { it.exists() }
-    val customHeroImageCacheKey =
-        customHeroImageFile?.let {
-            "library_custom_hero:${it.absolutePath}:${it.lastModified()}"
-        }
-    val heroImageUrl: Any? =
-        customHeroImageFile ?: when {
-            isCustom -> {
-                val customCoverArt =
-                    homeShortcutState.shortcut
-                        ?.getExtra("customCoverArtPath")
-                        ?.takeIf { it.isNotBlank() }
-                        ?.let { java.io.File(it) }
-                        ?.takeIf { it.exists() }
-                customCoverArt ?: run {
-                    val safeName = app.name.replace("/", "_").replace("\\", "_")
-                    val iconFile = java.io.File(context.filesDir, "custom_icons/$safeName.png")
-                    if (iconFile.exists()) iconFile else null
-                }
-            }
-
-            else -> {
-                val heroUrl = app.getHeroUrl()
-                StoreArtworkCache.imageModel(context, StoreArtworkCache.steamRef(app, "hero", heroUrl))
-            }
-        }
-
-    val subtitle =
-        when {
-            isCustom -> {
-                stringResource(R.string.library_games_custom_game)
-            }
-
-            else -> {
-                listOfNotNull(
-                    app.developer.takeIf { it.isNotBlank() },
-                    app.publisher.takeIf { it.isNotBlank() },
-                ).distinctBy { it.trim().lowercase() }.joinToString(" • ")
-            }
-        }
-
-    // Playtime info
-    val playtimePrefs =
-        remember {
-            context.getSharedPreferences("playtime_stats", android.content.Context.MODE_PRIVATE)
-        }
-    val searchKey =
-        remember(app) {
-            if (app.id < 0) {
-                app.name
-            } else {
-                app.name.replace(LIBRARY_NAME_SANITIZE_REGEX, "")
-            }
-        }
-    val lastPlayed = playtimePrefs.getLong("${searchKey}_last_played", 0L)
-    val totalPlaytime = playtimePrefs.getLong("${searchKey}_playtime", 0L)
-    val playCount = playtimePrefs.getInt("${searchKey}_play_count", 0)
-
-    val sourceLabel =
-        when {
-            isCustom -> "Custom"
-            else -> "Steam"
-        }
-
-    // Install path
-    val installPath =
-        remember(app) {
-            when {
-                isCustom -> {
-                    app.gameDir
-                }
-
-                else -> {
-                    try {
-                        SteamService.getAppDirPath(app.id)
-                    } catch (_: Exception) {
-                        ""
-                    }
-                }
-            }
-        }
-
-    // Install size (computed async)
-    val installSizeText by produceState<String?>(initialValue = null, key1 = installPath) {
-        value =
-            if (installPath.isNotBlank()) {
-                withContext(Dispatchers.IO) {
-                    try {
-                        val bytes = StorageUtils.getFolderSize(installPath)
-                        if (bytes > 0) StorageUtils.formatBinarySize(bytes) else null
-                    } catch (_: Exception) {
-                        null
-                    }
-                }
-            } else {
-                null
-            }
-    }
-
-    // Export / Import launchers (reuse GameSettingsDialog pattern)
-
-    val exportLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-            if (uri != null) {
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        val os = context.contentResolver.openOutputStream(uri) ?: return@launch
-                        val zos = java.util.zip.ZipOutputStream(java.io.BufferedOutputStream(os))
-                        val containerManager = ContainerManager(context)
-                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom)
-                        val dirsToZip = mutableListOf<java.io.File>()
-                        val goldbergSaves = java.io.File(SteamService.getAppDirPath(app.id), "steam_settings/saves")
-                        if (goldbergSaves.exists() && goldbergSaves.isDirectory) dirsToZip.add(goldbergSaves)
-                        if (shortcut != null) {
-                            val prefixDir = java.io.File(shortcut.container.getRootDir(), ".wine/drive_c/users/xuser")
-                            listOf("Documents", "Saved Games", "AppData").forEach { name ->
-                                val dir = java.io.File(prefixDir, name)
-                                if (dir.exists()) dirsToZip.add(dir)
-                            }
-                        }
-
-                        fun zipDir(
-                            dir: java.io.File,
-                            baseName: String,
-                        ) {
-                            val children = dir.listFiles() ?: return
-                            for (child in children) {
-                                val name = if (baseName.isEmpty()) child.name else "$baseName/${child.name}"
-                                if (child.isDirectory) {
-                                    zos.putNextEntry(java.util.zip.ZipEntry("$name/"))
-                                    zos.closeEntry()
-                                    zipDir(child, name)
-                                } else {
-                                    zos.putNextEntry(java.util.zip.ZipEntry(name))
-                                    child.inputStream().use { it.copyTo(zos) }
-                                    zos.closeEntry()
-                                }
-                            }
-                        }
-                        for (dir in dirsToZip) {
-                            zos.putNextEntry(java.util.zip.ZipEntry("${dir.name}/"))
-                            zos.closeEntry()
-                            zipDir(dir, dir.name)
-                        }
-                        zos.close()
-                        withContext(Dispatchers.Main) {
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                R.string.saves_import_export_exported,
-                                android.widget.Toast.LENGTH_SHORT,
-                            )
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        withContext(Dispatchers.Main) {
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                getString(R.string.saves_import_export_exported_failed, e.message),
-                                android.widget.Toast.LENGTH_SHORT,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-    val importLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) {
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        val inputStream = context.contentResolver.openInputStream(uri) ?: return@launch
-                        val zis = java.util.zip.ZipInputStream(java.io.BufferedInputStream(inputStream))
-                        val containerManager = ContainerManager(context)
-                        val shortcut = findLibraryShortcutForGame(containerManager, app, isCustom)
-                        val goldbergSavesParent =
-                            java.io.File(
-                                SteamService.getAppDirPath(app.id),
-                                "steam_settings",
-                            )
-                        val prefixDir = shortcut?.let { java.io.File(it.container.getRootDir(), ".wine/drive_c/users/xuser") }
-                        var ze: java.util.zip.ZipEntry?
-                        while (zis.nextEntry.also { ze = it } != null) {
-                            val entry = ze!!
-                            val name = entry.name
-                            var destFile: java.io.File? = null
-                            if (name.startsWith("saves/")) {
-                                destFile = java.io.File(goldbergSavesParent, name)
-                            } else if (prefixDir != null &&
-                                (name.startsWith("Documents/") || name.startsWith("Saved Games/") || name.startsWith("AppData/"))
-                            ) {
-                                destFile = java.io.File(prefixDir, name)
-                            }
-                            if (destFile != null) {
-                                if (entry.isDirectory) {
-                                    destFile.mkdirs()
-                                } else {
-                                    destFile.parentFile?.mkdirs()
-                                    java.io.FileOutputStream(destFile).use { fos -> zis.copyTo(fos) }
-                                }
-                            }
-                            zis.closeEntry()
-                        }
-                        zis.close()
-                        withContext(Dispatchers.Main) {
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                R.string.saves_import_export_imported,
-                                android.widget.Toast.LENGTH_SHORT,
-                            )
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        withContext(Dispatchers.Main) {
-                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                context,
-                                getString(R.string.saves_import_export_imported_failed, e.message),
-                                android.widget.Toast.LENGTH_SHORT,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-    val uninstallGame: () -> Unit = {
-        if (isCustom) {
-            scope.launch(Dispatchers.IO) {
-                val cm = ContainerManager(context)
-                val sc = findLibraryShortcutForGame(cm, app, isCustom)
-                sc?.let { LibraryShortcutUtils.deleteShortcutArtifacts(context, it) }
-                java.io
-                    .File(
-                        context.filesDir,
-                        "custom_icons/${app.name.replace("/", "_")}.png",
-                    ).delete()
-                PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(app.id))
-                withContext(Dispatchers.Main) {
-                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                        context,
-                        getString(R.string.library_games_game_removed, app.name),
-                        android.widget.Toast.LENGTH_SHORT,
-                    )
+                    context.startActivity(intent)
                     onDismissRequest()
                 }
-            }
-        } else {
-            SteamService.uninstallApp(app.id) { success ->
-                if (success) {
-                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                        context,
-                        getString(R.string.library_games_game_uninstalled, app.name),
-                        android.widget.Toast.LENGTH_SHORT,
-                    )
-                } else {
-                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                        context,
-                        getString(R.string.library_games_failed_to_uninstall),
-                        android.widget.Toast.LENGTH_SHORT,
-                    )
-                }
-                onDismissRequest()
-            }
-        }
+            },
+            onDismissRequest = { showBootDialog = false },
+        )
     }
 
-    Dialog(
-        onDismissRequest = onDismissRequest,
-        properties =
-            DialogProperties(
-                usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false,
-            ),
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            shape = RectangleShape,
-            color = Color.Black,
+    if (showAchievements) {
+        Dialog(
+            onDismissRequest = { showAchievements = false },
+            properties =
+                DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    dismissOnClickOutside = false,
+                    decorFitsSystemWindows = false,
+                ),
         ) {
-            Box(Modifier.fillMaxSize()) {
-                Column(Modifier.fillMaxSize()) {
-                    val showHero = currentScreen == LibraryDetailScreen.Main
-                    val subScreenTitle =
-                        when (currentScreen) {
-                            LibraryDetailScreen.Shortcut -> stringResource(R.string.common_ui_shortcut)
-                            LibraryDetailScreen.Uninstall ->
-                                stringResource(
-                                    if (isCustom) R.string.common_ui_remove else R.string.common_ui_uninstall,
-                                )
-                            else -> ""
-                        }
-                    // Sub-screens get a compact title bar. The main launch view owns the full
-                    // screen and draws artwork edge-to-edge in its content branch.
-                    if (!showHero) {
-                        Row(
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .background(SurfaceDark)
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            IconButton(onClick = { currentScreen = LibraryDetailScreen.Main }) {
-                                Icon(
-                                    Icons.AutoMirrored.Outlined.ArrowBack,
-                                    contentDescription = stringResource(R.string.common_ui_back),
-                                    tint = TextPrimary,
-                                )
-                            }
-                            Text(
-                                subScreenTitle,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = TextPrimary,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f).padding(start = 4.dp),
-                            )
-                            Text(
-                                app.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(end = 16.dp),
-                            )
-                        }
-                        HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
-                    }
-
-                    // Bottom content
-                    when (currentScreen) {
-                        LibraryDetailScreen.Main -> {
-                            // Lock Play while VERIFY / UPDATE is rewriting depots in place
-                            // for this game — launching mid-write can corrupt the install.
-                            val activePlayBlockingTask =
-                                if (isCustom) {
-                                    null
-                                } else {
-                                    val appIdStr = app.id.toString()
-                                    libraryDownloadRecords.firstOrNull { rec ->
-                                        rec.store == com.winlator.cmod.app.db.download
-                                            .DownloadRecord.STORE_STEAM &&
-                                            rec.storeGameId == appIdStr &&
-                                            rec.status ==
-                                            com.winlator.cmod.app.db.download
-                                                .DownloadRecord.STATUS_DOWNLOADING &&
-                                            (
-                                                rec.taskType ==
-                                                    com.winlator.cmod.app.db.download
-                                                        .DownloadRecord.TASK_VERIFY ||
-                                                    rec.taskType ==
-                                                        com.winlator.cmod.app.db.download
-                                                            .DownloadRecord.TASK_UPDATE
-                                            )
-                                    }?.taskType
-                                }
-                            val playEnabled = activePlayBlockingTask == null
-                            val playDisabledLabel =
-                                when (activePlayBlockingTask) {
-                                    com.winlator.cmod.app.db.download.DownloadRecord.TASK_VERIFY ->
-                                        stringResource(R.string.downloads_queue_phase_verifying)
-                                    com.winlator.cmod.app.db.download.DownloadRecord.TASK_UPDATE ->
-                                        stringResource(R.string.downloads_queue_phase_updating)
-                                    else -> null
-                                }
-                            val launchAppName =
-                                homeShortcutState.shortcut
-                                    ?.getExtra("custom_name", "")
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: app.name
-                            val heroToastAnchor = LocalView.current
-                            var heroPopup by remember { mutableStateOf<HeroLaunchPopup?>(null) }
-                            var bootShortcut by remember { mutableStateOf<com.winlator.cmod.runtime.container.Shortcut?>(null) }
-                            val resolveOrCreateShortcut: () -> com.winlator.cmod.runtime.container.Shortcut? = {
-                                val containerManager = ContainerManager(context)
-                                when {
-                                    isCustom -> findLibraryShortcutForGame(containerManager, app, isCustom)
-                                    else ->
-                                        findLibraryShortcutForGame(containerManager, app, isCustom)
-                                            ?: ShortcutSettingsComposeDialog.createLibraryShortcut(
-                                                context = context,
-                                                containerManager = containerManager,
-                                                source = "STEAM",
-                                                appId = app.id,
-                                                appName = app.name,
-                                            )
-                                }
-                            }
-                            LibraryGameLaunchScreen(
-                                appName = launchAppName,
-                                subtitle = subtitle,
-                                sourceLabel = sourceLabel,
-                                heroImageUrl = heroImageUrl,
-                                customHeroImageCacheKey = customHeroImageCacheKey,
-                                releaseDateEpochSeconds = app.releaseDate,
-                                totalPlaytimeMillis = totalPlaytime,
-                                playCount = playCount,
-                                lastPlayedMillis = lastPlayed,
-                                installSizeText = installSizeText,
-                                isCustom = isCustom,
-                                hasPinnedShortcut = hasPinnedShortcut,
-                                playEnabled = playEnabled,
-                                playDisabledLabel = playDisabledLabel,
-                                onBack = onDismissRequest,
-                                onPlay = {
-                                    val containerManager = ContainerManager(context)
-                                    if (isCustom) {
-                                        launchCustomGame(context, containerManager, app.name)
-                                    } else {
-                                        launchSteamGame(context, containerManager, app)
-                                    }
-                                    onDismissRequest()
-                                },
-                                onSettings = {
-                                    val shortcut = resolveOrCreateShortcut()
-                                    if (shortcut != null) {
-                                        // Layer the settings dialog on top; keep the detail dialog open underneath.
-                                        ShortcutSettingsComposeDialog(this@LibraryGameDetailDialog, shortcut).show()
-                                    }
-                                },
-                                onBootToDesktop = {
-                                    val shortcut = resolveOrCreateShortcut()
-                                    if (shortcut != null) {
-                                        bootShortcut = shortcut
-                                        heroPopup = HeroLaunchPopup.BootToDesktop
-                                    } else {
-                                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                            context,
-                                            R.string.shortcuts_list_not_available,
-                                            heroToastAnchor,
-                                        )
-                                    }
-                                },
-                                onAchievements = if (!isCustom) {
-                                    { showAchievements = true }
-                                } else null,
-                                onShortcut = {
-                                    if (hasPinnedShortcut) {
-                                        heroPopup = HeroLaunchPopup.RemoveShortcut
-                                    } else {
-                                        scope.launch {
-                                            val created =
-                                                withContext(Dispatchers.IO) {
-                                                    addLibraryShortcutToHomeScreen(
-                                                        context,
-                                                        app,
-                                                        isCustom,
-                                                    )
-                                                }
-                                            if (!created) {
-                                                com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                                    context,
-                                                    context.getString(
-                                                        R.string.library_games_failed_to_create_shortcut,
-                                                        app.name,
-                                                    ),
-                                                )
-                                            }
-                                        }
-                                    }
-                                },
-                                onCloudSaves = { activePopup = LibraryDetailPopup.CloudSaves },
-                                onUninstall = uninstallGame,
-                                // Store source tag actions. Steam exposes verify/update/workshop.
-                                steamMenuEnabled = !isCustom,
-                                showVerifyFiles = !isCustom,
-                                showCheckForUpdate = !isCustom,
-                                showWorkshop = !isCustom,
-                                areSteamActionsEnabled = !hasBlockingSteamDownloadForLibrary,
-                                onVerifyFiles = {
-                                    context.runIfOnlineOrToast {
-                                        scope.launch {
-                                            val started =
-                                                withContext(Dispatchers.IO) {
-                                                    SteamService.downloadAppForVerify(app.id)
-                                                }
-                                            if (started != null) {
-                                                showTaskProgressPopup(
-                                                    started,
-                                                    app.name,
-                                                    getString(R.string.store_game_verify_complete),
-                                                    getString(R.string.store_game_verify_failed_notice),
-                                                    completeAsToast = true,
-                                                )
-                                            }
-                                            if (started == null) {
-                                                com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                                    context,
-                                                    getString(R.string.store_game_download_already_active),
-                                                    android.widget.Toast.LENGTH_SHORT,
-                                                )
-                                            }
-                                        }
-                                    }
-                                },
-                                onCheckForUpdate = {
-                                    startUpdateCheck(app.id, app.name)
-                                },
-                                onWorkshop = { if (!isCustom) showWorkshopDialog = true },
-                            )
-
-                            when (heroPopup) {
-                                HeroLaunchPopup.BootToDesktop ->
-                                    HeroBootDialog(
-                                        onConfirm = { choice ->
-                                            heroPopup = null
-                                            bootShortcut?.let { sc ->
-                                                val intent =
-                                                    Intent(context, XServerDisplayActivity::class.java)
-                                                        .putExtra("container_id", sc.container.id)
-                                                when (choice) {
-                                                    HeroBootChoice.Desktop -> {}
-                                                    HeroBootChoice.Cube32 ->
-                                                        intent
-                                                            .putExtra("shortcut_path", sc.file.absolutePath)
-                                                            .putExtra("boot_exe", "C:\\ProgramData\\Microsoft\\Windows\\Graphics-Test-32bit.exe")
-                                                    HeroBootChoice.Cube64 ->
-                                                        intent
-                                                            .putExtra("shortcut_path", sc.file.absolutePath)
-                                                            .putExtra("boot_exe", "C:\\ProgramData\\Microsoft\\Windows\\Graphics-Test-64bit.exe")
-                                                    HeroBootChoice.Input32 ->
-                                                        intent
-                                                            .putExtra("shortcut_path", sc.file.absolutePath)
-                                                            .putExtra("boot_exe", "C:\\ProgramData\\Microsoft\\Windows\\InputControl32.exe")
-                                                    HeroBootChoice.Input64 ->
-                                                        intent
-                                                            .putExtra("shortcut_path", sc.file.absolutePath)
-                                                            .putExtra("boot_exe", "C:\\ProgramData\\Microsoft\\Windows\\InputControl64.exe")
-                                                }
-                                                context.startActivity(intent)
-                                                onDismissRequest()
-                                            }
-                                        },
-                                        onDismissRequest = { heroPopup = null },
-                                    )
-                                HeroLaunchPopup.RemoveShortcut ->
-                                    HeroRemoveShortcutDialog(
-                                        gameName = app.name,
-                                        onConfirm = {
-                                            scope.launch {
-                                                val removed =
-                                                    withContext(Dispatchers.IO) {
-                                                        homeShortcutState.shortcut?.let {
-                                                            LibraryShortcutUtils.disablePinnedHomeShortcut(context, it)
-                                                        } == true
-                                                    }
-                                                pinnedShortcutOverride = if (removed) false else hasPinnedShortcut
-                                                shortcutRefreshKey++
-                                                heroPopup = null
-                                                com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                                    context,
-                                                    if (removed) {
-                                                        context.getString(R.string.shortcuts_list_removed)
-                                                    } else {
-                                                        context.getString(R.string.common_ui_unknown_error)
-                                                    },
-                                                )
-                                            }
-                                        },
-                                        onDismissRequest = { heroPopup = null },
-                                    )
-                                null -> {}
-                            }
-                        }
-
-                        LibraryDetailScreen.Shortcut -> {
-                            Column(
-                                modifier =
-                                    Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Text(
-                                    stringResource(R.string.common_ui_shortcut),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = TextSecondary,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.1.sp,
-                                )
-
-                                Spacer(Modifier.weight(1f))
-
-                                ShortcutRemovalConfirmation(
-                                    message =
-                                        stringResource(
-                                            R.string.shortcuts_list_remove_game_shortcut_message,
-                                            app.name,
-                                        ),
-                                    onConfirm = {
-                                        scope.launch {
-                                            val removed =
-                                                withContext(Dispatchers.IO) {
-                                                    homeShortcutState.shortcut?.let {
-                                                        LibraryShortcutUtils.disablePinnedHomeShortcut(context, it)
-                                                    } == true
-                                                }
-                                            pinnedShortcutOverride = if (removed) false else hasPinnedShortcut
-                                            shortcutRefreshKey++
-                                            currentScreen = LibraryDetailScreen.Main
-                                            com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                                context,
-                                                if (removed) {
-                                                    context.getString(R.string.shortcuts_list_removed)
-                                                } else {
-                                                    context.getString(R.string.common_ui_unknown_error)
-                                                },
-                                            )
-                                        }
-                                    },
-                                    onCancel = { currentScreen = LibraryDetailScreen.Main },
-                                )
-                            }
-                        }
-
-                        LibraryDetailScreen.CloudSaves -> {
-                            Column(
-                                modifier =
-                                    Modifier
-                                        .fillMaxSize()
-                                        .verticalScroll(rememberScrollState())
-                                        .navigationBarsPadding(),
-                            ) {
-                            var isWorking by remember { mutableStateOf(false) }
-
-                            val detailGameSource =
-                                when {
-                                    else -> GameSaveBackupManager.GameSource.STEAM
-                                }
-                            val detailGameId =
-                                when {
-                                    else -> app.id.toString()
-                                }
-                            val detailShortcut =
-                                remember(app.id, isCustom) {
-                                    val containerManager = ContainerManager(context)
-                                    findLibraryShortcutForGame(containerManager, app, isCustom)
-                                }
-                            var cloudSyncEnabled by remember(detailShortcut?.file?.absolutePath) {
-                                mutableStateOf(isShortcutCloudSyncEnabled(detailShortcut))
-                            }
-                            var offlineModeEnabled by remember(detailShortcut?.file?.absolutePath) {
-                                mutableStateOf(isShortcutOfflineMode(detailShortcut))
-                            }
-
-                            val detailProviderLabel =
-                                when (detailGameSource) {
-                                    GameSaveBackupManager.GameSource.CUSTOM ->
-                                        stringResource(R.string.preloader_platform_custom)
-                                    GameSaveBackupManager.GameSource.STEAM ->
-                                        stringResource(R.string.preloader_platform_steam)
-                                }
-
-                            CloudSavesContent(
-                                activity = this@LibraryGameDetailDialog,
-                                isWorking = isWorking,
-                                cloudSyncEnabled = cloudSyncEnabled,
-                                offlineModeEnabled = offlineModeEnabled,
-                                gameSource = detailGameSource,
-                                gameId = detailGameId,
-                                gameName = app.name,
-                                shortcut = detailShortcut,
-                                onCloudSyncToggle = { enabled ->
-                                    cloudSyncEnabled = enabled
-                                    setShortcutCloudSyncEnabled(detailShortcut, enabled)
-                                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                        context,
-                                        if (enabled) {
-                                            context.getString(R.string.cloud_sync_enabled_summary)
-                                        } else {
-                                            context.getString(R.string.cloud_sync_disabled_summary)
-                                        },
-                                        android.widget.Toast.LENGTH_SHORT,
-                                    )
-                                },
-                                onOfflineModeToggle = { enabled ->
-                                    offlineModeEnabled = enabled
-                                    setShortcutOfflineMode(detailShortcut, enabled)
-                                },
-                                onSyncFromCloud = {
-                                    if (!isWorking) {
-                                        isWorking = true
-                                        scope.launch(Dispatchers.IO) {
-                                            val ok =
-                                                CloudSyncHelper.downloadCloudSaves(
-                                                    context,
-                                                    detailGameSource,
-                                                    detailGameId,
-                                                    detailShortcut,
-                                                )
-                                            withContext(Dispatchers.Main) {
-                                                isWorking = false
-                                                com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                                    context,
-                                                    if (ok) {
-                                                        context.getString(
-                                                            R.string.cloud_saves_sync_from_provider_success,
-                                                            detailProviderLabel,
-                                                        )
-                                                    } else {
-                                                        context.getString(
-                                                            R.string.cloud_saves_sync_from_provider_failed,
-                                                            detailProviderLabel,
-                                                        )
-                                                    },
-                                                    android.widget.Toast.LENGTH_SHORT,
-                                                )
-                                            }
-                                        }
-                                    }
-                                },
-                                showBottomBack = false,
-                                onBack = { currentScreen = LibraryDetailScreen.Main },
-                            )
-                            }
-                        }
-
-                        LibraryDetailScreen.Uninstall -> {
-                            Column(
-                                modifier =
-                                    Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Text(
-                                    stringResource(
-                                        if (isCustom) R.string.library_games_remove_game else R.string.library_games_uninstall_game,
-                                    ),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = TextSecondary,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.1.sp,
-                                )
-
-                                Spacer(Modifier.weight(1f))
-
-                                UninstallConfirmation(
-                                    message =
-                                        if (isCustom) {
-                                            getString(R.string.library_games_remove_confirm, app.name)
-                                        } else {
-                                            getString(R.string.library_games_uninstall_confirm, app.name)
-                                        },
-                                    confirmLabel =
-                                        stringResource(
-                                            if (isCustom) R.string.common_ui_remove else R.string.common_ui_uninstall,
-                                        ),
-                                    onConfirm = uninstallGame,
-                                    onCancel = { currentScreen = LibraryDetailScreen.Main },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (showAchievements) {
-                    Dialog(
-                        onDismissRequest = { showAchievements = false },
-                        properties = DialogProperties(
-                            usePlatformDefaultWidth = false,
-                            dismissOnClickOutside = false,
-                            decorFitsSystemWindows = false,
-                        ),
-                    ) {
-                        com.winlator.cmod.feature.stores.steam.achievements.SteamAchievementsScreen(
-                            appId = app.id,
-                            appName = app.name,
-                            onClose = { showAchievements = false },
-                        )
-                    }
-                }
-
-                activePopup?.let { popup ->
-                    LibraryDetailPopupFrame(
-                        title =
-                            when (popup) {
-                                LibraryDetailPopup.CloudSaves ->
-                                    stringResource(
-                                        R.string.cloud_saves_title_for_provider,
-                                        when {
-                                            isCustom -> stringResource(R.string.preloader_platform_custom)
-                                            else -> stringResource(R.string.preloader_platform_steam)
-                                        },
-                                        app.name,
-                                    )
-                            },
-                        wide = popup == LibraryDetailPopup.CloudSaves,
-                        onDismissRequest = { activePopup = null },
-                    ) {
-                        when (popup) {
-                            LibraryDetailPopup.CloudSaves -> {
-                                var isWorking by remember { mutableStateOf(false) }
-
-                                val detailGameSource =
-                                    when {
-                                        isCustom -> GameSaveBackupManager.GameSource.CUSTOM
-                                        else -> GameSaveBackupManager.GameSource.STEAM
-                                    }
-                                val detailShortcut =
-                                    remember(app.id, isCustom) {
-                                        val containerManager = ContainerManager(context)
-                                        findLibraryShortcutForGame(containerManager, app, isCustom)
-                                    }
-                                val detailGameId =
-                                    when {
-                                        isCustom ->
-                                            detailShortcut?.let { GameSaveBackupManager.customGameId(it) }
-                                                ?: app.name
-                                        else -> app.id.toString()
-                                    }
-                                var cloudSyncEnabled by remember(detailShortcut?.file?.absolutePath) {
-                                    mutableStateOf(isShortcutCloudSyncEnabled(detailShortcut))
-                                }
-                                var offlineModeEnabled by remember(detailShortcut?.file?.absolutePath) {
-                                    mutableStateOf(isShortcutOfflineMode(detailShortcut))
-                                }
-
-                                val detailProviderLabel =
-                                    when (detailGameSource) {
-                                        GameSaveBackupManager.GameSource.CUSTOM ->
-                                            stringResource(R.string.preloader_platform_custom)
-                                        GameSaveBackupManager.GameSource.STEAM ->
-                                            stringResource(R.string.preloader_platform_steam)
-                                    }
-
-                                CloudSavesContent(
-                                    activity = this@LibraryGameDetailDialog,
-                                    isWorking = isWorking,
-                                    cloudSyncEnabled = cloudSyncEnabled,
-                                    offlineModeEnabled = offlineModeEnabled,
-                                    gameSource = detailGameSource,
-                                    gameId = detailGameId,
-                                    gameName = app.name,
-                                    shortcut = detailShortcut,
-                                    onCloudSyncToggle = { enabled ->
-                                        cloudSyncEnabled = enabled
-                                        setShortcutCloudSyncEnabled(detailShortcut, enabled)
-                                        com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                            context,
-                                            if (enabled) {
-                                                context.getString(R.string.cloud_sync_enabled_summary)
-                                            } else {
-                                                context.getString(R.string.cloud_sync_disabled_summary)
-                                            },
-                                            android.widget.Toast.LENGTH_SHORT,
-                                        )
-                                    },
-                                    onOfflineModeToggle = { enabled ->
-                                        offlineModeEnabled = enabled
-                                        setShortcutOfflineMode(detailShortcut, enabled)
-                                    },
-                                onSyncFromCloud = {
-                                    if (!isWorking) {
-                                        isWorking = true
-                                            scope.launch(Dispatchers.IO) {
-                                                val ok =
-                                                    CloudSyncHelper.downloadCloudSaves(
-                                                        context,
-                                                        detailGameSource,
-                                                        detailGameId,
-                                                        detailShortcut,
-                                                    )
-                                                withContext(Dispatchers.Main) {
-                                                    isWorking = false
-                                                    com.winlator.cmod.shared.ui.toast.WinToast.show(
-                                                        context,
-                                                        if (ok) {
-                                                            context.getString(
-                                                                R.string.cloud_saves_sync_from_provider_success,
-                                                                detailProviderLabel,
-                                                            )
-                                                        } else {
-                                                            context.getString(
-                                                                R.string.cloud_saves_sync_from_provider_failed,
-                                                                detailProviderLabel,
-                                                            )
-                                                        },
-                                                        android.widget.Toast.LENGTH_SHORT,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    },
-                                    showTitle = false,
-                                    showBottomBack = false,
-                                    onBack = { activePopup = null },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (
-                    currentScreen != LibraryDetailScreen.Main &&
-                    currentScreen != LibraryDetailScreen.CloudSaves
-                ) {
-                    // Close button overlay
-                    IconButton(
-                        onClick = onDismissRequest,
-                        modifier =
-                            Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(16.dp)
-                                .size(42.dp)
-                                .shadow(8.dp, CircleShape, spotColor = Color.Black.copy(alpha = 0.35f))
-                                .clip(CircleShape)
-                                .background(BgDark.copy(alpha = 0.7f)),
-                    ) {
-                        Icon(Icons.Outlined.Close, contentDescription = "Close", tint = TextPrimary)
-                    }
-                }
-            }
-
-            if (showWorkshopDialog) {
-                WorkshopDialog(
-                    appId = app.id,
-                    gameTitle = app.name,
-                    onDismissRequest = { showWorkshopDialog = false },
-                )
-            }
+            com.winlator.cmod.feature.stores.steam.achievements.SteamAchievementsScreen(
+                appId = app.id,
+                appName = app.name,
+                onClose = { showAchievements = false },
+            )
         }
     }
 }
+

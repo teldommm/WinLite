@@ -375,8 +375,6 @@ class UnifiedActivity :
     val leftStickScrollState = kotlinx.coroutines.flow.MutableStateFlow(0f)
     val keyEventFlow = kotlinx.coroutines.flow.MutableSharedFlow<android.view.KeyEvent>(extraBufferCapacity = 10)
 
-    val openHeroForFocusedSignal = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-
     val openSearchSignal = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     val openFriendsSignal = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -1163,6 +1161,7 @@ class UnifiedActivity :
         Menu,
         Shortcut,
         CloudSaves,
+        Stats,
         Uninstall,
     }
 
@@ -1183,13 +1182,7 @@ class UnifiedActivity :
         val onClick: () -> Unit,
     )
 
-    // Library Game Detail Dialog
-
-    internal enum class LibraryDetailScreen { Main, Shortcut, CloudSaves, Uninstall }
-
-    internal enum class LibraryDetailPopup { CloudSaves }
-
-    internal enum class HeroLaunchPopup { BootToDesktop, RemoveShortcut }
+    // Boot picker (Desktop / graphics test / input test) — used from GameSettingsDialog.
 
     internal enum class HeroBootChoice { Desktop, Cube32, Cube64, Input32, Input64 }
 

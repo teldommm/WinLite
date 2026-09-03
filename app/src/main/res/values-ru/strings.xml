@@ -173,6 +173,8 @@
     <string name="library_games_last_played">Последний запуск</string>
     <string name="library_games_playtime">Время игры</string>
     <string name="library_games_plays">Запуски</string>
+    <string name="library_games_stats_title">Статистика</string>
+    <string name="library_games_no_stats_yet">Пока нет статистики — запустите игру хотя бы раз, чтобы начать отслеживать время игры и запуски.</string>
     <string name="library_games_dlcs">DLC</string>
     <string name="library_games_uninstall_game">УДАЛИТЬ ИГРУ</string>
     <string name="library_games_remove_game">УДАЛИТЬ ИЗ БИБЛИОТЕКИ</string>

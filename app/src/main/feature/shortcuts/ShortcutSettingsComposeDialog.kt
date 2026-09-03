@@ -97,18 +97,11 @@ private enum class LibraryArtworkTarget {
 // Only what BitmapFactory can decode.
 private val ARTWORK_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "bmp", "gif", "heic", "heif", "ico")
 
-class ShortcutSettingsComposeDialog private constructor(
+class ShortcutSettingsComposeDialog(
     private val activity: Activity,
     private val shortcut: Shortcut,
-    private val fragment: ShortcutsFragment?
 ) {
     private val context: Context = activity
-
-    constructor(fragment: ShortcutsFragment, shortcut: Shortcut) :
-        this(fragment.requireActivity(), shortcut, fragment)
-
-    constructor(activity: Activity, shortcut: Shortcut) :
-        this(activity, shortcut, null)
     private val dialog: Dialog
     private val state = GameSettingsStateHolder()
     private val nav = GameSettingsNav()
@@ -230,11 +223,7 @@ class ShortcutSettingsComposeDialog private constructor(
             }
 
             override fun onAddToHomeScreen() {
-                val result = if (fragment != null) {
-                    fragment.addShortcutToScreen(shortcut)
-                } else {
-                    addShortcutToScreen(shortcut)
-                }
+                val result = addShortcutToScreen(shortcut)
                 if (result == ShortcutsFragment.PinShortcutResult.REUSED_EXISTING) {
                     WinToast.show(context, R.string.shortcuts_list_readded_existing, shortcut.icon, dialog.window?.decorView)
                 } else if (result == ShortcutsFragment.PinShortcutResult.FAILED) {

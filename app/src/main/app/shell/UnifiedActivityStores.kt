@@ -304,6 +304,7 @@ internal fun UnifiedActivity.GameCapsule(
     customHeroPath: String? = null,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
+    onMoreClick: (() -> Unit)? = null,
     useLibraryCapsule: Boolean = false,
     listMode: Boolean = false,
     modifier: Modifier = Modifier,
@@ -526,6 +527,11 @@ internal fun UnifiedActivity.GameCapsule(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+
+                if (onMoreClick != null) {
+                    Spacer(Modifier.width(6.dp))
+                    GameCapsuleMoreButton(onClick = onMoreClick)
+                }
             }
         }
     } else {
@@ -557,6 +563,12 @@ internal fun UnifiedActivity.GameCapsule(
                         .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
             ) {
                 ArtContent(Modifier.fillMaxSize())
+                if (onMoreClick != null) {
+                    GameCapsuleMoreButton(
+                        onClick = onMoreClick,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+                    )
+                }
             }
 
             Text(
@@ -576,6 +588,34 @@ internal fun UnifiedActivity.GameCapsule(
     }
 }
 
+/** Small "⋮" overlay so touch users can discover the settings menu without needing long-press. */
+@Composable
+internal fun UnifiedActivity.GameCapsuleMoreButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
+        modifier =
+            modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.45f))
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.MoreVert,
+            contentDescription = stringResource(R.string.common_ui_options),
+            tint = Color.White,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
 
 @Composable
 internal fun UnifiedActivity.StoreInstalledBadge(

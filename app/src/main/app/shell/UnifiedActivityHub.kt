@@ -424,9 +424,18 @@ internal fun UnifiedActivity.UnifiedHub() {
                     }
                 }
 
-                android.view.KeyEvent.KEYCODE_BUTTON_X -> {
+                android.view.KeyEvent.KEYCODE_BUTTON_X, android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
                     if (key == "library" && selectedSteamAppId != 0) {
-                        activity?.openHeroForFocusedSignal?.tryEmit(Unit)
+                        val isCustom = selectedSteamAppId < 0
+
+                        globalSettingsApp = (
+                            steamApps.find { it.id == selectedSteamAppId }
+                                ?: if (isCustom) {
+                                    SteamApp(id = selectedSteamAppId, name = selectedSteamAppName, developer = "Custom")
+                                } else {
+                                    null
+                                }
+                        )
                     }
                 }
 
@@ -455,21 +464,6 @@ internal fun UnifiedActivity.UnifiedHub() {
                         showAddCustomGame = false
                     } else {
                         showExitDialog = true
-                    }
-                }
-
-                android.view.KeyEvent.KEYCODE_BUTTON_Y -> {
-                    if (key == "library" && selectedSteamAppId != 0) {
-                        val isCustom = selectedSteamAppId < 0
-
-                        globalSettingsApp = (
-                            steamApps.find { it.id == selectedSteamAppId }
-                                ?: if (isCustom) {
-                                    SteamApp(id = selectedSteamAppId, name = selectedSteamAppName, developer = "Custom")
-                                } else {
-                                    null
-                                }
-                        )
                     }
                 }
 
@@ -2104,15 +2098,13 @@ internal fun UnifiedActivity.LibraryCarousel(
     }
 
     var selectedAppForSettings by remember { mutableStateOf<SteamApp?>(null) }
-    var detailApp by remember { mutableStateOf<SteamApp?>(null) }
     val gridState = rememberLazyGridState()
     val carouselState = rememberLazyListState()
     val activity = LocalContext.current as? UnifiedActivity
 
     // Pause chasing borders on library cards while any dialog is open.
-    LaunchedEffect(selectedAppForSettings, detailApp) {
-        chasingBordersPaused.value =
-            selectedAppForSettings != null || detailApp != null
+    LaunchedEffect(selectedAppForSettings) {
+        chasingBordersPaused.value = selectedAppForSettings != null
     }
     DisposableEffect(Unit) {
         onDispose { chasingBordersPaused.value = false }
@@ -2164,18 +2156,6 @@ internal fun UnifiedActivity.LibraryCarousel(
                 app.id < 0 -> "CUSTOM"
                 else -> "STEAM"
             }
-    }
-
-    val heroApps = rememberUpdatedState(displayedApps)
-    val heroFocus = rememberUpdatedState(focusIndex)
-    LaunchedEffect(Unit) {
-        activity?.openHeroForFocusedSignal?.collect {
-            val list = heroApps.value
-            val app = list.getOrNull(heroFocus.value) ?: list.firstOrNull()
-            if (app != null) {
-                detailApp = app
-            }
-        }
     }
 
     // Publish the focused game's hero art (custom card > store hero > grid capsule) for the immersive background; shortcuts load once per refresh signal, not per focus move.
@@ -2232,6 +2212,17 @@ internal fun UnifiedActivity.LibraryCarousel(
         selectedAppForSettings = app
     }
 
+    val launchFocusedApp: (Int, SteamApp) -> Unit = { index, app ->
+        // Keeps the immersive background on the opened game after backing out.
+        activity?.libraryFocusIndex?.value = index
+        val containerManager = ContainerManager(context)
+        if (app.id < 0) {
+            launchCustomGame(context, containerManager, app.name)
+        } else {
+            launchSteamGame(context, containerManager, app)
+        }
+    }
+
     PullToRefreshBox(
         isRefreshing = pullRefreshing,
         onRefresh = {
@@ -2260,14 +2251,11 @@ internal fun UnifiedActivity.LibraryCarousel(
                         customIconPath = visibleCustomIconPathByAppId[app.id],
                         customListPath = visibleCustomListPathByAppId[app.id],
                         customHeroPath = visibleCustomHeroPathByAppId[app.id],
-                        onClick = {
-                            // Keeps the immersive background on the opened game after backing out.
-                            activity?.libraryFocusIndex?.value = index
-                            detailApp = app
-                        },
+                        onClick = { launchFocusedApp(index, app) },
                         onLongClick = {
                             openSettingsForApp(index, app)
                         },
+                        onMoreClick = { openSettingsForApp(index, app) },
                         modifier =
                             Modifier
                                 .height(rowHeight)
@@ -2310,10 +2298,9 @@ internal fun UnifiedActivity.LibraryCarousel(
                                     customListPath = visibleCustomListPathByAppId[app.id],
                                     customCarouselPath = visibleCustomCarouselPathByAppId[app.id],
                                     customHeroPath = visibleCustomHeroPathByAppId[app.id],
-                                    onClick = {
-                                        detailApp = app
-                                    },
+                                    onClick = { launchFocusedApp(index, app) },
                                     onLongClick = { openSettingsForApp(index, app) },
+                                    onMoreClick = { openSettingsForApp(index, app) },
                                     useLibraryCapsule = true,
                                     modifier =
                                         Modifier
@@ -2355,12 +2342,9 @@ internal fun UnifiedActivity.LibraryCarousel(
                         customIconPath = visibleCustomIconPathByAppId[app.id],
                         customListPath = visibleCustomListPathByAppId[app.id],
                         customHeroPath = visibleCustomHeroPathByAppId[app.id],
-                        onClick = {
-                            // Keeps the immersive background on the opened game after backing out.
-                            activity?.libraryFocusIndex?.value = index
-                            detailApp = app
-                        },
+                        onClick = { launchFocusedApp(index, app) },
                         onLongClick = { openSettingsForApp(index, app) },
+                        onMoreClick = { openSettingsForApp(index, app) },
                         listMode = true,
                         modifier =
                             Modifier
@@ -2388,14 +2372,6 @@ internal fun UnifiedActivity.LibraryCarousel(
         GameSettingsDialog(
             app = selectedAppForSettings!!,
             onDismissRequest = { selectedAppForSettings = null },
-        )
-    }
-    if (detailApp != null) {
-        LibraryGameDetailDialog(
-            app = detailApp!!,
-            onDismissRequest = {
-                detailApp = null
-            },
         )
     }
 }
