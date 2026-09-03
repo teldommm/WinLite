@@ -866,7 +866,7 @@ private fun ComponentItemCard(
                     StatusPillBadge(
                         label = stringResource(R.string.common_ui_installed),
                         icon = Icons.Outlined.Check,
-                        tint = TextSecondary,
+                        tint = SuccessGreen,
                         compact = true,
                     )
                 } else if (item.isInstalled) {

@@ -73,7 +73,6 @@ import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -159,7 +158,6 @@ data class DebugState(
     val recordPerformanceToFile: Boolean = false,
     val vulkanValidationLayers: Boolean = false,
     val wnHybridMode: Boolean = false,
-    val offlineMode: Boolean = false,
     val logsSize: String = "0 B",
 )
 
@@ -190,7 +188,6 @@ fun DebugScreen(
     onRecordPerformanceToFileChanged: (Boolean) -> Unit,
     onVulkanValidationLayersChanged: (Boolean) -> Unit,
     onWnHybridModeChanged: (Boolean) -> Unit,
-    onOfflineModeChanged: (Boolean) -> Unit,
     onShareLogs: () -> Unit,
     onDownloadLogs: () -> String?,
     onDeleteLogs: () -> Unit,
@@ -263,15 +260,6 @@ fun DebugScreen(
                 accentColor = Warning,
                 checked = state.appDebug,
                 onCheckedChange = onAppDebugChanged,
-            )
-
-            SettingsToggleCard(
-                title = stringResource(R.string.settings_debug_offline_mode_title),
-                subtitle = stringResource(R.string.settings_debug_offline_mode_subtitle),
-                icon = Icons.Outlined.WifiOff,
-                accentColor = Warning,
-                checked = state.offlineMode,
-                onCheckedChange = onOfflineModeChanged,
             )
 
             SectionLabel(stringResource(R.string.settings_debug_section_emulation), modifier = Modifier.padding(top = 8.dp))

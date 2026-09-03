@@ -214,7 +214,7 @@ class ContentsFragment : Fragment() {
                         .toSortedMap(compareBy { it.ordinal })
                         .mapValues { (_, profiles) ->
                             profiles
-                                .sortedWith(compareBy<ContentProfile> { it.isInstalled }.thenBy { it.verName.lowercase() })
+                                .sortedBy { it.verName.lowercase() }
                                 .map { profile ->
                                     val item = profile.toItem()
                                     keyedProfiles[item.key] = profile

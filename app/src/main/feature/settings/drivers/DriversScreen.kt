@@ -573,7 +573,6 @@ private fun InstalledDriverCard(
     driver: InstalledDriverItem,
     onRemove: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
     Box(
         modifier =
             Modifier
@@ -625,41 +624,11 @@ private fun InstalledDriverCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Box {
-                IconTapButton(
-                    icon = Icons.Outlined.MoreVert,
-                    tint = TextSecondary,
-                    onClick = { menuOpen = true },
-                )
-                DropdownMenu(
-                    expanded = menuOpen,
-                    onDismissRequest = { menuOpen = false },
-                    containerColor = CardDark,
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Delete,
-                                    contentDescription = null,
-                                    tint = DangerRed,
-                                    modifier = Modifier.size(15.dp),
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "Remove",
-                                    color = DangerRed,
-                                    fontSize = 13.sp,
-                                )
-                            }
-                        },
-                        onClick = {
-                            menuOpen = false
-                            onRemove()
-                        },
-                    )
-                }
-            }
+            IconTapButton(
+                icon = Icons.Outlined.Delete,
+                tint = DangerRed,
+                onClick = onRemove,
+            )
         }
     }
 }
