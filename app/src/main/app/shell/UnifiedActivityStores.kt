@@ -70,7 +70,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -598,8 +597,8 @@ internal fun UnifiedActivity.GameCapsuleMoreButton(
     Box(
         modifier =
             modifier
-                .size(24.dp)
-                .clip(CircleShape)
+                .size(30.dp)
+                .clip(RoundedCornerShape(8.dp))
                 .background(Color.Black.copy(alpha = 0.45f))
                 .clickable(
                     interactionSource = interactionSource,
@@ -612,7 +611,7 @@ internal fun UnifiedActivity.GameCapsuleMoreButton(
             imageVector = Icons.Outlined.MoreVert,
             contentDescription = stringResource(R.string.common_ui_options),
             tint = Color.White,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(20.dp),
         )
     }
 }

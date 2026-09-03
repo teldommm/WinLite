@@ -582,49 +582,29 @@ internal fun UnifiedActivity.HeroLaunchConfirmFooter(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PaneFooterAction(
-            label = stringResource(R.string.common_ui_cancel),
-            textColor = DangerRed,
-            onClick = onCancel,
-        )
-        PaneFooterAction(
-            label = stringResource(R.string.common_ui_continue),
-            textColor = StatusOnline,
+        OutlinedButton(
             onClick = onContinue,
-            isEntry = true,
-        )
-    }
-}
-
-@Composable
-internal fun UnifiedActivity.PaneFooterAction(
-    label: String,
-    textColor: Color,
-    onClick: () -> Unit,
-    isEntry: Boolean = false,
-) {
-    Box(
-        modifier =
-            Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .paneNavItem(
-                    cornerRadius = 8.dp,
-                    onActivate = onClick,
-                    tapToSelect = true,
-                    isEntry = isEntry,
-                ).padding(horizontal = 10.dp, vertical = 7.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            color = textColor,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
+            modifier = Modifier.paneNavItem(cornerRadius = 8.dp, onActivate = onContinue, isEntry = true),
+            border = BorderStroke(1.dp, Accent.copy(alpha = 0.5f)),
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+        ) {
+            Text(
+                stringResource(R.string.common_ui_continue),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        TextButton(
+            onClick = onCancel,
+            modifier = Modifier.paneNavItem(cornerRadius = 8.dp, onActivate = onCancel),
+        ) {
+            Text(stringResource(R.string.common_ui_cancel), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
@@ -722,68 +702,6 @@ internal fun UnifiedActivity.HeroBootOptionRow(
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
         )
-    }
-}
-
-@Composable
-internal fun UnifiedActivity.HeroRemoveShortcutDialog(
-    gameName: String,
-    onConfirm: () -> Unit,
-    onDismissRequest: () -> Unit,
-) {
-    val registry = remember { PaneNavRegistry() }
-    var isRemoving by remember { mutableStateOf(false) }
-    Dialog(onDismissRequest = onDismissRequest) {
-      CompositionLocalProvider(LocalPaneNav provides registry) {
-        DialogPaneNav(registry, onDismiss = onDismissRequest)
-        PopupDialog(
-            title = stringResource(R.string.common_ui_shortcut),
-            message = stringResource(R.string.shortcuts_list_remove_game_shortcut_message, gameName),
-            icon = Icons.Outlined.Home,
-            accentColor = DangerRed,
-            confirmButtonColor = DangerRed,
-            progressLabel = stringResource(R.string.common_ui_working),
-            modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
-            footer = {
-                if (isRemoving) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(color = DangerRed, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                        Text(
-                            stringResource(R.string.common_ui_working),
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        PaneFooterAction(
-                            label = stringResource(R.string.common_ui_cancel),
-                            textColor = TextSecondary,
-                            onClick = onDismissRequest,
-                        )
-                        PaneFooterAction(
-                            label = stringResource(R.string.common_ui_remove),
-                            textColor = DangerRed,
-                            onClick = {
-                                isRemoving = true
-                                onConfirm()
-                            },
-                            isEntry = true,
-                        )
-                    }
-                }
-            },
-        )
-      }
     }
 }
 
