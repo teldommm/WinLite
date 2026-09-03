@@ -582,28 +582,43 @@ internal fun UnifiedActivity.HeroLaunchConfirmFooter(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        OutlinedButton(
-            onClick = onContinue,
-            modifier = Modifier.paneNavItem(cornerRadius = 8.dp, onActivate = onContinue, isEntry = true),
-            border = BorderStroke(1.dp, Accent.copy(alpha = 0.5f)),
-            shape = RoundedCornerShape(8.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+        Box(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, CardBorder, RoundedCornerShape(8.dp))
+                    .background(CardDark)
+                    .paneNavItem(cornerRadius = 8.dp, onActivate = onCancel, tapToSelect = true),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
-                stringResource(R.string.common_ui_continue),
+                stringResource(R.string.common_ui_cancel),
+                color = TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Medium,
             )
         }
-        Spacer(Modifier.width(8.dp))
-        TextButton(
-            onClick = onCancel,
-            modifier = Modifier.paneNavItem(cornerRadius = 8.dp, onActivate = onCancel),
+        Box(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, Accent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    .background(Accent.copy(alpha = 0.1f))
+                    .paneNavItem(cornerRadius = 8.dp, onActivate = onContinue, tapToSelect = true, isEntry = true),
+            contentAlignment = Alignment.Center,
         ) {
-            Text(stringResource(R.string.common_ui_cancel), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+            Text(
+                stringResource(R.string.common_ui_continue),
+                color = Accent,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+            )
         }
     }
 }

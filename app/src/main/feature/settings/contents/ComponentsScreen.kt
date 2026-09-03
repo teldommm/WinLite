@@ -863,12 +863,11 @@ private fun ComponentItemCard(
                     Spacer(Modifier.width(8.dp))
                 }
                 if (item.isInstalled && showInstalledAsBadge) {
-                    SmallPillButton(
+                    StatusPillBadge(
                         label = stringResource(R.string.common_ui_installed),
                         icon = Icons.Outlined.Check,
                         tint = TextSecondary,
                         compact = true,
-                        onClick = {},
                     )
                 } else if (item.isInstalled) {
                     IconTapButton(
@@ -1024,6 +1023,52 @@ private fun SmallPillButton(
             fontWeight = FontWeight.SemiBold,
             // Never let a squeezed row break the label across lines mid-word;
             // clip it instead so the pill keeps a single-line height.
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Same look as [SmallPillButton] but purely a status indicator — no paneNavItem, no focus
+ * ring, no tap/click handling at all. Used for the "Installed" badge in a repo card, where
+ * tapping shouldn't do anything.
+ */
+@Composable
+private fun StatusPillBadge(
+    label: String,
+    icon: ImageVector?,
+    tint: Color,
+    compact: Boolean = false,
+) {
+    val horizontalPadding = if (compact) 8.dp else 10.dp
+    val verticalPadding = if (compact) 4.dp else 6.dp
+    val iconSize = if (compact) 11.dp else 12.dp
+    val fontSize = if (compact) 10.sp else 11.sp
+    Row(
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(tint.copy(alpha = 0.14f))
+                .border(1.dp, tint.copy(alpha = 0.30f), RoundedCornerShape(8.dp))
+                .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(iconSize),
+            )
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            text = label,
+            color = tint,
+            fontSize = fontSize,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
