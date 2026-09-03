@@ -955,10 +955,6 @@ private fun isSteamCompatible(item: ComponentItem): Boolean =
     item.verName.contains("steam", ignoreCase = true) ||
         item.key.contains("steam", ignoreCase = true)
 
-// Badge marking first-party "WinLite" builds. A perfect square (width follows
-// the filled height) in WinLite blue, carrying only the WinLite logo for
-// "WN" branding. Pass Modifier.fillMaxHeight() to match the row's action height.
-@Composable
 @Composable
 private fun SteamCompatBadge(modifier: Modifier = Modifier) {
     Row(
