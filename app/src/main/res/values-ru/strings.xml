@@ -983,11 +983,6 @@
     <string name="settings_content_extracting_detail">Извлечение (%1$d файлов)</string>
     <string name="settings_content_preparing_package">Готовим пакет</string>
     <string name="settings_content_download_complete">Загрузка завершена</string>
-    <string name="settings_content_already_installed_title">Компонент уже установлен</string>
-    <string name="settings_content_already_installed_message">Этот компонент уже установлен. Удалите установленную копию перед повторной загрузкой.
-
-Установленный путь:
-%1$s</string>
     <string name="settings_content_conflicting_title">Установлен конфликтующий контент</string>
     <string name="settings_content_conflicting_message">Удалите конфликтующее содержимое перед загрузкой этого пакета.
 

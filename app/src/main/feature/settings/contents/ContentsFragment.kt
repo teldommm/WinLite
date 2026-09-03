@@ -54,7 +54,6 @@ class ContentsFragment : Fragment() {
     private val installedSizeFetchesInFlight = mutableSetOf<String>()
 
     private var downloadProgress: ComponentsDownloadProgress? = null
-    private var conflictingContentPath: String? = null
     private var isRefreshing = false
     private var componentRepos by mutableStateOf<List<ComponentRepo>>(emptyList())
     private var profilesByRepo by mutableStateOf<Map<ComponentRepo, List<ContentProfile>>>(emptyMap())
@@ -106,10 +105,6 @@ class ContentsFragment : Fragment() {
                         },
                         onRemoveItem = { item ->
                             profilesByKey[item.key]?.let { onRemoveRequested(it) }
-                        },
-                        onDismissConflict = {
-                            conflictingContentPath = null
-                            publishState()
                         },
                         onToggleAutoCreateContainer = { enabled ->
                             autoCreateContainer = enabled
@@ -207,18 +202,19 @@ class ContentsFragment : Fragment() {
         }
 
         // Available is grouped per configured repo, then per type within that repo — only
-        // types that repo actually has assets for show up (no empty placeholders).
+        // types that repo actually has assets for show up (no empty placeholders). Items
+        // already installed (matched below) stay in the list, badged instead of hidden, so
+        // the repo view reflects what's actually on disk.
         val repoSections =
             componentRepos.map { repo ->
                 val itemsByType =
                     profilesByRepo[repo]
                         .orEmpty()
-                        .filterNot { it.isInstalled }
                         .groupBy { it.type }
                         .toSortedMap(compareBy { it.ordinal })
                         .mapValues { (_, profiles) ->
                             profiles
-                                .sortedBy { it.verName.lowercase() }
+                                .sortedWith(compareBy<ContentProfile> { it.isInstalled }.thenBy { it.verName.lowercase() })
                                 .map { profile ->
                                     val item = profile.toItem()
                                     keyedProfiles[item.key] = profile
@@ -234,7 +230,6 @@ class ContentsFragment : Fragment() {
                 installed = installedItems,
                 repoSections = repoSections,
                 downloadProgress = downloadProgress,
-                conflict = conflictingContentPath?.let(::ComponentsConflict),
                 autoCreateContainer = autoCreateContainer,
                 isRefreshing = isRefreshing,
                 expandedRepoApiUrl = expandedRepoApiUrl,
@@ -567,9 +562,10 @@ class ContentsFragment : Fragment() {
 
                     runOnMain {
                         clearDownloadProgress()
-                        if (reason == ContentsManager.InstallFailedReason.ERROR_EXIST && conflictingProfile != null) {
-                            showConflictingContentDialog(conflictingProfile)
-                        } else {
+                        // ERROR_EXIST just means this item was already installed under a
+                        // different name — the alias registered above makes the repo card
+                        // badge it as installed on the next publishState(), no popup needed.
+                        if (reason != ContentsManager.InstallFailedReason.ERROR_EXIST) {
                             ContentDialog.alert(
                                 requireContext(),
                                 getString(R.string.settings_content_install_failed) + ": " + getString(msgId),
@@ -683,16 +679,12 @@ class ContentsFragment : Fragment() {
         }
     }
 
-    private fun showConflictingContentDialog(profile: ContentProfile) {
-        conflictingContentPath = ContentsManager.getInstallDir(requireContext(), profile).absolutePath
-        publishState()
-    }
-
     private fun findInstalledProfileFor(profile: ContentProfile): ContentProfile? {
         manager.syncContents()
 
         val context = requireContext()
         val remoteUrl = profile.remoteUrl
+        val normalizedRemoteName = ContentsManager.normalizeVerName(profile.verName)
         val installedProfile =
             manager
                 .getProfiles(profile.type)
@@ -702,10 +694,13 @@ class ContentsFragment : Fragment() {
                         candidate.verName == profile.verName &&
                             candidate.verCode == profile.verCode
                     val sameRemote = remoteUrl != null && candidate.remoteUrl == remoteUrl
+                    val sameNormalizedName =
+                        normalizedRemoteName.isNotEmpty() &&
+                            ContentsManager.normalizeVerName(candidate.verName) == normalizedRemoteName
 
                     candidate.isInstalled &&
                         ContentsManager.isInstalled(context, candidate) &&
-                        (sameVersion || sameRemote)
+                        (sameVersion || sameRemote || sameNormalizedName)
                 }
 
         return installedProfile
@@ -718,8 +713,9 @@ class ContentsFragment : Fragment() {
             val installedProfile = withContext(Dispatchers.IO) { findInstalledProfileFor(profile) }
             if (!isAdded || view == null) return@launch
             if (installedProfile != null) {
+                // Already installed under this name (or a close match) — the repo card
+                // already badges it as installed, so just make sure state reflects that.
                 publishState()
-                showConflictingContentDialog(installedProfile)
                 return@launch
             }
 

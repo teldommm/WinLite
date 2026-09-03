@@ -43,6 +43,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Delete
@@ -56,7 +57,6 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Upload
-import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -112,7 +112,6 @@ private val SurfaceDark = Color(0xFF21212A)
 private val Accent = Color(0xFF1A9FFF)
 private val SuccessGreen = Color(0xFF5BD68F)
 private val DangerRed = Color(0xFFFF7A88)
-private val WarningAmber = Color(0xFFFFB454)
 private val TextPrimary = Color(0xFFD6DAE0)
 private val TextSecondary = Color(0xFF7A8FA8)
 private val NavHighlight = Color(0xFF4FC3F7)
@@ -136,10 +135,6 @@ data class ComponentsDownloadProgress(
     val indeterminate: Boolean = false,
 )
 
-data class ComponentsConflict(
-    val path: String,
-)
-
 data class ComponentRepo(
     val name: String,
     val apiUrl: String,
@@ -156,7 +151,6 @@ data class ComponentsState(
     val installed: List<ComponentItem> = emptyList(),
     val repoSections: List<ComponentRepoSection> = emptyList(),
     val downloadProgress: ComponentsDownloadProgress? = null,
-    val conflict: ComponentsConflict? = null,
     val autoCreateContainer: Boolean = true,
     val isRefreshing: Boolean = false,
     val expandedRepoApiUrl: String? = null,
@@ -172,7 +166,6 @@ fun ComponentsScreen(
     onInstallFromFile: () -> Unit,
     onDownloadItem: (ComponentItem) -> Unit,
     onRemoveItem: (ComponentItem) -> Unit,
-    onDismissConflict: () -> Unit,
     onToggleAutoCreateContainer: (Boolean) -> Unit,
     onAddRepo: () -> Unit,
     onEditRepo: (ComponentRepo) -> Unit,
@@ -251,24 +244,6 @@ fun ComponentsScreen(
         DownloadProgressDialog(progress = progress)
     }
 
-    state.conflict?.let { conflict ->
-        val nav = remember { PaneNavRegistry() }
-        Dialog(onDismissRequest = onDismissConflict) {
-            DialogPaneNav(nav, onDismiss = onDismissConflict)
-            CompositionLocalProvider(LocalPaneNav provides nav) {
-                PopupDialog(
-                    title = stringResource(R.string.settings_content_already_installed_title),
-                    message = stringResource(R.string.settings_content_already_installed_message, conflict.path),
-                    confirmLabel = stringResource(R.string.common_ui_ok),
-                    modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
-                    icon = Icons.Outlined.Warning,
-                    accentColor = WarningAmber,
-                    onConfirm = onDismissConflict,
-                )
-            }
-        }
-    }
-
     CompositionLocalProvider(LocalPaneNav provides contentNav) {
         Column(
             modifier =
@@ -302,13 +277,20 @@ fun ComponentsScreen(
                     text = stringResource(R.string.common_ui_installed),
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                state.installed.forEach { item ->
-                    key("installed_${item.key}") {
-                        ComponentItemCard(
-                            item = item,
-                            onDownload = { onDownloadItem(item) },
-                            onRemove = { itemPendingRemoval = item },
-                        )
+                val installedByType =
+                    remember(state.installed) {
+                        state.installed.groupBy { it.type }.toSortedMap(compareBy { it.ordinal })
+                    }
+                installedByType.forEach { (type, items) ->
+                    TypeSubLabel(text = type.toString())
+                    items.forEach { item ->
+                        key("installed_${item.key}") {
+                            ComponentItemCard(
+                                item = item,
+                                onDownload = { onDownloadItem(item) },
+                                onRemove = { itemPendingRemoval = item },
+                            )
+                        }
                     }
                 }
             }
@@ -555,6 +537,21 @@ private fun SectionLabel(
     )
 }
 
+// Sub-header grouping installed components by type (Wine, DXVK, Box64, ...).
+@Composable
+private fun TypeSubLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        color = TextSecondary,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier.padding(top = 6.dp, bottom = 2.dp, start = 2.dp),
+    )
+}
+
 // Component repo card
 
 @Composable
@@ -741,6 +738,7 @@ private fun ComponentRepoCard(
                                         item = item,
                                         onDownload = { onDownloadItem(item) },
                                         onRemove = {},
+                                        showInstalledAsBadge = true,
                                     )
                                 }
                             }
@@ -793,6 +791,7 @@ private fun ComponentItemCard(
     item: ComponentItem,
     onDownload: () -> Unit,
     onRemove: () -> Unit,
+    showInstalledAsBadge: Boolean = false,
 ) {
     Box(
         modifier =
@@ -863,7 +862,15 @@ private fun ComponentItemCard(
                     SteamCompatBadge(Modifier.fillMaxHeight())
                     Spacer(Modifier.width(8.dp))
                 }
-                if (item.isInstalled) {
+                if (item.isInstalled && showInstalledAsBadge) {
+                    SmallPillButton(
+                        label = stringResource(R.string.common_ui_installed),
+                        icon = Icons.Outlined.Check,
+                        tint = TextSecondary,
+                        compact = true,
+                        onClick = {},
+                    )
+                } else if (item.isInstalled) {
                     IconTapButton(
                         icon = Icons.Outlined.Delete,
                         tint = DangerRed,

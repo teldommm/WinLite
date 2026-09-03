@@ -274,6 +274,15 @@ public class ContentsManager {
             String profileKey = getProfileKey(remote);
             ContentProfile existingProfile = mergedProfiles.get(profileKey);
             if (existingProfile == null) {
+              // Soft fallback: the remote verName comes from the raw GitHub asset filename,
+              // while an installed copy's verName comes from its own profile.json — these
+              // often name the exact same release differently (case, dashes vs. spaces).
+              // Match on normalized name within the same type rather than losing the link.
+              ContentProfile softMatch = findInstalledByNormalizedName(mergedProfiles, remote);
+              if (softMatch != null) {
+                mergeRemoteMetadata(softMatch, remote);
+                continue;
+              }
               mergedProfiles.put(profileKey, remote);
               Log.d("ContentsManager", "Remote profile added: " + remote.verName);
             } else {
@@ -737,6 +746,30 @@ public class ContentsManager {
   private static String getProfileKey(
       ContentProfile.ContentType type, String verName, int verCode) {
     return type + "|" + verName + "|" + verCode;
+  }
+
+  /** Lowercased, punctuation/whitespace-stripped — for tolerant name comparison only. */
+  public static String normalizeVerName(String verName) {
+    if (verName == null) return "";
+    return verName.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+  }
+
+  /**
+   * Finds an already-installed profile in {@code mergedProfiles} (same type — the caller
+   * only ever passes candidates for one type) whose name matches {@code remote} once both
+   * are normalized. Exact-key matching already handled the common case; this only runs as
+   * a fallback so a real name collision between two different releases is unlikely.
+   */
+  private static ContentProfile findInstalledByNormalizedName(
+      Map<String, ContentProfile> mergedProfiles, ContentProfile remote) {
+    String normalizedRemote = normalizeVerName(remote.verName);
+    if (normalizedRemote.isEmpty()) return null;
+    for (ContentProfile candidate : mergedProfiles.values()) {
+      if (candidate.isInstalled && normalizeVerName(candidate.verName).equals(normalizedRemote)) {
+        return candidate;
+      }
+    }
+    return null;
   }
 
   private void mergeRemoteMetadata(ContentProfile localProfile, ContentProfile remoteProfile) {
