@@ -11,15 +11,20 @@ import com.winlator.cmod.runtime.display.environment.EnvironmentComponent;
 import com.winlator.cmod.shared.io.FileUtils;
 
 import java.io.File;
+import java.util.Collections;
 import java.util.List;
 
 /**
  * Writes active Android network info into the Wine prefix. Wine reads
  * {@code <tmpDir>/ifaddrs} because Android sandboxes direct interface
  * enumeration. CONNECTIVITY_ACTION refreshes the files mid-session.
+ *
+ * When Debug > Offline Mode is on, Wine is always told there is no adapter,
+ * regardless of Android's real connectivity state.
  */
 public class NetworkInfoUpdateComponent extends EnvironmentComponent {
     private static final String TAG = "NetworkInfoUpdateComponent";
+    private static final String PREF_OFFLINE_MODE = "enable_offline_mode";
     private BroadcastReceiver broadcastReceiver;
 
     @Override
@@ -27,19 +32,30 @@ public class NetworkInfoUpdateComponent extends EnvironmentComponent {
         Log.d(TAG, "Starting...");
         Context context = environment.getContext();
         final NetworkHelper networkHelper = new NetworkHelper(context);
-        updateIFAddrsFile(networkHelper.getIFAddresses());
-        updateEtcHostsFile(networkHelper.getIPv4Address());
+        pushNetworkState(context, networkHelper);
 
         broadcastReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context ctx, Intent intent) {
-                updateIFAddrsFile(networkHelper.getIFAddresses());
-                updateEtcHostsFile(networkHelper.getIPv4Address());
+                pushNetworkState(ctx, networkHelper);
             }
         };
         IntentFilter filter = new IntentFilter();
         filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         context.registerReceiver(broadcastReceiver, filter);
+    }
+
+    private void pushNetworkState(Context context, NetworkHelper networkHelper) {
+        boolean offline =
+            androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                .getBoolean(PREF_OFFLINE_MODE, false);
+        if (offline) {
+            updateIFAddrsFile(Collections.emptyList());
+            updateEtcHostsFile(null);
+        } else {
+            updateIFAddrsFile(networkHelper.getIFAddresses());
+            updateEtcHostsFile(networkHelper.getIPv4Address());
+        }
     }
 
     @Override

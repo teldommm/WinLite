@@ -1171,6 +1171,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_debug_capture_failed">Failed to capture logs: %1$s</string>
     <string name="settings_debug_log_to_file_desc">Log WinLite process errors, warnings and crashes to file</string>
     <string name="settings_debug_section_emulation">Emulation</string>
+    <string name="settings_debug_offline_mode_title">Offline Mode</string>
+    <string name="settings_debug_offline_mode_subtitle">Hide the network adapter from Wine and block DNS resolution inside the container — games and launchers see no internet connection</string>
     <string name="settings_debug_section_subsystems">Subsystems</string>
     <string name="settings_debug_section_tools">Tools</string>
     <string name="settings_debug_no_channels_selected">No channels selected</string>

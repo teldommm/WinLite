@@ -167,6 +167,10 @@ class DebugFragment : Fragment() {
                                 )
                                 refresh()
                             },
+                            onOfflineModeChanged = { checked ->
+                                preferences.edit { putBoolean("enable_offline_mode", checked) }
+                                refresh()
+                            },
                             onShareLogs = { shareLogs() },
                             onDownloadLogs = { downloadLogs() },
                             onDeleteLogs = { deleteLogs() },
@@ -216,6 +220,7 @@ class DebugFragment : Fragment() {
                 recordPerformanceToFile = preferences.getBoolean("hud_record_to_file", false),
                 vulkanValidationLayers = preferences.getBoolean("enable_vulkan_validation_layers", false),
                 wnHybridMode = com.winlator.cmod.feature.stores.steam.utils.PrefManager.wnHybridMode,
+                offlineMode = preferences.getBoolean("enable_offline_mode", false),
                 logsSize =
                     StorageUtils.formatDecimalSize(
                         com.winlator.cmod.runtime.system.LogManager

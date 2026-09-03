@@ -947,42 +947,48 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     envVars.put("ANDROID_SYSVSHM_SERVER", rootDir.getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
 
-    String primaryDNS = "8.8.4.4";
+    boolean offlineMode =
+        androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+            .getBoolean("enable_offline_mode", false);
+
+    String primaryDNS = offlineMode ? "" : "8.8.4.4";
     java.util.List<String> orderedDns = new java.util.ArrayList<>();
-    try {
-      ConnectivityManager connectivityManager =
-          (ConnectivityManager) context.getSystemService(Service.CONNECTIVITY_SERVICE);
-      android.net.Network activeNetwork =
-          connectivityManager != null ? connectivityManager.getActiveNetwork() : null;
-      android.net.LinkProperties linkProps =
-          activeNetwork != null ? connectivityManager.getLinkProperties(activeNetwork) : null;
-      java.util.List<InetAddress> dnsServers =
-          linkProps != null ? linkProps.getDnsServers() : null;
-      if (dnsServers != null && !dnsServers.isEmpty()) {
-        for (InetAddress dns : dnsServers) {
-          if (dns instanceof java.net.Inet4Address) {
-            String a = dns.getHostAddress();
-            if (a != null && !a.isEmpty()) orderedDns.add(a);
-          }
-        }
-        for (InetAddress dns : dnsServers) {
-          if (!(dns instanceof java.net.Inet4Address)) {
-            String a = dns.getHostAddress();
-            if (a != null && !a.isEmpty()) {
-              int pct = a.indexOf('%');
-              if (pct >= 0) a = a.substring(0, pct);
-              orderedDns.add(a);
+    if (!offlineMode) {
+      try {
+        ConnectivityManager connectivityManager =
+            (ConnectivityManager) context.getSystemService(Service.CONNECTIVITY_SERVICE);
+        android.net.Network activeNetwork =
+            connectivityManager != null ? connectivityManager.getActiveNetwork() : null;
+        android.net.LinkProperties linkProps =
+            activeNetwork != null ? connectivityManager.getLinkProperties(activeNetwork) : null;
+        java.util.List<InetAddress> dnsServers =
+            linkProps != null ? linkProps.getDnsServers() : null;
+        if (dnsServers != null && !dnsServers.isEmpty()) {
+          for (InetAddress dns : dnsServers) {
+            if (dns instanceof java.net.Inet4Address) {
+              String a = dns.getHostAddress();
+              if (a != null && !a.isEmpty()) orderedDns.add(a);
             }
           }
+          for (InetAddress dns : dnsServers) {
+            if (!(dns instanceof java.net.Inet4Address)) {
+              String a = dns.getHostAddress();
+              if (a != null && !a.isEmpty()) {
+                int pct = a.indexOf('%');
+                if (pct >= 0) a = a.substring(0, pct);
+                orderedDns.add(a);
+              }
+            }
+          }
+          if (!orderedDns.isEmpty()) primaryDNS = orderedDns.get(0);
         }
-        if (!orderedDns.isEmpty()) primaryDNS = orderedDns.get(0);
+      } catch (Exception e) {
+        Log.w("GuestLauncher", "DNS capture failed, using fallback " + primaryDNS, e);
       }
-    } catch (Exception e) {
-      Log.w("GuestLauncher", "DNS capture failed, using fallback " + primaryDNS, e);
-    }
-    if (orderedDns.isEmpty()) {
-      orderedDns.add("8.8.4.4");
-      orderedDns.add("1.1.1.1");
+      if (orderedDns.isEmpty()) {
+        orderedDns.add("8.8.4.4");
+        orderedDns.add("1.1.1.1");
+      }
     }
     envVars.put("ANDROID_RESOLV_DNS", primaryDNS);
     envVars.put("WINE_NEW_NDIS", "1");

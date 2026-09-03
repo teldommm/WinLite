@@ -920,6 +920,8 @@
     <string name="settings_debug_capture_failed">Не удалось записать журналы: %1$s</string>
     <string name="settings_debug_log_to_file_desc">Записывать ошибки процесса WinLite, предупреждения и сбои в файл.</string>
     <string name="settings_debug_section_emulation">Эмуляция</string>
+    <string name="settings_debug_offline_mode_title">Офлайн-режим</string>
+    <string name="settings_debug_offline_mode_subtitle">Скрыть сетевой адаптер от Wine и заблокировать DNS внутри контейнера — игры и лаунчеры не увидят подключения к интернету</string>
     <string name="settings_debug_section_subsystems">Подсистемы</string>
     <string name="settings_debug_section_tools">Инструменты</string>
     <string name="settings_debug_no_channels_selected">Каналы не выбраны</string>
