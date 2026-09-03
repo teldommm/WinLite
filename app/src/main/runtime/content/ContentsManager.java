@@ -276,7 +276,15 @@ public class ContentsManager {
 
             String profileKey = getProfileKey(remote);
             if (matchedLocal == null) {
-              matchedLocal = mergedProfiles.get(profileKey);
+              // Guard on isInstalled here too — mergedProfiles can already contain an
+              // earlier *remote* entry under this same key (e.g. the same release
+              // showing up twice across paginated pages, or the same repo added
+              // twice). Without this check, one un-installed remote entry could get
+              // mistaken for the local install of another un-installed remote entry.
+              ContentProfile keyMatch = mergedProfiles.get(profileKey);
+              if (keyMatch != null && keyMatch.isInstalled) {
+                matchedLocal = keyMatch;
+              }
             }
 
             if (matchedLocal == null) {

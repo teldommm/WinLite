@@ -947,6 +947,7 @@
     <string name="settings_content_type">Категория</string>
     <string name="settings_content_components">Компоненты</string>
     <string name="settings_content_repo_add">Добавить репозиторий</string>
+    <string name="settings_content_repo_already_added">Этот репозиторий уже добавлен</string>
     <string name="settings_content_sources_label">Источники компонентов</string>
     <string name="settings_content_repo_item_count">%1$d компонентов</string>
     <string name="settings_content_repo_empty">Ничего не найдено в этом репозитории</string>

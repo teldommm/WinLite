@@ -472,6 +472,14 @@ class ContentsFragment : Fragment() {
         rawUrl: String,
     ) {
         val normalized = normalizeRepoInput(name, rawUrl)
+        if (existing == null && componentRepos.any { it.apiUrl == normalized.apiUrl }) {
+            // Same underlying GitHub releases feed added twice (possibly under a
+            // different display name) — every asset in it would show up duplicated,
+            // and one un-installed duplicate can end up mismarked as installed. See
+            // ContentsManager.syncContents()'s isInstalled matching.
+            WinToast.show(requireContext(), R.string.settings_content_repo_already_added)
+            return
+        }
         componentRepos =
             if (existing != null) {
                 componentRepos.map { if (it == existing) normalized else it }

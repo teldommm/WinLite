@@ -1201,6 +1201,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_content_type">Category</string>
     <string name="settings_content_components">Components</string>
     <string name="settings_content_repo_add">Add Repository</string>
+    <string name="settings_content_repo_already_added">This repository is already added</string>
     <string name="settings_content_sources_label">Component Sources</string>
     <string name="settings_content_repo_item_count">%1$d components</string>
     <string name="settings_content_repo_empty">Nothing found for this repository</string>
