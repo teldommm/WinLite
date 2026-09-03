@@ -8,6 +8,7 @@ import androidx.compose.foundation.MarqueeSpacing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -38,6 +39,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Delete
@@ -47,12 +49,15 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -171,9 +176,12 @@ fun ComponentsScreen(
     onDismissConflict: () -> Unit,
     onToggleAutoCreateContainer: (Boolean) -> Unit,
     onRefresh: () -> Unit,
-    onManageSources: () -> Unit,
+    onAddRepo: () -> Unit,
+    onEditRepo: (ComponentRepo) -> Unit,
+    onDeleteRepo: (ComponentRepo) -> Unit,
 ) {
     var itemPendingRemoval by remember { mutableStateOf<ComponentItem?>(null) }
+    var repoPendingRemoval by remember { mutableStateOf<ComponentRepo?>(null) }
     val layoutDirection = LocalLayoutDirection.current
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues()
     val navBarStartPadding = navBarPadding.calculateStartPadding(layoutDirection)
@@ -213,6 +221,28 @@ fun ComponentsScreen(
                     onConfirm = {
                         onRemoveItem(item)
                         itemPendingRemoval = null
+                    },
+                )
+            }
+        }
+    }
+
+    repoPendingRemoval?.let { repo ->
+        val nav = remember { PaneNavRegistry() }
+        Dialog(onDismissRequest = { repoPendingRemoval = null }) {
+            DialogPaneNav(nav, onDismiss = { repoPendingRemoval = null })
+            CompositionLocalProvider(LocalPaneNav provides nav) {
+                PopupDialog(
+                    title = stringResource(R.string.settings_content_repo_remove_title),
+                    message = stringResource(R.string.settings_content_repo_confirm_remove, repo.name),
+                    confirmLabel = stringResource(R.string.common_ui_remove),
+                    modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
+                    icon = Icons.Outlined.Delete,
+                    accentColor = DangerRed,
+                    onCancel = { repoPendingRemoval = null },
+                    onConfirm = {
+                        onDeleteRepo(repo)
+                        repoPendingRemoval = null
                     },
                 )
             }
@@ -265,7 +295,7 @@ fun ComponentsScreen(
                 onInstallFromFile = onInstallFromFile,
                 onToggleAutoCreateContainer = onToggleAutoCreateContainer,
                 onRefresh = onRefresh,
-                onManageSources = onManageSources,
+                onAddRepo = onAddRepo,
             )
 
             if (state.installed.isEmpty() && state.repoSections.isEmpty() && !state.isRefreshing) {
@@ -300,6 +330,8 @@ fun ComponentsScreen(
                             isExpanded = state.expandedRepoApiUrl == section.repo.apiUrl,
                             onTap = { onToggleRepoExpanded(section.repo) },
                             onDownloadItem = onDownloadItem,
+                            onEdit = { onEditRepo(section.repo) },
+                            onDelete = { repoPendingRemoval = section.repo },
                         )
                     }
                 }
@@ -322,7 +354,7 @@ private fun HeroHeader(
     onInstallFromFile: () -> Unit,
     onToggleAutoCreateContainer: (Boolean) -> Unit,
     onRefresh: () -> Unit,
-    onManageSources: () -> Unit,
+    onAddRepo: () -> Unit,
 ) {
     Box(
         modifier =
@@ -357,11 +389,11 @@ private fun HeroHeader(
             }
             val sources: @Composable () -> Unit = {
                 SmallPillButton(
-                    label = stringResource(R.string.settings_content_sources_action),
-                    icon = Icons.Outlined.Settings,
+                    label = stringResource(R.string.settings_content_repo_add),
+                    icon = Icons.Outlined.Add,
                     tint = Accent,
                     compact = true,
-                    onClick = onManageSources,
+                    onClick = onAddRepo,
                 )
             }
             val install: @Composable () -> Unit = {
@@ -599,6 +631,8 @@ private fun ComponentRepoCard(
     isExpanded: Boolean,
     onTap: () -> Unit,
     onDownloadItem: (ComponentItem) -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val borderColor = if (isExpanded) Accent.copy(alpha = 0.45f) else CardBorder
     val chevronRotation by animateFloatAsState(
@@ -606,6 +640,9 @@ private fun ComponentRepoCard(
         animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
         label = "componentRepoChevron_${section.repo.apiUrl}",
     )
+    var menuOpen by remember { mutableStateOf(false) }
+    val types = remember(section) { section.itemsByType.keys.toList() }
+    var selectedType by remember(section.repo.apiUrl, types) { mutableStateOf(types.firstOrNull()) }
 
     Box(
         modifier =
@@ -666,6 +703,58 @@ private fun ComponentRepoCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+
+                Box {
+                    IconTapButton(
+                        icon = Icons.Outlined.MoreVert,
+                        tint = TextSecondary,
+                        onClick = { menuOpen = true },
+                    )
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        containerColor = CardDark,
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Edit,
+                                        contentDescription = null,
+                                        tint = Accent,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.common_ui_edit), color = TextPrimary, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onEdit()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Delete,
+                                        contentDescription = null,
+                                        tint = DangerRed,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.common_ui_remove), color = TextPrimary, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onDelete()
+                            },
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(2.dp))
                 Icon(
                     imageVector = Icons.Outlined.ChevronRight,
                     contentDescription = null,
@@ -677,24 +766,31 @@ private fun ComponentRepoCard(
             if (isExpanded) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (section.itemsByType.isEmpty()) {
+                    if (types.isEmpty()) {
                         Text(
                             text = stringResource(R.string.settings_content_repo_empty),
                             color = TextSecondary,
                             fontSize = 12.sp,
                         )
                     } else {
-                        section.itemsByType.forEach { (type, items) ->
-                            Text(
-                                text = type.toString().uppercase(),
-                                color = TextSecondary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.2.sp,
-                                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            types.forEachIndexed { index, type ->
+                                RepoTypeChip(
+                                    label = type.toString(),
+                                    selected = type == selectedType,
+                                    onClick = { selectedType = type },
+                                )
+                                if (index < types.lastIndex) Spacer(Modifier.width(8.dp))
+                            }
+                        }
+
+                        val items = section.itemsByType[selectedType].orEmpty()
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             items.forEach { item ->
                                 key(item.key) {
                                     ComponentItemCard(
@@ -709,6 +805,39 @@ private fun ComponentRepoCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RepoTypeChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val background = if (selected) Accent.copy(alpha = 0.18f) else SurfaceDark
+    val borderColor = if (selected) Accent.copy(alpha = 0.45f) else CardBorder
+    val textColor = if (selected) Accent else TextSecondary
+    Box(
+        modifier =
+            Modifier
+                .height(30.dp)
+                .clip(RoundedCornerShape(15.dp))
+                .background(background)
+                .border(1.dp, borderColor, RoundedCornerShape(15.dp))
+                .paneNavItem(
+                    cornerRadius = 15.dp,
+                    onActivate = onClick,
+                    highlightColor = NavHighlight,
+                    tapToSelect = true,
+                ).padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = textColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
@@ -1009,129 +1138,6 @@ private fun DownloadProgressDialog(progress: ComponentsDownloadProgress) {
             accentColor = Accent,
             progress = if (progress.indeterminate) Float.NaN else progress.progress,
         )
-    }
-}
-
-// Component source repositories — list + add/edit, mirrors the driver repo picker's storage
-// model but without the expand-to-browse-releases behavior (the catalog itself is browsed
-// via the type tabs above, not per-repo).
-
-@Composable
-fun ComponentRepoManagerDialog(
-    repos: List<ComponentRepo>,
-    onDismiss: () -> Unit,
-    onAddRepo: () -> Unit,
-    onEditRepo: (ComponentRepo) -> Unit,
-    onDeleteRepo: (ComponentRepo) -> Unit,
-) {
-    val registry = remember { PaneNavRegistry() }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
-        DialogPaneNav(registry, onDismiss = onDismiss)
-        CompositionLocalProvider(LocalPaneNav provides registry) {
-            BoxWithConstraints(
-                modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .windowInsetsPadding(WindowInsets.safeDrawing)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier =
-                        Modifier
-                            .widthIn(max = 440.dp)
-                            .fillMaxWidth()
-                            .heightIn(max = maxHeight)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(CardDark)
-                            .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                ) {
-                    Column(modifier = Modifier.wrapContentHeight()) {
-                        Text(
-                            text = stringResource(R.string.settings_content_repo_manager_title),
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Spacer(Modifier.height(8.dp))
-
-                        Column(
-                            modifier = Modifier.verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            repos.forEach { repo ->
-                                ComponentRepoRow(
-                                    repo = repo,
-                                    onEdit = { onEditRepo(repo) },
-                                    onDelete = { onDeleteRepo(repo) },
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                        ) {
-                            SmallDialogButton(
-                                label = stringResource(R.string.common_ui_close),
-                                textColor = TextSecondary,
-                                onClick = onDismiss,
-                            )
-                            SmallDialogButton(
-                                label = stringResource(R.string.settings_content_repo_add),
-                                textColor = Accent,
-                                onClick = onAddRepo,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ComponentRepoRow(
-    repo: ComponentRepo,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(CardDarker)
-                .border(1.dp, CardBorder, RoundedCornerShape(10.dp))
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = repo.name,
-                color = TextPrimary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = repo.apiUrl,
-                color = TextSecondary,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        IconTapButton(icon = Icons.Outlined.Edit, tint = TextSecondary, onClick = onEdit)
-        Spacer(Modifier.width(6.dp))
-        IconTapButton(icon = Icons.Outlined.Delete, tint = DangerRed, onClick = onDelete)
     }
 }
 

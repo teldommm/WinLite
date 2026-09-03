@@ -59,7 +59,6 @@ class ContentsFragment : Fragment() {
     private var loadFailed = false
     private var componentRepos by mutableStateOf<List<ComponentRepo>>(emptyList())
     private var profilesByRepo by mutableStateOf<Map<ComponentRepo, List<ContentProfile>>>(emptyMap())
-    private var repoManagerOpen by mutableStateOf(false)
     private var addRepoDialogOpen by mutableStateOf(false)
     private var editingRepo by mutableStateOf<ComponentRepo?>(null)
     private var expandedRepoApiUrl by mutableStateOf<String?>(null)
@@ -123,18 +122,10 @@ class ContentsFragment : Fragment() {
                             publishState()
                         },
                         onRefresh = { refreshRemoteProfiles() },
-                        onManageSources = { repoManagerOpen = true },
+                        onAddRepo = { addRepoDialogOpen = true },
+                        onEditRepo = { repo -> editingRepo = repo },
+                        onDeleteRepo = { repo -> removeRepo(repo) },
                     )
-
-                    if (repoManagerOpen) {
-                        ComponentRepoManagerDialog(
-                            repos = componentRepos,
-                            onDismiss = { repoManagerOpen = false },
-                            onAddRepo = { addRepoDialogOpen = true },
-                            onEditRepo = { repo -> editingRepo = repo },
-                            onDeleteRepo = { repo -> removeRepo(repo) },
-                        )
-                    }
 
                     if (addRepoDialogOpen) {
                         ComponentRepoEditDialog(
