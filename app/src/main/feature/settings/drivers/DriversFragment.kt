@@ -2,6 +2,7 @@ package com.winlator.cmod.feature.settings
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -26,6 +27,8 @@ import com.winlator.cmod.shared.ui.toast.WinToast
 import com.winlator.cmod.shared.android.DirectoryPickerDialog
 import com.winlator.cmod.shared.theme.WinLiteTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -52,6 +55,8 @@ class DriversFragment : Fragment() {
     private var expandedReleaseId: Long? = null
     private var loadingSourceApiUrl: String? = null
     private var downloadProgress: DownloadProgress? = null
+    private var isRefreshing = false
+    private var loadFailed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -128,6 +133,7 @@ class DriversFragment : Fragment() {
                             }
                         },
                         onRestoreDefaultRepos = { restoreDefaultRepos() },
+                        onRefresh = { refreshAllSources() },
                         bridge = (requireActivity() as? UnifiedActivity)?.settingsNavBridge,
                     )
                 }
@@ -166,7 +172,50 @@ class DriversFragment : Fragment() {
                 hasMissingDefaults = hasMissingDefaults,
                 installedAssetNames = installedAssetNames,
                 downloadProgress = downloadProgress,
+                isRefreshing = isRefreshing,
+                loadFailed = loadFailed,
             )
+    }
+
+    // Re-fetches releases for every configured source in parallel (forcing a fresh fetch even
+    // for sources already cached), plus refreshes the installed list. This is what gives the
+    // "Available" count something accurate to show without needing every card expanded first.
+    private fun refreshAllSources() {
+        if (isRefreshing) return
+        isRefreshing = true
+        loadFailed = false
+        refreshInstalledDrivers()
+        publishState()
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            var failed = false
+            try {
+                val fetched =
+                    withContext(Dispatchers.IO) {
+                        sources
+                            .map { source ->
+                                async {
+                                    source.apiUrl to runCatching { fetchGithubReleases(source) }.getOrElse { emptyList() }
+                                }
+                            }.awaitAll()
+                            .toMap()
+                    }
+                if (fetched.isNotEmpty()) {
+                    releasesBySource.clear()
+                    releasesBySource.putAll(fetched)
+                } else if (sources.isNotEmpty()) {
+                    failed = true
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to refresh driver sources.", e)
+                failed = true
+            } finally {
+                isRefreshing = false
+            }
+
+            loadFailed = failed
+            if (isAdded && view != null) publishState()
+        }
     }
 
     private fun refreshInstalledDrivers() {
@@ -189,7 +238,7 @@ class DriversFragment : Fragment() {
     private fun defaultRepoList(): List<DriverRepo> =
         listOf(
             DriverRepo(
-                name = WINLITE_COMPONENTS_REPO_NAME,
+                name = WINLITE_DRIVERS_REPO_NAME,
                 repoUrl = WINLITE_COMPONENTS_REPO_URL,
                 apiUrl = WINLITE_COMPONENTS_API_URL,
             ),
@@ -588,7 +637,8 @@ class DriversFragment : Fragment() {
     }
 
     companion object {
-        private const val WINLITE_COMPONENTS_REPO_NAME = "WinLite Components"
+        private const val TAG = "DriversFragment"
+        private const val WINLITE_DRIVERS_REPO_NAME = "WinLite Drivers"
         private const val WINLITE_COMPONENTS_REPO_URL = "https://github.com/teldommm/WinLite-Components/releases"
         private const val WINLITE_COMPONENTS_API_URL = "https://api.github.com/repos/teldommm/WinLite-Components/releases"
     }

@@ -705,7 +705,7 @@ private fun ComponentRepoCard(
                 }
 
                 Box {
-                    IconTapButton(
+                    PlainIconButton(
                         icon = Icons.Outlined.MoreVert,
                         tint = TextSecondary,
                         onClick = { menuOpen = true },
@@ -952,6 +952,34 @@ private fun ComponentItemCard(
 }
 
 // Generic small controls
+
+@Composable
+private fun PlainIconButton(
+    icon: ImageVector,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .paneNavItem(
+                    cornerRadius = 8.dp,
+                    onActivate = onClick,
+                    highlightColor = NavHighlight,
+                    tapToSelect = true,
+                ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
 
 @Composable
 private fun IconTapButton(

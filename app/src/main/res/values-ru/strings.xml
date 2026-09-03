@@ -1001,6 +1001,8 @@
     <string name="settings_drivers_manager_header">Менеджер драйверов</string>
     <string name="settings_drivers_github_repos">Репозитории GitHub</string>
     <string name="settings_drivers_install">Установить драйверы</string>
+    <string name="settings_drivers_add_repo">Добавить репозиторий</string>
+    <string name="settings_drivers_refresh">Обновить</string>
     <string name="settings_drivers_installed_success">Драйвер успешно установлен.</string>
     <string name="settings_drivers_install_failed">Не удалось установить драйвер.</string>
     <string name="settings_drivers_remove_title">Удалить драйвер?</string>

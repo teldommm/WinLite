@@ -1256,6 +1256,8 @@ Installed path:
     <string name="settings_drivers_manager_header">Driver Manager</string>
     <string name="settings_drivers_github_repos">GitHub Repos</string>
     <string name="settings_drivers_install">Install Drivers</string>
+    <string name="settings_drivers_add_repo">Add Repo</string>
+    <string name="settings_drivers_refresh">Refresh</string>
     <string name="settings_drivers_installed_success">Driver installed successfully.</string>
     <string name="settings_drivers_install_failed">Failed to install driver.</string>
     <string name="settings_drivers_remove_title">Remove driver?</string>
