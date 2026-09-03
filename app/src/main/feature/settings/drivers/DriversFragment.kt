@@ -56,7 +56,6 @@ class DriversFragment : Fragment() {
     private var loadingSourceApiUrl: String? = null
     private var downloadProgress: DownloadProgress? = null
     private var isRefreshing = false
-    private var loadFailed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -111,7 +110,7 @@ class DriversFragment : Fragment() {
                             val normalized = normalizeRepoInput(name, apiUrl)
                             sources.add(normalized)
                             saveRepos()
-                            publishState()
+                            refreshAllSources()
                         },
                         onRepoUpdated = { index, name, apiUrl ->
                             if (index in sources.indices) {
@@ -119,7 +118,7 @@ class DriversFragment : Fragment() {
                                 sources[index] = normalized
                                 releasesBySource.remove(sources[index].apiUrl)
                                 saveRepos()
-                                publishState()
+                                refreshAllSources()
                             }
                         },
                         onRepoDeleted = { index ->
@@ -133,7 +132,6 @@ class DriversFragment : Fragment() {
                             }
                         },
                         onRestoreDefaultRepos = { restoreDefaultRepos() },
-                        onRefresh = { refreshAllSources() },
                         bridge = (requireActivity() as? UnifiedActivity)?.settingsNavBridge,
                     )
                 }
@@ -143,8 +141,9 @@ class DriversFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        refreshInstalledDrivers()
-        publishState()
+        // Eagerly re-fetch every source's releases on each visit (mirrors Components),
+        // instead of leaving them to load lazily one card at a time on tap.
+        refreshAllSources()
     }
 
     private fun promptInstallDriverFromFile() {
@@ -172,8 +171,6 @@ class DriversFragment : Fragment() {
                 hasMissingDefaults = hasMissingDefaults,
                 installedAssetNames = installedAssetNames,
                 downloadProgress = downloadProgress,
-                isRefreshing = isRefreshing,
-                loadFailed = loadFailed,
             )
     }
 
@@ -183,12 +180,10 @@ class DriversFragment : Fragment() {
     private fun refreshAllSources() {
         if (isRefreshing) return
         isRefreshing = true
-        loadFailed = false
         refreshInstalledDrivers()
         publishState()
 
         viewLifecycleOwner.lifecycleScope.launch {
-            var failed = false
             try {
                 val fetched =
                     withContext(Dispatchers.IO) {
@@ -203,17 +198,13 @@ class DriversFragment : Fragment() {
                 if (fetched.isNotEmpty()) {
                     releasesBySource.clear()
                     releasesBySource.putAll(fetched)
-                } else if (sources.isNotEmpty()) {
-                    failed = true
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to refresh driver sources.", e)
-                failed = true
             } finally {
                 isRefreshing = false
             }
 
-            loadFailed = failed
             if (isAdded && view != null) publishState()
         }
     }
@@ -281,7 +272,7 @@ class DriversFragment : Fragment() {
         }
         if (added > 0) {
             saveRepos()
-            publishState()
+            refreshAllSources()
         } else {
             WinToast.show(requireContext(), "Default repositories already present")
         }

@@ -1,7 +1,12 @@
 package com.winlator.cmod.feature.settings
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.MarqueeSpacing
@@ -43,19 +48,14 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.DeveloperBoard
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
-import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.Warning
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -159,7 +159,6 @@ data class ComponentsState(
     val conflict: ComponentsConflict? = null,
     val autoCreateContainer: Boolean = true,
     val isRefreshing: Boolean = false,
-    val loadFailed: Boolean = false,
     val expandedRepoApiUrl: String? = null,
 )
 
@@ -175,7 +174,6 @@ fun ComponentsScreen(
     onRemoveItem: (ComponentItem) -> Unit,
     onDismissConflict: () -> Unit,
     onToggleAutoCreateContainer: (Boolean) -> Unit,
-    onRefresh: () -> Unit,
     onAddRepo: () -> Unit,
     onEditRepo: (ComponentRepo) -> Unit,
     onDeleteRepo: (ComponentRepo) -> Unit,
@@ -290,11 +288,8 @@ fun ComponentsScreen(
                 installedCount = state.installed.size,
                 availableCount = state.repoSections.sumOf { it.totalCount },
                 autoCreateContainer = state.autoCreateContainer,
-                isRefreshing = state.isRefreshing,
-                loadFailed = state.loadFailed,
                 onInstallFromFile = onInstallFromFile,
                 onToggleAutoCreateContainer = onToggleAutoCreateContainer,
-                onRefresh = onRefresh,
                 onAddRepo = onAddRepo,
             )
 
@@ -349,11 +344,8 @@ private fun HeroHeader(
     installedCount: Int,
     availableCount: Int,
     autoCreateContainer: Boolean,
-    isRefreshing: Boolean,
-    loadFailed: Boolean,
     onInstallFromFile: () -> Unit,
     onToggleAutoCreateContainer: (Boolean) -> Unit,
-    onRefresh: () -> Unit,
     onAddRepo: () -> Unit,
 ) {
     Box(
@@ -380,13 +372,6 @@ private fun HeroHeader(
                     onToggle = { onToggleAutoCreateContainer(!autoCreateContainer) },
                 )
             }
-            val refresh: @Composable () -> Unit = {
-                RefreshChip(
-                    isRefreshing = isRefreshing,
-                    loadFailed = loadFailed,
-                    onRefresh = onRefresh,
-                )
-            }
             val sources: @Composable () -> Unit = {
                 SmallPillButton(
                     label = stringResource(R.string.settings_content_repo_add),
@@ -407,17 +392,15 @@ private fun HeroHeader(
             }
 
             if (isPortraitLayout()) {
-                // Portrait has no room for counts + toggle + refresh + install on a
-                // single line: the counts collapse to nothing and the install pill is
-                // left a few characters wide, wrapping its label mid-word. Split the
-                // controls over two rows so every chip keeps its natural width.
+                // Portrait has no room for counts + toggle + install on a single line:
+                // the counts collapse to nothing and the install pill is left a few
+                // characters wide, wrapping its label mid-word. Split the controls over
+                // two rows so every chip keeps its natural width.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     counts()
-                    Spacer(Modifier.weight(1f))
-                    refresh()
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -450,8 +433,6 @@ private fun HeroHeader(
                     toggle(Modifier)
                     Spacer(Modifier.width(6.dp))
                     sources()
-                    Spacer(Modifier.width(6.dp))
-                    refresh()
                     Spacer(Modifier.width(8.dp))
                     install()
                 }
@@ -510,55 +491,6 @@ private fun ToggleChip(
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-@Composable
-private fun RefreshChip(
-    isRefreshing: Boolean,
-    loadFailed: Boolean,
-    onRefresh: () -> Unit,
-) {
-    val tint = if (loadFailed) WarningAmber else Accent
-    Row(
-        modifier =
-            Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(tint.copy(alpha = 0.14f))
-                .border(1.dp, tint.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
-                .paneNavItem(
-                    cornerRadius = 8.dp,
-                    onActivate = { if (!isRefreshing) onRefresh() },
-                    highlightColor = NavHighlight,
-                    tapToSelect = true,
-                )
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (isRefreshing) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(11.dp),
-                strokeWidth = 1.5.dp,
-                color = tint,
-            )
-        } else {
-            Icon(
-                imageVector = Icons.Outlined.Refresh,
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier.size(11.dp),
-            )
-            Spacer(Modifier.width(5.dp))
-            Text(
-                text = stringResource(R.string.settings_content_refresh),
-                color = tint,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 
@@ -758,12 +690,24 @@ private fun ComponentRepoCard(
                 Icon(
                     imageVector = Icons.Outlined.ChevronRight,
                     contentDescription = null,
-                    tint = TextSecondary,
+                    tint = if (isExpanded) Accent else TextSecondary,
                     modifier = Modifier.size(18.dp).rotate(chevronRotation),
                 )
             }
 
-            if (isExpanded) {
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter =
+                    fadeIn(tween(200)) +
+                        expandVertically(
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                        ),
+                exit =
+                    fadeOut(tween(140)) +
+                        shrinkVertically(
+                            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                        ),
+            ) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -865,22 +809,6 @@ private fun ComponentItemCard(
                     .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier =
-                    Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(IconBoxBg),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = iconFor(item.type),
-                    contentDescription = null,
-                    tint = Accent,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            Spacer(Modifier.width(13.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.verName,
@@ -1359,20 +1287,3 @@ private fun formatBytes(bytes: Long): String {
         String.format(java.util.Locale.US, "%.1f %s", value, units[unitIndex])
     }
 }
-
-private fun iconFor(type: ContentProfile.ContentType): ImageVector =
-    when (type) {
-        ContentProfile.ContentType.CONTENT_TYPE_WINE,
-        ContentProfile.ContentType.CONTENT_TYPE_PROTON,
-        -> Icons.Outlined.Science
-
-        ContentProfile.ContentType.CONTENT_TYPE_DXVK,
-        ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
-        ContentProfile.ContentType.CONTENT_TYPE_D7VK,
-        -> Icons.Outlined.DeveloperBoard
-
-        ContentProfile.ContentType.CONTENT_TYPE_BOX64,
-        ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64,
-        ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
-        -> Icons.Outlined.Memory
-    }

@@ -55,10 +55,8 @@ import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Upload
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -107,7 +105,6 @@ private val Accent = Color(0xFF1A9FFF)
 private val NavHighlight = Color(0xFF4FC3F7)
 private val SuccessGreen = Color(0xFF5BD68F)
 private val DangerRed = Color(0xFFFF7A88)
-private val WarningAmber = Color(0xFFFFB454)
 private val TextPrimary = Color(0xFFD6DAE0)
 private val TextSecondary = Color(0xFF7A8FA8)
 
@@ -139,8 +136,6 @@ data class DriversState(
     val installedAssetNames: Set<String> = emptySet(),
     // Non-null when a download or install is in flight; drives the Compose progress dialog.
     val downloadProgress: DownloadProgress? = null,
-    val isRefreshing: Boolean = false,
-    val loadFailed: Boolean = false,
 )
 
 /**
@@ -195,7 +190,6 @@ fun DriversScreen(
     onRepoUpdated: (index: Int, name: String, apiUrl: String) -> Unit,
     onRepoDeleted: (index: Int) -> Unit,
     onRestoreDefaultRepos: () -> Unit,
-    onRefresh: () -> Unit,
     bridge: SettingsNavBridge? = null,
 ) {
     var showAddRepoDialog by remember { mutableStateOf(false) }
@@ -295,11 +289,8 @@ fun DriversScreen(
             HeroHeader(
                 installedCount = state.installedDrivers.size,
                 availableCount = state.releasesBySource.values.sumOf { it.size },
-                isRefreshing = state.isRefreshing,
-                loadFailed = state.loadFailed,
                 onInstall = onInstallFromFile,
                 onAddRepo = { showAddRepoDialog = true },
-                onRefresh = onRefresh,
             )
 
             if (state.installedDrivers.isEmpty() && state.sources.isEmpty()) {
@@ -378,11 +369,8 @@ fun DriversScreen(
 private fun HeroHeader(
     installedCount: Int,
     availableCount: Int,
-    isRefreshing: Boolean,
-    loadFailed: Boolean,
     onInstall: () -> Unit,
     onAddRepo: () -> Unit,
-    onRefresh: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         SectionLabel(text = stringResource(R.string.settings_drivers_manager_header))
@@ -408,22 +396,11 @@ private fun HeroHeader(
                             stacked = true,
                         )
                         Spacer(Modifier.width(10.dp))
-                        Row(
+                        DriverManagerActions(
+                            onAddRepo = onAddRepo,
+                            onInstall = onInstall,
                             modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RefreshChip(
-                                isRefreshing = isRefreshing,
-                                loadFailed = loadFailed,
-                                onRefresh = onRefresh,
-                            )
-                            DriverManagerActions(
-                                onAddRepo = onAddRepo,
-                                onInstall = onInstall,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
+                        )
                     }
                 } else {
                     Row(
@@ -438,21 +415,11 @@ private fun HeroHeader(
 
                         Spacer(Modifier.width(12.dp))
 
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RefreshChip(
-                                isRefreshing = isRefreshing,
-                                loadFailed = loadFailed,
-                                onRefresh = onRefresh,
-                            )
-                            DriverManagerActions(
-                                onAddRepo = onAddRepo,
-                                onInstall = onInstall,
-                                modifier = Modifier.widthIn(min = 112.dp, max = 132.dp),
-                            )
-                        }
+                        DriverManagerActions(
+                            onAddRepo = onAddRepo,
+                            onInstall = onInstall,
+                            modifier = Modifier.widthIn(min = 112.dp, max = 132.dp),
+                        )
                     }
                 }
             }
@@ -505,55 +472,6 @@ private fun DriverManagerActions(
         onClick = onInstall,
         modifier = modifier,
     )
-}
-
-@Composable
-private fun RefreshChip(
-    isRefreshing: Boolean,
-    loadFailed: Boolean,
-    onRefresh: () -> Unit,
-) {
-    val tint = if (loadFailed) WarningAmber else Accent
-    Row(
-        modifier =
-            Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(tint.copy(alpha = 0.14f))
-                .border(1.dp, tint.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
-                .paneNavItem(
-                    cornerRadius = 8.dp,
-                    onActivate = { if (!isRefreshing) onRefresh() },
-                    highlightColor = NavHighlight,
-                    tapToSelect = true,
-                )
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (isRefreshing) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(11.dp),
-                strokeWidth = 1.5.dp,
-                color = tint,
-            )
-        } else {
-            Icon(
-                imageVector = Icons.Outlined.Refresh,
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier.size(11.dp),
-            )
-            Spacer(Modifier.width(5.dp))
-            Text(
-                text = stringResource(R.string.settings_drivers_refresh),
-                color = tint,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
 }
 
 @Composable

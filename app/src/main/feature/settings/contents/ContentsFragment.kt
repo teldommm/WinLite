@@ -56,7 +56,6 @@ class ContentsFragment : Fragment() {
     private var downloadProgress: ComponentsDownloadProgress? = null
     private var conflictingContentPath: String? = null
     private var isRefreshing = false
-    private var loadFailed = false
     private var componentRepos by mutableStateOf<List<ComponentRepo>>(emptyList())
     private var profilesByRepo by mutableStateOf<Map<ComponentRepo, List<ContentProfile>>>(emptyMap())
     private var addRepoDialogOpen by mutableStateOf(false)
@@ -121,7 +120,6 @@ class ContentsFragment : Fragment() {
                                 .apply()
                             publishState()
                         },
-                        onRefresh = { refreshRemoteProfiles() },
                         onAddRepo = { addRepoDialogOpen = true },
                         onEditRepo = { repo -> editingRepo = repo },
                         onDeleteRepo = { repo -> removeRepo(repo) },
@@ -239,7 +237,6 @@ class ContentsFragment : Fragment() {
                 conflict = conflictingContentPath?.let(::ComponentsConflict),
                 autoCreateContainer = autoCreateContainer,
                 isRefreshing = isRefreshing,
-                loadFailed = loadFailed,
                 expandedRepoApiUrl = expandedRepoApiUrl,
             )
 
@@ -499,13 +496,11 @@ class ContentsFragment : Fragment() {
     private fun refreshRemoteProfiles() {
         if (isRefreshing) return
         isRefreshing = true
-        loadFailed = false
         remoteSizeCache.entries.removeAll { it.value <= 0L }
         installedSizeCache.entries.removeAll { it.value <= 0L }
         publishState()
 
         viewLifecycleOwner.lifecycleScope.launch {
-            var failed = false
             try {
                 val repos = componentRepos.ifEmpty { defaultComponentRepoList() }
                 val perRepo =
@@ -525,17 +520,13 @@ class ContentsFragment : Fragment() {
                 if (flattened.isNotEmpty()) {
                     withContext(Dispatchers.IO) { manager.setRemoteProfiles(flattened) }
                     profilesByRepo = perRepo
-                } else {
-                    failed = true
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to refresh remote profiles.", e)
-                failed = true
             } finally {
                 isRefreshing = false
             }
 
-            loadFailed = failed
             if (isAdded && view != null) publishState()
         }
     }
