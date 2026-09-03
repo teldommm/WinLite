@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.MarqueeSpacing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -48,11 +46,14 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeveloperBoard
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.Warning
@@ -81,7 +82,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -809,6 +809,22 @@ private fun ComponentItemCard(
                     .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Box(
+                modifier =
+                    Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(IconBoxBg),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = iconFor(item.type),
+                    contentDescription = null,
+                    tint = Accent,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.width(13.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.verName,
@@ -843,10 +859,6 @@ private fun ComponentItemCard(
                 modifier = Modifier.height(IntrinsicSize.Min),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (item.isOfficial) {
-                    OfficialBadge(Modifier.fillMaxHeight())
-                    Spacer(Modifier.width(8.dp))
-                }
                 if (isSteamCompatible(item)) {
                     SteamCompatBadge(Modifier.fillMaxHeight())
                     Spacer(Modifier.width(8.dp))
@@ -947,23 +959,6 @@ private fun isSteamCompatible(item: ComponentItem): Boolean =
 // the filled height) in WinLite blue, carrying only the WinLite logo for
 // "WN" branding. Pass Modifier.fillMaxHeight() to match the row's action height.
 @Composable
-private fun OfficialBadge(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Accent.copy(alpha = 0.14f))
-            .border(1.dp, Accent.copy(alpha = 0.30f), RoundedCornerShape(8.dp)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Image(
-            painter = painterResource(R.drawable.ic_winlite_badge),
-            contentDescription = "Official WinLite build",
-            modifier = Modifier.fillMaxSize(0.8f),
-        )
-    }
-}
-
 @Composable
 private fun SteamCompatBadge(modifier: Modifier = Modifier) {
     Row(
@@ -1287,3 +1282,20 @@ private fun formatBytes(bytes: Long): String {
         String.format(java.util.Locale.US, "%.1f %s", value, units[unitIndex])
     }
 }
+
+private fun iconFor(type: ContentProfile.ContentType): ImageVector =
+    when (type) {
+        ContentProfile.ContentType.CONTENT_TYPE_WINE,
+        ContentProfile.ContentType.CONTENT_TYPE_PROTON,
+        -> Icons.Outlined.Science
+
+        ContentProfile.ContentType.CONTENT_TYPE_DXVK,
+        ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
+        ContentProfile.ContentType.CONTENT_TYPE_D7VK,
+        -> Icons.Outlined.DeveloperBoard
+
+        ContentProfile.ContentType.CONTENT_TYPE_BOX64,
+        ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64,
+        ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
+        -> Icons.Outlined.Memory
+    }
