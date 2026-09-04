@@ -31,11 +31,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 object UpdateChecker {
-    private const val RELEASES_API_URL = "https://api.github.com/repos/teldommm/WinLite/releases/latest"
+    private const val DEFAULT_RELEASES_API_URL = "https://api.github.com/repos/teldommm/WinLite/releases/latest"
 
     private const val PREF_CHECK_FOR_UPDATES = "check_for_updates"
     private const val PREF_INSTALL_TIMESTAMP = "app_install_timestamp"
     private const val PREF_LAST_UPDATE_CHECK = "last_update_check_time"
+    private const val PREF_REPO_URL = "update_repo_url"
+
+    private val REPO_LABEL_REGEX = Regex("api\\.github\\.com/repos/([^/]+/[^/]+)/releases")
 
     private const val CHECK_INTERVAL_MS = 60 * 60 * 1000L
     private const val MANUAL_CHECK_COOLDOWN_MS = 30 * 1000L
@@ -169,6 +172,72 @@ object UpdateChecker {
             .apply()
     }
 
+    // The GitHub repo backing update checks. Empty pref = built-in default.
+    fun getEffectiveApiUrl(context: Context): String {
+        val stored = PreferenceManager.getDefaultSharedPreferences(context).getString(PREF_REPO_URL, null)
+        return stored?.takeIf { it.isNotBlank() } ?: DEFAULT_RELEASES_API_URL
+    }
+
+    fun isCustomRepo(context: Context): Boolean {
+        val stored = PreferenceManager.getDefaultSharedPreferences(context).getString(PREF_REPO_URL, null)
+        return !stored.isNullOrBlank()
+    }
+
+    // Human-friendly "owner/repo" derived from a releases API URL, for display in settings.
+    private fun repoLabelFromApiUrl(apiUrl: String): String = REPO_LABEL_REGEX.find(apiUrl)?.groupValues?.get(1) ?: apiUrl
+
+    fun getRepoLabel(context: Context): String = repoLabelFromApiUrl(getEffectiveApiUrl(context))
+
+    fun getDefaultRepoLabel(): String = repoLabelFromApiUrl(DEFAULT_RELEASES_API_URL)
+
+    // Accepts "owner/repo", a github.com link, or an already-correct api.github.com releases URL.
+    private fun normalizeRepoUrl(raw: String): String? {
+        var input = raw.trim()
+        if (input.isEmpty()) return null
+
+        if (input.contains("api.github.com/repos/")) {
+            return when {
+                input.endsWith("/releases/latest") -> input
+                input.endsWith("/releases") -> "$input/latest"
+                else -> "${input.trimEnd('/')}/releases/latest"
+            }
+        }
+
+        input = input.replaceFirst(Regex("^https?://github\\.com/", RegexOption.IGNORE_CASE), "")
+        input = input.removeSuffix(".git")
+        val parts = input.trim('/').split("/")
+        if (parts.size < 2) return null
+        val owner = parts[0].trim()
+        val repo = parts[1].trim()
+        if (owner.isEmpty() || repo.isEmpty()) return null
+
+        return "https://api.github.com/repos/$owner/$repo/releases/latest"
+    }
+
+    // Returns false (and stores nothing) if `raw` doesn't look like a GitHub repo reference.
+    fun setRepoUrl(
+        context: Context,
+        raw: String,
+    ): Boolean {
+        val normalized = normalizeRepoUrl(raw) ?: return false
+        PreferenceManager
+            .getDefaultSharedPreferences(context)
+            .edit()
+            .putString(PREF_REPO_URL, normalized)
+            .apply()
+        resetCheckTimer(context)
+        return true
+    }
+
+    fun resetRepoUrlToDefault(context: Context) {
+        PreferenceManager
+            .getDefaultSharedPreferences(context)
+            .edit()
+            .remove(PREF_REPO_URL)
+            .apply()
+        resetCheckTimer(context)
+    }
+
     private fun isAutoCheckAllowed(): Boolean {
         val activity = PluviaApp.currentForegroundActivity ?: return false
         return activity !is XServerDisplayActivity
@@ -212,7 +281,7 @@ object UpdateChecker {
         val request =
             Request
                 .Builder()
-                .url(RELEASES_API_URL)
+                .url(getEffectiveApiUrl(context))
                 .header("Accept", "application/vnd.github+json")
                 .header("Cache-Control", "no-cache")
                 .build()

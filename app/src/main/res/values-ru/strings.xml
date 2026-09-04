@@ -869,6 +869,10 @@
     <string name="settings_general_imagefs_summary">Восстановите связанные системные файлы, не удаляя существующие контейнеры.</string>
     <string name="settings_general_check_for_updates">Проверять обновления</string>
     <string name="settings_general_check_for_updates_summary">Автоматически проверять наличие новых версий приложений при запуске и периодически.</string>
+    <string name="settings_general_update_channel_title">Репозиторий обновлений</string>
+    <string name="settings_general_update_channel_hint">owner/repo или ссылка github.com/owner/repo</string>
+    <string name="settings_general_update_channel_invalid">Некорректная ссылка на репозиторий.</string>
+    <string name="settings_general_update_channel_reset_toast">Репозиторий обновлений сброшен на стандартный.</string>
     <!-- Settings > Audio -->
     <string name="settings_audio_midi_sound_font">MIDI SoundFont</string>
     <string name="settings_audio_sound">Звук</string>

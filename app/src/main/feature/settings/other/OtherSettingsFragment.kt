@@ -108,6 +108,19 @@ class OtherSettingsFragment : Fragment() {
                                 )
                             }
                         },
+                        onUpdateRepoChanged = { raw ->
+                            val ok = UpdateChecker.setRepoUrl(ctx, raw)
+                            if (ok) {
+                                refresh()
+                            } else {
+                                WinToast.show(ctx, R.string.settings_general_update_channel_invalid)
+                            }
+                        },
+                        onUpdateRepoReset = {
+                            UpdateChecker.resetRepoUrlToDefault(ctx)
+                            WinToast.show(ctx, R.string.settings_general_update_channel_reset_toast)
+                            refresh()
+                        },
                         onLanguageSelected = { index ->
                             val currentIndex =
                                 LocaleHelper.indexForTag(
@@ -245,6 +258,8 @@ class OtherSettingsFragment : Fragment() {
                 enableBackgroundSession = preferences.getBoolean("enable_background_session", false),
                 externalDisplayOutput = preferences.getBoolean("external_display_output", false),
                 imagefsInstallProgress = uiState.imagefsInstallProgress,
+                updateRepoCustomLabel = if (UpdateChecker.isCustomRepo(ctx)) UpdateChecker.getRepoLabel(ctx) else "",
+                updateRepoDefaultLabel = UpdateChecker.getDefaultRepoLabel(),
             )
     }
 

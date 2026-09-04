@@ -4,6 +4,8 @@ package com.winlator.cmod.feature.settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowCircleDown
@@ -45,6 +48,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SliderState
@@ -55,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +72,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,6 +82,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.winlator.cmod.shared.ui.layout.isPortraitLayout
 import com.winlator.cmod.R
 import com.winlator.cmod.shared.ui.dialog.PopupDialog
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogButton
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogShell
 import com.winlator.cmod.shared.ui.focus.rememberSettingsContentNav
 import com.winlator.cmod.shared.ui.nav.DialogPaneNav
 import com.winlator.cmod.shared.ui.nav.LocalPaneNav
@@ -114,6 +125,8 @@ data class OtherSettingsState(
     val enableBackgroundSession: Boolean = false,
     val externalDisplayOutput: Boolean = false,
     val imagefsInstallProgress: Int? = null,
+    val updateRepoCustomLabel: String = "",
+    val updateRepoDefaultLabel: String = "",
 )
 
 @Composable
@@ -141,6 +154,8 @@ fun OtherSettingsScreen(
     state: OtherSettingsState,
     onCheckForUpdatesChanged: (Boolean) -> Unit,
     onCheckForUpdatesNow: () -> Unit,
+    onUpdateRepoChanged: (String) -> Unit,
+    onUpdateRepoReset: () -> Unit,
     onLanguageSelected: (Int) -> Unit,
     onSoundFontSelected: (Int) -> Unit,
     onInstallSoundFont: () -> Unit,
@@ -162,6 +177,7 @@ fun OtherSettingsScreen(
     bridge: SettingsNavBridge? = null,
 ) {
     var showReinstallDialog by remember { mutableStateOf(false) }
+    var showUpdateChannelDialog by remember { mutableStateOf(false) }
     val layoutDirection = LocalLayoutDirection.current
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues()
     val navBarStartPadding = navBarPadding.calculateStartPadding(layoutDirection)
@@ -181,6 +197,23 @@ fun OtherSettingsScreen(
 
     state.imagefsInstallProgress?.let { percent ->
         ImagefsInstallProgressDialog(percent = percent)
+    }
+
+    if (showUpdateChannelDialog) {
+        UpdateChannelDialog(
+            currentValue = state.updateRepoCustomLabel,
+            placeholder = state.updateRepoDefaultLabel,
+            isCustom = state.updateRepoCustomLabel.isNotEmpty(),
+            onDismiss = { showUpdateChannelDialog = false },
+            onSave = { value ->
+                showUpdateChannelDialog = false
+                onUpdateRepoChanged(value)
+            },
+            onReset = {
+                showUpdateChannelDialog = false
+                onUpdateRepoReset()
+            },
+        )
     }
 
     CompositionLocalProvider(LocalPaneNav provides contentNav) {
@@ -203,6 +236,7 @@ fun OtherSettingsScreen(
                 checked = state.checkForUpdates,
                 onCheckedChange = onCheckForUpdatesChanged,
                 onCheckNow = onCheckForUpdatesNow,
+                onEditChannel = { showUpdateChannelDialog = true },
             )
 
             SettingsDropdownCard(
@@ -410,6 +444,7 @@ private fun UpdatesCard(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     onCheckNow: () -> Unit,
+    onEditChannel: () -> Unit,
 ) {
     Box(
         modifier =
@@ -462,6 +497,26 @@ private fun UpdatesCard(
                 )
             }
             Spacer(Modifier.width(8.dp))
+            Box(
+                modifier =
+                    Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onEditChannel,
+                        ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Settings,
+                    contentDescription = stringResource(R.string.settings_general_update_channel_title),
+                    tint = TextSecondary,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+            Spacer(Modifier.width(4.dp))
             SmallActionButton(label = stringResource(R.string.common_ui_check), textColor = Accent, onClick = onCheckNow)
             Spacer(Modifier.width(6.dp))
             Switch(
@@ -473,6 +528,84 @@ private fun UpdatesCard(
                         accentColor = Accent,
                         textSecondaryColor = TextSecondary,
                     ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun UpdateChannelDialog(
+    currentValue: String,
+    placeholder: String,
+    isCustom: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onReset: () -> Unit,
+) {
+    var value by rememberSaveable { mutableStateOf(currentValue) }
+
+    WinLiteDialogShell(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.settings_general_update_channel_title),
+        maxWidth = 380.dp,
+    ) {
+        Text(
+            text = stringResource(R.string.settings_general_update_channel_hint),
+            color = TextSecondary,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = { value = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = {
+                Text(
+                    text = placeholder,
+                    color = TextSecondary.copy(alpha = 0.6f),
+                    fontSize = 13.sp,
+                )
+            },
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary),
+            colors =
+                OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Accent,
+                    unfocusedBorderColor = CardBorder,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    focusedContainerColor = CardDark,
+                    unfocusedContainerColor = CardDark,
+                    cursorColor = Accent,
+                ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        ) {
+            if (isCustom) {
+                WinLiteDialogButton(
+                    label = stringResource(R.string.common_ui_restore_defaults),
+                    textColor = TextSecondary,
+                    onClick = onReset,
+                )
+            }
+            WinLiteDialogButton(
+                label = stringResource(R.string.common_ui_cancel),
+                textColor = TextSecondary,
+                onClick = onDismiss,
+            )
+            WinLiteDialogButton(
+                label = stringResource(R.string.common_ui_save),
+                textColor = Accent,
+                backgroundColor = Accent.copy(alpha = 0.12f),
+                borderColor = Accent.copy(alpha = 0.3f),
+                onClick = {
+                    val trimmed = value.trim()
+                    if (trimmed.isNotEmpty()) onSave(trimmed)
+                },
             )
         }
     }
