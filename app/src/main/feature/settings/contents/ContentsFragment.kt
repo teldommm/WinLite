@@ -539,7 +539,6 @@ class ContentsFragment : Fragment() {
         val existingApiUrls = componentRepos.map { it.apiUrl }.toHashSet()
         val missing = defaultComponentRepoList().filter { it.apiUrl !in existingApiUrls }
         if (missing.isEmpty()) {
-            WinToast.show(requireContext(), getString(R.string.common_ui_defaults_already_present))
             return
         }
         componentRepos = componentRepos + missing

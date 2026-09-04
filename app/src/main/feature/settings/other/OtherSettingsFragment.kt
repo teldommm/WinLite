@@ -109,16 +109,11 @@ class OtherSettingsFragment : Fragment() {
                             }
                         },
                         onUpdateRepoChanged = { raw ->
-                            val ok = UpdateChecker.setRepoUrl(ctx, raw)
-                            if (ok) {
-                                refresh()
-                            } else {
-                                WinToast.show(ctx, R.string.settings_general_update_channel_invalid)
-                            }
+                            UpdateChecker.setRepoUrl(ctx, raw)
+                            refresh()
                         },
                         onUpdateRepoReset = {
                             UpdateChecker.resetRepoUrlToDefault(ctx)
-                            WinToast.show(ctx, R.string.settings_general_update_channel_reset_toast)
                             refresh()
                         },
                         onLanguageSelected = { index ->

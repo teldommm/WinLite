@@ -8,7 +8,6 @@
     <string name="common_ui_remove">Remove</string>
     <string name="common_ui_add">Add</string>
     <string name="common_ui_restore_defaults">Restore defaults</string>
-    <string name="common_ui_defaults_already_present">Default repositories already present</string>
     <string name="common_ui_shortcuts">Shortcuts</string>
     <string name="common_ui_containers">Containers</string>
     <string name="common_ui_input_controls">Input Controls</string>
@@ -1120,10 +1119,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_general_check_for_updates_summary">Automatically check for new app versions on launch and periodically.</string>
     <string name="settings_general_update_channel_title">Update Repository</string>
     <string name="settings_general_update_channel_hint">owner/repo or a github.com/owner/repo link</string>
-    <string name="settings_general_update_channel_invalid">Invalid repository link.</string>
-    <string name="settings_general_update_channel_reset_toast">Update repository reset to default.</string>
     <string name="settings_containers_component_channel_title">Component Repository</string>
-    <string name="settings_containers_component_channel_reset_toast">Component repository reset to default.</string>
 
     <!-- Settings > Audio -->
     <string name="settings_audio_midi_sound_font">MIDI SoundFont</string>

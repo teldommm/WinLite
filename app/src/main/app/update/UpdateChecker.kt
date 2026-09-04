@@ -191,9 +191,12 @@ object UpdateChecker {
     fun getDefaultRepoLabel(): String = repoLabelFromApiUrl(DEFAULT_RELEASES_API_URL)
 
     // Accepts "owner/repo", a github.com link, or an already-correct api.github.com releases URL.
-    private fun normalizeRepoUrl(raw: String): String? {
+    // Accepts "owner/repo", a github.com link, or an already-correct api.github.com releases
+    // URL. Anything else is stored as typed — a bad value just fails at fetch time, same as
+    // any other manually-entered GitHub source in this app.
+    private fun normalizeRepoUrl(raw: String): String {
         var input = raw.trim()
-        if (input.isEmpty()) return null
+        if (input.isEmpty()) return input
 
         if (input.contains("api.github.com/repos/")) {
             return when {
@@ -203,30 +206,31 @@ object UpdateChecker {
             }
         }
 
-        input = input.replaceFirst(Regex("^https?://github\\.com/", RegexOption.IGNORE_CASE), "")
-        input = input.removeSuffix(".git")
-        val parts = input.trim('/').split("/")
-        if (parts.size < 2) return null
+        val stripped =
+            input
+                .replaceFirst(Regex("^https?://github\\.com/", RegexOption.IGNORE_CASE), "")
+                .removeSuffix(".git")
+                .trim('/')
+        val parts = stripped.split("/")
+        if (parts.size < 2 || parts[0].isBlank() || parts[1].isBlank()) return input
+
         val owner = parts[0].trim()
         val repo = parts[1].trim()
-        if (owner.isEmpty() || repo.isEmpty()) return null
 
         return "https://api.github.com/repos/$owner/$repo/releases/latest"
     }
 
-    // Returns false (and stores nothing) if `raw` doesn't look like a GitHub repo reference.
     fun setRepoUrl(
         context: Context,
         raw: String,
-    ): Boolean {
-        val normalized = normalizeRepoUrl(raw) ?: return false
+    ) {
+        val normalized = normalizeRepoUrl(raw)
         PreferenceManager
             .getDefaultSharedPreferences(context)
             .edit()
             .putString(PREF_REPO_URL, normalized)
             .apply()
         resetCheckTimer(context)
-        return true
     }
 
     fun resetRepoUrlToDefault(context: Context) {

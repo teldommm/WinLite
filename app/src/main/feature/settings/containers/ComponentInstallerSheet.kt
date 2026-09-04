@@ -71,7 +71,6 @@ import com.winlator.cmod.shared.ui.nav.DialogPaneNav
 import com.winlator.cmod.shared.ui.nav.LocalPaneNav
 import com.winlator.cmod.shared.ui.nav.PaneNavRegistry
 import com.winlator.cmod.shared.ui.nav.paneNavItem
-import com.winlator.cmod.shared.ui.toast.WinToast
 import com.winlator.cmod.runtime.container.Container
 import com.winlator.cmod.runtime.content.Downloader
 import com.winlator.cmod.runtime.content.component.ComponentInstaller
@@ -107,42 +106,43 @@ private fun catalogLabel(context: Context): String = catalogLabelFrom(effectiveD
 private fun defaultCatalogLabel(): String = catalogLabelFrom(DEFAULT_DATASET_BASE)
 
 // Accepts "owner/repo", "owner/repo/branch", a github.com link (incl. /tree/branch), or an
-// already-correct raw.githubusercontent.com base.
-private fun normalizeCatalogBase(raw: String): String? {
+// already-correct raw.githubusercontent.com base. Anything else is stored as typed — a bad
+// value just fails at fetch time, same as any other manually-entered GitHub source here.
+private fun normalizeCatalogBase(raw: String): String {
     var input = raw.trim()
-    if (input.isEmpty()) return null
+    if (input.isEmpty()) return input
     input = input.removeSuffix("/index.json").trimEnd('/')
 
     if (input.contains("raw.githubusercontent.com/")) {
         return if (input.endsWith("/redistributables")) input else "$input/redistributables"
     }
 
-    input = input.replaceFirst(Regex("^https?://github\\.com/", RegexOption.IGNORE_CASE), "")
-    input = input.replace("/tree/", "/")
-    input = input.trim('/')
+    val stripped =
+        input
+            .replaceFirst(Regex("^https?://github\\.com/", RegexOption.IGNORE_CASE), "")
+            .replace("/tree/", "/")
+            .trim('/')
 
-    val parts = input.split("/")
-    if (parts.size < 2) return null
+    val parts = stripped.split("/")
+    if (parts.size < 2 || parts[0].isBlank() || parts[1].isBlank()) return input
+
     val owner = parts[0].trim()
     val repo = parts[1].trim()
-    if (owner.isEmpty() || repo.isEmpty()) return null
     val branch = parts.getOrNull(2)?.trim()?.takeIf { it.isNotEmpty() } ?: "main"
 
     return "https://raw.githubusercontent.com/$owner/$repo/$branch/redistributables"
 }
 
-// Returns false (and stores nothing) if `raw` doesn't look like a GitHub repo reference.
 private fun setCatalogBase(
     context: Context,
     raw: String,
-): Boolean {
-    val normalized = normalizeCatalogBase(raw) ?: return false
+) {
+    val normalized = normalizeCatalogBase(raw)
     PreferenceManager
         .getDefaultSharedPreferences(context)
         .edit()
         .putString(PREF_CATALOG_BASE_URL, normalized)
         .apply()
-    return true
 }
 
 private fun resetCatalogBase(context: Context) {
@@ -312,16 +312,12 @@ fun ComponentInstallerSheet(
                 onDismiss = { showChannelDialog = false },
                 onSave = { value ->
                     showChannelDialog = false
-                    if (setCatalogBase(context, value)) {
-                        catalogVersion++
-                    } else {
-                        WinToast.show(context, context.getString(R.string.settings_general_update_channel_invalid))
-                    }
+                    setCatalogBase(context, value)
+                    catalogVersion++
                 },
                 onReset = {
                     showChannelDialog = false
                     resetCatalogBase(context)
-                    WinToast.show(context, context.getString(R.string.settings_containers_component_channel_reset_toast))
                     catalogVersion++
                 },
             )

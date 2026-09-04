@@ -271,8 +271,6 @@ class DriversFragment : Fragment() {
         if (added > 0) {
             saveRepos()
             refreshAllSources()
-        } else {
-            WinToast.show(requireContext(), getString(R.string.common_ui_defaults_already_present))
         }
     }
 
