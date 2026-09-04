@@ -93,11 +93,11 @@ object Downloader {
     fun downloadString(
         address: String,
         headers: Map<String, String> = emptyMap(),
-    ): String? {
-        val requestBuilder = Request.Builder().url(address)
-        headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
-        val request = requestBuilder.build()
-        return try {
+    ): String? =
+        try {
+            val requestBuilder = Request.Builder().url(address)
+            headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
+            val request = requestBuilder.build()
             metadataClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IllegalStateException("HTTP ${response.code} for $address")
@@ -105,10 +105,12 @@ object Downloader {
                 response.body?.string()
             }
         } catch (e: Exception) {
+            // Also catches IllegalArgumentException from a malformed `address` (e.g. no scheme,
+            // unencoded non-ASCII text) — Request.Builder().url() throws synchronously for that,
+            // so it has to be inside this try, not just the network call below it.
             if (logEnabled()) Log.w(TAG, "String download failed for $address", e)
             null
         }
-    }
 
     /**
      * Fetches a GitHub REST "list" endpoint (releases, etc.) via the shared OkHttp client,

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Monitor
 import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.OpenInBrowser
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.SportsEsports
@@ -500,8 +501,10 @@ private fun UpdatesCard(
             Box(
                 modifier =
                     Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(7.dp))
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(IconBoxBg)
+                        .border(1.dp, CardBorder, RoundedCornerShape(8.dp))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -513,10 +516,10 @@ private fun UpdatesCard(
                     imageVector = Icons.Outlined.Settings,
                     contentDescription = stringResource(R.string.settings_general_update_channel_title),
                     tint = TextSecondary,
-                    modifier = Modifier.size(15.dp),
+                    modifier = Modifier.size(16.dp),
                 )
             }
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(6.dp))
             SmallActionButton(label = stringResource(R.string.common_ui_check), textColor = Accent, onClick = onCheckNow)
             Spacer(Modifier.width(6.dp))
             Switch(
@@ -530,6 +533,37 @@ private fun UpdatesCard(
                     ),
             )
         }
+    }
+}
+
+@Composable
+private fun ChannelRestorePill(onClick: () -> Unit) {
+    Row(
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Accent.copy(alpha = 0.14f))
+                .border(1.dp, Accent.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick,
+                ).padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Restore,
+            contentDescription = null,
+            tint = Accent,
+            modifier = Modifier.size(12.dp),
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text = stringResource(R.string.common_ui_restore_defaults),
+            color = Accent,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -548,7 +582,7 @@ private fun UpdateChannelDialog(
     WinLiteDialogShell(
         onDismiss = onDismiss,
         title = stringResource(R.string.settings_general_update_channel_title),
-        maxWidth = 380.dp,
+        maxWidth = 440.dp,
     ) {
         DialogPaneNav(nav, onDismiss = onDismiss)
         CompositionLocalProvider(LocalPaneNav provides nav) {
@@ -586,30 +620,29 @@ private fun UpdateChannelDialog(
         Spacer(Modifier.height(14.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             if (isCustom) {
+                ChannelRestorePill(onClick = onReset)
+            }
+            Spacer(Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 WinLiteDialogButton(
-                    label = stringResource(R.string.common_ui_restore_defaults),
+                    label = stringResource(R.string.common_ui_cancel),
                     textColor = TextSecondary,
-                    onClick = onReset,
+                    onClick = onDismiss,
+                )
+                WinLiteDialogButton(
+                    label = stringResource(R.string.common_ui_save),
+                    textColor = Accent,
+                    backgroundColor = Accent.copy(alpha = 0.12f),
+                    borderColor = Accent.copy(alpha = 0.3f),
+                    onClick = {
+                        val trimmed = value.trim()
+                        if (trimmed.isNotEmpty()) onSave(trimmed)
+                    },
                 )
             }
-            WinLiteDialogButton(
-                label = stringResource(R.string.common_ui_cancel),
-                textColor = TextSecondary,
-                onClick = onDismiss,
-            )
-            WinLiteDialogButton(
-                label = stringResource(R.string.common_ui_save),
-                textColor = Accent,
-                backgroundColor = Accent.copy(alpha = 0.12f),
-                borderColor = Accent.copy(alpha = 0.3f),
-                onClick = {
-                    val trimmed = value.trim()
-                    if (trimmed.isNotEmpty()) onSave(trimmed)
-                },
-            )
         }
         }
     }

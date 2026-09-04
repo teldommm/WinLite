@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -473,6 +474,37 @@ private fun SheetHeader(
 }
 
 @Composable
+private fun ComponentChannelRestorePill(onClick: () -> Unit) {
+    Row(
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(SheetAccent.copy(alpha = 0.14f))
+                .border(1.dp, SheetAccent.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick,
+                ).padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Restore,
+            contentDescription = null,
+            tint = SheetAccent,
+            modifier = Modifier.size(12.dp),
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text = stringResource(R.string.common_ui_restore_defaults),
+            color = SheetAccent,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
 private fun ComponentCatalogChannelDialog(
     currentValue: String,
     placeholder: String,
@@ -487,7 +519,7 @@ private fun ComponentCatalogChannelDialog(
     WinLiteDialogShell(
         onDismiss = onDismiss,
         title = stringResource(R.string.settings_containers_component_channel_title),
-        maxWidth = 380.dp,
+        maxWidth = 440.dp,
     ) {
         DialogPaneNav(nav, onDismiss = onDismiss)
         CompositionLocalProvider(LocalPaneNav provides nav) {
@@ -525,30 +557,29 @@ private fun ComponentCatalogChannelDialog(
         Spacer(Modifier.height(14.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             if (isCustom) {
+                ComponentChannelRestorePill(onClick = onReset)
+            }
+            Spacer(Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 WinLiteDialogButton(
-                    label = stringResource(R.string.common_ui_restore_defaults),
+                    label = stringResource(R.string.common_ui_cancel),
                     textColor = SheetTextSecondary,
-                    onClick = onReset,
+                    onClick = onDismiss,
+                )
+                WinLiteDialogButton(
+                    label = stringResource(R.string.common_ui_save),
+                    textColor = SheetAccent,
+                    backgroundColor = SheetAccent.copy(alpha = 0.12f),
+                    borderColor = SheetAccent.copy(alpha = 0.3f),
+                    onClick = {
+                        val trimmed = value.trim()
+                        if (trimmed.isNotEmpty()) onSave(trimmed)
+                    },
                 )
             }
-            WinLiteDialogButton(
-                label = stringResource(R.string.common_ui_cancel),
-                textColor = SheetTextSecondary,
-                onClick = onDismiss,
-            )
-            WinLiteDialogButton(
-                label = stringResource(R.string.common_ui_save),
-                textColor = SheetAccent,
-                backgroundColor = SheetAccent.copy(alpha = 0.12f),
-                borderColor = SheetAccent.copy(alpha = 0.3f),
-                onClick = {
-                    val trimmed = value.trim()
-                    if (trimmed.isNotEmpty()) onSave(trimmed)
-                },
-            )
         }
         }
     }
