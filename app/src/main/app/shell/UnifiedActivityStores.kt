@@ -597,9 +597,10 @@ internal fun UnifiedActivity.GameCapsuleMoreButton(
     Box(
         modifier =
             modifier
-                .size(30.dp)
+                .size(34.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.Black.copy(alpha = 0.45f))
+                .background(MoreButtonBg)
+                .border(1.dp, MoreButtonOutline, RoundedCornerShape(8.dp))
                 .clickable(
                     interactionSource = interactionSource,
                     indication = null,
@@ -610,11 +611,17 @@ internal fun UnifiedActivity.GameCapsuleMoreButton(
         Icon(
             imageVector = Icons.Outlined.MoreVert,
             contentDescription = stringResource(R.string.common_ui_options),
-            tint = Color.White,
-            modifier = Modifier.size(20.dp),
+            tint = MoreButtonTint,
+            modifier = Modifier.size(18.dp),
         )
     }
 }
+
+// Matches the "⋮" affordance used for containers (ContainersScreen.kt's SmallVectorIconButton),
+// kept as its own copy here since GameCapsule overlays artwork rather than a flat card.
+private val MoreButtonBg = Color(0xFF161622)
+private val MoreButtonOutline = Color(0xFF2A2A3A)
+private val MoreButtonTint = Color(0xFF7A8FA8)
 
 @Composable
 internal fun UnifiedActivity.StoreInstalledBadge(
