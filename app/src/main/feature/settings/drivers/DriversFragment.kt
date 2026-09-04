@@ -295,17 +295,55 @@ class DriversFragment : Fragment() {
         }
     }
 
+    // Accepts "owner/repo", "owner/repo/branch" (branch ignored — the Releases API is branch-
+    // agnostic), any github.com link (repo root, /releases, /releases/tag/vX, /tree/branch), or
+    // an already-correct api.github.com releases URL. Anything else (e.g. a self-hosted mirror)
+    // passes through untouched.
+    private fun normalizeGithubReleasesApiUrl(raw: String): String {
+        val input = raw.trim()
+        if (input.isEmpty()) return input
+
+        if (input.contains("api.github.com/repos/")) {
+            val match = Regex("api\\.github\\.com/repos/([^/]+)/([^/]+)").find(input)
+            return if (match != null) {
+                val (owner, repo) = match.destructured
+                "https://api.github.com/repos/$owner/$repo/releases"
+            } else {
+                input
+            }
+        }
+
+        if (input.contains("github.com/")) {
+            val afterHost =
+                input
+                    .replaceFirst(Regex("^https?://", RegexOption.IGNORE_CASE), "")
+                    .removePrefix("github.com/")
+                    .trim('/')
+            val parts = afterHost.split("/")
+            return if (parts.size >= 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                "https://api.github.com/repos/${parts[0]}/${parts[1]}/releases"
+            } else {
+                input
+            }
+        }
+
+        // Bare "owner/repo" shorthand — owner names never contain a dot, which is what tells
+        // this apart from a plain hostname-and-path paste for some other service.
+        val parts = input.trim('/').split("/")
+        if (!input.contains("://") && parts.size >= 2 && !parts[0].contains(".") &&
+            parts[0].isNotBlank() && parts[1].isNotBlank()
+        ) {
+            return "https://api.github.com/repos/${parts[0]}/${parts[1]}/releases"
+        }
+
+        return input
+    }
+
     private fun normalizeRepoInput(
         name: String,
         rawUrl: String,
     ): DriverRepo {
-        var url = rawUrl
-        if (url.startsWith("https://github.com/") && !url.contains("api.github.com")) {
-            url = url.replace("https://github.com/", "https://api.github.com/repos/")
-            if (!url.endsWith("/releases")) {
-                url = "$url/releases"
-            }
-        }
+        val url = normalizeGithubReleasesApiUrl(rawUrl)
         val repoUrl = url.replace("api.github.com/repos", "github.com")
         return DriverRepo(name = name, repoUrl = repoUrl, apiUrl = url)
     }

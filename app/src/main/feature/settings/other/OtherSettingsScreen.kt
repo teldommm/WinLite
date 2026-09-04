@@ -543,12 +543,15 @@ private fun UpdateChannelDialog(
     onReset: () -> Unit,
 ) {
     var value by rememberSaveable { mutableStateOf(currentValue) }
+    val nav = remember { PaneNavRegistry() }
 
     WinLiteDialogShell(
         onDismiss = onDismiss,
         title = stringResource(R.string.settings_general_update_channel_title),
         maxWidth = 380.dp,
     ) {
+        DialogPaneNav(nav, onDismiss = onDismiss)
+        CompositionLocalProvider(LocalPaneNav provides nav) {
         Text(
             text = stringResource(R.string.settings_general_update_channel_hint),
             color = TextSecondary,
@@ -607,6 +610,7 @@ private fun UpdateChannelDialog(
                     if (trimmed.isNotEmpty()) onSave(trimmed)
                 },
             )
+        }
         }
     }
 }

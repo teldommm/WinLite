@@ -873,6 +873,8 @@
     <string name="settings_general_update_channel_hint">owner/repo или ссылка github.com/owner/repo</string>
     <string name="settings_general_update_channel_invalid">Некорректная ссылка на репозиторий.</string>
     <string name="settings_general_update_channel_reset_toast">Репозиторий обновлений сброшен на стандартный.</string>
+    <string name="settings_containers_component_channel_title">Репозиторий компонентов</string>
+    <string name="settings_containers_component_channel_reset_toast">Репозиторий компонентов сброшен на стандартный.</string>
     <!-- Settings > Audio -->
     <string name="settings_audio_midi_sound_font">MIDI SoundFont</string>
     <string name="settings_audio_sound">Звук</string>
@@ -1010,6 +1012,9 @@
     <string name="settings_drivers_repo_list_empty_subtitle">Восстановите источник драйверов по умолчанию или добавьте свой вручную.</string>
     <string name="settings_drivers_install">Установить драйверы</string>
     <string name="settings_drivers_add_repo">Добавить репозиторий</string>
+    <string name="settings_drivers_repo_edit">Редактировать репозиторий</string>
+    <string name="settings_drivers_repo_name">Название</string>
+    <string name="settings_drivers_repo_url">URL GitHub</string>
     <string name="settings_drivers_refresh">Обновить</string>
     <string name="settings_drivers_installed_success">Драйвер успешно установлен.</string>
     <string name="settings_drivers_install_failed">Не удалось установить драйвер.</string>

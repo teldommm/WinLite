@@ -1122,6 +1122,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_general_update_channel_hint">owner/repo or a github.com/owner/repo link</string>
     <string name="settings_general_update_channel_invalid">Invalid repository link.</string>
     <string name="settings_general_update_channel_reset_toast">Update repository reset to default.</string>
+    <string name="settings_containers_component_channel_title">Component Repository</string>
+    <string name="settings_containers_component_channel_reset_toast">Component repository reset to default.</string>
 
     <!-- Settings > Audio -->
     <string name="settings_audio_midi_sound_font">MIDI SoundFont</string>
@@ -1265,6 +1267,9 @@ Installed path:
     <string name="settings_drivers_repo_list_empty_subtitle">Restore the default GitHub driver sources or add one manually.</string>
     <string name="settings_drivers_install">Install Drivers</string>
     <string name="settings_drivers_add_repo">Add Repo</string>
+    <string name="settings_drivers_repo_edit">Edit Repository</string>
+    <string name="settings_drivers_repo_name">Name</string>
+    <string name="settings_drivers_repo_url">GitHub URL</string>
     <string name="settings_drivers_refresh">Refresh</string>
     <string name="settings_drivers_installed_success">Driver installed successfully.</string>
     <string name="settings_drivers_install_failed">Failed to install driver.</string>

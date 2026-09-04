@@ -1327,7 +1327,12 @@ private fun RepoEditDialog(
                                 .verticalScroll(rememberScrollState()),
                     ) {
                         Text(
-                            text = if (existing == null) "Add Repository" else "Edit Repository",
+                            text =
+                                if (existing == null) {
+                                    stringResource(R.string.settings_drivers_add_repo)
+                                } else {
+                                    stringResource(R.string.settings_drivers_repo_edit)
+                                },
                             color = TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -1335,7 +1340,7 @@ private fun RepoEditDialog(
                         Spacer(Modifier.height(8.dp))
 
                         LabeledField(
-                            label = "Name",
+                            label = stringResource(R.string.settings_drivers_repo_name),
                             value = name,
                             onValueChange = { name = it },
                             placeholder = "Display name",
@@ -1343,7 +1348,7 @@ private fun RepoEditDialog(
                         )
                         Spacer(Modifier.height(6.dp))
                         LabeledField(
-                            label = "GitHub URL",
+                            label = stringResource(R.string.settings_drivers_repo_url),
                             value = url,
                             onValueChange = { url = it },
                             placeholder = "https://github.com/owner/repo/releases",
@@ -1356,9 +1361,18 @@ private fun RepoEditDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                         ) {
-                            DialogActionButton(label = "Cancel", textColor = TextSecondary, onClick = onDismiss)
                             DialogActionButton(
-                                label = if (existing == null) "Add" else "Save",
+                                label = stringResource(R.string.common_ui_cancel),
+                                textColor = TextSecondary,
+                                onClick = onDismiss,
+                            )
+                            DialogActionButton(
+                                label =
+                                    if (existing == null) {
+                                        stringResource(R.string.settings_drivers_add_repo)
+                                    } else {
+                                        stringResource(R.string.common_ui_save)
+                                    },
                                 textColor = Accent,
                                 onClick = {
                                     val trimmedName = name.trim()

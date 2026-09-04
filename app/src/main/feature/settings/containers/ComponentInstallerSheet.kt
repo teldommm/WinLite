@@ -1,5 +1,6 @@
 package com.winlator.cmod.feature.settings
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,8 +28,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -38,6 +44,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,16 +54,24 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.preference.PreferenceManager
+import com.winlator.cmod.R
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogButton
+import com.winlator.cmod.shared.ui.dialog.WinLiteDialogShell
 import com.winlator.cmod.shared.ui.nav.DialogPaneNav
 import com.winlator.cmod.shared.ui.nav.LocalPaneNav
 import com.winlator.cmod.shared.ui.nav.PaneNavRegistry
 import com.winlator.cmod.shared.ui.nav.paneNavItem
+import com.winlator.cmod.shared.ui.toast.WinToast
 import com.winlator.cmod.runtime.container.Container
 import com.winlator.cmod.runtime.content.Downloader
 import com.winlator.cmod.runtime.content.component.ComponentInstaller
@@ -70,8 +85,73 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-private const val DATASET_BASE = "https://raw.githubusercontent.com/teldommm/WinLite-Components/main/redistributables"
-private const val INDEX_URL = "$DATASET_BASE/index.json"
+private const val DEFAULT_DATASET_BASE = "https://raw.githubusercontent.com/teldommm/WinLite-Components/main/redistributables"
+private const val PREF_CATALOG_BASE_URL = "component_catalog_base_url"
+private val CATALOG_LABEL_REGEX = Regex("raw\\.githubusercontent\\.com/([^/]+/[^/]+/[^/]+)/redistributables")
+
+// The GitHub source backing the component catalog. Empty pref = built-in default.
+private fun effectiveDatasetBase(context: Context): String {
+    val stored = PreferenceManager.getDefaultSharedPreferences(context).getString(PREF_CATALOG_BASE_URL, null)
+    return stored?.takeIf { it.isNotBlank() } ?: DEFAULT_DATASET_BASE
+}
+
+private fun isCustomCatalog(context: Context): Boolean {
+    val stored = PreferenceManager.getDefaultSharedPreferences(context).getString(PREF_CATALOG_BASE_URL, null)
+    return !stored.isNullOrBlank()
+}
+
+private fun catalogLabelFrom(base: String): String = CATALOG_LABEL_REGEX.find(base)?.groupValues?.get(1) ?: base
+
+private fun catalogLabel(context: Context): String = catalogLabelFrom(effectiveDatasetBase(context))
+
+private fun defaultCatalogLabel(): String = catalogLabelFrom(DEFAULT_DATASET_BASE)
+
+// Accepts "owner/repo", "owner/repo/branch", a github.com link (incl. /tree/branch), or an
+// already-correct raw.githubusercontent.com base.
+private fun normalizeCatalogBase(raw: String): String? {
+    var input = raw.trim()
+    if (input.isEmpty()) return null
+    input = input.removeSuffix("/index.json").trimEnd('/')
+
+    if (input.contains("raw.githubusercontent.com/")) {
+        return if (input.endsWith("/redistributables")) input else "$input/redistributables"
+    }
+
+    input = input.replaceFirst(Regex("^https?://github\\.com/", RegexOption.IGNORE_CASE), "")
+    input = input.replace("/tree/", "/")
+    input = input.trim('/')
+
+    val parts = input.split("/")
+    if (parts.size < 2) return null
+    val owner = parts[0].trim()
+    val repo = parts[1].trim()
+    if (owner.isEmpty() || repo.isEmpty()) return null
+    val branch = parts.getOrNull(2)?.trim()?.takeIf { it.isNotEmpty() } ?: "main"
+
+    return "https://raw.githubusercontent.com/$owner/$repo/$branch/redistributables"
+}
+
+// Returns false (and stores nothing) if `raw` doesn't look like a GitHub repo reference.
+private fun setCatalogBase(
+    context: Context,
+    raw: String,
+): Boolean {
+    val normalized = normalizeCatalogBase(raw) ?: return false
+    PreferenceManager
+        .getDefaultSharedPreferences(context)
+        .edit()
+        .putString(PREF_CATALOG_BASE_URL, normalized)
+        .apply()
+    return true
+}
+
+private fun resetCatalogBase(context: Context) {
+    PreferenceManager
+        .getDefaultSharedPreferences(context)
+        .edit()
+        .remove(PREF_CATALOG_BASE_URL)
+        .apply()
+}
 
 // One install at a time across the app (the boot session + result bridge are single-instance).
 private val installMutex = Mutex()
@@ -176,12 +256,15 @@ fun ComponentInstallerSheet(
     val scope = rememberCoroutineScope()
     val installStates = remember { mutableStateMapOf<String, InstallUi>() }
     var ui by remember { mutableStateOf<CatalogUiState>(CatalogUiState.Loading) }
+    var catalogVersion by remember { mutableIntStateOf(0) }
+    var showChannelDialog by remember { mutableStateOf(false) }
     val registry = remember { PaneNavRegistry() }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(catalogVersion) {
+        ui = CatalogUiState.Loading
         ui =
             withContext(Dispatchers.IO) {
-                val json = Downloader.downloadString(INDEX_URL)
+                val json = Downloader.downloadString("${effectiveDatasetBase(context)}/index.json")
                 if (json == null) {
                     CatalogUiState.Error("Couldn't reach the component catalog.")
                 } else {
@@ -221,6 +304,28 @@ fun ComponentInstallerSheet(
     ) {
         DialogPaneNav(registry, onDismiss = onDismiss, onStart = onDismiss)
         CompositionLocalProvider(LocalPaneNav provides registry) {
+        if (showChannelDialog) {
+            ComponentCatalogChannelDialog(
+                currentValue = if (isCustomCatalog(context)) catalogLabel(context) else "",
+                placeholder = defaultCatalogLabel(),
+                isCustom = isCustomCatalog(context),
+                onDismiss = { showChannelDialog = false },
+                onSave = { value ->
+                    showChannelDialog = false
+                    if (setCatalogBase(context, value)) {
+                        catalogVersion++
+                    } else {
+                        WinToast.show(context, context.getString(R.string.settings_general_update_channel_invalid))
+                    }
+                },
+                onReset = {
+                    showChannelDialog = false
+                    resetCatalogBase(context)
+                    WinToast.show(context, context.getString(R.string.settings_containers_component_channel_reset_toast))
+                    catalogVersion++
+                },
+            )
+        }
         BoxWithConstraints(
             modifier =
                 Modifier
@@ -240,7 +345,7 @@ fun ComponentInstallerSheet(
                         .background(SheetRoot)
                         .border(1.dp, SheetOutline, RoundedCornerShape(18.dp)),
             ) {
-                SheetHeader(containerName = container.name, onClose = onDismiss)
+                SheetHeader(containerName = container.name, onClose = onDismiss, onOpenChannel = { showChannelDialog = true })
                 Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                     when (val state = ui) {
                         CatalogUiState.Loading -> SheetCentered { Spinner() }
@@ -257,7 +362,9 @@ fun ComponentInstallerSheet(
                                                 installStates[item.name] = InstallUi.Running("Starting…")
                                                 runInterruptible {
                                                     val yaml =
-                                                        Downloader.downloadString("$DATASET_BASE/${item.manifest}")
+                                                        Downloader.downloadString(
+                                                            "${effectiveDatasetBase(context)}/${item.manifest}",
+                                                        )
                                                             ?: throw Exception("Couldn't fetch the manifest.")
                                                     ComponentInstaller(
                                                         context = context,
@@ -297,6 +404,7 @@ fun ComponentInstallerSheet(
 private fun SheetHeader(
     containerName: String,
     onClose: () -> Unit,
+    onOpenChannel: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 14.dp, bottom = 10.dp)) {
         Row(
@@ -327,6 +435,28 @@ private fun SheetHeader(
                         .border(1.dp, SheetOutline, RoundedCornerShape(8.dp))
                         .paneNavItem(
                             cornerRadius = 8.dp,
+                            onActivate = onOpenChannel,
+                            tapToSelect = true,
+                        ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Settings,
+                    contentDescription = stringResource(R.string.settings_containers_component_channel_title),
+                    tint = SheetTextSecondary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+                modifier =
+                    Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(SheetSubcard)
+                        .border(1.dp, SheetOutline, RoundedCornerShape(8.dp))
+                        .paneNavItem(
+                            cornerRadius = 8.dp,
                             onActivate = onClose,
                             tapToSelect = true,
                             isEntry = true,
@@ -343,6 +473,88 @@ private fun SheetHeader(
         }
         Spacer(Modifier.height(10.dp))
         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(SheetOutline))
+    }
+}
+
+@Composable
+private fun ComponentCatalogChannelDialog(
+    currentValue: String,
+    placeholder: String,
+    isCustom: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onReset: () -> Unit,
+) {
+    var value by rememberSaveable { mutableStateOf(currentValue) }
+    val nav = remember { PaneNavRegistry() }
+
+    WinLiteDialogShell(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.settings_containers_component_channel_title),
+        maxWidth = 380.dp,
+    ) {
+        DialogPaneNav(nav, onDismiss = onDismiss)
+        CompositionLocalProvider(LocalPaneNav provides nav) {
+        Text(
+            text = stringResource(R.string.settings_general_update_channel_hint),
+            color = SheetTextSecondary,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = { value = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = {
+                Text(
+                    text = placeholder,
+                    color = SheetTextSecondary.copy(alpha = 0.6f),
+                    fontSize = 13.sp,
+                )
+            },
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = SheetTextPrimary),
+            colors =
+                OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = SheetAccent,
+                    unfocusedBorderColor = SheetOutline,
+                    focusedTextColor = SheetTextPrimary,
+                    unfocusedTextColor = SheetTextPrimary,
+                    focusedContainerColor = SheetCard,
+                    unfocusedContainerColor = SheetCard,
+                    cursorColor = SheetAccent,
+                ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        ) {
+            if (isCustom) {
+                WinLiteDialogButton(
+                    label = stringResource(R.string.common_ui_restore_defaults),
+                    textColor = SheetTextSecondary,
+                    onClick = onReset,
+                )
+            }
+            WinLiteDialogButton(
+                label = stringResource(R.string.common_ui_cancel),
+                textColor = SheetTextSecondary,
+                onClick = onDismiss,
+            )
+            WinLiteDialogButton(
+                label = stringResource(R.string.common_ui_save),
+                textColor = SheetAccent,
+                backgroundColor = SheetAccent.copy(alpha = 0.12f),
+                borderColor = SheetAccent.copy(alpha = 0.3f),
+                onClick = {
+                    val trimmed = value.trim()
+                    if (trimmed.isNotEmpty()) onSave(trimmed)
+                },
+            )
+        }
+        }
     }
 }
 
