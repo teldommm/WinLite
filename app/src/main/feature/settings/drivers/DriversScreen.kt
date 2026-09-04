@@ -325,7 +325,7 @@ fun DriversScreen(
                 )
                 if (state.hasMissingDefaults) {
                     SmallPillButton(
-                        label = "Restore defaults",
+                        label = stringResource(R.string.common_ui_restore_defaults),
                         icon = Icons.Outlined.Restore,
                         tint = Accent,
                         onClick = onRestoreDefaultRepos,
@@ -334,7 +334,10 @@ fun DriversScreen(
             }
 
             if (state.sources.isEmpty()) {
-                EmptyRepoCard()
+                EmptyRepoCard(
+                    title = stringResource(R.string.settings_drivers_repo_list_empty_title),
+                    subtitle = stringResource(R.string.settings_drivers_repo_list_empty_subtitle),
+                )
             } else {
                 state.sources.forEachIndexed { index, source ->
                     key(source.apiUrl) {
@@ -1189,7 +1192,10 @@ private fun DialogActionButton(
 // Empty state
 
 @Composable
-private fun EmptyRepoCard() {
+internal fun EmptyRepoCard(
+    title: String,
+    subtitle: String,
+) {
     Box(
         modifier =
             Modifier
@@ -1221,14 +1227,14 @@ private fun EmptyRepoCard() {
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "No repositories",
+                    text = title,
                     color = TextPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "Restore the default GitHub driver sources or add one manually.",
+                    text = subtitle,
                     color = TextSecondary,
                     fontSize = 11.sp,
                 )

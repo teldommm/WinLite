@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Upload
@@ -154,6 +155,7 @@ data class ComponentsState(
     val autoCreateContainer: Boolean = true,
     val isRefreshing: Boolean = false,
     val expandedRepoApiUrl: String? = null,
+    val hasMissingDefaults: Boolean = false,
 )
 
 // Root
@@ -170,6 +172,7 @@ fun ComponentsScreen(
     onAddRepo: () -> Unit,
     onEditRepo: (ComponentRepo) -> Unit,
     onDeleteRepo: (ComponentRepo) -> Unit,
+    onRestoreDefaultRepos: () -> Unit,
 ) {
     var itemPendingRemoval by remember { mutableStateOf<ComponentItem?>(null) }
     var repoPendingRemoval by remember { mutableStateOf<ComponentRepo?>(null) }
@@ -295,11 +298,33 @@ fun ComponentsScreen(
                 }
             }
 
-            if (state.repoSections.isNotEmpty()) {
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
                 SectionLabel(
                     text = stringResource(R.string.settings_content_sources_label),
-                    modifier = Modifier.padding(top = 6.dp),
+                    modifier = Modifier.weight(1f),
                 )
+                if (state.hasMissingDefaults) {
+                    SmallPillButton(
+                        label = stringResource(R.string.common_ui_restore_defaults),
+                        icon = Icons.Outlined.Restore,
+                        tint = Accent,
+                        onClick = onRestoreDefaultRepos,
+                    )
+                }
+            }
+
+            if (state.repoSections.isEmpty()) {
+                EmptyRepoCard(
+                    title = stringResource(R.string.settings_content_repo_list_empty_title),
+                    subtitle = stringResource(R.string.settings_content_repo_list_empty_subtitle),
+                )
+            } else {
                 state.repoSections.forEach { section ->
                     key(section.repo.apiUrl) {
                         ComponentRepoCard(

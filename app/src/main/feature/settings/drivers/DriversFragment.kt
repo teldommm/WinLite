@@ -272,7 +272,7 @@ class DriversFragment : Fragment() {
             saveRepos()
             refreshAllSources()
         } else {
-            WinToast.show(requireContext(), "Default repositories already present")
+            WinToast.show(requireContext(), getString(R.string.common_ui_defaults_already_present))
         }
     }
 

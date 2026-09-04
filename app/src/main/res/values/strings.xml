@@ -7,6 +7,8 @@
     <string name="common_ui_edit">Edit</string>
     <string name="common_ui_remove">Remove</string>
     <string name="common_ui_add">Add</string>
+    <string name="common_ui_restore_defaults">Restore defaults</string>
+    <string name="common_ui_defaults_already_present">Default repositories already present</string>
     <string name="common_ui_shortcuts">Shortcuts</string>
     <string name="common_ui_containers">Containers</string>
     <string name="common_ui_input_controls">Input Controls</string>
@@ -1203,6 +1205,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_content_sources_label">Component Sources</string>
     <string name="settings_content_repo_item_count">%1$d components</string>
     <string name="settings_content_repo_empty">Nothing found for this repository</string>
+    <string name="settings_content_repo_list_empty_title">No repositories</string>
+    <string name="settings_content_repo_list_empty_subtitle">Restore the default component source or add one manually.</string>
     <string name="settings_content_repo_remove_title">Remove Repository</string>
     <string name="settings_content_repo_confirm_remove">Remove "%1$s" from your component sources?</string>
     <string name="settings_content_repo_edit">Edit Repository</string>
@@ -1253,6 +1257,8 @@ Installed path:
     <string name="settings_drivers_title">Drivers</string>
     <string name="settings_drivers_manager_header">Driver Manager</string>
     <string name="settings_drivers_github_repos">GitHub Repos</string>
+    <string name="settings_drivers_repo_list_empty_title">No repositories</string>
+    <string name="settings_drivers_repo_list_empty_subtitle">Restore the default GitHub driver sources or add one manually.</string>
     <string name="settings_drivers_install">Install Drivers</string>
     <string name="settings_drivers_add_repo">Add Repo</string>
     <string name="settings_drivers_refresh">Refresh</string>

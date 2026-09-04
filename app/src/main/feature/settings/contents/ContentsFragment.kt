@@ -118,6 +118,7 @@ class ContentsFragment : Fragment() {
                         onAddRepo = { addRepoDialogOpen = true },
                         onEditRepo = { repo -> editingRepo = repo },
                         onDeleteRepo = { repo -> removeRepo(repo) },
+                        onRestoreDefaultRepos = { restoreComponentRepos() },
                     )
 
                     if (addRepoDialogOpen) {
@@ -224,6 +225,9 @@ class ContentsFragment : Fragment() {
                 ComponentRepoSection(repo = repo, itemsByType = itemsByType)
             }
 
+        val existingApiUrls = componentRepos.map { it.apiUrl }.toHashSet()
+        val hasMissingDefaults = defaultComponentRepoList().any { it.apiUrl !in existingApiUrls }
+
         profilesByKey = keyedProfiles
         componentsState =
             ComponentsState(
@@ -233,6 +237,7 @@ class ContentsFragment : Fragment() {
                 autoCreateContainer = autoCreateContainer,
                 isRefreshing = isRefreshing,
                 expandedRepoApiUrl = expandedRepoApiUrl,
+                hasMissingDefaults = hasMissingDefaults,
             )
 
         scheduleRemoteSizeFetches(repoSections.flatMap { it.itemsByType.values.flatten() })
@@ -492,6 +497,18 @@ class ContentsFragment : Fragment() {
 
     private fun removeRepo(repo: ComponentRepo) {
         componentRepos = componentRepos - repo
+        saveComponentRepos()
+        refreshRemoteProfiles()
+    }
+
+    private fun restoreComponentRepos() {
+        val existingApiUrls = componentRepos.map { it.apiUrl }.toHashSet()
+        val missing = defaultComponentRepoList().filter { it.apiUrl !in existingApiUrls }
+        if (missing.isEmpty()) {
+            WinToast.show(requireContext(), getString(R.string.common_ui_defaults_already_present))
+            return
+        }
+        componentRepos = componentRepos + missing
         saveComponentRepos()
         refreshRemoteProfiles()
     }
