@@ -88,7 +88,6 @@ import org.json.JSONObject
 
 private const val DEFAULT_DATASET_BASE = "https://raw.githubusercontent.com/teldommm/WinLite-Components/main/redistributables"
 private const val PREF_CATALOG_BASE_URL = "component_catalog_base_url"
-private val CATALOG_LABEL_REGEX = Regex("raw\\.githubusercontent\\.com/([^/]+/[^/]+/[^/]+)/redistributables")
 
 // The GitHub source backing the component catalog. Empty pref = built-in default.
 private fun effectiveDatasetBase(context: Context): String {
@@ -100,12 +99,6 @@ private fun isCustomCatalog(context: Context): Boolean {
     val stored = PreferenceManager.getDefaultSharedPreferences(context).getString(PREF_CATALOG_BASE_URL, null)
     return !stored.isNullOrBlank()
 }
-
-private fun catalogLabelFrom(base: String): String = CATALOG_LABEL_REGEX.find(base)?.groupValues?.get(1) ?: base
-
-private fun catalogLabel(context: Context): String = catalogLabelFrom(effectiveDatasetBase(context))
-
-private fun defaultCatalogLabel(): String = catalogLabelFrom(DEFAULT_DATASET_BASE)
 
 // Accepts "owner/repo", "owner/repo/branch", a github.com link (incl. /tree/branch), or an
 // already-correct raw.githubusercontent.com base. Anything else is stored as typed — a bad
@@ -308,8 +301,8 @@ fun ComponentInstallerSheet(
         CompositionLocalProvider(LocalPaneNav provides registry) {
         if (showChannelDialog) {
             ComponentCatalogChannelDialog(
-                currentValue = if (isCustomCatalog(context)) catalogLabel(context) else "",
-                placeholder = defaultCatalogLabel(),
+                currentValue = if (isCustomCatalog(context)) effectiveDatasetBase(context) else "",
+                placeholder = DEFAULT_DATASET_BASE,
                 isCustom = isCustomCatalog(context),
                 onDismiss = { showChannelDialog = false },
                 onSave = { value ->
@@ -497,7 +490,7 @@ private fun ComponentChannelRestorePill(onClick: () -> Unit) {
         )
         Spacer(Modifier.width(5.dp))
         Text(
-            text = stringResource(R.string.common_ui_restore_defaults),
+            text = stringResource(R.string.common_ui_default_short),
             color = SheetAccent,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -525,7 +518,7 @@ private fun ComponentCatalogChannelDialog(
         DialogPaneNav(nav, onDismiss = onDismiss)
         CompositionLocalProvider(LocalPaneNav provides nav) {
         Text(
-            text = stringResource(R.string.settings_general_update_channel_hint),
+            text = stringResource(R.string.settings_containers_component_channel_hint),
             color = SheetTextSecondary,
             fontSize = 11.sp,
         )

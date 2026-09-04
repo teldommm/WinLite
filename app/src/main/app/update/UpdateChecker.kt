@@ -38,8 +38,6 @@ object UpdateChecker {
     private const val PREF_LAST_UPDATE_CHECK = "last_update_check_time"
     private const val PREF_REPO_URL = "update_repo_url"
 
-    private val REPO_LABEL_REGEX = Regex("api\\.github\\.com/repos/([^/]+/[^/]+)/releases")
-
     private const val CHECK_INTERVAL_MS = 60 * 60 * 1000L
     private const val MANUAL_CHECK_COOLDOWN_MS = 30 * 1000L
     private const val POST_GAME_CHECK_DELAY_MS = 10 * 1000L
@@ -183,14 +181,8 @@ object UpdateChecker {
         return !stored.isNullOrBlank()
     }
 
-    // Human-friendly "owner/repo" derived from a releases API URL, for display in settings.
-    private fun repoLabelFromApiUrl(apiUrl: String): String = REPO_LABEL_REGEX.find(apiUrl)?.groupValues?.get(1) ?: apiUrl
+    fun getDefaultRepoUrl(): String = DEFAULT_RELEASES_API_URL
 
-    fun getRepoLabel(context: Context): String = repoLabelFromApiUrl(getEffectiveApiUrl(context))
-
-    fun getDefaultRepoLabel(): String = repoLabelFromApiUrl(DEFAULT_RELEASES_API_URL)
-
-    // Accepts "owner/repo", a github.com link, or an already-correct api.github.com releases URL.
     // Accepts "owner/repo", a github.com link, or an already-correct api.github.com releases
     // URL. Anything else is stored as typed — a bad value just fails at fetch time, same as
     // any other manually-entered GitHub source in this app.

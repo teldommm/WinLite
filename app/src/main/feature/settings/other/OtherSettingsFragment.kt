@@ -253,8 +253,8 @@ class OtherSettingsFragment : Fragment() {
                 enableBackgroundSession = preferences.getBoolean("enable_background_session", false),
                 externalDisplayOutput = preferences.getBoolean("external_display_output", false),
                 imagefsInstallProgress = uiState.imagefsInstallProgress,
-                updateRepoCustomLabel = if (UpdateChecker.isCustomRepo(ctx)) UpdateChecker.getRepoLabel(ctx) else "",
-                updateRepoDefaultLabel = UpdateChecker.getDefaultRepoLabel(),
+                updateRepoCustomLabel = if (UpdateChecker.isCustomRepo(ctx)) UpdateChecker.getEffectiveApiUrl(ctx) else "",
+                updateRepoDefaultLabel = UpdateChecker.getDefaultRepoUrl(),
             )
     }
 

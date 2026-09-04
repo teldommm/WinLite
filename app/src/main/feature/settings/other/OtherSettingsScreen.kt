@@ -559,7 +559,7 @@ private fun ChannelRestorePill(onClick: () -> Unit) {
         )
         Spacer(Modifier.width(5.dp))
         Text(
-            text = stringResource(R.string.common_ui_restore_defaults),
+            text = stringResource(R.string.common_ui_default_short),
             color = Accent,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,

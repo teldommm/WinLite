@@ -7,6 +7,7 @@
     <string name="common_ui_remove">Удалить</string>
     <string name="common_ui_add">Добавить</string>
     <string name="common_ui_restore_defaults">Восстановить по умолчанию</string>
+    <string name="common_ui_default_short">По умолчанию</string>
     <string name="common_ui_shortcuts">Ярлыки</string>
     <string name="common_ui_containers">Контейнеры</string>
     <string name="common_ui_input_controls">Управление вводом</string>
@@ -869,8 +870,9 @@
     <string name="settings_general_check_for_updates">Проверять обновления</string>
     <string name="settings_general_check_for_updates_summary">Автоматически проверять наличие новых версий приложений при запуске и периодически.</string>
     <string name="settings_general_update_channel_title">Репозиторий обновлений</string>
-    <string name="settings_general_update_channel_hint">owner/repo или ссылка github.com/owner/repo</string>
+    <string name="settings_general_update_channel_hint">https://github.com/owner/repo/releases</string>
     <string name="settings_containers_component_channel_title">Репозиторий компонентов</string>
+    <string name="settings_containers_component_channel_hint">https://github.com/owner/repo</string>
     <!-- Settings > Audio -->
     <string name="settings_audio_midi_sound_font">MIDI SoundFont</string>
     <string name="settings_audio_sound">Звук</string>
