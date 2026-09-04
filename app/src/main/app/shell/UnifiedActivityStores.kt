@@ -619,7 +619,7 @@ internal fun UnifiedActivity.GameCapsuleMoreButton(
 
 // Matches the "⋮" affordance used for containers (ContainersScreen.kt's SmallVectorIconButton),
 // kept as its own copy here since GameCapsule overlays artwork rather than a flat card.
-private val MoreButtonBg = Color(0xFF161622)
+private val MoreButtonBg = Color(0xFF161622).copy(alpha = 0.75f)
 private val MoreButtonOutline = Color(0xFF2A2A3A)
 private val MoreButtonTint = Color(0xFF7A8FA8)
 

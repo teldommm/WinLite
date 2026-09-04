@@ -1264,14 +1264,14 @@ private fun EmptyState() {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = "No drivers yet",
+                text = stringResource(R.string.settings_drivers_installed_empty_title),
                 color = TextPrimary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Install a ZIP package or load a repository to get started.",
+                text = stringResource(R.string.settings_drivers_installed_empty_subtitle),
                 color = TextSecondary,
                 fontSize = 11.sp,
             )

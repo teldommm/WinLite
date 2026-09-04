@@ -1277,6 +1277,8 @@ Installed path:
     <string name="settings_drivers_repo_no_version">Version unavailable</string>
     <string name="settings_drivers_repo_unknown_size">Unknown size</string>
     <string name="settings_drivers_manager">Driver Manager</string>
+    <string name="settings_drivers_installed_empty_title">No drivers yet</string>
+    <string name="settings_drivers_installed_empty_subtitle">Install a ZIP package or load a repository to get started.</string>
 
     <!-- Setup > Wizard -->
     <string name="setup_wizard_installing_system_files">Installing System Files</string>
