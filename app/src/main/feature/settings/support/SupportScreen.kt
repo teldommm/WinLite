@@ -60,13 +60,13 @@ private val SUPPORT_LINKS =
             iconRes = R.drawable.ic_brand_discord,
             titleRes = R.string.support_winlite_discord,
             subtitleRes = R.string.support_winlite_discord_desc,
-            url = "https://discord.gg/8Gzh5mmBJg",
+            url = "https://discord.gg/",
         ),
         SupportLink(
             iconRes = R.drawable.ic_brand_discord,
-            titleRes = R.string.support_maxstechreview_discord,
-            subtitleRes = R.string.support_maxstechreview_discord_desc,
-            url = "https://discord.gg/445xxnkCa2",
+            titleRes = R.string.support_winlite_community_discord,
+            subtitleRes = R.string.support_winlite_community_discord_desc,
+            url = "https://discord.gg/",
         ),
         SupportLink(
             iconRes = R.drawable.ic_brand_reddit,
@@ -78,7 +78,7 @@ private val SUPPORT_LINKS =
             iconRes = R.drawable.ic_brand_youtube,
             titleRes = R.string.support_youtube,
             subtitleRes = R.string.support_youtube_desc,
-            url = "https://youtube.com/@maxstechreview",
+            url = "https://youtube.com/",
         ),
     )
 
