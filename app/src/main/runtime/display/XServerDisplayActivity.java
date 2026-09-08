@@ -1260,7 +1260,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         frametimeNumericMode = preferences.getBoolean(FrameRating.PREF_HUD_FRAMETIME_NUMERIC, false);
 
         isDarkMode = preferences.getBoolean("dark_mode", false);
-        isTapToClickEnabled = true;
+        isTapToClickEnabled = preferences.getBoolean("tap_to_click_enabled", true);
         // Force the touchscreen-controls overlay on at each session start (profile default stays none).
         preferences.edit().putBoolean("show_touchscreen_controls_enabled", true).apply();
         boolean isOpenWithAndroidBrowser = preferences.getBoolean("open_with_android_browser", false);
