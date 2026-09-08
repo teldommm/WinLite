@@ -399,7 +399,7 @@ internal fun FPSLimiterCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = stringResource(R.string.session_drawer_fps_limiter),
+                text = stringResource(R.string.session_drawer_fps_limiter_enable),
                 color = DrawerTextPrimary,
                 fontSize = (14f * paneScale).sp,
                 fontWeight = FontWeight.Medium,

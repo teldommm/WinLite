@@ -450,6 +450,7 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         state.cpuCount.intValue = cpuCount
         state.cpuChecked.value = parseCpuList(c?.getCPUList(true) ?: Container.getFallbackCPUList(), cpuCount)
         state.cpuCheckedWoW64.value = parseCpuList(c?.getCPUListWoW64(true) ?: Container.getFallbackCPUListWoW64(), cpuCount)
+        state.syncCpuTopology.value = c?.isSyncCpuTopology() ?: false
 
         val wincomponentsStr = c?.getWinComponents() ?: Container.DEFAULT_WINCOMPONENTS
         val directX = mutableListOf<WinComponentItem>()
@@ -831,6 +832,7 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
             c.setEnvVars(envVarsStr)
             c.setCPUList(cpuList)
             c.setCPUListWoW64(cpuListWoW64)
+            c.setSyncCpuTopology(state.syncCpuTopology.value)
             c.setGraphicsDriver(graphicsDriver)
             c.setZinkMode(if (state.selectedZinkMode.intValue == 1) "windows" else "unix")
             c.setGraphicsDriverConfig(graphicsDriverConfig)

@@ -454,6 +454,11 @@ class ShortcutSettingsComposeDialog(
         }
         state.cpuCheckedWoW64.value = checkedWoW64
 
+        // Sync CPU Topology
+        state.syncCpuTopology.value = getShortcutSetting(
+            "syncCpuTopology", if (container.isSyncCpuTopology()) "1" else "0"
+        ) == "1"
+
         // Win Components
         loadWinComponents()
 
@@ -1194,6 +1199,15 @@ class ShortcutSettingsComposeDialog(
             val cpuListWoW64 = buildCpuListString(state.cpuCheckedWoW64.value)
             hasContainerOverride =
                 hasContainerOverride or saveOverride("cpuListWoW64", cpuListWoW64, container.getCPUListWoW64(true))
+
+            // Sync CPU Topology
+            val syncCpuTopologyValue = if (state.syncCpuTopology.value) "1" else "0"
+            hasContainerOverride =
+                hasContainerOverride or saveOverride(
+                    "syncCpuTopology",
+                    syncCpuTopologyValue,
+                    if (container.isSyncCpuTopology()) "1" else "0"
+                )
 
             // Input type
             var finalInputType = 0
@@ -2263,6 +2277,7 @@ class ShortcutSettingsComposeDialog(
         val cpuCount = state.cpuCount.intValue
         state.cpuChecked.value = parseCpuList(container.getCPUList(true), cpuCount)
         state.cpuCheckedWoW64.value = parseCpuList(container.getCPUListWoW64(true), cpuCount)
+        state.syncCpuTopology.value = container.isSyncCpuTopology()
 
         val inputType = container.getInputType().toInt()
         state.enableXInput.value =

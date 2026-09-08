@@ -408,6 +408,8 @@
     <string name="container_config_env_vars">Environment Variables</string>
     <string name="container_config_processor_affinity">Processor Affinity</string>
     <string name="container_config_processor_affinity_32bit">Processor Affinity (32-bit apps)</string>
+    <string name="container_config_sync_cpu_topology">Sync CPU Topology</string>
+    <string name="container_config_sync_cpu_topology_note">Tells Wine exactly which cores are available, matching the processor affinity above. Without this, Wine may still see all device cores and size its own thread pools for them even though the game is restricted to fewer.</string>
     <string name="container_config_audio_driver">Audio Driver</string>
     <string name="container_config_win_components">Win Components</string>
     <string name="container_config_drives">Drives</string>
@@ -747,17 +749,17 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="frame_generation_preset_performance_note" formatted="false">Motion estimated at 50% resolution. Around 46% of Quality\'s GPU cost, with almost no visible loss.</string>
     <string name="frame_generation_preset_balanced_note" formatted="false">Motion estimated at 70% resolution. Around 61% of Quality\'s GPU cost. Recommended for handhelds.</string>
     <string name="frame_generation_preset_quality_note" formatted="false">Motion estimated at full resolution. Highest cost; use it only when the game has GPU headroom to spare.</string>
-    <string name="session_drawer_frame_generation_note">Interpolates between rendered frames with AI Frame Generation. Smoother motion, but one extra frame of input latency.</string>
+    <string name="session_drawer_frame_generation_note">AI Frame Generation interpolates between rendered frames using Lossless.dll shaders. Smoother motion, but one extra frame of input latency.</string>
     <string name="session_drawer_frame_generation_target_note">Climbs toward the target only while it measurably helps, instead of holding a fixed multiplier.</string>
-    <string name="session_drawer_frame_generation_missing">Install AI Frame Generation in container settings to use frame generation.</string>
+    <string name="session_drawer_frame_generation_missing">AI Frame Generation runs on Lossless.dll shaders. Install them in container settings to use frame generation.</string>
     <string name="settings_frame_generation_title">Frame Generation</string>
-    <string name="settings_frame_generation_importing">Looking for AI Frame Generation…</string>
-    <string name="settings_frame_generation_ready">AI Frame Generation shaders ready.</string>
+    <string name="settings_frame_generation_importing">Looking for Lossless.dll shaders…</string>
+    <string name="settings_frame_generation_ready">Lossless.dll shaders ready.</string>
     <string name="settings_frame_generation_imported">Imported from %1$s.</string>
-    <string name="settings_frame_generation_not_found">AI Frame Generation was not found. Select the file below to import it.</string>
-    <string name="settings_frame_generation_failed">The AI Frame Generation file was found but its shaders could not be read. Verify the Steam files and try again.</string>
+    <string name="settings_frame_generation_not_found">Shaders for AI Frame Generation were not found. Select the Lossless.dll file below to import them.</string>
+    <string name="settings_frame_generation_failed">The Lossless.dll file was found but its shaders could not be read. Verify the Steam files and try again.</string>
     <string name="settings_frame_generation_updated">Updated from %1$s.</string>
-    <string name="settings_frame_generation_locate">Select AI Frame Generation file…</string>
+    <string name="settings_frame_generation_locate">Select Lossless.dll…</string>
     <string name="session_drawer_vivid">Vivid</string>
     <string name="session_drawer_vivid_strength">Vivid Strength</string>
     <string name="session_drawer_color_profile">Color Effect</string>
@@ -835,6 +837,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="session_drawer_command_center_display">Display</string>
     <string name="session_drawer_command_center_system">System</string>
     <string name="session_drawer_fps_limiter">FPS Limiter</string>
+    <string name="session_drawer_fps_limiter_enable">Limited fps</string>
     <string name="session_drawer_fps_limiter_off">Off</string>
     <string name="session_drawer_color_profile_disabled">Disabled</string>
     <string name="session_drawer_color_profile_hdr">HDR</string>

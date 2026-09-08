@@ -78,6 +78,7 @@ public class Container {
     private boolean steamOfflineMode = false;
     private boolean unpackFiles = false;
     private boolean runtimePatcher = false;
+    private boolean syncCpuTopology = false;
 
     private ContainerManager containerManager;
 
@@ -458,6 +459,7 @@ public class Container {
             data.put("steamOfflineMode", steamOfflineMode);
             data.put("unpackFiles", unpackFiles);
             data.put("runtimePatcher", runtimePatcher);
+            if (syncCpuTopology) data.put("syncCpuTopology", true);
 
             if (!WineInfo.isMainWineVersion(wineVersion)) data.put("wineVersion", wineVersion);
             FileUtils.writeString(getConfigFile(), data.toString());
@@ -592,6 +594,9 @@ public class Container {
                     break;
                 case "unpackFiles":
                     setUnpackFiles(data.getBoolean(key));
+                    break;
+                case "syncCpuTopology":
+                    setSyncCpuTopology(data.getBoolean(key));
                     break;
                 case "runtimePatcher":
                     setRuntimePatcher(data.getBoolean(key));
@@ -769,6 +774,14 @@ public class Container {
 
     public void setUnpackFiles(boolean unpackFiles) {
         this.unpackFiles = unpackFiles;
+    }
+
+    public boolean isSyncCpuTopology() {
+        return syncCpuTopology;
+    }
+
+    public void setSyncCpuTopology(boolean syncCpuTopology) {
+        this.syncCpuTopology = syncCpuTopology;
     }
 
     public boolean isRuntimePatcher() {

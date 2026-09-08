@@ -333,6 +333,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
     private com.winlator.cmod.runtime.system.SessionLogWriter sessionLogWriter;
     private int taskAffinityMask = 0;
     private int taskAffinityMaskWoW64 = 0;
+    private String wineCpuTopologyValue = "";
     private final HashSet<Integer> guestAffinityCheckedPids = new HashSet<>();
     private volatile boolean serviceAffinityStarted = false;
     private static final String[] SERVICE_AFFINITY_PROCESSES = {
@@ -1564,6 +1565,14 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                 rawShortcutCpuListWoW64 + "' container='" + containerCpuListWoW64 +
                 "' effective='" + effectiveCpuListWoW64 + "' affinityMask=0x" +
                 Integer.toHexString(taskAffinityMaskWoW64 & 0xFFFF));
+
+        boolean syncCpuTopology = parseBoolean(
+                getShortcutSetting("syncCpuTopology", container.isSyncCpuTopology() ? "1" : "0"));
+        wineCpuTopologyValue = "";
+        if (syncCpuTopology && effectiveCpuList != null && !effectiveCpuList.isEmpty()) {
+            int coreCount = effectiveCpuList.split(",").length;
+            wineCpuTopologyValue = coreCount + ":" + effectiveCpuList;
+        }
 
         String wmClass = shortcut != null ? shortcut.getExtra("wmClass", "") : "";
         Log.d("XServerDisplayActivity", "Startup wmClass: " + wmClass);
@@ -6435,6 +6444,11 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                 "WINEDEBUG resolved: enable=" + enableWineDebug
                         + " classes='" + wineDebugClasses + "' channels='" + wineDebugChannels
                         + "' value='" + wineDebugValue + "'");
+
+        if (!wineCpuTopologyValue.isEmpty()) {
+            envVars.put("WINE_CPU_TOPOLOGY", wineCpuTopologyValue);
+            Log.i("XServerDisplayActivity", "WINE_CPU_TOPOLOGY=" + wineCpuTopologyValue);
+        }
 
         String rootPath = imageFs.getRootDir().getPath();
         FileUtils.clear(imageFs.getTmpDir());
