@@ -150,7 +150,6 @@ import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -341,114 +340,6 @@ internal fun RecordSettingsDialog(
                 }
             }
         }
-        }
-    }
-}
-
-@Composable
-internal fun FPSLimiterCard(
-    currentLimit: Int,
-    maxRefreshRate: Int,
-    onLimitChanged: (Int) -> Unit,
-) {
-    val paneScale = LocalPaneScale.current
-    val enabled = currentLimit > 0
-    val maxFps = maxRefreshRate.coerceAtLeast(FPS_LIMITER_MIN)
-    val steps = (maxFps - FPS_LIMITER_MIN - 1).coerceAtLeast(0)
-
-    // Slider position tracked locally (readout follows the drag, value survives an off/on toggle); the commit is deferred to release and re-seeds when maxFps changes (e.g. a mid-game refresh-rate change that clamps the limit).
-    var sliderValue by remember(maxFps) {
-        mutableStateOf(
-            (if (currentLimit > 0) currentLimit else FPS_LIMITER_DEFAULT)
-                .coerceIn(FPS_LIMITER_MIN, maxFps)
-                .toFloat(),
-        )
-    }
-
-    LaunchedEffect(currentLimit) {
-        if (currentLimit > 0) {
-            val target = currentLimit.coerceIn(FPS_LIMITER_MIN, maxFps).toFloat()
-            if (target != sliderValue) sliderValue = target
-        }
-    }
-
-    val borderColor by animateColorAsState(
-        targetValue = if (enabled) ActiveCardBorder else RestingCardBorder,
-        animationSpec = tween(140),
-        label = "fpsLimiterCardBorder",
-    )
-    val shape = RoundedCornerShape((14f * paneScale).dp)
-
-    Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(PaneInnerResting)
-                .border(1.dp, borderColor, shape)
-                .padding(horizontal = (12f * paneScale).dp, vertical = (8f * paneScale).dp),
-    ) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { onLimitChanged(if (enabled) 0 else sliderValue.roundToInt()) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.session_drawer_fps_limiter_enable),
-                color = DrawerTextPrimary,
-                fontSize = (14f * paneScale).sp,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text =
-                    if (enabled) {
-                        "${sliderValue.roundToInt()} FPS"
-                    } else {
-                        stringResource(R.string.session_drawer_fps_limiter_off)
-                    },
-                color = if (enabled) DrawerAccent else DrawerTextSecondary,
-                fontSize = (14f * paneScale).sp,
-                fontWeight = if (enabled) FontWeight.SemiBold else FontWeight.Normal,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f).padding(horizontal = (8f * paneScale).dp),
-            )
-            CompositionLocalProvider(LocalRippleConfiguration provides null) {
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = { on -> onLimitChanged(if (on) sliderValue.roundToInt() else 0) },
-                    colors = outlinedSwitchColors(DrawerAccent, DrawerTextSecondary),
-                )
-            }
-        }
-
-        AnimatedVisibility(
-            visible = enabled,
-            enter =
-                expandVertically(
-                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                    expandFrom = Alignment.Top,
-                ) + fadeIn(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)),
-            exit =
-                shrinkVertically(
-                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-                    shrinkTowards = Alignment.Top,
-                ) + fadeOut(animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)),
-        ) {
-            Column {
-                Spacer(Modifier.height((6f * paneScale).dp))
-                CompactSlider(
-                    value = sliderValue,
-                    onValueChange = { sliderValue = it },
-                    valueRange = FPS_LIMITER_MIN.toFloat()..maxFps.toFloat(),
-                    steps = steps,
-                    onValueChangeFinished = { onLimitChanged(sliderValue.roundToInt()) },
-                )
-            }
         }
     }
 }

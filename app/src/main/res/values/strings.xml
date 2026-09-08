@@ -685,6 +685,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="session_drawer_touch_map_right_stick">Map to Right Stick</string>
     <string name="session_drawer_rts_gestures">RTS Gestures</string>
     <string name="session_drawer_rts_gestures_edit">Edit</string>
+    <string name="session_drawer_mouse_sensitivity_scale">Mouse sensitivity scale</string>
     <string name="session_drawer_right_stick_sensitivity">Right stick sensitivity</string>
     <string name="session_rts_action">Action</string>
     <string name="session_rts_behavior">Behavior</string>
@@ -729,8 +730,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="session_drawer_upscaler_mode">Upscaler</string>
     <string name="session_drawer_upscaler_fsr">SGSR 1</string>
     <string name="session_drawer_sgsr_edge_sharpness">Edge Sharpness</string>
-    <string name="session_drawer_frame_generation">Frame Generation</string>
-    <string name="session_drawer_frame_generation_enable">Generate</string>
+    <string name="session_drawer_frame_generation">Ai Frame Generation</string>
+    <string name="session_drawer_frame_generation_enable">Ai FrameGen</string>
     <string name="session_drawer_frame_generation_multiplier">Multiplier</string>
     <string name="session_drawer_frame_generation_multiplier_value">%1$dx</string>
     <string name="session_drawer_frame_generation_target">Adaptive Target</string>
@@ -752,7 +753,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="session_drawer_frame_generation_note">AI Frame Generation interpolates between rendered frames using Lossless.dll shaders. Smoother motion, but one extra frame of input latency.</string>
     <string name="session_drawer_frame_generation_target_note">Climbs toward the target only while it measurably helps, instead of holding a fixed multiplier.</string>
     <string name="session_drawer_frame_generation_missing">AI Frame Generation runs on Lossless.dll shaders. Install them in container settings to use frame generation.</string>
-    <string name="settings_frame_generation_title">Frame Generation</string>
+    <string name="settings_frame_generation_title">Ai Frame Generation</string>
     <string name="settings_frame_generation_importing">Looking for Lossless.dll shaders…</string>
     <string name="settings_frame_generation_ready">Lossless.dll shaders ready.</string>
     <string name="settings_frame_generation_imported">Imported from %1$s.</string>
@@ -837,8 +838,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="session_drawer_command_center_display">Display</string>
     <string name="session_drawer_command_center_system">System</string>
     <string name="session_drawer_fps_limiter">FPS Limiter</string>
-    <string name="session_drawer_fps_limiter_enable">Limited fps</string>
-    <string name="session_drawer_fps_limiter_off">Off</string>
+    <string name="session_drawer_fps_limiter_enable">Limit in-game FPS</string>
+    <string name="session_drawer_fps_limiter_target">Target FPS</string>
     <string name="session_drawer_color_profile_disabled">Disabled</string>
     <string name="session_drawer_color_profile_hdr">HDR</string>
     <string name="session_drawer_color_profile_natural">Natural</string>
@@ -1345,6 +1346,12 @@ Installed path:
     <string name="setup_wizard_creating_container">Creating\u2026</string>
 
     <string name="input_controls_tap_to_click">Tap to Click</string>
+    <string name="session_drawer_gamesir_rumble_title">GameSir Controller Rumble</string>
+    <string name="session_drawer_gamesir_rumble_subtitle">For Android-mode GameSir controllers only</string>
+    <string name="session_drawer_gamesir_rumble_mode_known">Known</string>
+    <string name="session_drawer_gamesir_rumble_mode_all">All (experimental)</string>
+    <string name="session_drawer_gamesir_rumble_known_devices">G8+ MFi, X5s, X3 Pro</string>
+    <string name="session_drawer_gamesir_rumble_all_devices">All GameSir devices</string>
     <string name="input_controls_reverse_binding_order">Reverse order bindings</string>
     <!-- Steam > Login -->
     <string name="steam_login_auth_webview_title">Authorization</string>

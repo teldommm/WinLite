@@ -298,7 +298,7 @@ internal fun InputControlsPaneContent(
                 )
 
                 NavSliderRow(
-                    label = "Mouse sensitivity scale",
+                    label = stringResource(R.string.session_drawer_mouse_sensitivity_scale),
                     valueText = "${Math.round(state.cursorSpeed * 100)}%",
                     value = state.cursorSpeed * 100f,
                     valueRange = 10f..300f,
@@ -324,8 +324,8 @@ internal fun InputControlsPaneContent(
                 }
 
                 NavBooleanRow(
-                    title = "GameSir Controller Rumble",
-                    subtitle = "For Android-mode GameSir controllers only",
+                    title = stringResource(R.string.session_drawer_gamesir_rumble_title),
+                    subtitle = stringResource(R.string.session_drawer_gamesir_rumble_subtitle),
                     checked = gcmEnabled,
                     onCheckedChange = { enabled ->
                         listener.onInputControlsGcmRumbleModeChanged(if (enabled) "known" else "disabled")
@@ -339,7 +339,7 @@ internal fun InputControlsPaneContent(
                             horizontalArrangement = Arrangement.spacedBy((8f * paneScale).dp),
                         ) {
                             HUDToggleChip(
-                                label = "Known",
+                                label = stringResource(R.string.session_drawer_gamesir_rumble_mode_known),
                                 checked = state.inputControlsGcmRumbleMode == "known",
                                 onClick = { listener.onInputControlsGcmRumbleModeChanged("known") },
                                 modifier = Modifier.weight(1f).paneNavItem(
@@ -348,7 +348,7 @@ internal fun InputControlsPaneContent(
                                 ),
                             )
                             HUDToggleChip(
-                                label = "All (experimental)",
+                                label = stringResource(R.string.session_drawer_gamesir_rumble_mode_all),
                                 checked = state.inputControlsGcmRumbleMode == "all",
                                 onClick = { listener.onInputControlsGcmRumbleModeChanged("all") },
                                 modifier = Modifier.weight(1f).paneNavItem(
@@ -359,9 +359,9 @@ internal fun InputControlsPaneContent(
                         }
                         Text(
                             text = if (state.inputControlsGcmRumbleMode == "all")
-                                "All GameSir devices"
+                                stringResource(R.string.session_drawer_gamesir_rumble_all_devices)
                             else
-                                "G8+ MFi, X5s, X3 Pro",
+                                stringResource(R.string.session_drawer_gamesir_rumble_known_devices),
                             color = DrawerTextSecondary,
                             fontSize = (11f * paneScale).sp,
                         )

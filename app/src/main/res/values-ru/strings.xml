@@ -676,8 +676,8 @@
     <string name="session_drawer_command_center_display">Экран</string>
     <string name="session_drawer_command_center_system">Система</string>
     <string name="session_drawer_fps_limiter">Ограничитель ФПС</string>
-    <string name="session_drawer_fps_limiter_enable">Лимит FPS</string>
-    <string name="session_drawer_fps_limiter_off">Выкл.</string>
+    <string name="session_drawer_fps_limiter_enable">Limit in-game FPS</string>
+    <string name="session_drawer_fps_limiter_target">Целевой ФПС</string>
     <string name="session_drawer_color_profile_disabled">Отключено</string>
     <string name="session_drawer_color_profile_hdr">HDR</string>
     <string name="session_drawer_color_profile_natural">Естественный</string>
@@ -1087,6 +1087,12 @@
     <string name="setup_wizard_create_container">Создать контейнер</string>
     <string name="setup_wizard_creating_container">Создание\u2026</string>
     <string name="input_controls_tap_to_click">Касание для клика</string>
+    <string name="session_drawer_gamesir_rumble_title">Вибрация контроллера GameSir</string>
+    <string name="session_drawer_gamesir_rumble_subtitle">Только для GameSir-геймпадов в режиме Android</string>
+    <string name="session_drawer_gamesir_rumble_mode_known">Известные</string>
+    <string name="session_drawer_gamesir_rumble_mode_all">Все (экспериментально)</string>
+    <string name="session_drawer_gamesir_rumble_known_devices">G8+ MFi, X5s, X3 Pro</string>
+    <string name="session_drawer_gamesir_rumble_all_devices">Все устройства GameSir</string>
     <string name="input_controls_reverse_binding_order">Обратный порядок привязок</string>
     <!-- Steam > Login -->
     <string name="steam_login_auth_webview_title">Авторизация</string>
@@ -1408,6 +1414,7 @@
     <string name="gesture_profile_new">Новый профиль жестов</string>
     <string name="gesture_profile_none">Нет профилей жестов</string>
     <string name="input_controls_editor_input_profiles_section">Профили ввода</string>
+    <string name="session_drawer_mouse_sensitivity_scale">Чувствительность мыши</string>
     <string name="session_drawer_right_stick_sensitivity">Чувствительность правого стика</string>
     <string name="session_drawer_rts_gestures">Жесты RTS</string>
     <string name="session_drawer_rts_gestures_edit">Изменить</string>
@@ -1547,8 +1554,8 @@
     <string name="cloud_saves_history_delete_confirm_title">Удалить облачное сохранение</string>
     <string name="cloud_saves_history_delete_failed">Не удалось удалить облачное сохранение</string>
     <string name="cloud_saves_history_delete_success">Облачное сохранение удалено</string>
-    <string name="session_drawer_frame_generation">Генерация кадров</string>
-    <string name="session_drawer_frame_generation_enable">Генерировать</string>
+    <string name="session_drawer_frame_generation">Ai Генерация кадров</string>
+    <string name="session_drawer_frame_generation_enable">Ai FrameGen</string>
     <string name="session_drawer_frame_generation_multiplier">Множитель</string>
     <string name="session_drawer_frame_generation_multiplier_value">%1$dx</string>
     <string name="session_drawer_frame_generation_target">Адаптивная цель</string>
@@ -1570,7 +1577,7 @@
     <string name="frame_generation_preset_performance_note" formatted="false">Движение вычисляется при 50 % разрешения. Около 46 % нагрузки на GPU режима «Качество», почти без заметных потерь.</string>
     <string name="frame_generation_preset_balanced_note" formatted="false">Движение вычисляется при 70 % разрешения. Около 61 % нагрузки на GPU режима «Качество». Рекомендуется для портативных устройств.</string>
     <string name="frame_generation_preset_quality_note" formatted="false">Движение вычисляется при полном разрешении. Максимальная нагрузка; используйте, только когда у игры есть запас GPU.</string>
-    <string name="settings_frame_generation_title">Генерация кадров</string>
+    <string name="settings_frame_generation_title">Ai Генерация кадров</string>
     <string name="settings_frame_generation_importing">Поиск шейдеров Lossless.dll…</string>
     <string name="settings_frame_generation_ready">Шейдеры Lossless.dll готовы.</string>
     <string name="settings_frame_generation_imported">Импортировано из %1$s.</string>

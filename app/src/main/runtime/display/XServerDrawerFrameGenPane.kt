@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,7 +36,9 @@ import com.winlator.cmod.shared.framegen.FrameGenPreset
 import kotlin.math.roundToInt
 
 // The FPS limiter now lives inline in SCREEN_EFFECTS (not behind the Frame Gen gear), so it
-// needs its own reusable section with its own fpsLimitMemory state.
+// needs its own reusable section with its own fpsLimitMemory state. Styled the same way as the
+// SGSR section above it: a bordered NavBooleanRow toggle, then a separate, borderless
+// NavSliderRow for the value once enabled — not one merged card.
 @Composable
 internal fun FpsLimiterSection(
     state: XServerDrawerState,
@@ -51,36 +52,44 @@ internal fun FpsLimiterSection(
         if (state.fpsLimit > 0) fpsLimitMemory = state.fpsLimit
     }
 
+    val enabled = state.fpsLimit > 0
+    val maxFps = state.maxRefreshRate.coerceAtLeast(FPS_LIMITER_MIN)
+    val steps = (maxFps - FPS_LIMITER_MIN - 1).coerceAtLeast(0)
+    val sliderValue = (if (enabled) state.fpsLimit else fpsLimitMemory).coerceIn(FPS_LIMITER_MIN, maxFps)
+
     Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
         PaneSectionLabel(stringResource(R.string.session_drawer_fps_limiter))
+        NavBooleanRow(
+            title = stringResource(R.string.session_drawer_fps_limiter_enable),
+            checked = enabled,
+            onCheckedChange = { on ->
+                listener.onFPSLimitChanged(if (on) fpsLimitMemory.coerceIn(FPS_LIMITER_MIN, maxFps) else 0)
+            },
+        )
 
-        Box(
-            Modifier.fillMaxWidth().paneNavItem(
-                cornerRadius = (12f * paneScale).dp,
-                onActivate = {
-                    listener.onFPSLimitChanged(
-                        if (state.fpsLimit > 0) {
-                            0
-                        } else {
-                            fpsLimitMemory.coerceIn(FPS_LIMITER_MIN, state.maxRefreshRate)
-                        },
-                    )
-                },
-                onAdjust = { dir ->
-                    val base = if (state.fpsLimit > 0) state.fpsLimit else fpsLimitMemory
-                    val q = base / 5.0
-                    val units = if (dir > 0) Math.floor(q + 1e-4) + 1 else Math.ceil(q - 1e-4) - 1
-                    listener.onFPSLimitChanged(
-                        (units * 5).toInt().coerceIn(FPS_LIMITER_MIN, state.maxRefreshRate),
-                    )
-                },
-            ),
+        AnimatedVisibility(
+            visible = enabled,
+            enter =
+                expandVertically(
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.Top,
+                ) + fadeIn(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)),
+            exit =
+                shrinkVertically(
+                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Top,
+                ) + fadeOut(animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)),
         ) {
-            FPSLimiterCard(
-                currentLimit = state.fpsLimit,
-                maxRefreshRate = state.maxRefreshRate,
-                onLimitChanged = listener::onFPSLimitChanged,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy((8f * paneScale).dp)) {
+                NavSliderRow(
+                    label = stringResource(R.string.session_drawer_fps_limiter_target),
+                    valueText = "$sliderValue FPS",
+                    value = sliderValue.toFloat(),
+                    valueRange = FPS_LIMITER_MIN.toFloat()..maxFps.toFloat(),
+                    steps = steps,
+                    onValueChange = { listener.onFPSLimitChanged(it.roundToInt().coerceIn(FPS_LIMITER_MIN, maxFps)) },
+                )
+            }
         }
     }
 }
