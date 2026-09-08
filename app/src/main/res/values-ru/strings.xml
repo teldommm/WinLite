@@ -129,6 +129,11 @@
     <string name="store_game_update_failed_notice">Обновление не выполнено</string>
     <string name="store_game_update_check_failed_notice">Проверка обновления не удалась</string>
     <string name="store_game_download_already_active">Эта игра уже загружается. Отмените текущую загрузку перед добавлением DLC.</string>
+    <string name="store_game_branch_label">Версия</string>
+    <string name="store_game_branch_public">По умолчанию (public)</string>
+    <string name="store_game_branch_build">Сборка %1$s</string>
+    <string name="store_game_branch_changed">Версия изменена на %1$s. Скачайте, чтобы применить.</string>
+    <string name="store_game_branch_switch_installed">Версия изменена на %1$s. Нажмите «Проверить обновления», чтобы переключить установленные файлы.</string>
     <string name="common_ui_select">Выбрать</string>
     <string name="common_ui_storage_roots">Корни хранилища</string>
     <string name="common_ui_browse_local_folders_directly">Просматривать локальные папки напрямую</string>
