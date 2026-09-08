@@ -4146,6 +4146,14 @@ private fun AdvancedSection(
             checked = state.fullscreenStretched.value,
             onCheckedChange = { state.fullscreenStretched.value = it }
         )
+
+        Spacer(Modifier.height(SettingItemGap))
+
+        SettingCheckbox(
+            label = stringResource(R.string.container_config_sync_cpu_topology),
+            checked = state.syncCpuTopology.value,
+            onCheckedChange = { state.syncCpuTopology.value = it }
+        )
     }
 
     Spacer(Modifier.height(SettingSectionGap))
@@ -4205,23 +4213,6 @@ private fun AdvancedSection(
                 )
             }
         }
-    }
-
-    Spacer(Modifier.height(SettingSectionGap))
-
-    SettingGroup {
-        SettingCheckbox(
-            label = stringResource(R.string.container_config_sync_cpu_topology),
-            checked = state.syncCpuTopology.value,
-            onCheckedChange = { state.syncCpuTopology.value = it }
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.container_config_sync_cpu_topology_note),
-            color = TextSecondary,
-            fontSize = SettingLabelSize,
-            lineHeight = SettingLabelSize * 1.4f,
-        )
     }
 }
 

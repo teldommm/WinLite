@@ -409,7 +409,6 @@
     <string name="container_config_processor_affinity">Processor Affinity</string>
     <string name="container_config_processor_affinity_32bit">Processor Affinity (32-bit apps)</string>
     <string name="container_config_sync_cpu_topology">Sync CPU Topology</string>
-    <string name="container_config_sync_cpu_topology_note">Tells Wine exactly which cores are available, matching the processor affinity above. Without this, Wine may still see all device cores and size its own thread pools for them even though the game is restricted to fewer.</string>
     <string name="container_config_audio_driver">Audio Driver</string>
     <string name="container_config_win_components">Win Components</string>
     <string name="container_config_drives">Drives</string>
