@@ -5,6 +5,7 @@ import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
 
+import com.winlator.cmod.runtime.container.Container;
 import com.winlator.cmod.runtime.system.ApplicationLogGate;
 
 import java.io.File;
@@ -12,6 +13,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
 
 public final class AifgFrameGen {
     public static final int STATUS_OK = 0;
@@ -32,6 +37,26 @@ public final class AifgFrameGen {
     private static final String CACHE_FP32 = "shaders-fp32.cache";
     private static final String CACHE_FP16 = "shaders-fp16.cache";
     private static final String STAGED_DLL = "aifg.staged";
+
+    // Real on-disk name of the Steam product (Lossless Scaling) that supplies the
+    // shaders. This is the actual file/folder Steam creates and is unrelated to the
+    // "aifg" internal naming, so it is not renamed.
+    static final String DLL_NAME = "Lossless.dll";
+
+    private static final String[] DRIVE_C_CANDIDATES = {
+        "Program Files (x86)/Steam/steamapps/common/Lossless Scaling/" + DLL_NAME,
+        "Program Files/Steam/steamapps/common/Lossless Scaling/" + DLL_NAME,
+        "Program Files (x86)/Lossless Scaling/" + DLL_NAME,
+        "Program Files/Lossless Scaling/" + DLL_NAME,
+    };
+
+    private static final String[] DRIVE_ROOT_CANDIDATES = {
+        "SteamLibrary/steamapps/common/Lossless Scaling/" + DLL_NAME,
+        "steamapps/common/Lossless Scaling/" + DLL_NAME,
+        "Steam/steamapps/common/Lossless Scaling/" + DLL_NAME,
+        "Lossless Scaling/" + DLL_NAME,
+        DLL_NAME,
+    };
 
     private static Boolean gpuSupported = null;
     private static String gpuSupportedDriver = null;
@@ -189,6 +214,33 @@ public final class AifgFrameGen {
     public static void invalidateGpuSupport() {
         gpuSupported = null;
         gpuSupportedDriver = null;
+    }
+
+    public static List<File> findInContainers(Collection<Container> containers) {
+        LinkedHashSet<File> found = new LinkedHashSet<>();
+        if (containers == null) return new ArrayList<>(found);
+
+        for (Container container : containers) {
+            if (container == null || container.getRootDir() == null) continue;
+
+            File driveC = new File(container.getRootDir(), ".wine/drive_c");
+            for (String candidate : DRIVE_C_CANDIDATES) {
+                addIfReadable(found, new File(driveC, candidate));
+            }
+
+            for (String[] drive : container.drivesIterator()) {
+                if (drive.length < 2 || drive[1] == null || drive[1].isEmpty()) continue;
+                File root = new File(drive[1]);
+                for (String candidate : DRIVE_ROOT_CANDIDATES) {
+                    addIfReadable(found, new File(root, candidate));
+                }
+            }
+        }
+        return new ArrayList<>(found);
+    }
+
+    private static void addIfReadable(LinkedHashSet<File> target, File candidate) {
+        if (candidate.isFile() && candidate.canRead()) target.add(candidate);
     }
 
     private static void logInstalled(File source, int variant, boolean bothVariants) {

@@ -751,6 +751,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="settings_frame_generation_imported">Imported from %1$s.</string>
     <string name="settings_frame_generation_not_found">AI Frame Generation was not found. Select the file below to import it.</string>
     <string name="settings_frame_generation_failed">The AI Frame Generation file was found but its shaders could not be read. Verify the Steam files and try again.</string>
+    <string name="settings_frame_generation_updated">Updated from %1$s.</string>
     <string name="settings_frame_generation_locate">Select AI Frame Generation file…</string>
     <string name="session_drawer_vivid">Vivid</string>
     <string name="session_drawer_vivid_strength">Vivid Strength</string>

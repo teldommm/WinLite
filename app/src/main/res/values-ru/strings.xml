@@ -1568,5 +1568,6 @@
     <string name="settings_frame_generation_imported">Импортировано из %1$s.</string>
     <string name="settings_frame_generation_not_found">AI Frame Generation не найден. Выберите файл ниже, чтобы импортировать его.</string>
     <string name="settings_frame_generation_failed">Файл AI Frame Generation найден, но его шейдеры не удалось прочитать. Проверьте файлы Steam и попробуйте снова.</string>
+    <string name="settings_frame_generation_updated">Обновлено из %1$s.</string>
     <string name="settings_frame_generation_locate">Выбрать файл AI Frame Generation…</string>
 </resources>
