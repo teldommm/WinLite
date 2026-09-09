@@ -35,6 +35,7 @@ import com.winlator.cmod.feature.library.GameSettingsNav
 import com.winlator.cmod.feature.library.GameSettingsStateHolder
 import com.winlator.cmod.feature.library.WinComponentItem
 import com.winlator.cmod.feature.library.parseEnvVarItems
+import com.winlator.cmod.shared.android.DeviceResolutions
 import com.winlator.cmod.runtime.compat.box64.Box64Preset
 import com.winlator.cmod.runtime.compat.box64.Box64PresetManager
 import com.winlator.cmod.runtime.container.Container
@@ -520,7 +521,14 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         val c = container
 
         val screenSizeArr = context.resources.getStringArray(R.array.screen_size_entries).toList()
+        state.standardScreenSizeEntries.value = screenSizeArr
+        state.deviceScreenSizeEntries.value =
+            DeviceResolutions.screenSizeEntries(activity, screenSizeArr.firstOrNull() ?: "Custom")
+        state.devicePanelSummary.value = DeviceResolutions.panelSummary(activity)
         state.screenSizeEntries.value = screenSizeArr
+        state.applyScreenSizeEntries(
+            DeviceResolutions.isEnabled(c?.getExtra(DeviceResolutions.EXTRA_ENABLED))
+        )
         selectScreenSize(c?.getScreenSize() ?: Container.DEFAULT_SCREEN_SIZE)
 
         try {
@@ -839,6 +847,10 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
             c.setDXWrapper(dxwrapper)
             c.setDXWrapperConfig(dxwrapperConfig)
             c.putExtra("swapRB", if (state.selectedSurfaceEffect.intValue == 1) "1" else "0")
+            c.putExtra(
+                DeviceResolutions.EXTRA_ENABLED,
+                DeviceResolutions.extraValue(state.showDeviceResolutions.value)
+            )
             c.putExtra("refreshRate", getRefreshRateFromState())
             writeFrameGenExtras(c)
             c.setAudioDriver(audioDriver)
@@ -915,6 +927,10 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
                         newContainer.putExtra(
                             "swapRB",
                             if (state.selectedSurfaceEffect.intValue == 1) "1" else "0"
+                        )
+                        newContainer.putExtra(
+                            DeviceResolutions.EXTRA_ENABLED,
+                            DeviceResolutions.extraValue(state.showDeviceResolutions.value)
                         )
                         getRefreshRateFromState()?.let { newContainer.putExtra("refreshRate", it) }
                         writeFrameGenExtras(newContainer)
