@@ -1516,6 +1516,15 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             shortcut = new Shortcut(container, new File(shortcutPath));
         }
 
+        // When a game starts, sync the per-game setting into the global PrefManager so that
+        // background services (like SteamService) use the correct value for the current session.
+        if (shortcut != null) {
+            String steamLauncherExtra = shortcut.getExtra("steamLauncher");
+            if (!steamLauncherExtra.isEmpty()) {
+                com.winlator.cmod.feature.stores.steam.utils.PrefManager.INSTANCE.setWnPlanW(steamLauncherExtra.equals("1"));
+            }
+        }
+
         loadScreenEffectsSettings();
 
         boolean recordToFile = preferences.getBoolean("hud_record_to_file", false);

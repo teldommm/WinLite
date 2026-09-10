@@ -396,8 +396,12 @@ class ShortcutSettingsComposeDialog(
         val gameSource = shortcut.getExtra("game_source", "")
         state.isSteamGame.value = gameSource == "STEAM" || gameSource == "steam"
         if (state.isSteamGame.value) {
-            state.steamLauncher.value =
+            val steamLauncherExtra = shortcut.getExtra("steamLauncher")
+            state.steamLauncher.value = if (steamLauncherExtra.isEmpty()) {
                 com.winlator.cmod.feature.stores.steam.utils.PrefManager.wnPlanW
+            } else {
+                steamLauncherExtra == "1"
+            }
             // Legacy Launcher is on if either underlying setting was previously on.
             state.useLegacyLauncher.value =
                 getShortcutSetting("useColdClient", if (container.isUseColdClient) "1" else "0") == "1" ||
@@ -1352,8 +1356,7 @@ class ShortcutSettingsComposeDialog(
 
             // Steam options
             if (state.isSteamGame.value) {
-                com.winlator.cmod.feature.stores.steam.utils.PrefManager.wnPlanW =
-                    state.steamLauncher.value
+                shortcut.putExtra("steamLauncher", if (state.steamLauncher.value) "1" else "0")
                 shortcut.putExtra("launchRealSteam", null)
                 shortcut.putExtra("steamType", null)
                 // "Use Legacy Launcher" drives both the ColdClient launcher and
@@ -2313,8 +2316,12 @@ class ShortcutSettingsComposeDialog(
         }
 
         if (state.isSteamGame.value) {
-            state.steamLauncher.value =
+            val steamLauncherExtra = shortcut.getExtra("steamLauncher")
+            state.steamLauncher.value = if (steamLauncherExtra.isEmpty()) {
                 com.winlator.cmod.feature.stores.steam.utils.PrefManager.wnPlanW
+            } else {
+                steamLauncherExtra == "1"
+            }
             state.useLegacyLauncher.value = container.isUseColdClient || container.isUnpackFiles
             state.steamOfflineMode.value = container.isSteamOfflineMode
             state.runtimePatcher.value = container.isRuntimePatcher
