@@ -2323,7 +2323,8 @@ class ShortcutSettingsComposeDialog(
                 steamLauncherExtra == "1"
             }
             state.useLegacyLauncher.value = container.isUseColdClient || container.isUnpackFiles
-            state.steamOfflineMode.value = container.isSteamOfflineMode
+            state.steamOfflineMode.value = shortcut.getSettingExtra(
+                "steamOfflineMode", if (container.isSteamOfflineMode) "1" else "0") == "1"
             state.runtimePatcher.value = container.isRuntimePatcher
             state.useSteamInput.value = container.getExtra("useSteamInput", "0") == "1"
         }
