@@ -458,6 +458,35 @@ internal fun UnifiedActivity.GameSettingsStatRow(
 }
 
 /**
+ * Shared removal-confirmation body for GameSettingsDialog's Uninstall/Shortcut tabs, built on
+ * the same [PopupDialog] used everywhere else (Components/Drivers/Repos/Containers) so the
+ * icon, typography, and Cancel/Confirm footer (with its built-in confirming spinner) match
+ * exactly. The card background/border are made transparent since this is rendered inside
+ * GameSettingsDialogFrame's own bordered card rather than as a separate floating popup.
+ */
+@Composable
+private fun UnifiedActivity.GameSettingsRemovalConfirmation(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    PopupDialog(
+        title = title,
+        message = message,
+        modifier = Modifier.fillMaxWidth(),
+        icon = Icons.Outlined.Delete,
+        confirmLabel = confirmLabel,
+        onConfirm = onConfirm,
+        onCancel = onCancel,
+        accentColor = DangerRed,
+        cardColor = Color.Transparent,
+        borderColor = Color.Transparent,
+    )
+}
+
+/**
  * Shared uninstall/remove confirmation UI, used by GameSettingsDialog.
  */
 @Composable
@@ -467,55 +496,13 @@ internal fun UnifiedActivity.UninstallConfirmation(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    var isUninstalling by remember { mutableStateOf(false) }
-
-    GameSettingsInfoCard(message = message, accentColor = DangerRed)
-
-    if (isUninstalling) {
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(color = DangerRed)
-        }
-    } else {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(
-                onClick = {
-                    isUninstalling = true
-                    onConfirm()
-                },
-                modifier = Modifier.paneNavItem(
-                    cornerRadius = 8.dp,
-                    onActivate = { isUninstalling = true; onConfirm() },
-                    isEntry = true,
-                ),
-                border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
-            ) {
-                Text(
-                    confirmLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            TextButton(
-                onClick = onCancel,
-                modifier = Modifier.paneNavItem(cornerRadius = 8.dp, onActivate = onCancel),
-            ) {
-                Text(stringResource(R.string.common_ui_cancel), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
+    GameSettingsRemovalConfirmation(
+        title = "$confirmLabel?",
+        message = message,
+        confirmLabel = confirmLabel,
+        onConfirm = onConfirm,
+        onCancel = onCancel,
+    )
 }
 
 @Composable
@@ -524,55 +511,14 @@ internal fun UnifiedActivity.ShortcutRemovalConfirmation(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    var isRemoving by remember { mutableStateOf(false) }
-
-    GameSettingsInfoCard(message = message, accentColor = DangerRed)
-
-    if (isRemoving) {
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(color = DangerRed)
-        }
-    } else {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(
-                onClick = {
-                    isRemoving = true
-                    onConfirm()
-                },
-                modifier = Modifier.paneNavItem(
-                    cornerRadius = 8.dp,
-                    onActivate = { isRemoving = true; onConfirm() },
-                    isEntry = true,
-                ),
-                border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
-            ) {
-                Text(
-                    stringResource(R.string.common_ui_remove),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            TextButton(
-                onClick = onCancel,
-                modifier = Modifier.paneNavItem(cornerRadius = 8.dp, onActivate = onCancel),
-            ) {
-                Text(stringResource(R.string.common_ui_cancel), color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
+    val confirmLabel = stringResource(R.string.common_ui_remove)
+    GameSettingsRemovalConfirmation(
+        title = "$confirmLabel?",
+        message = message,
+        confirmLabel = confirmLabel,
+        onConfirm = onConfirm,
+        onCancel = onCancel,
+    )
 }
 
 @Composable

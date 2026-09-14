@@ -944,13 +944,23 @@ class UnifiedActivity :
             consumeSettingsIntent(intent)
         }
 
-        // Exclude the drawer edge from system back gesture where Android allows it.
+        // Exclude both screen edges from the system back gesture where Android allows it.
+        // Left edge: opens the drawer. Right edge: without this, the grid's per-tile "⋮" overflow
+        // button (which sits only ~16-20dp from the edge for the rightmost column) falls inside the
+        // OS back-gesture zone and taps there get swallowed as a swipe-back instead of reaching the app.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val decorView = window.decorView
             val updateDrawerGestureExclusion = {
-                val leftEdgeWidth = (32 * resources.displayMetrics.density).toInt()
-                val exclusionRect = android.graphics.Rect(0, 0, leftEdgeWidth, decorView.height)
-                decorView.systemGestureExclusionRects = listOf(exclusionRect)
+                val edgeWidth = (32 * resources.displayMetrics.density).toInt()
+                val leftExclusionRect = android.graphics.Rect(0, 0, edgeWidth, decorView.height)
+                val rightExclusionRect =
+                    android.graphics.Rect(
+                        decorView.width - edgeWidth,
+                        0,
+                        decorView.width,
+                        decorView.height,
+                    )
+                decorView.systemGestureExclusionRects = listOf(leftExclusionRect, rightExclusionRect)
             }
             decorView.post(updateDrawerGestureExclusion)
             decorView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
