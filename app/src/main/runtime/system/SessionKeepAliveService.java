@@ -110,6 +110,11 @@ public class SessionKeepAliveService extends Service {
         activeXServer = xServer;
     }
 
+    public static void clearActiveSession() {
+        activeEnvironment = null;
+        activeXServer = null;
+    }
+
     public static void onPauseSession(Context ctx) {
         if (ctx == null) return;
         sessionActive.set(true);
@@ -222,8 +227,7 @@ public class SessionKeepAliveService extends Service {
             protectionHandler.removeCallbacks(protectionRunnable);
             if (activeEnvironment != null) {
                 final XEnvironment env = activeEnvironment;
-                activeEnvironment = null;
-                activeXServer = null;
+                clearActiveSession();
                 new Thread(() -> {
                     try {
                         env.stopEnvironmentComponents();

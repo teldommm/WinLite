@@ -232,9 +232,9 @@ import kotlin.math.roundToInt
 
 // Game settings/detail dialogs, split out of UnifiedActivity.kt (behavior-identical).
 
+@Composable
 internal enum class GameSettingsFrameWidth { COMPACT, CONFIRM, WIDE }
 
-@Composable
 internal fun UnifiedActivity.GameSettingsDialogFrame(
     title: String,
     onDismissRequest: () -> Unit,
@@ -754,18 +754,20 @@ internal fun UnifiedActivity.GameSettingsDialog(
     val lastPlayed = playtimePrefs.getLong("${statsSearchKey}_last_played", 0L)
     val totalPlaytime = playtimePrefs.getLong("${statsSearchKey}_playtime", 0L)
     val playCount = playtimePrefs.getInt("${statsSearchKey}_play_count", 0)
-    val installPath =
-        remember(app) {
+    val installPath by produceState("", app, isCustom) {
+        value =
             if (isCustom) {
                 app.gameDir
             } else {
-                try {
-                    SteamService.getAppDirPath(app.id)
-                } catch (_: Exception) {
-                    ""
+                withContext(Dispatchers.IO) {
+                    try {
+                        SteamService.getAppDirPath(app.id)
+                    } catch (_: Exception) {
+                        ""
+                    }
                 }
             }
-        }
+    }
     val installSizeText by produceState<String?>(initialValue = null, key1 = installPath) {
         value =
             if (installPath.isNotBlank()) {
