@@ -52,7 +52,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -113,13 +114,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -738,7 +740,24 @@ internal fun UnifiedActivity.UnifiedHub() {
                 val key = tabs.getOrNull(selectedIdx)?.key ?: "library"
                 val innerBoxBg = if (immersiveMode && key == "library") Color.Transparent else BgDark
 
-                Box(Modifier.padding(padding).fillMaxSize().background(innerBoxBg)) {
+                Box(
+                    Modifier
+                        .padding(padding)
+                        .fillMaxSize()
+                        .background(innerBoxBg)
+                        // Edge swipes are detected on the container itself instead of on
+                        // overlay boxes: an overlay would win hit-testing and swallow taps on
+                        // whatever sits underneath it (e.g. the "⋮" of the right-most tile).
+                        .drawerEdgeSwipe(
+                            enabled = drawerState.isClosed,
+                            isRightSide = false,
+                            onOpenDrawer = { scope.launch { drawerState.open() } },
+                        ).drawerEdgeSwipe(
+                            enabled = rightDrawerState.isClosed,
+                            isRightSide = true,
+                            onOpenDrawer = { scope.launch { rightDrawerState.open() } },
+                        ),
+                ) {
 
                     LaunchedEffect(key) { libraryTabActive.value = (key == "library") }
 
@@ -803,20 +822,6 @@ internal fun UnifiedActivity.UnifiedHub() {
                     val fabStartInset =
                         (20.dp - fabNavInsets.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr))
                             .coerceAtLeast(4.dp)
-
-                    if (drawerState.isClosed) {
-                        DrawerSwipeHotZone(
-                            modifier = Modifier.align(Alignment.CenterStart),
-                            onOpenDrawer = { scope.launch { drawerState.open() } },
-                        )
-                    }
-                    if (rightDrawerState.isClosed) {
-                        DrawerSwipeHotZone(
-                            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 22.dp),
-                            isRightSide = true,
-                            onOpenDrawer = { scope.launch { rightDrawerState.open() } },
-                        )
-                    }
 
                     // Composed after the hot zones so the FAB stays on top for hit-testing.
                     if (key == "library") {
@@ -1005,45 +1010,71 @@ internal fun UnifiedActivity.UnifiedHub() {
     }
 }
 
-@Composable
-internal fun UnifiedActivity.DrawerSwipeHotZone(
-    modifier: Modifier = Modifier,
-    isRightSide: Boolean = false,
+/**
+ * Left/right edge swipe that opens the side drawers.
+ *
+ * This is deliberately a [Modifier] on the content container rather than a full-height overlay
+ * Box: Compose hit-testing stops at the top-most sibling under the finger, so an overlay strip
+ * eats every tap in its band even when it never consumes the event. The right-hand strip used to
+ * sit 22..52dp from the screen edge, which is exactly where the per-tile "⋮" overflow button of
+ * the right-most grid column lives — those taps never reached the button.
+ *
+ * As a parent modifier the pointer events still arrive here (ancestors stay on the hit path), so
+ * drags keep working while taps go to the child that was actually pressed.
+ */
+internal fun Modifier.drawerEdgeSwipe(
+    enabled: Boolean,
+    isRightSide: Boolean,
+    zoneWidth: Dp = if (isRightSide) 30.dp else 40.dp,
+    edgeInset: Dp = if (isRightSide) 22.dp else 0.dp,
+    openThreshold: Dp = 36.dp,
     onOpenDrawer: () -> Unit,
-) {
-    val density = LocalDensity.current
-    val openThresholdPx = with(density) { 36.dp.toPx() }
+): Modifier =
+    this.pointerInput(enabled, isRightSide, zoneWidth, edgeInset, openThreshold) {
+        if (!enabled) return@pointerInput
 
-    Box(
-        modifier =
-            modifier
-                .fillMaxHeight()
-                .width(if (isRightSide) 30.dp else 40.dp)
-                .pointerInput(openThresholdPx, isRightSide) {
-                    var accumulatedDrag = 0f
-                    var opened = false
+        val zonePx = zoneWidth.toPx()
+        val insetPx = edgeInset.toPx()
+        val thresholdPx = openThreshold.toPx()
 
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            accumulatedDrag = 0f
-                            opened = false
-                        },
-                        onHorizontalDrag = { change, dragAmount ->
-                            val delta = if (isRightSide) -dragAmount else dragAmount
-                            if (delta <= 0f || opened) return@detectHorizontalDragGestures
+        awaitEachGesture {
+            // requireUnconsumed = false: a child (a tile, the "⋮" button) may already have taken
+            // the press, and that must not stop us from recognising a drag that starts on it.
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val x = down.position.x
+            val inZone =
+                if (isRightSide) {
+                    x >= size.width - insetPx - zonePx && x <= size.width - insetPx
+                } else {
+                    x <= zonePx
+                }
+            if (!inZone) return@awaitEachGesture
 
-                            accumulatedDrag += delta
-                            change.consume()
+            var accumulatedX = 0f
+            var accumulatedY = 0f
 
-                            if (accumulatedDrag >= openThresholdPx) {
-                                opened = true
-                                onOpenDrawer()
-                            }
-                        },
-                    )
-                },
-    )
-}
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.changedToUpIgnoreConsumed()) break
+                // Someone else (a scrollable list, the carousel) claimed the gesture.
+                if (change.isConsumed) break
+
+                val move = change.positionChange()
+                accumulatedX += if (isRightSide) -move.x else move.x
+                accumulatedY += kotlin.math.abs(move.y)
+
+                // Mostly vertical travel: this is a list scroll, not an edge pull.
+                if (accumulatedY > thresholdPx && accumulatedY > accumulatedX) break
+
+                if (accumulatedX >= thresholdPx) {
+                    change.consume()
+                    onOpenDrawer()
+                    break
+                }
+            }
+        }
+    }
 
 @Composable
 internal fun UnifiedActivity.GlassesSettingsSheet(onDismiss: () -> Unit) {

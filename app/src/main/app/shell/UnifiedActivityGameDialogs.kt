@@ -233,10 +233,12 @@ import kotlin.math.roundToInt
 // Game settings/detail dialogs, split out of UnifiedActivity.kt (behavior-identical).
 
 @Composable
+internal enum class GameSettingsFrameWidth { COMPACT, CONFIRM, WIDE }
+
 internal fun UnifiedActivity.GameSettingsDialogFrame(
     title: String,
     onDismissRequest: () -> Unit,
-    wide: Boolean = false,
+    widthMode: GameSettingsFrameWidth = GameSettingsFrameWidth.COMPACT,
     contentKey: Any? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -260,10 +262,17 @@ internal fun UnifiedActivity.GameSettingsDialogFrame(
             contentAlignment = Alignment.Center,
         ) {
             val widthModifier =
-                if (wide) {
-                    Modifier.widthIn(min = 320.dp, max = (maxWidth - 32.dp).coerceAtMost(560.dp))
-                } else {
-                    Modifier.widthIn(min = 200.dp, max = 280.dp)
+                when (widthMode) {
+                    GameSettingsFrameWidth.WIDE ->
+                        Modifier.widthIn(min = 320.dp, max = (maxWidth - 32.dp).coerceAtMost(560.dp))
+                    // Matches the shared PopupDialog width used everywhere else a
+                    // delete/remove confirmation appears (Components/Repos/Containers:
+                    // widthIn(280-360dp)), so this embedded confirmation doesn't read as a
+                    // visually distinct, narrower dialog from the rest of the app.
+                    GameSettingsFrameWidth.CONFIRM ->
+                        Modifier.widthIn(min = 280.dp, max = 360.dp)
+                    GameSettingsFrameWidth.COMPACT ->
+                        Modifier.widthIn(min = 200.dp, max = 280.dp)
                 }
             val maxContentHeight = (maxHeight - 48.dp).coerceAtLeast(320.dp)
             Surface(
@@ -933,7 +942,12 @@ internal fun UnifiedActivity.GameSettingsDialog(
     GameSettingsDialogFrame(
         title = app.name,
         onDismissRequest = onDismissRequest,
-        wide = currentTab == GameSettingsScreen.CloudSaves,
+        widthMode =
+            when (currentTab) {
+                GameSettingsScreen.CloudSaves -> GameSettingsFrameWidth.WIDE
+                GameSettingsScreen.Shortcut, GameSettingsScreen.Uninstall -> GameSettingsFrameWidth.CONFIRM
+                else -> GameSettingsFrameWidth.COMPACT
+            },
         contentKey = currentTab,
     ) {
         when (currentTab) {
