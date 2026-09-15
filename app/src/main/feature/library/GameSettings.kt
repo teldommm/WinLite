@@ -140,6 +140,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.scale
 import com.winlator.cmod.R
+import com.winlator.cmod.runtime.audio.directaudio.DirectAudioDriver
 import com.winlator.cmod.shared.framegen.FrameGenPreset
 import com.winlator.cmod.shared.theme.GameSettingsStyle
 import com.winlator.cmod.runtime.wine.WineThemeManager
@@ -497,6 +498,7 @@ class GameSettingsStateHolder {
     // Audio
     val audioDriverEntries = mutableStateOf<List<String>>(emptyList())
     val selectedAudioDriver = mutableIntStateOf(0)
+    val directAudioMic = mutableStateOf(false)
     val midiSoundFontEntries = mutableStateOf<List<String>>(emptyList())
     val selectedMidiSoundFont = mutableIntStateOf(0)
 
@@ -1681,6 +1683,37 @@ private fun GeneralSection(
                     onSelected = { state.selectedMidiSoundFont.intValue = it }
                 )
             }
+        }
+    }
+
+    // Only DirectAudio has a capture path; ALSA and PulseAudio cannot record.
+    val audioContext = LocalContext.current
+    val directAudioSelected = com.winlator.cmod.shared.util.StringUtils.parseIdentifier(
+        state.audioDriverEntries.value.getOrNull(state.selectedAudioDriver.intValue) ?: ""
+    ) == DirectAudioDriver.IDENTIFIER
+
+    AnimatedVisibility(
+        visible = directAudioSelected,
+        enter = graphicsCardExpandEnter(),
+        exit = graphicsCardExpandExit()
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SettingSwitch(
+                label = stringResource(R.string.container_config_direct_audio_mic),
+                checked = state.directAudioMic.value,
+                onCheckedChange = { on ->
+                    state.directAudioMic.value = on
+                    if (on) {
+                        DirectAudioDriver.requestMicPermission(audioContext)
+                    }
+                }
+            )
+            Text(
+                stringResource(R.string.container_config_direct_audio_mic_help),
+                color = TextDim,
+                fontSize = 11.sp,
+                lineHeight = 16.sp
+            )
         }
     }
 

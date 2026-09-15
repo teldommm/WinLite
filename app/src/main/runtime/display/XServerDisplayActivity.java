@@ -149,6 +149,7 @@ import com.winlator.cmod.runtime.display.connector.UnixSocketConfig;
 import com.winlator.cmod.runtime.display.environment.ImageFs;
 import com.winlator.cmod.runtime.display.environment.XEnvironment;
 import com.winlator.cmod.feature.stores.steam.SteamClientManager;
+import com.winlator.cmod.runtime.audio.directaudio.DirectAudioDriver;
 import com.winlator.cmod.runtime.display.environment.components.ALSAServerComponent;
 import com.winlator.cmod.runtime.display.environment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.runtime.display.environment.components.NetworkInfoUpdateComponent;
@@ -296,6 +297,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
     private String zinkMode = Container.DEFAULT_ZINK_MODE;
     private HashMap<String, String> graphicsDriverConfig;
     private String audioDriver = Container.DEFAULT_AUDIO_DRIVER;
+    private Boolean directAudioAvailable;
     private String emulator = Container.DEFAULT_EMULATOR;
     private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
     private String dxwrapper = Container.DEFAULT_DXWRAPPER;
@@ -1971,6 +1973,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                         }
                         setupWineSystemFiles();
                         extractGraphicsDriverFiles();
+                        resolveAudioDriver();
                         changeWineAudioDriver();
 
                         try {
@@ -1988,6 +1991,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                     } else {
                         Log.i("XServerDisplayActivity", "Skipping pre-game setup for active background session");
                         applyPreferredRefreshRate();
+                        resolveAudioDriver();
                     }
 
                     try {
@@ -6656,6 +6660,16 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                             pulseOptions
                     )
             );
+        } else if (DirectAudioDriver.INSTANCE.isSelected(audioDriver)) {
+            boolean micRequested = DirectAudioDriver.INSTANCE.isMicEnabled(
+                    getShortcutSetting(
+                            DirectAudioDriver.EXTRA_MIC,
+                            container.getExtra(DirectAudioDriver.EXTRA_MIC)));
+            if (DirectAudioDriver.INSTANCE.shouldExposeMic(this, micRequested)) {
+                envVars.put(DirectAudioDriver.ENV_MIC, "1");
+            }
+            Log.d("XServerDisplayActivity", "DirectAudio: micRequested=" + micRequested +
+                    " micExposed=" + envVars.has(DirectAudioDriver.ENV_MIC));
         }
 
         // Wine cannot enumerate Android network interfaces; Steam treats that as offline.
@@ -11305,6 +11319,26 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         return overrideEnvVars;
     }
 
+    private boolean ensureDirectAudioInstalled() {
+        if (directAudioAvailable != null) return directAudioAvailable;
+        String wineIdentifier =
+                wineInfo != null ? wineInfo.identifier() : container.getWineVersion();
+        directAudioAvailable = DirectAudioDriver.INSTANCE.install(this, imageFs, wineIdentifier);
+        Log.d("XServerDisplayActivity", "DirectAudio install for wine '" + wineIdentifier
+                + "' available=" + directAudioAvailable);
+        return directAudioAvailable;
+    }
+
+    private void resolveAudioDriver() {
+        if (!DirectAudioDriver.INSTANCE.isSelected(audioDriver)) return;
+        if (ensureDirectAudioInstalled()) return;
+        Log.w("XServerDisplayActivity", "DirectAudio is unavailable for this container; falling back to "
+                + Container.DEFAULT_AUDIO_DRIVER + " so mmdevapi keeps a loadable backend");
+        audioDriver = Container.DEFAULT_AUDIO_DRIVER;
+        runOnUiThread(() -> android.widget.Toast.makeText(
+                this, R.string.directaudio_unavailable, android.widget.Toast.LENGTH_LONG).show());
+    }
+
     private void changeWineAudioDriver() {
         if (!audioDriver.equals(container.getExtra("audioDriver"))) {
             File rootDir = imageFs.getRootDir();
@@ -11315,6 +11349,10 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
                 }
                 else if (audioDriver.equals("pulseaudio")) {
                     registryEditor.setStringValue("Software\\Wine\\Drivers", "Audio", "pulse");
+                }
+                else if (DirectAudioDriver.INSTANCE.isSelected(audioDriver)) {
+                    registryEditor.setStringValue("Software\\Wine\\Drivers", "Audio",
+                            DirectAudioDriver.IDENTIFIER);
                 }
             }
             container.putExtra("audioDriver", audioDriver);
