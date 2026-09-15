@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
+import com.winlator.cmod.runtime.wine.WineThemeManager
 import com.winlator.cmod.BuildConfig
 import com.winlator.cmod.R
 import com.winlator.cmod.app.PluviaApp
@@ -665,10 +666,9 @@ class ShortcutSettingsComposeDialog(
         state.desktopThemeEntries.value = desktopThemeArr
         // Desktop theme is stored as compound "THEME,TYPE,COLOR" — extract theme name
         val savedDesktopTheme = getShortcutSetting("desktopTheme", container.getDesktopTheme())
-        val themePart = savedDesktopTheme.split(",").firstOrNull()?.trim() ?: ""
-        // Match case-insensitively: enum is "LIGHT"/"DARK", entries are "Light"/"Dark"
-        val themeIdx = desktopThemeArr.indexOfFirst { it.equals(themePart, ignoreCase = true) }
-        state.selectedDesktopTheme.intValue = if (themeIdx >= 0) themeIdx else 0
+        state.selectedDesktopTheme.intValue =
+            WineThemeManager.ThemeInfo(savedDesktopTheme).theme.ordinal
+                .coerceIn(0, (desktopThemeArr.size - 1).coerceAtLeast(0))
 
         // Show Box64/FEXCore frames based on saved emulator selection immediately,
         // before the async content sync runs
@@ -1342,8 +1342,12 @@ class ShortcutSettingsComposeDialog(
             if (state.desktopThemeEntries.value.isNotEmpty()) {
                 val desktopThemeEntries = state.desktopThemeEntries.value
                 val dtIdx = state.selectedDesktopTheme.intValue
-                val selectedLabel = if (dtIdx in desktopThemeEntries.indices) desktopThemeEntries[dtIdx] else ""
-                val themeName = selectedLabel.uppercase()
+                val themeName =
+                    if (dtIdx in desktopThemeEntries.indices) {
+                        WineThemeManager.Theme.values().getOrNull(dtIdx)?.name ?: "LIGHT"
+                    } else {
+                        "LIGHT"
+                    }
                 // Preserve existing compound value, only replace the theme portion
                 val existing = getShortcutSetting("desktopTheme", container.getDesktopTheme())
                 val parts = existing.split(",").toMutableList()
@@ -1996,74 +2000,51 @@ class ShortcutSettingsComposeDialog(
         state.graphicsDriverVersion.value = config["version"] ?: ""
     }
 
-    private fun loadGraphicsDriverVersions(container: Container = shortcut.container) {
-        val versions = mutableListOf<String>()
-        try {
-            val defaults = context.resources.getStringArray(R.array.wrapper_graphics_driver_version_entries)
-            for (ver in defaults) {
-                try {
-                    if (com.winlator.cmod.runtime.system.GPUInformation.isDriverSupported(ver, context))
-                        versions.add(ver)
-                } catch (e: Throwable) {
-                    Log.w(TAG, "Error checking driver support: $ver", e)
-                }
-            }
-            try {
-                val adrenoManager = com.winlator.cmod.runtime.content.AdrenotoolsManager(context)
-                val installed = adrenoManager.enumarateInstalledDrivers()
-                if (installed != null) versions.addAll(installed)
-            } catch (e: Throwable) {
-                Log.w(TAG, "Error loading Adrenotools drivers", e)
-            }
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error loading wrapper versions", e)
-        }
-        if (versions.isEmpty()) versions.add("System")
+    private var extensionsRequest = 0
 
-        state.gfxDriverVersionEntries.value = versions
-
+    private fun savedGraphicsDriverConfig(container: Container = shortcut.container): Map<String, String> {
         val configStr = if (shouldUseShortcutOverrides(container))
             getShortcutSetting("graphicsDriverConfig", container.getGraphicsDriverConfig())
         else
             container.getGraphicsDriverConfig()
-        val config = GraphicsDriverConfigUtils.parseGraphicsDriverConfig(configStr)
-        val initialVersion = config["version"] ?: ""
-        if (initialVersion.isNotEmpty()) {
-            val idx = versions.indexOfFirst { it.equals(initialVersion, ignoreCase = true) }
-            if (idx >= 0) state.gfxSelectedDriverVersion.intValue = idx
-        }
+        return GraphicsDriverConfigUtils.parseGraphicsDriverConfig(configStr)
+    }
 
-        loadExtensionsForVersion(state.gfxSelectedDriverVersion.intValue)
+    private fun loadGraphicsDriverVersions(container: Container = shortcut.container) {
+        val savedVersion = savedGraphicsDriverConfig(container)["version"] ?: ""
+        state.gfxDriverVersionEntries.value = listOf(if (savedVersion.isNotEmpty()) savedVersion else "System")
+        state.gfxSelectedDriverVersion.intValue = 0
+        Thread({
+            val versions = com.winlator.cmod.runtime.system.GraphicsDriverCatalog.supportedVersions(context)
+            activity.runOnUiThread {
+                state.gfxDriverVersionEntries.value = versions
+                val idx = versions.indexOfFirst { it.equals(savedVersion, ignoreCase = true) }
+                state.gfxSelectedDriverVersion.intValue = if (idx >= 0) idx else 0
+                loadExtensionsForVersion(state.gfxSelectedDriverVersion.intValue)
+            }
+        }, "GraphicsDriverProbe").start()
     }
 
     private fun loadExtensionsForVersion(versionIndex: Int) {
-        val versions = state.gfxDriverVersionEntries.value
-        val version = versions.getOrElse(versionIndex) { return }
-        try {
-            val extensions = com.winlator.cmod.runtime.system.GPUInformation.enumerateExtensions(version, context)
-            if (extensions != null) {
-                state.gfxAvailableExtensions.value = extensions.toList()
-
-                // On initial load, set blacklisted from config; on version change, clear blacklist
-                val configStr = getShortcutSetting("graphicsDriverConfig", shortcut.container.getGraphicsDriverConfig())
-                val config = GraphicsDriverConfigUtils.parseGraphicsDriverConfig(configStr)
-                val savedVersion = config["version"] ?: ""
-                if (version == savedVersion) {
-                    val bl = config["blacklistedExtensions"] ?: ""
-                    state.gfxBlacklistedExtensions.value = if (bl.isNotEmpty()) bl.split(",").toSet() else emptySet()
-                } else {
-                    state.gfxBlacklistedExtensions.value = emptySet()
-                }
-            } else {
-                state.gfxAvailableExtensions.value = emptyList()
-                state.gfxBlacklistedExtensions.value = emptySet()
+        val version = state.gfxDriverVersionEntries.value.getOrElse(versionIndex) { return }
+        val request = ++extensionsRequest
+        Thread({
+            val extensions = com.winlator.cmod.runtime.system.GraphicsDriverCatalog.extensions(context, version)
+            activity.runOnUiThread {
+                if (request != extensionsRequest) return@runOnUiThread
+                state.gfxAvailableExtensions.value = extensions
+                val config = savedGraphicsDriverConfig()
+                state.gfxBlacklistedExtensions.value =
+                    if (version == (config["version"] ?: "")) {
+                        val bl = config["blacklistedExtensions"] ?: ""
+                        if (bl.isNotEmpty()) bl.split(",").toSet() else emptySet()
+                    } else {
+                        emptySet()
+                    }
             }
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error loading extensions for $version", e)
-            state.gfxAvailableExtensions.value = emptyList()
-            state.gfxBlacklistedExtensions.value = emptySet()
-        }
+        }, "GraphicsDriverExtensions").start()
     }
+
 
     private fun loadDxvkConfigState(container: Container = shortcut.container) {
         val configStr = if (shouldUseShortcutOverrides(container))
@@ -2272,9 +2253,9 @@ class ShortcutSettingsComposeDialog(
         // Desktop theme is stored as compound "THEME,TYPE,COLOR".
         val desktopThemeArr = state.desktopThemeEntries.value
         if (desktopThemeArr.isNotEmpty()) {
-            val themePart = container.getDesktopTheme().split(",").firstOrNull()?.trim() ?: ""
-            val themeIdx = desktopThemeArr.indexOfFirst { it.equals(themePart, ignoreCase = true) }
-            state.selectedDesktopTheme.intValue = if (themeIdx >= 0) themeIdx else 0
+            state.selectedDesktopTheme.intValue =
+                WineThemeManager.ThemeInfo(container.getDesktopTheme()).theme.ordinal
+                    .coerceIn(0, desktopThemeArr.size - 1)
         }
 
         val directX = mutableListOf<WinComponentItem>()

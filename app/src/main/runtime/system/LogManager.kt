@@ -10,6 +10,7 @@ object LogManager {
     private const val TAG = "LogManager"
     private var logcatProcess: Process? = null
     private var appLogProcess: Process? = null
+    private var systemLogProcess: Process? = null
 
     @JvmStatic
     fun getLogsDir(context: Context): File {
@@ -107,15 +108,36 @@ object LogManager {
                     arrayOf("logcat", "-f", logFile.absolutePath, "-r", "8192", "-n", "2", "--pid=$pid", "*:W"),
                 )
             closeProcessStdin(appLogProcess)
+            startSystemLogging(context)
             Log.i(TAG, "Application debug logging started (PID=$pid)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start application logging: ${e.message}")
         }
     }
 
+    private fun startSystemLogging(context: Context) {
+        val logFile = File(getLogsDir(context), "system.log")
+        try {
+            systemLogProcess?.let(::destroyProcess)
+            systemLogProcess =
+                Runtime.getRuntime().exec(
+                    arrayOf(
+                        "logcat", "-f", logFile.absolutePath, "-r", "2048", "-n", "2",
+                        "ActivityManager:E", "AndroidRuntime:E", "InputDispatcher:E",
+                        "lowmemorykiller:I", "DEBUG:V", "libc:F", "*:S",
+                    ),
+                )
+            closeProcessStdin(systemLogProcess)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start system logging: ${e.message}")
+        }
+    }
+
     @JvmStatic
     fun stopAppLogging() {
         try {
+            systemLogProcess?.let(::destroyProcess)
+            systemLogProcess = null
             appLogProcess?.let(::destroyProcess)
             appLogProcess = null
         } catch (e: Exception) {
