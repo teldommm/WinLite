@@ -1905,7 +1905,7 @@ class ShortcutSettingsComposeDialog(
         val bcnEmulationType = state.gfxBcnEmulationTypeEntries.value.getOrElse(state.gfxSelectedBcnEmulationType.intValue) { "compute" }
         val bcnEmulationCache = state.gfxBcnEmulationCacheEntries.value.getOrElse(state.gfxSelectedBcnEmulationCache.intValue) { "0" }
         val transcoder = state.gfxTranscoderEntries.value.getOrElse(state.gfxSelectedTranscoder.intValue) { "cpu" }
-        val quality = state.gfxQualityEntries.value.getOrElse(state.gfxSelectedQuality.intValue) { "low" }
+        val astcTranscoding = state.gfxAstcTranscodingValues.value.getOrElse(state.gfxSelectedAstcTranscoding.intValue) { "off" }
 
         return "vulkanVersion=$vulkanVersion;version=$version;blacklistedExtensions=$blacklisted;" +
                 "maxDeviceMemory=$maxDeviceMemory;presentMode=$presentMode;syncFrame=$syncFrame;" +
@@ -1913,7 +1913,7 @@ class ShortcutSettingsComposeDialog(
                 "bcnEmulation=$bcnEmulation;bcnEmulationType=$bcnEmulationType;" +
                 "bcnEmulationCache=$bcnEmulationCache;gpuName=$gpuName;" +
                 "compositorPresentMode=$compositorPresentMode;" +
-                "transcoder=$transcoder;quality=$quality"
+                "transcoder=$transcoder;astcTranscoding=$astcTranscoding"
     }
 
     private fun buildDxvkConfigFromState(): String {
@@ -1955,7 +1955,8 @@ class ShortcutSettingsComposeDialog(
         state.gfxBcnEmulationTypeEntries.value = context.resources.getStringArray(R.array.bcn_emulation_type_entries).toList()
         state.gfxBcnEmulationCacheEntries.value = context.resources.getStringArray(R.array.bcn_emulation_cache_entries).toList()
         state.gfxTranscoderEntries.value = context.resources.getStringArray(R.array.wrapper_transcoder_entries).toList()
-        state.gfxQualityEntries.value = context.resources.getStringArray(R.array.wrapper_quality_entries).toList()
+        state.gfxAstcTranscodingEntries.value = context.resources.getStringArray(R.array.wrapper_astc_transcoding_entries).toList()
+        state.gfxAstcTranscodingValues.value = context.resources.getStringArray(R.array.wrapper_astc_transcoding_values).toList()
 
         val gpuNames = mutableListOf("Device")
         try {
@@ -1984,7 +1985,7 @@ class ShortcutSettingsComposeDialog(
         selectByValue(state.gfxBcnEmulationTypeEntries.value, config["bcnEmulationType"] ?: "compute", state.gfxSelectedBcnEmulationType)
         selectByValue(state.gfxBcnEmulationCacheEntries.value, config["bcnEmulationCache"] ?: "0", state.gfxSelectedBcnEmulationCache)
         selectByValue(state.gfxTranscoderEntries.value, config["transcoder"] ?: "cpu", state.gfxSelectedTranscoder)
-        selectByValue(state.gfxQualityEntries.value, config["quality"] ?: "low", state.gfxSelectedQuality)
+        selectByValue(state.gfxAstcTranscodingValues.value, config["astcTranscoding"] ?: "off", state.gfxSelectedAstcTranscoding)
 
         state.gfxSyncFrame.value = config["syncFrame"] == "1"
         state.gfxDisablePresentWait.value = config["disablePresentWait"] == "1"

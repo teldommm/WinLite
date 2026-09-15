@@ -5822,6 +5822,13 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         else if (!hasFocus) {
             releasePointerCapture();
         }
+
+        if (!hasFocus) {
+            if (touchpadView != null) touchpadView.resetInputState();
+            if (inputControlsView != null) inputControlsView.cancelActiveTouches();
+        } else if (winHandler != null) {
+            winHandler.resyncGamepadState();
+        }
     }
 
     @Override
@@ -7994,6 +8001,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
 
         inputControlsView.invalidate();
         if (winHandler != null) {
+            winHandler.representVirtualGamepad();
             winHandler.sendGamepadState();
         }
         startTouchscreenTimeout();
@@ -8220,8 +8228,17 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
         if (wantGamenative) {
             String transcoder = graphicsDriverConfig.get("transcoder");
             envVars.put("WRAPPER_BCN_GPU", "gpu".equalsIgnoreCase(transcoder) ? "1" : "0");
-            String wrapperQuality = graphicsDriverConfig.get("quality");
-            envVars.put("WRAPPER_ASTC_BLOCK", "high".equalsIgnoreCase(wrapperQuality) ? "4x4" : "8x8");
+
+            String astcTranscoding = graphicsDriverConfig.get("astcTranscoding");
+            if (isSupportedAstcBlockSize(astcTranscoding)) {
+                envVars.put("WRAPPER_BCN_ASTC", "1");
+                envVars.put("WRAPPER_ASTC_BLOCK", astcTranscoding);
+                Log.i("XServerDisplayActivity", "ASTC transcoding on: block size " + astcTranscoding);
+            }
+            else {
+                envVars.put("WRAPPER_BCN_ASTC", "0");
+                Log.i("XServerDisplayActivity", "ASTC transcoding off");
+            }
         }
 
         String bcnEmulationCache = graphicsDriverConfig.get("bcnEmulationCache");
@@ -8229,17 +8246,13 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
 
     }
 
+    private static boolean isSupportedAstcBlockSize(String blockSize) {
+        return "4x4".equals(blockSize) || "8x8".equals(blockSize);
+    }
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
         handleDrawerEdgeSwipe(event);
-
-        // Drop paused input after the drawer edge-swipe check to avoid ANRs.
-        if (isInputSuspended() && (drawerStateHolder == null ||
-                (!drawerStateHolder.isDrawerOpen() && !drawerStateHolder.isPaneOpen()))) {
-
-            return true;
-        }
-
         return super.dispatchTouchEvent(event);
     }
 
@@ -8340,11 +8353,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             }
             return true;
         }
-        if (isInputSuspended() && (drawerStateHolder == null ||
-                (!drawerStateHolder.isDrawerOpen() && !drawerStateHolder.isPaneOpen()))) {
-
-            return true;
-        }
 
         boolean handledByWinHandler = false;
         boolean handledByTouchpadView = false;
@@ -8432,7 +8440,6 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity
             }
             return true;
         }
-        if (isInputSuspended()) return super.dispatchKeyEvent(event);
         if (ExternalController.isGameController(event.getDevice())) {
             cancelMousePointerTimeout();
             if (touchpadView != null) {

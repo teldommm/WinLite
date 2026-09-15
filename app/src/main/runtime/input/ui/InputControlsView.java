@@ -86,6 +86,7 @@ public class InputControlsView extends View {
 
   private SharedPreferences preferences;
   private final SparseArray<ControlElement> activeTouchElements = new SparseArray<>();
+  private final Set<Binding> gestureHeldBindings = new HashSet<>();
 
   private ControlElement stickElement;
 
@@ -485,14 +486,29 @@ public class InputControlsView extends View {
   }
 
   private void releaseActiveTouchElements() {
+    boolean released = false;
     for (int i = 0; i < activeTouchElements.size(); i++) {
       int activePointerId = activeTouchElements.keyAt(i);
       ControlElement activeElement = activeTouchElements.valueAt(i);
       if (activeElement != null) {
         activeElement.handleTouchUp(activePointerId);
+        released = true;
       }
     }
     activeTouchElements.clear();
+    if (stickElement != null) released |= stickElement.forceRelease();
+    ControlsProfile activeProfile = profile;
+    if (activeProfile != null) {
+      for (ControlElement element : activeProfile.getElements()) {
+        released |= element.forceRelease();
+        released |= element.releaseToggleLatch();
+      }
+      activeProfile.resetGamepadState();
+    }
+    if (released) {
+      WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
+      if (winHandler != null) winHandler.sendGamepadState();
+    }
   }
 
   // Release captures whose pointer is no longer reported (missed UP/CANCEL).
@@ -500,21 +516,63 @@ public class InputControlsView extends View {
     boolean removedAny = false;
     for (int i = activeTouchElements.size() - 1; i >= 0; i--) {
       int capturedId = activeTouchElements.keyAt(i);
-      boolean stillDown = false;
-      for (int p = 0, count = event.getPointerCount(); p < count; p++) {
-        if (event.getPointerId(p) == capturedId) {
-          stillDown = true;
-          break;
-        }
-      }
-      if (!stillDown) {
+      if (!isPointerDown(event, capturedId)) {
         ControlElement element = activeTouchElements.valueAt(i);
         if (element != null) element.handleTouchUp(capturedId);
         activeTouchElements.removeAt(i);
         removedAny = true;
       }
     }
-    if (removedAny) syncCapturedPointers();
+    if (stickElement != null && isLatchedToMissingPointer(stickElement, event)) {
+      removedAny |= stickElement.forceRelease();
+    }
+    ControlsProfile activeProfile = profile;
+    if (activeProfile != null) {
+      for (ControlElement element : activeProfile.getElements()) {
+        if (isLatchedToMissingPointer(element, event)) removedAny |= element.forceRelease();
+      }
+    }
+    boolean reconciled = reconcileIdleGamepadState();
+    if (removedAny || reconciled) {
+      WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
+      if (winHandler != null) winHandler.sendGamepadState();
+    }
+    if (removedAny) {
+      syncCapturedPointers();
+    }
+  }
+
+  private boolean releaseLatchedPointer(int pointerId) {
+    boolean released = false;
+    if (stickElement != null && stickElement.getCurrentPointerId() == pointerId) {
+      released |= stickElement.forceRelease();
+    }
+    ControlsProfile activeProfile = profile;
+    if (activeProfile != null) {
+      for (ControlElement element : activeProfile.getElements()) {
+        if (element.getCurrentPointerId() == pointerId) released |= element.forceRelease();
+      }
+    }
+    activeTouchElements.remove(pointerId);
+    return released;
+  }
+
+  private static boolean isLatchedToMissingPointer(ControlElement element, MotionEvent event) {
+    int latchedId = element.getCurrentPointerId();
+    return latchedId != -1 && !isPointerDown(event, latchedId);
+  }
+
+  private static boolean isPointerDown(MotionEvent event, int pointerId) {
+    int action = event.getActionMasked();
+    if (action == MotionEvent.ACTION_CANCEL) return false;
+    if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP)
+        && event.getPointerId(event.getActionIndex()) == pointerId) {
+      return false;
+    }
+    for (int p = 0, count = event.getPointerCount(); p < count; p++) {
+      if (event.getPointerId(p) == pointerId) return true;
+    }
+    return false;
   }
 
   public void cancelContinuousMouseMove() {
@@ -711,6 +769,7 @@ public class InputControlsView extends View {
 
   @Override
   public boolean onGenericMotionEvent(MotionEvent event) {
+    if (isInputSuspended()) return true;
     if (!editMode && profile != null) {
       ExternalController controller = profile.getController(event.getDeviceId());
 
@@ -743,7 +802,10 @@ public class InputControlsView extends View {
 
   @Override
   public boolean onTouchEvent(MotionEvent event) {
-    if (getContext() instanceof XServerDisplayActivity && ((XServerDisplayActivity)getContext()).isInputSuspended()) return true;
+    if (isInputSuspended()) {
+      dispatchUnhandledTouch(event);
+      return true;
+    }
 
     boolean hapticsEnabled = preferences.getBoolean("touchscreen_haptics_enabled", false);
 
@@ -807,6 +869,8 @@ public class InputControlsView extends View {
             float x = event.getX(actionIndex);
             float y = event.getY(actionIndex);
 
+            boolean staleReleased = releaseLatchedPointer(pointerId);
+
             if (stickElement != null && stickElement.handleTouchDown(pointerId, x, y)) {
               eventHandled = true;
               activeTouchElements.put(pointerId, stickElement);
@@ -822,6 +886,10 @@ public class InputControlsView extends View {
                   break;
                 }
               }
+            }
+            if (eventHandled || staleReleased) {
+              WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
+              if (winHandler != null) winHandler.sendGamepadState();
             }
             syncCapturedPointers();
             if (!eventHandled) dispatchUnhandledTouch(event);
@@ -991,7 +1059,7 @@ public class InputControlsView extends View {
   }
 
   public boolean onKeyEvent(KeyEvent event) {
-    if (getContext() instanceof XServerDisplayActivity && ((XServerDisplayActivity)getContext()).isInputSuspended()) return false;
+    if (isInputSuspended()) return false;
     if (profile != null && event.getRepeatCount() == 0) {
       ExternalController controller = profile.getController(event.getDeviceId());
       if (controller != null) {
@@ -1010,6 +1078,42 @@ public class InputControlsView extends View {
       }
     }
     return false;
+  }
+
+  public void handleGestureInputEvent(Binding binding, boolean isActionDown) {
+    if (isActionDown) gestureHeldBindings.add(binding);
+    else gestureHeldBindings.remove(binding);
+    handleInputEvent(null, binding, isActionDown, 0f, false);
+  }
+
+  private boolean reconcileIdleGamepadState() {
+    ControlsProfile activeProfile = profile;
+    if (activeProfile == null || activeProfile.isGamepadStateNeutral()) return false;
+    if (activeTouchElements.size() > 0 || !gestureHeldBindings.isEmpty()) return false;
+    if (stickElement != null && !stickElement.isIdle()) return false;
+    for (ControlElement element : activeProfile.getElements()) {
+      if (!element.isIdle()) return false;
+    }
+    activeProfile.resetGamepadState();
+    return true;
+  }
+
+  public void handleGestureInputEvent(Binding binding, boolean isActionDown) {
+    if (isActionDown) gestureHeldBindings.add(binding);
+    else gestureHeldBindings.remove(binding);
+    handleInputEvent(null, binding, isActionDown, 0f, false);
+  }
+
+  private boolean reconcileIdleGamepadState() {
+    ControlsProfile activeProfile = profile;
+    if (activeProfile == null || activeProfile.isGamepadStateNeutral()) return false;
+    if (activeTouchElements.size() > 0 || !gestureHeldBindings.isEmpty()) return false;
+    if (stickElement != null && !stickElement.isIdle()) return false;
+    for (ControlElement element : activeProfile.getElements()) {
+      if (!element.isIdle()) return false;
+    }
+    activeProfile.resetGamepadState();
+    return true;
   }
 
   public void handleInputEvent(Binding binding, boolean isActionDown) {
@@ -1164,5 +1268,9 @@ public class InputControlsView extends View {
       }
     }
     return icons[id];
+  }
+
+  private boolean isInputSuspended() {
+    return getContext() instanceof XServerDisplayActivity && ((XServerDisplayActivity)getContext()).isInputSuspended();
   }
 }
