@@ -232,9 +232,9 @@ import kotlin.math.roundToInt
 
 // Game settings/detail dialogs, split out of UnifiedActivity.kt (behavior-identical).
 
-@Composable
 internal enum class GameSettingsFrameWidth { COMPACT, CONFIRM, WIDE }
 
+@Composable
 internal fun UnifiedActivity.GameSettingsDialogFrame(
     title: String,
     onDismissRequest: () -> Unit,

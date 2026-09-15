@@ -155,10 +155,11 @@ object LogManager {
                 java.util.concurrent.TimeUnit.MILLISECONDS,
             )
             if (!finished) {
-                logW(TAG, null) {
+                Log.w(
+                    TAG,
                     "logcat command ${command.joinToString(" ")} did not finish in " +
-                        "${LOGCAT_COMMAND_TIMEOUT_MS}ms; abandoning it"
-                }
+                        "${LOGCAT_COMMAND_TIMEOUT_MS}ms; abandoning it",
+                )
             }
         } finally {
             destroyProcess(process)

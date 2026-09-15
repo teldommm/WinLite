@@ -352,14 +352,6 @@ class TouchpadView(
         return true
     }
 
-    fun resetInputState() {
-        longPressHandler.removeCallbacks(longPressRunnable)
-        longPressActive = false
-        for (i in 0 until 4) fingers[i] = null
-        numFingers = 0
-        scrolling = false
-    }
-
     private fun handleTouchscreenEvent(event: MotionEvent): Boolean {
         if (isInputSuspended) return true
         val action = event.actionMasked
