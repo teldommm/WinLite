@@ -29,6 +29,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -80,17 +87,70 @@ val knownEnvironmentVariables = listOf(
     EnvVariableSpec("WINEDLLOVERRIDES", EnvValueKind.TEXT)
 )
 
+// Storage format (EnvVars): space-separated NAME=value tokens with no quoting, so neither names
+// nor values may contain whitespace, and a name may not contain '='.
+private val ENV_NAME_REGEX = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+
+fun isValidEnvironmentVariableName(name: String): Boolean = ENV_NAME_REGEX.matches(name)
+
+private fun stripWhitespace(text: String): String = text.filterNot(Char::isWhitespace)
+
 fun parseEnvironmentVariables(raw: String): List<EditableEnvVariable> {
     if (raw.isBlank()) return emptyList()
-    return raw.split(' ').mapNotNull { token ->
+    val result = LinkedHashMap<String, String>()
+    raw.trim().split(Regex("\\s+")).forEach { token ->
         val split = token.indexOf('=')
-        if (split <= 0) null else EditableEnvVariable(token.substring(0, split), token.substring(split + 1))
+        if (split > 0) result[token.substring(0, split)] = token.substring(split + 1)
     }
+    return result.map { (name, value) -> EditableEnvVariable(name, value) }
 }
 
 fun serializeEnvironmentVariables(rows: List<EditableEnvVariable>): String = rows
-    .filter { it.name.isNotBlank() }
-    .joinToString(" ") { "${it.name.trim().replace(" ", "")}=${it.value.trim().replace(" ", "")}" }
+    .map { EditableEnvVariable(stripWhitespace(it.name), stripWhitespace(it.value)) }
+    .filter { isValidEnvironmentVariableName(it.name) }
+    .distinctBy { it.name }
+    .joinToString(" ") { "${it.name}=${it.value}" }
+
+private fun specFor(name: String): EnvVariableSpec? = knownEnvironmentVariables.firstOrNull { it.name == name }
+
+private fun defaultValueFor(spec: EnvVariableSpec?): String = when (spec?.kind) {
+    EnvValueKind.CHECKBOX, EnvValueKind.SELECT -> spec.options.firstOrNull().orEmpty()
+    else -> ""
+}
+
+/** Result of parsing what was typed/pasted into the custom-name field. */
+private data class CustomInput(
+    val entries: List<EditableEnvVariable>,
+    val invalid: List<String>,
+    val bulk: Boolean
+)
+
+// "NAME" -> single entry (value comes from the value field).
+// Anything containing '=' is treated as pasted pairs: "A=1 B=2", one per line, "export A=1",
+// values wrapped in matching quotes are unwrapped.
+private fun parseCustomInput(nameField: String, valueField: String): CustomInput {
+    val text = nameField.trim()
+    if (text.isEmpty()) return CustomInput(emptyList(), emptyList(), false)
+    if (!text.contains('=')) {
+        val name = stripWhitespace(text)
+        return if (isValidEnvironmentVariableName(name)) {
+            CustomInput(listOf(EditableEnvVariable(name, stripWhitespace(valueField))), emptyList(), false)
+        } else CustomInput(emptyList(), listOf(name), false)
+    }
+    val entries = LinkedHashMap<String, String>()
+    val invalid = ArrayList<String>()
+    text.split(Regex("\\s+")).filter { it.isNotEmpty() && it != "export" }.forEach { token ->
+        val split = token.indexOf('=')
+        val name = if (split > 0) token.substring(0, split) else ""
+        if (!isValidEnvironmentVariableName(name)) { invalid.add(token); return@forEach }
+        var value = token.substring(split + 1)
+        if (value.length >= 2 && (value.first() == '"' || value.first() == '\'') && value.last() == value.first()) {
+            value = value.substring(1, value.length - 1)
+        }
+        entries[name] = value
+    }
+    return CustomInput(entries.map { (n, v) -> EditableEnvVariable(n, v) }, invalid, true)
+}
 
 @Composable
 fun EnvironmentVariablesEditor(
@@ -122,38 +182,50 @@ fun EnvironmentVariablesEditor(
         } else {
             SettingsCard {
                 rows.forEachIndexed { index, row ->
-                    EnvironmentVariableRow(
-                        row = row,
-                        onValue = { newValue ->
-                            if (index in rows.indices) {
-                                rows[index] = row.copy(value = newValue)
-                                commit()
+                    // Keyed by name so text-field state follows its row when another row is removed.
+                    key(row.name) {
+                        EnvironmentVariableRow(
+                            row = row,
+                            onValue = { newValue ->
+                                val at = rows.indexOfFirst { it.name == row.name }
+                                if (at >= 0) {
+                                    rows[at] = rows[at].copy(value = newValue)
+                                    commit()
+                                }
+                            },
+                            onRemove = {
+                                val at = rows.indexOfFirst { it.name == row.name }
+                                if (at >= 0) {
+                                    rows.removeAt(at)
+                                    commit()
+                                }
                             }
-                        },
-                        onRemove = {
-                            if (index in rows.indices) {
-                                rows.removeAt(index)
-                                commit()
-                            }
-                        }
-                    )
+                        )
+                    }
                     if (index != rows.lastIndex) SettingsDivider()
                 }
             }
         }
-        OutlinedButton(onClick = { addOpen = true }, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Outlined.Add, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.size(7.dp))
+        Button(
+            onClick = { addOpen = true },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
+        ) {
+            Icon(Icons.Outlined.Add, null)
+            Spacer(Modifier.width(7.dp))
             Text("Add variable")
         }
     }
 
     if (addOpen) {
         AddEnvironmentVariableDialog(
-            existing = rows.map { it.name }.toSet(),
+            existing = rows.associate { it.name to it.value },
             onDismiss = { addOpen = false },
-            onAdd = { name, initial ->
-                rows.add(EditableEnvVariable(name, initial))
+            onAdd = { added ->
+                added.forEach { entry ->
+                    val at = rows.indexOfFirst { it.name == entry.name }
+                    if (at >= 0) rows[at] = entry else rows.add(entry)
+                }
                 commit()
                 addOpen = false
             }
@@ -167,35 +239,67 @@ private fun EnvironmentVariableRow(
     onValue: (String) -> Unit,
     onRemove: () -> Unit
 ) {
-    val spec = knownEnvironmentVariables.firstOrNull { it.name == row.name }
-        ?: EnvVariableSpec(row.name, EnvValueKind.TEXT)
+    val known = specFor(row.name)
+    val spec = known ?: EnvVariableSpec(row.name, EnvValueKind.TEXT)
     Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         Row(
             Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(row.name, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+            Text(
+                row.name,
+                modifier = Modifier.weight(1f, fill = false),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (known == null) {
+                Spacer(Modifier.width(8.dp))
+                CustomTag()
+            }
+            Spacer(Modifier.weight(1f))
             IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, "Remove") }
         }
-        when (spec.kind) {
-            EnvValueKind.CHECKBOX -> {
-                val off = spec.options.getOrElse(0) { "0" }
-                val on = spec.options.getOrElse(1) { "1" }
-                SettingToggle(
-                    label = if (row.value == on) on else off,
-                    checked = row.value == on,
-                    onChanged = { onValue(if (it) on else off) }
-                )
-            }
-            EnvValueKind.SELECT -> SettingChoice(
-                label = "Value",
-                selected = row.value.ifBlank { spec.options.firstOrNull().orEmpty() },
-                entries = spec.options
-            ) { onValue(it) }
-            EnvValueKind.MULTI -> MultiEnvironmentChoice(spec.options, row.value, onValue)
-            EnvValueKind.NUMBER -> SettingText("Value", row.value) { onValue(it.filter(Char::isDigit)) }
-            EnvValueKind.TEXT -> SettingText("Value", row.value, onChanged = onValue)
+        EnvValueEditor(spec, row.value, onValue)
+    }
+}
+
+@Composable
+private fun CustomTag() {
+    Surface(
+        shape = WinZShapes.Small,
+        color = controlAccentColor().copy(alpha = 0.16f)
+    ) {
+        Text(
+            "Custom",
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = controlAccentColor()
+        )
+    }
+}
+
+/** Value editor matching the variable's kind; shared by the list rows and the add dialog. */
+@Composable
+private fun EnvValueEditor(spec: EnvVariableSpec, value: String, onValue: (String) -> Unit) {
+    when (spec.kind) {
+        EnvValueKind.CHECKBOX -> {
+            val off = spec.options.getOrElse(0) { "0" }
+            val on = spec.options.getOrElse(1) { "1" }
+            SettingToggle(
+                label = if (value == on) on else off,
+                checked = value == on,
+                onChanged = { onValue(if (it) on else off) }
+            )
         }
+        EnvValueKind.SELECT -> SettingChoice(
+            label = "Value",
+            selected = value.ifBlank { spec.options.firstOrNull().orEmpty() },
+            entries = spec.options
+        ) { onValue(it) }
+        EnvValueKind.MULTI -> MultiEnvironmentChoice(spec.options, value, onValue)
+        EnvValueKind.NUMBER -> SettingText("Value", value) { onValue(it.filter(Char::isDigit)) }
+        EnvValueKind.TEXT -> SettingText("Value", value) { onValue(stripWhitespace(it)) }
     }
 }
 
@@ -255,26 +359,106 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
     }
 }
 
+private enum class AddMode { PRESET, CUSTOM }
+
 @Composable
 private fun AddEnvironmentVariableDialog(
-    existing: Set<String>,
+    existing: Map<String, String>,
     onDismiss: () -> Unit,
-    onAdd: (String, String) -> Unit
+    onAdd: (List<EditableEnvVariable>) -> Unit
 ) {
-    val available = knownEnvironmentVariables.map { it.name }
-    var name by remember { mutableStateOf(available.firstOrNull().orEmpty()) }
+    val accent = controlAccentColor()
+    val available = remember(existing) { knownEnvironmentVariables.filter { it.name !in existing } }
+    var mode by remember { mutableStateOf(if (available.isEmpty()) AddMode.CUSTOM else AddMode.PRESET) }
+
+    var presetName by remember { mutableStateOf(available.firstOrNull()?.name.orEmpty()) }
+    val presetSpec = available.firstOrNull { it.name == presetName }
+    var presetValue by remember(presetName) { mutableStateOf(defaultValueFor(presetSpec)) }
+
     var customName by remember { mutableStateOf("") }
-    val options = available + "Custom…"
-    val selected = if (name in available) name else "Custom…"
+    var customValue by remember { mutableStateOf("") }
+    val custom = parseCustomInput(customName, customValue)
+    val customSpec = if (!custom.bulk) custom.entries.firstOrNull()?.let { specFor(it.name) } else null
+
+    val toAdd: List<EditableEnvVariable> = when (mode) {
+        AddMode.PRESET -> presetSpec?.let { listOf(EditableEnvVariable(it.name, presetValue)) } ?: emptyList()
+        AddMode.CUSTOM -> if (custom.invalid.isEmpty() || custom.bulk) custom.entries else emptyList()
+    }
+    val replacing = toAdd.count { it.name in existing }
 
     ThemedDialog(onDismissRequest = onDismiss) {
         ThemedDialogTitle("Add environment variable")
-        ThemedDialogScrollBody(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SettingChoice("Variable", selected, options) { picked ->
-                name = if (picked == "Custom…") "" else picked
+        ModeSwitch(mode, presetEnabled = available.isNotEmpty()) { mode = it }
+        Spacer(Modifier.height(10.dp))
+        ThemedDialogScrollBody(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            when (mode) {
+                AddMode.PRESET -> {
+                    SettingChoice("Variable", presetName, available.map { it.name }) { presetName = it }
+                    if (presetSpec != null) EnvValueEditor(presetSpec, presetValue) { presetValue = it }
+                }
+                AddMode.CUSTOM -> {
+                    OutlinedTextField(
+                        value = customName,
+                        onValueChange = { customName = it },
+                        label = { Text("Name or NAME=value") },
+                        placeholder = { Text("DXVK_ASYNC") },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        maxLines = 4,
+                        shape = WinZShapes.Small,
+                        isError = custom.invalid.isNotEmpty() && !custom.bulk,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
+                        supportingText = {
+                            Text(
+                                when {
+                                    custom.bulk -> "Pasted list: ${custom.entries.size} variable(s)" +
+                                        if (custom.invalid.isNotEmpty()) ", ${custom.invalid.size} invalid will be skipped" else ""
+                                    custom.invalid.isNotEmpty() -> "Use letters, digits and _, not starting with a digit"
+                                    customSpec != null -> "Known variable: it will get its own editor"
+                                    else -> "Tip: paste \"A=1 B=2\" or one NAME=value per line to add several"
+                                }
+                            )
+                        }
+                    )
+                    if (!custom.bulk) {
+                        if (customSpec != null) {
+                            // Known name typed by hand: offer the proper editor right away.
+                            val v = customValue.ifEmpty { defaultValueFor(customSpec) }
+                            EnvValueEditor(customSpec, v) { customValue = it }
+                        } else {
+                            OutlinedTextField(
+                                value = customValue,
+                                onValueChange = { customValue = stripWhitespace(it) },
+                                label = { Text("Value") },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                                singleLine = true,
+                                shape = WinZShapes.Small,
+                                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                                supportingText = { Text("Spaces are not allowed") }
+                            )
+                        }
+                    } else if (custom.entries.isNotEmpty()) {
+                        SettingsCard {
+                            custom.entries.forEachIndexed { i, e ->
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 7.dp)) {
+                                    Text(e.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false))
+                                    Text(" = ${e.value}", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                }
+                                if (i != custom.entries.lastIndex) SettingsDivider()
+                            }
+                        }
+                    }
+                }
             }
-            if (selected == "Custom…") {
-                SettingText("Name", customName) { customName = it }
+            if (replacing > 0) {
+                Text(
+                    if (toAdd.size == 1) "Already added: its value will be replaced."
+                    else "$replacing already added: their values will be replaced.",
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -286,19 +470,60 @@ private fun AddEnvironmentVariableDialog(
             ) { Text("Cancel") }
             Button(
                 onClick = {
-                    val finalName = if (selected == "Custom…") customName.trim().replace(" ", "") else name
-                    if (finalName.isNotBlank() && finalName !in existing) {
-                        val spec = knownEnvironmentVariables.firstOrNull { it.name == finalName }
-                        val initial = when (spec?.kind) {
-                            EnvValueKind.CHECKBOX -> spec.options.firstOrNull().orEmpty()
-                            EnvValueKind.SELECT -> spec.options.firstOrNull().orEmpty()
-                            else -> ""
-                        }
-                        onAdd(finalName, initial)
+                    val finalEntries = toAdd.map { e ->
+                        // A known variable added without touching its editor gets the editor's default.
+                        if (e.value.isEmpty()) e.copy(value = defaultValueFor(specFor(e.name))) else e
                     }
+                    onAdd(finalEntries)
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-            ) { Text("Add") }
+                enabled = toAdd.isNotEmpty(),
+                colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color.White)
+            ) {
+                Text(
+                    when {
+                        toAdd.size > 1 -> "Add ${toAdd.size}"
+                        replacing > 0 -> "Replace"
+                        else -> "Add"
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModeSwitch(mode: AddMode, presetEnabled: Boolean, onMode: (AddMode) -> Unit) {
+    val accent = controlAccentColor()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = WinZShapes.Medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, hairlineColor())
+    ) {
+        Row(Modifier.padding(3.dp)) {
+            listOf(AddMode.PRESET to "Preset", AddMode.CUSTOM to "Custom").forEach { (m, label) ->
+                val selected = m == mode
+                val enabled = m != AddMode.PRESET || presetEnabled
+                Surface(
+                    onClick = { onMode(m) },
+                    enabled = enabled,
+                    modifier = Modifier.weight(1f),
+                    shape = WinZShapes.Small,
+                    color = if (selected) accent else Color.Transparent
+                ) {
+                    Box(Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            if (m == AddMode.PRESET && !presetEnabled) "$label (all added)" else label,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = when {
+                                selected -> Color.White
+                                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                else -> MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }
