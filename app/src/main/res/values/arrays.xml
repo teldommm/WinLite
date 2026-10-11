@@ -25,7 +25,7 @@
     <string-array name="graphics_wrapper_entries">
         <item>Wrapper Default</item>
         <item>Wrapper Adreno</item>
-        <item>Wrapper Test</item>
+        <item>Wrapper Legacy</item>
     </string-array>
     <string-array name="wrapper_graphics_driver_version_entries">
         <item>System</item>

@@ -151,16 +151,16 @@ public class Container {
     // graphics_wrapper_entries -> StringUtils.parseIdentifier():
     //   "Wrapper Default" -> "wrapper-default" (stored as "wrapper"),
     //   "Wrapper Adreno"  -> "wrapper-adreno",
-    //   "Wrapper Test"    -> "wrapper-test" (legacy wrapper build).
-    // Anything else (incl. the removed "wrapper-legacy") falls back to the default wrapper.
+    //   "Wrapper Legacy"  -> "wrapper-legacy" (assets/graphics_driver/wrapper_legacy.tzst).
+    // Anything else falls back to the default wrapper.
     public static final String ADRENO_GRAPHICS_WRAPPER = "wrapper-adreno";
-    public static final String TEST_GRAPHICS_WRAPPER = "wrapper-test";
+    public static final String LEGACY_GRAPHICS_WRAPPER = "wrapper-legacy";
 
     public static String normalizeGraphicsWrapper(String graphicsWrapper) {
         if (graphicsWrapper == null) return DEFAULT_GRAPHICS_WRAPPER;
         String id = graphicsWrapper.toLowerCase(java.util.Locale.ENGLISH);
         if (ADRENO_GRAPHICS_WRAPPER.equals(id)) return ADRENO_GRAPHICS_WRAPPER;
-        if (TEST_GRAPHICS_WRAPPER.equals(id)) return TEST_GRAPHICS_WRAPPER;
+        if (LEGACY_GRAPHICS_WRAPPER.equals(id)) return LEGACY_GRAPHICS_WRAPPER;
         return DEFAULT_GRAPHICS_WRAPPER;
     }
 
