@@ -2260,9 +2260,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     static String resolveGraphicsWrapperArchiveName(String graphicsWrapper) {
         // assets/graphics_driver/<name>.tzst; the name is also stored in the ImageFS variant marker.
-        if (Container.ADRENO_GRAPHICS_WRAPPER.equals(graphicsWrapper)) return "wrapper_adreno";
-        if (Container.TEST_GRAPHICS_WRAPPER.equals(graphicsWrapper)) return "wrapper_legacy";
-        return "wrapper_default";
+        return Container.TEST_GRAPHICS_WRAPPER.equals(graphicsWrapper) ? "wrapper-test" : "wrapper";
     }
 
     private String getSelectedOpenGLDriver() {
@@ -2346,6 +2344,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    // MESA_VK_WSI_DEBUG is a comma separated flag list: "Disable DRI3" (sw) and
+    // "Sync Frame" (forcesync) must not overwrite each other.
+    private void appendWsiDebugFlag(String flag) {
+        String current = envVars.get("MESA_VK_WSI_DEBUG");
+        if (current.isEmpty()) {
+            envVars.put("MESA_VK_WSI_DEBUG", flag);
+            return;
+        }
+        for (String existing : current.split(",")) {
+            if (existing.trim().equals(flag)) return;
+        }
+        envVars.put("MESA_VK_WSI_DEBUG", current + "," + flag);
+    }
+
     private void extractGraphicsDriverFiles() {
         String adrenoToolsDriverId = graphicsDriverConfig.get("version");
 
@@ -2366,7 +2378,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         boolean useDRI3 = preferences.getBoolean("use_dri3", true);
         if (!useDRI3) {
-            envVars.put("MESA_VK_WSI_DEBUG", "sw");
+            appendWsiDebugFlag("sw");
         }
 
         envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir() + "/vulkan/icd.d/wrapper_icd.aarch64.json");
@@ -2378,10 +2390,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         File wrapperVariantMarker = new File(rootDir, "usr/lib/.winlator-graphics-wrapper-variant");
         String wrapperArchive = resolveGraphicsWrapperArchiveName(graphicsWrapper);
         boolean installCommonRuntime = firstTimeBoot || !graphicsRuntimeMarker.isFile();
-        // Markers written by older builds ("wrapper", "wrapper-test") or a missing marker never
-        // match the current archive names, so the updated wrapper libs get reinstalled once.
+        // ImageFS that predates variant selection always carries the current wrapper.
         String installedWrapper = wrapperVariantMarker.isFile()
-                ? FileUtils.readString(wrapperVariantMarker).trim() : "";
+                ? FileUtils.readString(wrapperVariantMarker).trim() : "wrapper";
         boolean wrapperChanged = !wrapperArchive.equals(installedWrapper);
         if (installCommonRuntime || wrapperChanged) {
             Log.d("XServerDisplayActivity", "Installing graphics wrapper " + wrapperArchive);
@@ -2435,7 +2446,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         String syncFrame = graphicsDriverConfig.get("syncFrame");
         if (syncFrame.equals("1"))
-            envVars.put("MESA_VK_WSI_DEBUG", "forcesync");
+            appendWsiDebugFlag("forcesync");
 
         String disablePresentWait = graphicsDriverConfig.get("disablePresentWait");
         envVars.put("WRAPPER_DISABLE_PRESENT_WAIT", disablePresentWait);
