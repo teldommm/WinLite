@@ -102,6 +102,8 @@ import com.winlator.cmod.ui.settings.CpuSelectorRow
 import com.winlator.cmod.ui.settings.DriverOption
 import com.winlator.cmod.ui.settings.DxvkAsyncMode
 import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
+import com.winlator.cmod.ui.settings.VulkanExtensionsDialog
+import com.winlator.cmod.ui.settings.parseExtensionBlacklist
 import com.winlator.cmod.ui.settings.DDrawWrapperChoice
 import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingDriverChoice
@@ -1237,7 +1239,7 @@ private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blackli
         SettingText("Disabled Vulkan Extensions", blacklisted, 2) { onChanged(it.replace(" ", "")) }
         return
     }
-    val disabled = blacklisted.split(',').map(String::trim).filter(String::isNotBlank).toSet()
+    val disabled = parseExtensionBlacklist(blacklisted)
     val enabledCount = extensions.count { it !in disabled }
     var showDialog by remember { mutableStateOf(false) }
     Surface(
@@ -1256,50 +1258,15 @@ private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blackli
     // showed anything. ThemedDialog uses Compose's own Dialog(), which attaches to whichever
     // window is currently hosting the composition, so it renders correctly here too.
     if (showDialog) {
-        ThemedDialog(onDismissRequest = { showDialog = false }) {
-            ThemedDialogTitle("Vulkan Extensions")
-            val checked = remember { mutableStateListOf(*Array(extensions.size) { i -> extensions[i] !in disabled }) }
-            // weight(fill = false): only the height left after title + buttons, so the buttons
-            // stay on-screen in landscape; the list scrolls instead.
-            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 280.dp)) {
-                items(extensions.size) { index ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                indication = null,
-                                interactionSource = remember { MutableInteractionSource() }
-                            ) { checked[index] = !checked[index] }
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = checked[index],
-                            onCheckedChange = { checked[index] = it },
-                            colors = CheckboxDefaults.colors(checkedColor = controlAccentColor())
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(extensions[index], style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
+        VulkanExtensionsDialog(
+            extensions = extensions,
+            blacklisted = blacklisted,
+            onDismiss = { showDialog = false },
+            onDone = {
+                showDialog = false
+                onChanged(it)
             }
-            Spacer(Modifier.height(14.dp))
-            Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = { showDialog = false },
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
-                    border = BorderStroke(1.dp, hairlineColor())
-                ) { Text("Cancel") }
-                Button(
-                    onClick = {
-                        showDialog = false
-                        val enabledNames = extensions.indices.filter { checked[it] }.map { extensions[it] }.toSet()
-                        onChanged(extensions.filterNot { it in enabledNames }.joinToString(","))
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-                ) { Text("Done") }
-            }
-        }
+        )
     }
 }
 
