@@ -97,8 +97,6 @@ import com.winlator.cmod.ui.settings.SettingsCard
 import com.winlator.cmod.ui.settings.SettingsCatalog
 import com.winlator.cmod.ui.settings.SettingsDivider
 import com.winlator.cmod.ui.settings.WineRuntimeOption
-import com.winlator.cmod.ui.settings.cleanContainerEnvironment
-import com.winlator.cmod.ui.settings.containerManagedEnvNames
 import com.winlator.cmod.ui.settings.VulkanExtensionsDialog
 import com.winlator.cmod.ui.settings.parseExtensionBlacklist
 import com.winlator.cmod.ui.settings.dxvkAsyncMode
@@ -245,7 +243,7 @@ private class ContainerEditorStateV2(
 
     var startup by mutableIntStateOf(editing?.startupSelection?.toInt() ?: Container.STARTUP_SELECTION_ESSENTIAL.toInt())
     var openGlDefaultInitialized by mutableStateOf((editing?.getExtra("openGlDefaultInitialized", "0") ?: "0") == "1")
-    private val initialEnvVars = cleanContainerEnvironment(editing?.envVars ?: Container.DEFAULT_ENV_VARS)
+    private val initialEnvVars = editing?.envVars ?: Container.DEFAULT_ENV_VARS
     private val shouldAddMesaGlOverride = graphicsDriver.equals("freedreno", true) &&
         envValue(initialEnvVars, "MESA_GL_VERSION_OVERRIDE").isNullOrBlank()
     var autoMesaGlVersionOverride by mutableStateOf(
@@ -279,11 +277,10 @@ private class ContainerEditorStateV2(
     }
 
     fun setEnvironment(value: String) {
-        val cleaned = cleanContainerEnvironment(value)
-        if (autoMesaGlVersionOverride && envValue(cleaned, "MESA_GL_VERSION_OVERRIDE") != "3.3") {
+        if (autoMesaGlVersionOverride && envValue(value, "MESA_GL_VERSION_OVERRIDE") != "3.3") {
             autoMesaGlVersionOverride = false
         }
-        envVars = cleaned
+        envVars = value
     }
 
     fun wrapperValue(key: String, value: String) {
@@ -462,7 +459,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
     fun saveExisting(container: Container) {
         container.setName(state.name.trim().ifBlank { container.name })
         container.setScreenSize(normalizeResolution(state.screen))
-        container.setEnvVars(cleanContainerEnvironment(state.envVars))
+        container.setEnvVars(state.envVars)
         container.setDrives(state.drives)
         container.setCPUList(state.cpu64.indices.filter { state.cpu64[it] }.joinToString(","))
         container.setCPUListWoW64(state.cpu32.indices.filter { state.cpu32[it] }.joinToString(","))
@@ -523,7 +520,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
             val data = JSONObject().apply {
                 put("name", state.name.trim().ifBlank { "Container-${manager.nextContainerId}" })
                 put("screenSize", normalizeResolution(state.screen))
-                put("envVars", cleanContainerEnvironment(state.envVars))
+                put("envVars", state.envVars)
                 put("cpuList", state.cpu64.indices.filter { state.cpu64[it] }.joinToString(","))
                 put("cpuListWoW64", state.cpu32.indices.filter { state.cpu32[it] }.joinToString(","))
                 if (state.syncCpu) put("syncCpuTopology", true)
@@ -1053,11 +1050,7 @@ private fun ContainerCategoryV2(
         }
 
         "Environment" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            EnvironmentVariablesEditor(
-                cleanContainerEnvironment(s.envVars),
-                onChanged = { s.setEnvironment(it) },
-                excludedNames = containerManagedEnvNames
-            )
+            EnvironmentVariablesEditor(s.envVars, onChanged = { s.setEnvironment(it) })
         }
 
         else -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

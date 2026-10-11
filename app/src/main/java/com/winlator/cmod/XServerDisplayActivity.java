@@ -1101,7 +1101,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             guestProgramLauncherComponent.setGuestExecutable(guestExecutable);
 
-            // A shortcut's own list replaces the container's one (legacy shortcuts are merged).
+            // A shortcut's own list replaces the container's one.
             envVars.putAll(shortcut != null ? shortcut.getEffectiveEnvVars(container) : container.getEnvVars());
 
             applyOpenGLDriverEnvVars();

@@ -279,10 +279,10 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
             container.getExtra("autoMesaGlVersionOverride", "0")
         ) == "1"
     )
-    // What the game actually gets: the shortcut's own list, or (legacy / never edited) the
-    // container's list with the shortcut's additions on top. Saved back as the shortcut's own list.
+    // What the game actually gets: the shortcut's own list, or the container's one until the
+    // shortcut is edited (then it is saved as the shortcut's own list).
     var envVars by mutableStateOf(shortcut.getEffectiveEnvVars(container))
-    var hasOwnEnvironment by mutableStateOf(shortcut.hasOwnEnvVars() || shortcut.getExtra("envVars").isNotBlank())
+    var hasOwnEnvironment by mutableStateOf(shortcut.hasOwnEnvVars())
     var winlatorHudMode by mutableIntStateOf(
         shortcut.getExtra("hudMode", container.getExtra("hudMode", if (container.isShowFPS) "1" else "0")).toIntOrNull() ?: 0
     )

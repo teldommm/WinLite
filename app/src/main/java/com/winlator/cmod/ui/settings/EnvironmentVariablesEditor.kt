@@ -122,9 +122,7 @@ private fun defaultValueFor(spec: EnvVariableSpec?): String = when (spec?.kind) 
 private data class CustomInput(
     val entries: List<EditableEnvVariable>,
     val invalid: List<String>,
-    val bulk: Boolean,
-    /** True when some entries were rejected because the caller manages them elsewhere. */
-    val managed: Boolean = false
+    val bulk: Boolean
 )
 
 // "NAME" -> single entry (value comes from the value field).
@@ -158,10 +156,7 @@ private fun parseCustomInput(nameField: String, valueField: String): CustomInput
 fun EnvironmentVariablesEditor(
     value: String,
     onChanged: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    // Names the caller strips on save (e.g. container-level DXVK_HUD/TU_DEBUG); they are not
-    // offered in the add dialog, otherwise the added row would silently vanish right away.
-    excludedNames: Set<String> = emptySet()
+    modifier: Modifier = Modifier
 ) {
     val rows = remember(value) {
         mutableStateListOf<EditableEnvVariable>().apply { addAll(parseEnvironmentVariables(value)) }
@@ -225,7 +220,6 @@ fun EnvironmentVariablesEditor(
     if (addOpen) {
         AddEnvironmentVariableDialog(
             existing = rows.associate { it.name to it.value },
-            excludedNames = excludedNames,
             onDismiss = { addOpen = false },
             onAdd = { added ->
                 added.forEach { entry ->
@@ -383,14 +377,11 @@ private enum class AddMode { PRESET, CUSTOM }
 @Composable
 private fun AddEnvironmentVariableDialog(
     existing: Map<String, String>,
-    excludedNames: Set<String>,
     onDismiss: () -> Unit,
     onAdd: (List<EditableEnvVariable>) -> Unit
 ) {
     val accent = controlAccentColor()
-    val available = remember(existing, excludedNames) {
-        knownEnvironmentVariables.filter { it.name !in existing && it.name !in excludedNames }
-    }
+    val available = remember(existing) { knownEnvironmentVariables.filter { it.name !in existing } }
     var mode by remember { mutableStateOf(if (available.isEmpty()) AddMode.CUSTOM else AddMode.PRESET) }
 
     var presetName by remember { mutableStateOf(available.firstOrNull()?.name.orEmpty()) }
@@ -399,12 +390,7 @@ private fun AddEnvironmentVariableDialog(
 
     var customName by remember { mutableStateOf("") }
     var customValue by remember { mutableStateOf("") }
-    val custom = parseCustomInput(customName, customValue).let { parsed ->
-        if (excludedNames.isEmpty()) parsed else {
-            val (blocked, allowed) = parsed.entries.partition { it.name in excludedNames }
-            parsed.copy(entries = allowed, invalid = parsed.invalid + blocked.map { it.name }, managed = blocked.isNotEmpty())
-        }
-    }
+    val custom = parseCustomInput(customName, customValue)
     val customSpec = if (!custom.bulk) custom.entries.firstOrNull()?.let { specFor(it.name) } else null
 
     val toAdd: List<EditableEnvVariable> = when (mode) {
@@ -427,7 +413,6 @@ private fun AddEnvironmentVariableDialog(
                     val customMessage: String? = when {
                         custom.bulk -> "Pasted list: ${custom.entries.size} variable(s)" +
                             if (custom.invalid.isNotEmpty()) ", ${custom.invalid.size} invalid will be skipped" else ""
-                        custom.managed -> "Set by other settings here, can't be added manually"
                         custom.invalid.isNotEmpty() -> "Use letters, digits and _, not starting with a digit"
                         customSpec != null -> "Known variable: it will get its own editor"
                         else -> null

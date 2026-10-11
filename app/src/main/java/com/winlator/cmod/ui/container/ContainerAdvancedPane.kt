@@ -17,8 +17,6 @@ import androidx.compose.ui.unit.dp
 import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.ui.settings.CpuSelectorRow
 import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
-import com.winlator.cmod.ui.settings.cleanContainerEnvironment
-import com.winlator.cmod.ui.settings.containerManagedEnvNames
 import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingToggle
 import com.winlator.cmod.ui.settings.SettingsCard
@@ -42,8 +40,7 @@ internal fun ContainerAdvancedPane(containerId: Int) {
     val container = remember(containerId) { ContainerManager(context).getContainerById(containerId) } ?: return
     var page by remember { mutableStateOf("Environment") }
     val pages = listOf("Environment", "Components", "Startup & Input", "CPU")
-    // Same rules as the full container editor: DXVK_HUD/TU_DEBUG are per-shortcut, never container-level.
-    var environment by remember(container.getEnvVars()) { mutableStateOf(cleanContainerEnvironment(container.getEnvVars())) }
+    var environment by remember(container.getEnvVars()) { mutableStateOf(container.getEnvVars()) }
     // Text edits in the environment editor arrive per keystroke: keep the container in memory up
     // to date right away, but write it to disk 500 ms after the last change (and when leaving).
     var envSaveTick by remember { mutableIntStateOf(0) }
@@ -98,12 +95,11 @@ internal fun ContainerAdvancedPane(containerId: Int) {
         SettingsCard { SettingChoice("Advanced", page, pages) { page = it } }
         when (page) {
             "Environment" -> EnvironmentVariablesEditor(environment, onChanged = {
-                val cleaned = cleanContainerEnvironment(it)
-                environment = cleaned
-                container.setEnvVars(cleaned)
+                environment = it
+                container.setEnvVars(it)
                 envSavePending[0] = true
                 envSaveTick++
-            }, excludedNames = containerManagedEnvNames)
+            })
 
             "Components" -> SettingsCard {
                 advancedComponents.forEachIndexed { index, (key, label) ->

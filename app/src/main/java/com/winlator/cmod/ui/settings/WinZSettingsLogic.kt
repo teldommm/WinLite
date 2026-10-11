@@ -15,16 +15,16 @@ internal fun envValue(raw: String, key: String): String? = raw
 
 internal fun envPut(raw: String, key: String, value: String?): String {
     val prefix = "$key="
-    val items = raw.split(' ').filter(String::isNotBlank).filterNot { it.startsWith(prefix) }.toMutableList()
-    if (!value.isNullOrBlank()) items.add("$key=${value.replace(" ", "")}")
+    val items = raw.split(' ').filter(String::isNotBlank).toMutableList()
+    val at = items.indexOfFirst { it.startsWith(prefix) }
+    items.removeAll { it.startsWith(prefix) }
+    if (!value.isNullOrBlank()) {
+        // Updates keep the variable where it was (e.g. TU_DEBUG stays first); new ones go last.
+        val entry = "$key=${value.replace(" ", "")}"
+        if (at >= 0) items.add(at, entry) else items.add(entry)
+    }
     return items.joinToString(" ")
 }
-
-/** Variables never stored on a container: they are driven per shortcut (DXVK HUD toggle, Rendering Mode). */
-internal val containerManagedEnvNames: Set<String> = setOf("DXVK_HUD", "TU_DEBUG")
-
-internal fun cleanContainerEnvironment(raw: String): String =
-    containerManagedEnvNames.fold(raw) { acc, name -> envPut(acc, name, null) }
 
 internal fun isTurnipDriver(version: String): Boolean {
     val value = version.lowercase()
