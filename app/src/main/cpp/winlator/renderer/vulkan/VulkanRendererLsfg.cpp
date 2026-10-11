@@ -211,6 +211,9 @@ void VulkanRendererContext::readFgQueryResult() {
 void VulkanRendererContext::recordFrameGenProcess(VkCommandBuffer cb) {
     if (!compositeActive() || compositeTargets.empty()) return;
     if (!lsfgEngine_) return;
+    // A passthrough frame carries no new guest content: it must not advance
+    // the chain's input ring or frame counter.
+    if (fgPassthrough_) return;
     const CompositeTarget& src = compositeTargets[compositeIndex];
     ensureFgQueryPool();
     if (fgQueryPool_ != VK_NULL_HANDLE && fgPlan_.generations > 0) {

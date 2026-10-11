@@ -1239,9 +1239,16 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
 void VulkanRendererContext::renderLoop() {
     while (isRunning) {
         { std::unique_lock<std::mutex> lk(dirtyMutex);
-          dirtyCV.wait(lk,[this]{
+          auto wake=[this]{
               return !isRunning||(!surfaceDetached.load()&&
-                  (needsRender.load()||fbResized.load()||cursorMoved.load())); }); }
+                  (needsRender.load()||fbResized.load()||cursorMoved.load())); };
+          // A deferred frame-gen wake (cursor/transform change while the guest
+          // was drawing) is re-run after the idle window even if nothing else
+          // arrives, so a game that stops presenting still gets its cursor.
+          if (fgDeferred_.load(std::memory_order_relaxed))
+              dirtyCV.wait_for(lk,std::chrono::milliseconds(kFgIdleMs),wake);
+          else
+              dirtyCV.wait(lk,wake); }
         if (!isRunning) break;
         try { renderFrame(); }
         catch (const std::exception& error) {
@@ -1323,6 +1330,27 @@ void VulkanRendererContext::renderFrame() {
         swapchainRetryPending.store(true);
         return;
     }
+    // --- Frame gen: only new guest content makes a source frame. A wake that
+    // carries none (pointer motion, cursor image, transform) is folded into the
+    // next guest frame while the guest is drawing - every present draws the
+    // cursor at its latest position anyway - and only once the guest has been
+    // idle for kFgIdleMs is it drawn on its own, without frame generation.
+    fgDeferred_.store(false, std::memory_order_relaxed);
+    fgPassthrough_ = false;
+    if (compositeActive()) {
+        const auto now = std::chrono::steady_clock::now();
+        const uint64_t serial = guestFrameSerial_.load(std::memory_order_relaxed);
+        if (serial != fgSeenGuestSerial_) {
+            fgSeenGuestSerial_ = serial;
+            fgLastGuestFrame_  = now;
+        } else if (now - fgLastGuestFrame_ < std::chrono::milliseconds(kFgIdleMs)) {
+            fgDeferred_.store(true, std::memory_order_relaxed);
+            return;
+        } else {
+            fgPassthrough_ = true;
+        }
+    }
+
     bool currentFenceWaited = false;
     VkResult fenceState=vk_.GetFenceStatus ? vk_.GetFenceStatus(device,inFlightFences[currentFrame]) : VK_NOT_READY;
     if (fenceState==VK_NOT_READY) {
@@ -1382,7 +1410,7 @@ void VulkanRendererContext::renderFrame() {
     const uint32_t capacity = (uint32_t)std::min<size_t>(
         std::min(kMaxPresentsPerFrame - 1, fgSwapchainCapacity_),
         compositeTargets.empty() ? 0 : compositeTargets.size() - 1);
-    if (compositeActive() && ensureLsfgEngine()) {
+    if (compositeActive() && !fgPassthrough_ && ensureLsfgEngine()) {
         if (fgConfigDirty_.exchange(false, std::memory_order_relaxed)) {
             lsfgEngine_->configure(
                 (uint32_t)std::max(fgMultiplier_.load(std::memory_order_relaxed), 2),
@@ -1774,6 +1802,7 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
         auto it=texMap.find(id);
         if (it!=texMap.end()) it->second.dirty=true;
     }
+    guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
     needsRender.store(true); dirtyCV.notify_one();
 }
 
@@ -1800,6 +1829,7 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
     wt.img  = src.img; wt.mem  = src.mem; wt.view = src.view; wt.ds   = src.ds;
     wt.isAHB = true; wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
     wt.needsTransition = false; // The first-use layout belongs to the cached VkImage.
+    guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
     needsRender.store(true); dirtyCV.notify_one();
 }
 

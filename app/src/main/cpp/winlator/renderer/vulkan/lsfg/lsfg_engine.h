@@ -81,6 +81,7 @@ private:
     float effectiveFlowScale(uint32_t width) const;
 
     bool historyFresh() const { return haveCopied_ && lastCopiedCount_ + 1 == frameCount_; }
+    bool adaptive() const { return pacer_.Config().target_rate != 0; }
 
     Device      device_{};
     std::string cachePath_;
@@ -113,6 +114,10 @@ private:
     uint32_t warmStreak_{};
     bool     warm_{};
     bool     generating_{};
+    // Adaptive mode, warm and armed: the pacer may plan zero generations for
+    // some source frames (target < 2x source), so the input ring and the
+    // shared chain are kept running on every frame to keep history continuous.
+    bool     keepHistory_{};
     bool     unavailable_{};
 };
 

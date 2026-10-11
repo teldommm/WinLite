@@ -230,6 +230,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // from in-game (its editor's Input tab stays the one place that sets the default).
     private int touchMode = TouchpadView.MODE_TRACKPAD;
     private float refreshRate = 60.0f;
+    // Feeds the panel's ACTUAL refresh rate to native frame generation and keeps
+    // it current when the system switches display modes. The adaptive pacer clamps
+    // its target to this, so it must never be a mode the window is not running in.
+    private android.hardware.display.DisplayManager.DisplayListener frameGenDisplayListener;
+    private float frameGenRefreshHz = 0f;
     private MagnifierView magnifierView;
     private DebugDialog debugDialog;
     private WinlatorLogcatLogger winlatorLogcatLogger;
@@ -946,6 +951,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             winlatorLogcatLogger = null;
         }
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
+        stopFrameGenRefreshTracking();
         super.onDestroy();
     }
 
@@ -1263,7 +1269,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             rememberedLsfgTargetRate = lsfgTargetMemo > 0 ? lsfgTargetMemo
                     : activeLsfgTargetRate > 0 ? activeLsfgTargetRate
                     : Container.DEFAULT_LSFG_TARGET_RATE;
-            vkRenderer.setFrameGenRefreshRate(pickHighestRefreshRate());
+            // Was pickHighestRefreshRate(): the highest mode the panel SUPPORTS, sent even when
+            // high_refresh_rate_mode is off and the window never asked for it. Start from the
+            // rate this activity actually runs at (requested or current) and follow mode changes.
+            startFrameGenRefreshTracking(vkRenderer);
             vkRenderer.setFrameGenNative(lsfgDll, lsfgMultiplier, lsfgFlowScale, activeLsfgTargetRate);
         }
 
@@ -2924,6 +2933,47 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     public void setRefreshRate(float refreshRate) {
         this.refreshRate = refreshRate;
+    }
+
+    private void startFrameGenRefreshTracking(final VulkanXServerView vkRenderer) {
+        stopFrameGenRefreshTracking();
+        // With high_refresh_rate_mode the window requested refreshRate and the switch may still
+        // be pending; otherwise refreshRate is the display's current rate. Either way the
+        // listener below corrects it as soon as the mode actually changes.
+        frameGenRefreshHz = refreshRate > 1f ? refreshRate : currentDisplayRefreshRate();
+        vkRenderer.setFrameGenRefreshRate(frameGenRefreshHz);
+
+        android.hardware.display.DisplayManager dm =
+                (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
+        if (dm == null) return;
+        frameGenDisplayListener = new android.hardware.display.DisplayManager.DisplayListener() {
+            @Override public void onDisplayAdded(int displayId) {}
+            @Override public void onDisplayRemoved(int displayId) {}
+            @Override
+            public void onDisplayChanged(int displayId) {
+                android.view.Display display = getWindowManager().getDefaultDisplay();
+                if (display == null || display.getDisplayId() != displayId) return;
+                float hz = display.getRefreshRate();
+                if (hz <= 1f || Math.abs(hz - frameGenRefreshHz) < 0.5f) return;
+                Log.d("XServerDisplayActivity", "Frame gen refresh rate " + frameGenRefreshHz + " -> " + hz);
+                frameGenRefreshHz = hz;
+                vkRenderer.setFrameGenRefreshRate(hz);
+            }
+        };
+        dm.registerDisplayListener(frameGenDisplayListener, handler);
+    }
+
+    private void stopFrameGenRefreshTracking() {
+        if (frameGenDisplayListener == null) return;
+        android.hardware.display.DisplayManager dm =
+                (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
+        if (dm != null) dm.unregisterDisplayListener(frameGenDisplayListener);
+        frameGenDisplayListener = null;
+    }
+
+    private float currentDisplayRefreshRate() {
+        android.view.Display display = getWindowManager().getDefaultDisplay();
+        return display != null ? display.getRefreshRate() : 60f;
     }
 
     public float getRefreshRate() {

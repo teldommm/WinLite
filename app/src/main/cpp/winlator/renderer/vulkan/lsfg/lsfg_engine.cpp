@@ -188,6 +188,7 @@ bool Engine::prepare(uint32_t width, uint32_t height, VkFormat format) {
     warmStreak_ = 0;
     warm_ = false;
     generating_ = false;
+    keepHistory_ = false;
     pacer_.Reset();
     LSFG_LOGI("chain built at %ux%u, flow %ux%u scale %.2f (preset %.2f, guest %ux%u)",
               width, height, (unsigned)(width * scale), (unsigned)(height * scale),
@@ -204,6 +205,16 @@ uint32_t Engine::plan(uint32_t capacity, uint64_t sourceFrames) {
     warm_ = plan_.warm && frameCount_ + 1 >= kRequiredFrames;
     warmStreak_ = warm_ ? warmStreak_ + 1 : 0;
     generating_ = warm_ && warmStreak_ >= kRecurrenceFrames && plan_.generations > 0;
+
+    // Adaptive pacing alternates frames with and without generations whenever
+    // target/source is below 2 (e.g. 45 fps -> 60). If the input ring and the
+    // shared chain only ran on generating frames, every generating frame that
+    // follows a zero frame would find stale history: it was turned into a
+    // priming frame (no output at all - at target/source <= 1.5 nothing was
+    // ever generated), and the next one ran on a freshly reset alpha history,
+    // i.e. motion estimated from two identical frames (a plain crossfade).
+    // So in adaptive mode, once warm, history is maintained on every frame.
+    keepHistory_ = adaptive() && warm_ && warmStreak_ >= kRecurrenceFrames;
 
     // After arming or a pacing gap, fill the two-frame input ring before
     // interpolating so the first generated frame is never blended with stale history.
@@ -246,26 +257,29 @@ void Engine::process(VkCommandBuffer cmd, VkImage source, uint32_t width, uint32
     // generating_ covers the renderer cutting this frame's generations to zero
     // after plan() (a short acquire): the input ring still advances, so the
     // next frame does not have to spend a frame re-priming it.
-    const bool needHistory = generations > 0 || primeHistory_ || generating_;
+    // keepHistory_ covers adaptive frames the pacer planned no output for.
+    const bool needHistory = generations > 0 || primeHistory_ || generating_ || keepHistory_;
     if (needHistory) {
         copyPresentedFrame(cmd, source, chain_->Input(count), VkExtent2D{width, height});
         lastCopiedCount_ = count;
         haveCopied_ = true;
     }
 
-    // The SHARED chain is 24 of the 25 shaders - the whole flow pyramid - and
-    // only `generate` runs per generated frame. Running it while producing
-    // nothing spends almost the entire cost of frame generation for no frames
-    // at all, every frame - pinning the GPU at 100% regardless of the game's
-    // own settings. Only dispatch it when actually generating.
-    if (warm_ && generations > 0) {
+    // The SHARED chain (mipmaps -> alpha -> beta, 10 of the 25 shaders) builds
+    // the per-frame feature history; gamma/delta/generate run per generated
+    // frame. It is skipped when nothing needs history - running it then would
+    // cost GPU time for no output. But whenever the input ring advances it has
+    // to run too: alpha keeps a 3-slot history of its own, and a gap in shared
+    // dispatches forces ResetHistory(), which fills every slot from the current
+    // frame - the next generated frame would then see no motion at all. This
+    // includes the priming frame, so the first generated frame after arming
+    // already interpolates with real motion.
+    if (warm_ && needHistory) {
         // The alpha stage reads its own output from the previous shared pass.
         // If that pass did not run for frame count-1 (first pass after a
-        // build, or generation paused because the pacer planned zero frames,
-        // or an acquire shortfall dropped them), that slot holds stale or
+        // build, or after a pause in generation), that slot holds stale or
         // never-written data. Re-prime: the next dispatch writes every history
-        // slot from the current frame, so the first generated frame blends
-        // two consistent inputs instead of garbage.
+        // slot from the current frame.
         if (!haveShared_ || lastSharedCount_ + 1 != count) chain_->ResetHistory();
         chain_->DispatchShared(cmd, count);
         lastSharedCount_ = count;
@@ -301,6 +315,7 @@ void Engine::reset() {
     warmStreak_ = 0;
     warm_ = false;
     generating_ = false;
+    keepHistory_ = false;
     plan_ = {};
 }
 

@@ -469,6 +469,20 @@ public:
     FrameGenPlan fgPlan_{};
     std::unique_ptr<lsfg::Engine> lsfgEngine_;
     uint64_t    fgSourceFrames_ = 0;
+    // Guest content updates (window content uploads / AHB swaps). A frame-gen
+    // SOURCE frame is a wake that carries new guest content; cursor motion,
+    // cursor image or transform changes alone are not, and must neither feed
+    // the pacer nor be interpolated (that would queue duplicate presents).
+    std::atomic<uint64_t> guestFrameSerial_{0};
+    uint64_t    fgSeenGuestSerial_ = 0;
+    std::chrono::steady_clock::time_point fgLastGuestFrame_{};
+    // This frame is drawn without frame generation (no new guest content and
+    // the guest has gone idle): composite + one present, no plan/process.
+    bool        fgPassthrough_ = false;
+    // A non-content wake was deferred while the guest was producing frames;
+    // the render loop re-checks after kFgIdleMs so it is never lost.
+    std::atomic<bool> fgDeferred_{false};
+    static constexpr int kFgIdleMs = 100;
     std::string lsfgCachePath_;
     bool        lsfgEngineTried_ = false;
 

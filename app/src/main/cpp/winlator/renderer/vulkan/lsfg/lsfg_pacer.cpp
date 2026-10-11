@@ -20,6 +20,13 @@ constexpr float HEADROOM_EPSILON = 0.02f;
 constexpr float CREDIT_EPSILON = 1.0e-4f;
 constexpr float SOURCE_ACCUM_FLOOR = 0.01f;
 constexpr uint32_t MIN_RATE_SAMPLES = 12;
+// Adaptive output is kept this far below the panel's refresh rate. Under FIFO
+// a present rate exactly equal to the refresh rate can never shrink the
+// present queue: any surplus queued after a hitch (or a panel that actually
+// runs a hair slower than its nominal rate) stays queued forever as added
+// latency. A few presents per second of slack let the queue drain back.
+constexpr float DRAIN_MARGIN_MIN_HZ = 2.0f;
+constexpr float DRAIN_MARGIN_FRACTION = 0.03f;
 
 }
 
@@ -110,7 +117,9 @@ LsfgPlan LsfgPacer::Plan(size_t capacity, uint64_t source_frames) {
 
     float target_rate = static_cast<float>(config.target_rate);
     if (target_rate > 0.0f && config.refresh_rate > 0.0f) {
-        target_rate = std::min(target_rate, config.refresh_rate);
+        const float margin =
+            std::max(DRAIN_MARGIN_MIN_HZ, config.refresh_rate * DRAIN_MARGIN_FRACTION);
+        target_rate = std::min(target_rate, config.refresh_rate - margin);
     }
 
     if (target_rate == 0.0f) {
@@ -128,6 +137,15 @@ LsfgPlan LsfgPacer::Plan(size_t capacity, uint64_t source_frames) {
         output_credit = 0.0f;
         limit = ceiling;
         return LsfgPlan{limit, true};
+    }
+
+    // Adaptive pacing works from the measured rates; until both have enough
+    // samples a single long first interval (chain build, resume) would plan
+    // the full 3 generations from one bad reading.
+    if (!RatesSettled()) {
+        output_credit = 0.0f;
+        limit = 0;
+        return {};
     }
 
     const size_t allowed = std::min(ceiling, HeadroomLimit());
