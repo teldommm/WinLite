@@ -98,6 +98,7 @@ import com.winlator.cmod.ui.settings.SettingsCatalog
 import com.winlator.cmod.ui.settings.SettingsDivider
 import com.winlator.cmod.ui.settings.WineRuntimeOption
 import com.winlator.cmod.ui.settings.cleanContainerEnvironment
+import com.winlator.cmod.ui.settings.containerManagedEnvNames
 import com.winlator.cmod.ui.settings.dxvkAsyncMode
 import com.winlator.cmod.ui.settings.envPut
 import com.winlator.cmod.ui.settings.envValue
@@ -1050,7 +1051,11 @@ private fun ContainerCategoryV2(
         }
 
         "Environment" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            EnvironmentVariablesEditor(cleanContainerEnvironment(s.envVars), onChanged = { s.setEnvironment(it) })
+            EnvironmentVariablesEditor(
+                cleanContainerEnvironment(s.envVars),
+                onChanged = { s.setEnvironment(it) },
+                excludedNames = containerManagedEnvNames
+            )
         }
 
         else -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

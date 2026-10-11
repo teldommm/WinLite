@@ -6,6 +6,8 @@ import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import com.winlator.cmod.ui.toast.WinToast
 import androidx.compose.foundation.BorderStroke
@@ -58,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -274,19 +277,15 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
             container.getExtra("autoMesaGlVersionOverride", "0")
         ) == "1"
     )
-    var envVars by mutableStateOf(shortcut.getExtra("envVars", container.getEnvVars()))
+    // What the game actually gets: the shortcut's own list, or (legacy / never edited) the
+    // container's list with the shortcut's additions on top. Saved back as the shortcut's own list.
+    var envVars by mutableStateOf(shortcut.getEffectiveEnvVars(container))
+    var hasOwnEnvironment by mutableStateOf(shortcut.hasOwnEnvVars() || shortcut.getExtra("envVars").isNotBlank())
     var winlatorHudMode by mutableIntStateOf(
         shortcut.getExtra("hudMode", container.getExtra("hudMode", if (container.isShowFPS) "1" else "0")).toIntOrNull() ?: 0
     )
     var dxvkHud by mutableStateOf(!envValue(envVars, "DXVK_HUD").isNullOrBlank())
-    var renderingMode by mutableStateOf(
-        when {
-            envValue(envVars, "TU_AUTOTUNE_ALGO").equals("profiled", true) -> "Autotuner Profiled"
-            envValue(envVars, "TU_DEBUG")?.split(',')?.any { it.equals("gmem", true) } == true -> "Gmem"
-            envValue(envVars, "TU_DEBUG")?.split(',')?.any { it.equals("sysmem", true) } == true -> "Sysmem"
-            else -> "None"
-        }
-    )
+    var renderingMode by mutableStateOf(renderingModeOf(envVars))
     val components = mutableStateMapOf<String, Int>().apply {
         putAll(parseShortcutComponentsV2(shortcut.getExtra("wincomponents", container.getWinComponents())))
     }
@@ -295,6 +294,50 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var installing by mutableStateOf<Set<String>>(emptySet())
 
     private fun save() = shortcut.saveData()
+
+    // Environment edits arrive on every keystroke; writing the shortcut file each time is wasteful
+    // (main-thread disk I/O), so it is written 500 ms after the last change. flushEnvironmentSave()
+    // is called before anything that reads the file or moves it (launch, rename, container change).
+    private val envSaveHandler = Handler(Looper.getMainLooper())
+    private var envSavePending = false
+    private val envSaveRunnable = Runnable {
+        envSavePending = false
+        save()
+    }
+
+    private fun persistEnvironment(debounced: Boolean) {
+        shortcut.setOwnEnvVars(envVars)
+        hasOwnEnvironment = true
+        envSaveHandler.removeCallbacks(envSaveRunnable)
+        if (debounced) {
+            envSavePending = true
+            envSaveHandler.postDelayed(envSaveRunnable, 500)
+        } else {
+            envSavePending = false
+            save()
+        }
+    }
+
+    fun flushEnvironmentSave() {
+        envSaveHandler.removeCallbacks(envSaveRunnable)
+        if (envSavePending) {
+            envSavePending = false
+            save()
+        }
+    }
+
+    fun resetEnvironmentToContainer() {
+        envSaveHandler.removeCallbacks(envSaveRunnable)
+        envSavePending = false
+        shortcut.resetEnvVarsToContainer()
+        shortcut.putExtra("autoMesaGlVersionOverride", null)
+        autoMesaGlVersionOverride = container.getExtra("autoMesaGlVersionOverride", "0") == "1"
+        envVars = container.getEnvVars()
+        dxvkHud = !envValue(envVars, "DXVK_HUD").isNullOrBlank()
+        renderingMode = renderingModeOf(envVars)
+        hasOwnEnvironment = false
+        save()
+    }
 
     fun extra(key: String, value: String?) {
         shortcut.putExtra(key, value)
@@ -333,13 +376,18 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     }
 
     fun setEnvironment(raw: String) {
+        // Keep the dedicated toggles in sync when the same variables are edited in the
+        // Environment tab (removing DXVK_HUD there used to leave the "DXVK HUD" switch on).
+        dxvkHud = !envValue(raw, "DXVK_HUD").isNullOrBlank()
+        renderingMode = renderingModeOf(raw)
         if (autoMesaGlVersionOverride && envValue(raw, "MESA_GL_VERSION_OVERRIDE") != "3.3") {
             autoMesaGlVersionOverride = false
             shortcut.putExtra("autoMesaGlVersionOverride", "0")
         }
         envVars = raw
-        shortcut.putExtra("envVars", raw.ifBlank { null })
-        save()
+        // Stored even when empty: "no variables" is a valid choice and must not fall back to the
+        // container's list (putExtra(null) used to bring the deleted variables back).
+        persistEnvironment(debounced = true)
     }
 
     fun selectGraphicsDriver(value: String) {
@@ -357,8 +405,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
             autoMesaGlVersionOverride = false
         }
         shortcut.putExtra("autoMesaGlVersionOverride", if (autoMesaGlVersionOverride) "1" else "0")
-        shortcut.putExtra("envVars", envVars.ifBlank { null })
-        save()
+        persistEnvironment(debounced = false)
     }
 
     fun syncOpenGlEnvironment() {
@@ -368,8 +415,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
             envVars = envPut(envVars, "MESA_GL_VERSION_OVERRIDE", "3.3")
             autoMesaGlVersionOverride = true
             shortcut.putExtra("autoMesaGlVersionOverride", "1")
-            shortcut.putExtra("envVars", envVars)
-            save()
+            persistEnvironment(debounced = false)
         }
     }
 
@@ -380,14 +426,18 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
 
     fun applyRenderingMode(mode: String) {
         renderingMode = mode
-        var next = envPut(envVars, "TU_DEBUG", null)
-        next = envPut(next, "TU_AUTOTUNE_ALGO", null)
-        next = when (mode) {
-            "Sysmem" -> envPut(next, "TU_DEBUG", "sysmem")
-            "Gmem" -> envPut(next, "TU_DEBUG", "gmem")
-            "Autotuner Profiled" -> envPut(next, "TU_AUTOTUNE_ALGO", "profiled")
-            else -> next
+        // Only swap the sysmem/gmem flag; other TU_DEBUG flags the user set (noconform, nolrz, ...)
+        // used to be wiped whenever a rendering mode was picked.
+        val otherFlags = envValue(envVars, "TU_DEBUG").orEmpty().split(',')
+            .map(String::trim)
+            .filter { it.isNotEmpty() && !it.equals("sysmem", true) && !it.equals("gmem", true) }
+        val flags = when (mode) {
+            "Sysmem" -> otherFlags + "sysmem"
+            "Gmem" -> otherFlags + "gmem"
+            else -> otherFlags
         }
+        var next = envPut(envVars, "TU_DEBUG", flags.joinToString(",").ifEmpty { null })
+        next = envPut(next, "TU_AUTOTUNE_ALGO", if (mode == "Autotuner Profiled") "profiled" else null)
         setEnvironment(next)
     }
 
@@ -437,6 +487,9 @@ internal fun ShortcutEditorV2(
     val scope = rememberCoroutineScope()
     LaunchedEffect(shortcut.file.path) {
         state.syncOpenGlEnvironment()
+    }
+    DisposableEffect(state) {
+        onDispose { state.flushEnvironmentSave() }
     }
     val manager = remember { ContainerManager(context) }
     val containers = remember { manager.containers.toList() }
@@ -515,6 +568,7 @@ internal fun ShortcutEditorV2(
     }
 
     fun closeEditor() {
+        state.flushEnvironmentSave()
         val rename = renameShortcutV2(shortcut, state.name)
         if (rename is ShortcutRenameResult.Renamed) {
             // The save profile folder follows the shortcut's name (it is found by id, not by name).
@@ -539,6 +593,7 @@ internal fun ShortcutEditorV2(
     }
 
     fun enterContainer() {
+        state.flushEnvironmentSave()
         activity.startActivity(Intent(activity, XServerDisplayActivity::class.java).putExtra("container_id", state.container.id))
     }
 
@@ -546,6 +601,7 @@ internal fun ShortcutEditorV2(
     fun changeContainer(targetId: Int) {
         val target = containers.firstOrNull { it.id == targetId } ?: return
         if (target.id == state.container.id) return
+        state.flushEnvironmentSave()
         if (File(target.desktopDir, shortcut.file.name).exists()) {
             WinToast.show(context, "${target.name} already has a shortcut named \"${shortcut.name}\"", Toast.LENGTH_LONG, dialogView)
             return
@@ -1050,6 +1106,14 @@ private fun ShortcutCategoryV2(
 
         "Environment" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             EnvironmentVariablesEditor(s.envVars, onChanged = { s.setEnvironment(it) })
+            if (s.hasOwnEnvironment) {
+                // The shortcut keeps its own copy of the variables; this makes it follow the
+                // container's list again (and pick up later changes made there).
+                TextButton(
+                    onClick = { s.resetEnvironmentToContainer() },
+                    modifier = Modifier.align(Alignment.End)
+                ) { Text("Reset to container variables") }
+            }
         }
 
         else -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1294,3 +1358,12 @@ private fun renameShortcutV2(shortcut: Shortcut, requested: String): ShortcutRen
     return ShortcutRenameResult.Renamed(clean)
 }
 
+private fun renderingModeOf(env: String): String {
+    val tuDebug = envValue(env, "TU_DEBUG")?.split(',').orEmpty()
+    return when {
+        envValue(env, "TU_AUTOTUNE_ALGO").equals("profiled", true) -> "Autotuner Profiled"
+        tuDebug.any { it.trim().equals("gmem", true) } -> "Gmem"
+        tuDebug.any { it.trim().equals("sysmem", true) } -> "Sysmem"
+        else -> "None"
+    }
+}

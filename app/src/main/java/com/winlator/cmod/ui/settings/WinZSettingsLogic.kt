@@ -20,7 +20,11 @@ internal fun envPut(raw: String, key: String, value: String?): String {
     return items.joinToString(" ")
 }
 
-internal fun cleanContainerEnvironment(raw: String): String = envPut(envPut(raw, "DXVK_HUD", null), "TU_DEBUG", null)
+/** Variables never stored on a container: they are driven per shortcut (DXVK HUD toggle, Rendering Mode). */
+internal val containerManagedEnvNames: Set<String> = setOf("DXVK_HUD", "TU_DEBUG")
+
+internal fun cleanContainerEnvironment(raw: String): String =
+    containerManagedEnvNames.fold(raw) { acc, name -> envPut(acc, name, null) }
 
 internal fun isTurnipDriver(version: String): Boolean {
     val value = version.lowercase()

@@ -20,9 +20,12 @@ public class EnvVars implements Iterable<String> {
 
     public void putAll(String values) {
         if (values == null || values.isEmpty()) return;
-        String[] parts = values.split(" ");
+        // Tolerate double/leading spaces, tabs/newlines and stray tokens without '=' (hand-edited
+        // or legacy data): the old split(" ") + substring(0, -1) threw and broke the launch.
+        String[] parts = values.trim().split("\\s+");
         for (String part : parts) {
-            int index = part.indexOf("=");
+            int index = part.indexOf('=');
+            if (index <= 0) continue;
             String name = part.substring(0, index);
             String value = part.substring(index+1);
             data.put(name, value);

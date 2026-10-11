@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory;
 import android.os.Environment;
 import android.util.Log;
 
+import com.winlator.cmod.core.EnvVars;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.StringUtils;
 
@@ -163,6 +164,42 @@ public class Shortcut {
             else extraData.remove(name);
         }
         catch (JSONException e) {}
+    }
+
+    // Environment variables of a shortcut.
+    // "override" mode (written by the current editor): the shortcut's list fully replaces the
+    // container's one, so removing a variable in the shortcut really removes it at launch and an
+    // empty list means "no variables".
+    // Legacy mode (no envVarsMode): the shortcut's list is layered over the container's one, as
+    // older versions did. The editor shows the merged result and saves it as "override", so the
+    // effective set of variables doesn't change when an old shortcut gets migrated.
+    public static final String ENV_VARS_MODE_OVERRIDE = "override";
+
+    public boolean hasOwnEnvVars() {
+        return ENV_VARS_MODE_OVERRIDE.equals(getExtra("envVarsMode"));
+    }
+
+    public String getEffectiveEnvVars() {
+        return getEffectiveEnvVars(container);
+    }
+
+    /** @param base the container the shortcut is actually launched with (may differ from {@link #container}). */
+    public String getEffectiveEnvVars(Container base) {
+        if (hasOwnEnvVars()) return getExtra("envVars");
+        EnvVars merged = new EnvVars(base != null ? base.getEnvVars() : container.getEnvVars());
+        merged.putAll(getExtra("envVars"));
+        return merged.toString();
+    }
+
+    public void setOwnEnvVars(String envVars) {
+        putExtra("envVars", envVars != null ? envVars : "");
+        putExtra("envVarsMode", ENV_VARS_MODE_OVERRIDE);
+    }
+
+    /** Drops the shortcut's own list: it follows the container's variables again. */
+    public void resetEnvVarsToContainer() {
+        putExtra("envVars", null);
+        putExtra("envVarsMode", null);
     }
 
     public void saveData() {

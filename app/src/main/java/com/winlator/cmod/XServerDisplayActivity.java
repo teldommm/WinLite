@@ -1101,10 +1101,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             guestProgramLauncherComponent.setGuestExecutable(guestExecutable);
 
-            envVars.putAll(container.getEnvVars());
-
-            if (shortcut != null)
-                envVars.putAll(shortcut.getExtra("envVars"));
+            // A shortcut's own list replaces the container's one (legacy shortcuts are merged).
+            envVars.putAll(shortcut != null ? shortcut.getEffectiveEnvVars(container) : container.getEnvVars());
 
             applyOpenGLDriverEnvVars();
 
@@ -1211,8 +1209,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // Opt-in Vulkan validation layer: WINLATOR_VULKAN_VALIDATION=1 in the container or
             // shortcut environment variables (needs libVkLayer_khronos_validation.so in the app).
             EnvVars vulkanStartupVars = new EnvVars();
-            if (container != null) vulkanStartupVars.putAll(container.getEnvVars());
-            if (shortcut != null) vulkanStartupVars.putAll(shortcut.getExtra("envVars"));
+            if (shortcut != null) vulkanStartupVars.putAll(shortcut.getEffectiveEnvVars(container));
+            else if (container != null) vulkanStartupVars.putAll(container.getEnvVars());
             String validationValue = vulkanStartupVars.get("WINLATOR_VULKAN_VALIDATION");
             boolean validationEnabled = "1".equals(validationValue)
                     || "true".equalsIgnoreCase(validationValue)
@@ -2315,6 +2313,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (shortcutEnvVars.has("MESA_GL_VERSION_OVERRIDE")) {
                 return !"1".equals(shortcut.getExtra("autoMesaGlVersionOverride", "0"));
             }
+            // Own list without the variable: the container's value isn't applied at all.
+            if (shortcut.hasOwnEnvVars()) return false;
         }
 
         if (container == null) return false;

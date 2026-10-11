@@ -122,7 +122,9 @@ private fun defaultValueFor(spec: EnvVariableSpec?): String = when (spec?.kind) 
 private data class CustomInput(
     val entries: List<EditableEnvVariable>,
     val invalid: List<String>,
-    val bulk: Boolean
+    val bulk: Boolean,
+    /** True when some entries were rejected because the caller manages them elsewhere. */
+    val managed: Boolean = false
 )
 
 // "NAME" -> single entry (value comes from the value field).
@@ -156,7 +158,10 @@ private fun parseCustomInput(nameField: String, valueField: String): CustomInput
 fun EnvironmentVariablesEditor(
     value: String,
     onChanged: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Names the caller strips on save (e.g. container-level DXVK_HUD/TU_DEBUG); they are not
+    // offered in the add dialog, otherwise the added row would silently vanish right away.
+    excludedNames: Set<String> = emptySet()
 ) {
     val rows = remember(value) {
         mutableStateListOf<EditableEnvVariable>().apply { addAll(parseEnvironmentVariables(value)) }
@@ -220,6 +225,7 @@ fun EnvironmentVariablesEditor(
     if (addOpen) {
         AddEnvironmentVariableDialog(
             existing = rows.associate { it.name to it.value },
+            excludedNames = excludedNames,
             onDismiss = { addOpen = false },
             onAdd = { added ->
                 added.forEach { entry ->
@@ -246,18 +252,23 @@ private fun EnvironmentVariableRow(
             Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                row.name,
-                modifier = Modifier.weight(1f, fill = false),
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (known == null) {
-                Spacer(Modifier.width(8.dp))
-                CustomTag()
+            // Name + tag take all the free space as ONE weighted child, so the delete button is
+            // always pinned to the right edge. (Two weighted siblings — the name with fill=false
+            // and a weight(1f) Spacer — split the free space in half, and the half the short name
+            // doesn't use is never given back, so the button drifted with the name's length.)
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    row.name,
+                    modifier = Modifier.weight(1f, fill = false),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (known == null) {
+                    Spacer(Modifier.width(8.dp))
+                    CustomTag()
+                }
             }
-            Spacer(Modifier.weight(1f))
             IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, "Remove") }
         }
         EnvValueEditor(spec, row.value, onValue)
@@ -287,7 +298,7 @@ private fun EnvValueEditor(spec: EnvVariableSpec, value: String, onValue: (Strin
             val off = spec.options.getOrElse(0) { "0" }
             val on = spec.options.getOrElse(1) { "1" }
             SettingToggle(
-                label = if (value == on) on else off,
+                label = if (value == on) "Enabled" else "Disabled",
                 checked = value == on,
                 onChanged = { onValue(if (it) on else off) }
             )
@@ -331,8 +342,13 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
                         Checkbox(
                             checked = option in selected,
                             onCheckedChange = { enabled ->
-                                if (enabled) { if (option !in selected) selected.add(option) }
-                                else selected.remove(option)
+                                if (enabled) {
+                                    // "key=value" options (scale=0.5 / scale=0.7, opacity=...) are
+                                    // alternatives of one setting: picking one drops its siblings.
+                                    val key = option.substringBefore('=', missingDelimiterValue = "")
+                                    if (key.isNotEmpty()) selected.removeAll { it.startsWith("$key=") }
+                                    if (option !in selected) selected.add(option)
+                                } else selected.remove(option)
                             },
                             colors = CheckboxDefaults.colors(checkedColor = accent)
                         )
@@ -349,7 +365,10 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
                 ) { Text("Cancel") }
                 Button(
                     onClick = {
-                        onChanged(selected.joinToString(","))
+                        // Keep the options' canonical order (not click order); values that aren't
+                        // in the option list (typed by hand earlier) are kept at the end.
+                        val ordered = options.filter { it in selected } + selected.filter { it !in options }
+                        onChanged(ordered.joinToString(","))
                         open = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color.White)
@@ -364,11 +383,14 @@ private enum class AddMode { PRESET, CUSTOM }
 @Composable
 private fun AddEnvironmentVariableDialog(
     existing: Map<String, String>,
+    excludedNames: Set<String>,
     onDismiss: () -> Unit,
     onAdd: (List<EditableEnvVariable>) -> Unit
 ) {
     val accent = controlAccentColor()
-    val available = remember(existing) { knownEnvironmentVariables.filter { it.name !in existing } }
+    val available = remember(existing, excludedNames) {
+        knownEnvironmentVariables.filter { it.name !in existing && it.name !in excludedNames }
+    }
     var mode by remember { mutableStateOf(if (available.isEmpty()) AddMode.CUSTOM else AddMode.PRESET) }
 
     var presetName by remember { mutableStateOf(available.firstOrNull()?.name.orEmpty()) }
@@ -377,7 +399,12 @@ private fun AddEnvironmentVariableDialog(
 
     var customName by remember { mutableStateOf("") }
     var customValue by remember { mutableStateOf("") }
-    val custom = parseCustomInput(customName, customValue)
+    val custom = parseCustomInput(customName, customValue).let { parsed ->
+        if (excludedNames.isEmpty()) parsed else {
+            val (blocked, allowed) = parsed.entries.partition { it.name in excludedNames }
+            parsed.copy(entries = allowed, invalid = parsed.invalid + blocked.map { it.name }, managed = blocked.isNotEmpty())
+        }
+    }
     val customSpec = if (!custom.bulk) custom.entries.firstOrNull()?.let { specFor(it.name) } else null
 
     val toAdd: List<EditableEnvVariable> = when (mode) {
@@ -397,27 +424,25 @@ private fun AddEnvironmentVariableDialog(
                     if (presetSpec != null) EnvValueEditor(presetSpec, presetValue) { presetValue = it }
                 }
                 AddMode.CUSTOM -> {
+                    val customMessage: String? = when {
+                        custom.bulk -> "Pasted list: ${custom.entries.size} variable(s)" +
+                            if (custom.invalid.isNotEmpty()) ", ${custom.invalid.size} invalid will be skipped" else ""
+                        custom.managed -> "Set by other settings here, can't be added manually"
+                        custom.invalid.isNotEmpty() -> "Use letters, digits and _, not starting with a digit"
+                        customSpec != null -> "Known variable: it will get its own editor"
+                        else -> null
+                    }
                     OutlinedTextField(
                         value = customName,
                         onValueChange = { customName = it },
-                        label = { Text("Name or NAME=value") },
-                        placeholder = { Text("DXVK_ASYNC") },
+                        label = { Text("Name") },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                         maxLines = 4,
                         shape = WinZShapes.Small,
                         isError = custom.invalid.isNotEmpty() && !custom.bulk,
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
-                        supportingText = {
-                            Text(
-                                when {
-                                    custom.bulk -> "Pasted list: ${custom.entries.size} variable(s)" +
-                                        if (custom.invalid.isNotEmpty()) ", ${custom.invalid.size} invalid will be skipped" else ""
-                                    custom.invalid.isNotEmpty() -> "Use letters, digits and _, not starting with a digit"
-                                    customSpec != null -> "Known variable: it will get its own editor"
-                                    else -> "Tip: paste \"A=1 B=2\" or one NAME=value per line to add several"
-                                }
-                            )
-                        }
+                        // Only shown when there is something to say (no idle tip line).
+                        supportingText = if (customMessage != null) { { Text(customMessage) } } else null
                     )
                     if (!custom.bulk) {
                         if (customSpec != null) {
@@ -432,8 +457,7 @@ private fun AddEnvironmentVariableDialog(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                                 singleLine = true,
                                 shape = WinZShapes.Small,
-                                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
-                                supportingText = { Text("Spaces are not allowed") }
+                                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false)
                             )
                         }
                     } else if (custom.entries.isNotEmpty()) {
