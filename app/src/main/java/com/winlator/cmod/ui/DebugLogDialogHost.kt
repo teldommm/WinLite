@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui
 
+import androidx.activity.compose.BackHandler
+
 import android.app.Activity
 import android.view.View
 import android.view.ViewGroup
@@ -89,6 +91,9 @@ object DebugLogDialogHost {
                         (composeView.parent as? ViewGroup)?.removeView(composeView)
                         onDismissed.run()
                     }
+                    // System back closes this overlay instead of reaching the screen behind it
+                    // (it lives in the activity's own view tree, not a Dialog window).
+                    BackHandler { dismiss() }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()

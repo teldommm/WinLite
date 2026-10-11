@@ -5,7 +5,9 @@ import android.content.SharedPreferences;
 import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.view.LayoutInflater;
+import android.graphics.drawable.Drawable;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
@@ -41,6 +43,9 @@ public class FrameRating extends FrameLayout implements Runnable {
     private static final String KEY_ALPHA = "classic_hud_alpha_int";
     private final SharedPreferences prefs;
     private boolean userEnabled = false;
+    // Row backgrounds (#33000000 in frame_rating.xml). Opacity is applied only to these so the
+    // text stays fully opaque, matching the Modern HUD where hud_alpha only affects the bg paint.
+    private final java.util.ArrayList<Drawable> rowBackgrounds = new java.util.ArrayList<>();
 
     private String lastKnownRenderer = null;
 
@@ -66,6 +71,17 @@ public class FrameRating extends FrameLayout implements Runnable {
         totalRAM = getTotalRAM();
         this.graphicsDriverConfig = graphicsDriverConfig;
         addView(view);
+        if (view instanceof ViewGroup) {
+            ViewGroup root = (ViewGroup) view;
+            for (int i = 0; i < root.getChildCount(); i++) {
+                Drawable bg = root.getChildAt(i).getBackground();
+                if (bg != null) {
+                    bg = bg.mutate();
+                    root.getChildAt(i).setBackground(bg);
+                    rowBackgrounds.add(bg);
+                }
+            }
+        }
 
         // Scale from the top-left corner, where the HUD sits, so it grows/shrinks in place instead
         // of drifting off the screen edge (same as the Modern HUD).
@@ -74,7 +90,7 @@ public class FrameRating extends FrameLayout implements Runnable {
         float scale = prefs.getFloat(KEY_SCALE, 1f);
         setScaleX(scale);
         setScaleY(scale);
-        setAlpha(prefs.getInt(KEY_ALPHA, 100) / 100f);
+        applyBackgroundAlpha(prefs.getInt(KEY_ALPHA, 100) / 100f);
     }
 
     private String getTotalRAM() {
@@ -130,7 +146,7 @@ public class FrameRating extends FrameLayout implements Runnable {
 
     public void setHudAlpha(float alpha, boolean persist) {
         float clamped = Math.max(0f, Math.min(1f, alpha));
-        setAlpha(clamped);
+        applyBackgroundAlpha(clamped);
         if (persist) prefs.edit().putInt(KEY_ALPHA, Math.round(clamped * 100f)).apply();
     }
 
@@ -139,7 +155,13 @@ public class FrameRating extends FrameLayout implements Runnable {
         resetSavedLayout(context);
         setScaleX(1f);
         setScaleY(1f);
-        setAlpha(1f);
+        applyBackgroundAlpha(1f);
+    }
+
+    // ColorDrawable.setAlpha modulates the XML color's own alpha, so 1.0 keeps the original #33.
+    private void applyBackgroundAlpha(float alpha) {
+        int a = Math.round(Math.max(0f, Math.min(1f, alpha)) * 255f);
+        for (Drawable bg : rowBackgrounds) bg.setAlpha(a);
     }
 
     public static void resetSavedLayout(Context context) {

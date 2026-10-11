@@ -182,6 +182,8 @@ public class WinlatorHUD extends View {
     private int snapGpu = -1, snapCpu = -1, snapCpuTemp = -1;
     // Signed battery power in mW (+ charging, - draining); PWR_NA when unavailable.
     private static final int PWR_NA = Integer.MIN_VALUE;
+    // |PWR| below this (mW) is shown without a sign: it rounds to 0.0W.
+    private static final int PWR_SIGN_MIN_MW = 50;
     private int snapMw = PWR_NA;
     // Sign shown with PWR: 1 = "+", -1 = "−", 0 = none (direction unknown).
     private int snapPwrSign = 0;
@@ -680,12 +682,16 @@ public class WinlatorHUD extends View {
             // Only fact that is certain: on battery and the system itself reports DISCHARGING.
             boolean confirmedDischarging = plugged == 0
                     && status == BatteryManager.BATTERY_STATUS_DISCHARGING;
-            float amps = getBatteryCurrentSignedAmps(plugged != 0, confirmedDischarging);
+            float amps = getBatteryCurrentSignedAmps(plugged != 0, confirmedDischarging,
+                    status == BatteryManager.BATTERY_STATUS_CHARGING);
             float watts = (!Float.isNaN(amps) && voltageMv > 0)
                     ? (voltageMv / 1000f) * amps : Float.NaN;
             int sign = Float.isNaN(watts) ? 0 : (int) Math.signum(watts);
 
-            if (Float.isNaN(watts) || watts == 0f) {
+            // Only when the current is unavailable. A real 0 A net current on external power
+            // (bypass / charge limit) is a valid reading and must stay 0.0W; it used to fall
+            // through to power_now and show an unsigned value of unknown meaning instead.
+            if (Float.isNaN(watts)) {
                 long powerUw = readFirstSysFsLong(POWER_CHANNELS);
                 if (powerUw != 0L) {
                     // power_now has no reliable sign across devices: unplugged it can only be
@@ -701,7 +707,8 @@ public class WinlatorHUD extends View {
             }
 
             int mw = Float.isNaN(watts) ? PWR_NA : Math.round(watts * 1000f);
-            if (mw == 0) sign = 0;
+            // Below 50 mW the value prints as 0.0W, so a sign there is noise ("+0.0W"/"−0.0W").
+            if (mw != PWR_NA && Math.abs(mw) < PWR_SIGN_MIN_MW) sign = 0;
             boolean chargingChanged = charging != snapCharging;
             snapCharging = charging;
 
@@ -731,9 +738,65 @@ public class WinlatorHUD extends View {
         }
     }
 
-    // Set once a reading proves the source reports microamps (the documented unit); some
-    // devices report milliamps instead, which is what the < 20000 guess is for.
-    private static volatile boolean currentIsMicroAmps = false;
+    // ---------- Current unit ----------
+    // CURRENT_NOW is documented in microamps, but some devices (many Samsung, some Huawei)
+    // report milliamps. A magnitude >= 20000 can only be uA (20 A is not a phone current).
+    // A smaller one is ambiguous, and the old guess ("mA until a >= 20000 reading is seen",
+    // kept in a static field per process) read the near-zero net current of bypass / charge
+    // limit / FULL as amps: a few mA showed as +20..50 W on the charger, possibly for the whole
+    // session. Now the unit is learned per source and stored in prefs (device calibration, like
+    // the drain sign), so it is decided once per install:
+    //  - any reading >= 20000                      -> uA (certain);
+    //  - certain discharge with 50..19999 (raw)    -> mA (in uA that would be < 20 mA while the
+    //    screen is on and a game runs, which is impossible), after SIGN_CONFIRM_SAMPLES samples.
+    // Until it is learned, an ambiguous reading is interpreted by state:
+    //  - external power, status CHARGING           -> mA (real charging is well above 20 mA);
+    //  - external power, FULL / NOT_CHARGING / ...  -> uA (bypass, limit: net current ~0);
+    //  - on battery                                -> mA (a uA discharge can't be that small).
+    private static final String KEY_UNIT_BM = "hud_current_unit_bm";
+    private static final String KEY_UNIT_SYSFS = "hud_current_unit_sysfs";
+    private static final int UNIT_UNKNOWN = 0;
+    private static final int UNIT_MICRO = 1;
+    private static final int UNIT_MILLI = 2;
+    private static final long UNIT_CERTAIN_UA = 20000L;
+    private static final long UNIT_LEARN_MIN_RAW = 50L;
+    private String unitLearnKey = null;
+    private int unitLearnCount = 0;
+
+    /** Converts a raw CURRENT_NOW magnitude to amps, learning the source's unit on the way. */
+    private float currentMagnitudeToAmps(long magnitude, String unitKey, boolean onExternalPower,
+                                         boolean confirmedDischarging, boolean statusCharging) {
+        int unit = prefs.getInt(unitKey, UNIT_UNKNOWN);
+
+        if (magnitude >= UNIT_CERTAIN_UA) {
+            unitLearnCount = 0;
+            if (unit != UNIT_MICRO) prefs.edit().putInt(unitKey, UNIT_MICRO).apply();
+            return magnitude / 1_000_000f;
+        }
+
+        if (unit == UNIT_UNKNOWN && confirmedDischarging && magnitude >= UNIT_LEARN_MIN_RAW) {
+            if (unitKey.equals(unitLearnKey)) {
+                unitLearnCount++;
+            } else {
+                unitLearnKey = unitKey;
+                unitLearnCount = 1;
+            }
+            if (unitLearnCount >= SIGN_CONFIRM_SAMPLES) {
+                unit = UNIT_MILLI;
+                prefs.edit().putInt(unitKey, UNIT_MILLI).apply();
+                unitLearnCount = 0;
+            }
+        } else {
+            unitLearnCount = 0; // confirmations must be consecutive
+        }
+
+        boolean milli;
+        if (unit == UNIT_MICRO) milli = false;
+        else if (unit == UNIT_MILLI) milli = true;
+        else if (onExternalPower) milli = statusCharging;
+        else milli = true;
+        return milli ? magnitude / 1000f : magnitude / 1_000_000f;
+    }
 
     // ---------- Current direction ----------
     // Android documents CURRENT_NOW as positive = charging, negative = discharging, but many
@@ -760,9 +823,11 @@ public class WinlatorHUD extends View {
      * unavailable. On external power a net current of 0 is a real reading (the charger covers
      * the whole load, e.g. bypass charging / charge limit) and returns 0, so PWR shows 0.0W.
      */
-    private float getBatteryCurrentSignedAmps(boolean onExternalPower, boolean confirmedDischarging) {
+    private float getBatteryCurrentSignedAmps(boolean onExternalPower, boolean confirmedDischarging,
+                                              boolean statusCharging) {
         long raw = Long.MIN_VALUE;
         String signKey = KEY_DRAIN_SIGN_BM;
+        String unitKey = KEY_UNIT_BM;
         if (batteryManager != null) {
             raw = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
         }
@@ -771,16 +836,15 @@ public class WinlatorHUD extends View {
             if (sysfs != 0L) {
                 raw = sysfs;
                 signKey = KEY_DRAIN_SIGN_SYSFS;
+                unitKey = KEY_UNIT_SYSFS;
             }
         }
         if (raw == Long.MIN_VALUE) return Float.NaN;
         if (raw == 0L) return onExternalPower ? 0f : Float.NaN;
 
         long magnitude = Math.abs(raw);
-        if (magnitude >= 20000L) currentIsMicroAmps = true;
-        // Sticky unit: a small microamp reading near 0 A while charging (e.g. 15000 uA) used to
-        // be read as 15 A and showed a huge PWR spike.
-        float amps = currentIsMicroAmps || magnitude >= 20000L ? magnitude / 1_000_000f : magnitude / 1000f;
+        float amps = currentMagnitudeToAmps(magnitude, unitKey, onExternalPower,
+                confirmedDischarging, statusCharging);
 
         int rawSign = raw > 0 ? 1 : -1;
         int drain = drainSign(signKey);
@@ -1754,8 +1818,8 @@ public class WinlatorHUD extends View {
 
     // Prefs-only variants for when the HUD view doesn't exist yet; it reads these on creation.
     // Metrics: back to "show everything, no dual-cell correction". The mask is written explicitly (not
-    // removed) so the pref listener sees the change. The learned battery drain-sign keys are
-    // device calibration, not a setting, and are left alone.
+    // removed) so the pref listener sees the change. The learned battery drain-sign and
+    // current-unit keys are device calibration, not a setting, and are left alone.
     public static void resetSavedMetrics(Context context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putInt(KEY_SHOW, SHOW_DEFAULT)

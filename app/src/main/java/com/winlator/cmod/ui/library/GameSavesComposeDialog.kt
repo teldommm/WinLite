@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.library
 
+import androidx.activity.compose.BackHandler
+
 import android.app.Activity
 import android.content.Context
 import android.view.View
@@ -115,6 +117,9 @@ object GameSavesComposeDialog {
                         }
                     }
                     val dismiss: () -> Unit = { if (!busy) visibleState.targetState = false }
+                    // System back closes this overlay instead of reaching the screen behind it
+                    // (it lives in the activity's own view tree, not a Dialog window).
+                    BackHandler(enabled = visibleState.targetState) { dismiss() }
                     AnimatedVisibility(
                         visibleState = visibleState,
                         enter = fadeIn(tween(180)),

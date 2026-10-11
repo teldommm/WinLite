@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.settings
 
+import androidx.activity.compose.BackHandler
+
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
 import android.app.Activity
 import android.content.Context
@@ -114,8 +116,14 @@ object WinlatorServicesDialog {
                         }
                     }
                     val dismiss: () -> Unit = { visibleState.targetState = false }
+                    // System back closes this overlay instead of reaching the screen behind it
+                    // (it lives in the activity's own view tree, not a Dialog window).
                     val repos = remember { mutableStateListOf<DriverRepo>().apply { addAll(RemoteSources.driverRepos(activity)) } }
                     var addRepoOpen by remember { mutableStateOf(false) }
+                    // The inline "Add repository" card closes first, then the dialog itself.
+                    BackHandler(enabled = visibleState.targetState) {
+                        if (addRepoOpen) addRepoOpen = false else dismiss()
+                    }
                     AnimatedVisibility(
                         visibleState = visibleState,
                         enter = fadeIn(tween(180)),

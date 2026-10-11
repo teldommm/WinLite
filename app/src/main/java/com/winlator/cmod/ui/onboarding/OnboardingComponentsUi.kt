@@ -400,7 +400,9 @@ private fun SourcePart(icon: ImageVector, label: String, selected: Boolean, clic
         ) {
             Icon(icon, null, Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            // softWrap = false: with maxLines = 1 alone a two-word label that is a bit too wide
+            // wraps at the space and the second line is clipped ("Winlator servers" -> "Winlator").
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
     }
 }

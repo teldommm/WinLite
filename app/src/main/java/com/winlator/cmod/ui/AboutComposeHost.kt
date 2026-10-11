@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui
 
+import androidx.activity.compose.BackHandler
+
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -87,6 +89,9 @@ object AboutDialogHost {
                         }
                     }
                     val dismiss: () -> Unit = { visibleState.targetState = false }
+                    // System back closes this overlay instead of reaching the screen behind it
+                    // (it lives in the activity's own view tree, not a Dialog window).
+                    BackHandler(enabled = visibleState.targetState) { dismiss() }
                     AnimatedVisibility(
                         visibleState = visibleState,
                         enter = fadeIn(tween(180)),
