@@ -148,14 +148,20 @@ public class Container {
         putExtra("graphicsWrapper", normalizeGraphicsWrapper(graphicsWrapper));
     }
 
-    // "Wrapper Test" in graphics_wrapper_entries -> StringUtils.parseIdentifier() -> "wrapper-test".
+    // graphics_wrapper_entries -> StringUtils.parseIdentifier():
+    //   "Wrapper Default" -> "wrapper-default" (stored as "wrapper"),
+    //   "Wrapper Adreno"  -> "wrapper-adreno",
+    //   "Wrapper Test"    -> "wrapper-test" (legacy wrapper build).
     // Anything else (incl. the removed "wrapper-legacy") falls back to the default wrapper.
+    public static final String ADRENO_GRAPHICS_WRAPPER = "wrapper-adreno";
     public static final String TEST_GRAPHICS_WRAPPER = "wrapper-test";
 
     public static String normalizeGraphicsWrapper(String graphicsWrapper) {
         if (graphicsWrapper == null) return DEFAULT_GRAPHICS_WRAPPER;
-        return TEST_GRAPHICS_WRAPPER.equals(graphicsWrapper.toLowerCase(java.util.Locale.ENGLISH))
-                ? TEST_GRAPHICS_WRAPPER : DEFAULT_GRAPHICS_WRAPPER;
+        String id = graphicsWrapper.toLowerCase(java.util.Locale.ENGLISH);
+        if (ADRENO_GRAPHICS_WRAPPER.equals(id)) return ADRENO_GRAPHICS_WRAPPER;
+        if (TEST_GRAPHICS_WRAPPER.equals(id)) return TEST_GRAPHICS_WRAPPER;
+        return DEFAULT_GRAPHICS_WRAPPER;
     }
 
     public String getSurfaceFormat() {

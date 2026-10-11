@@ -2260,7 +2260,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     static String resolveGraphicsWrapperArchiveName(String graphicsWrapper) {
         // assets/graphics_driver/<name>.tzst; the name is also stored in the ImageFS variant marker.
-        return Container.TEST_GRAPHICS_WRAPPER.equals(graphicsWrapper) ? "wrapper-test" : "wrapper";
+        if (Container.ADRENO_GRAPHICS_WRAPPER.equals(graphicsWrapper)) return "wrapper_adreno";
+        if (Container.TEST_GRAPHICS_WRAPPER.equals(graphicsWrapper)) return "wrapper_legacy";
+        return "wrapper_default";
     }
 
     private String getSelectedOpenGLDriver() {
@@ -2376,9 +2378,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         File wrapperVariantMarker = new File(rootDir, "usr/lib/.winlator-graphics-wrapper-variant");
         String wrapperArchive = resolveGraphicsWrapperArchiveName(graphicsWrapper);
         boolean installCommonRuntime = firstTimeBoot || !graphicsRuntimeMarker.isFile();
-        // ImageFS that predates variant selection always carries the current wrapper.
+        // Markers written by older builds ("wrapper", "wrapper-test") or a missing marker never
+        // match the current archive names, so the updated wrapper libs get reinstalled once.
         String installedWrapper = wrapperVariantMarker.isFile()
-                ? FileUtils.readString(wrapperVariantMarker).trim() : "wrapper";
+                ? FileUtils.readString(wrapperVariantMarker).trim() : "";
         boolean wrapperChanged = !wrapperArchive.equals(installedWrapper);
         if (installCommonRuntime || wrapperChanged) {
             Log.d("XServerDisplayActivity", "Installing graphics wrapper " + wrapperArchive);
