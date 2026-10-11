@@ -17,7 +17,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -87,8 +86,8 @@ internal fun VulkanExtensionsDialog(
             value = query,
             onValueChange = { query = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Search") },
-            leadingIcon = { Icon(Icons.Outlined.Search, null) },
+            // Floating label (moves to the top border on focus), same as "Name" in Custom.
+            label = { Text("Name") },
             trailingIcon = {
                 if (query.isNotEmpty()) {
                     IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "Clear search") }
