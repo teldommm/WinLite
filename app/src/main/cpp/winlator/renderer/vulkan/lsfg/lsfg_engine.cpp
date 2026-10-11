@@ -232,9 +232,9 @@ uint32_t Engine::plan(uint32_t capacity, uint64_t sourceFrames) {
         const LsfgPacerStats stats = pacer_.Stats();
         const float wanted = stats.source_rate * (float)(plan_.generations + 1);
         LSFG_LOGI("presented=%.1f fps (measured at the swapchain)", (double)presentedRate_);
-        LSFG_LOGI("pace gen=%zu max=%zu cap=%u guest=%.1f loop=%.1f refresh=%.1f target=%.0f "
-                  "slots=%.2f drawn=%llu needs=%.1fHz%s%s",
-                  plan_.generations, pacer_.MaxGenerations(), capacity,
+        LSFG_LOGI("pace gen=%zu max=%zu cost=%zu cap=%u guest=%.1f loop=%.1f refresh=%.1f "
+                  "target=%.0f slots=%.2f drawn=%llu needs=%.1fHz%s%s",
+                  plan_.generations, pacer_.MaxGenerations(), stats.cost_limit, capacity,
                   (double)stats.source_rate, (double)stats.loop_rate, (double)stats.refresh_rate,
                   (double)stats.target_rate, (double)stats.slots,
                   (unsigned long long)stats.last_drawn, (double)wanted,

@@ -190,6 +190,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             long msc = ust / FAKE_INTERVAL;
 
             pixmap.drawable.updateDirect();
+        notifyGuestFramePresented(client);
             sendIdleNotify(window, pixmap, serial, idleFence);
             sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
             return;
@@ -199,8 +200,15 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         long msc = ust / (1_000_000L / targetFps);
 
         pixmap.drawable.updateDirect();
+        notifyGuestFramePresented(client);
         sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
         scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps);
+    }
+
+    // Frame generation paces on guest frames; a present is the exact frame clock.
+    private static void notifyGuestFramePresented(XClient client) {
+        com.winlator.cmod.widget.XServerRendererView view = client.xServer.getXServerView();
+        if (view != null) view.onGuestFramePresented();
     }
 
     private void selectInput(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {

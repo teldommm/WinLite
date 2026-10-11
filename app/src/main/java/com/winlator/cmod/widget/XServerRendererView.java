@@ -41,6 +41,9 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract void onUpdateWindowContentDirect(Window window, Drawable drawable);
     public abstract void onUpdateWindowContentDirect(Window window, Drawable drawable, short xOff, short yOff);
     public abstract void onPointerMove(short x, short y);
+    // A guest frame was presented through the X Present extension. Renderers that
+    // pace frame generation on guest frames override this; the default ignores it.
+    public void onGuestFramePresented() {}
     public abstract void requestRender();
     public abstract void queueEvent(Runnable action);
     public abstract void onSurfaceChanged(int width, int height);

@@ -133,6 +133,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         float ox, float oy, float sx, float sy,
         boolean hasScissor, int scX, int scY, int scW, int scH);
     @FastNative private native void nativeSetPointerPos(long handle, short x, short y);
+    @FastNative private native void nativeNoteGuestPresent(long handle);
     @FastNative private native void nativeSetCursorVisible(long handle, boolean visible);
     @FastNative private native void nativeUpdateCursorImage(long handle,
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY);
@@ -608,6 +609,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         drawable.backingAHB, drawable.width, drawable.height, rx, ry);
                 }
             }
+        }
+    }
+
+    @Override
+    public void onGuestFramePresented() {
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeNoteGuestPresent(nativeHandle);
         }
     }
 

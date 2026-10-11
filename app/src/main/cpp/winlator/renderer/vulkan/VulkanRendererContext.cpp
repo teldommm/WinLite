@@ -44,12 +44,17 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
     createFramebuffers(); createCmdPool(); createSampler();
     createWinTexPool(); createCursorDS(); createCmdBufs(); createSyncObjects();
     isRunning = true;
+    vsyncRunning_ = true;
+    vsyncThread_ = std::thread(&VulkanRendererContext::vsyncLoop, this);
     renderThread = std::thread(&VulkanRendererContext::renderLoop, this);
 }
 
 VulkanRendererContext::~VulkanRendererContext() {
     isRunning = false; dirtyCV.notify_all();
     if (renderThread.joinable()) renderThread.join();
+    vsyncRunning_ = false;
+    if (ALooper* looper = vsyncLooper_.load()) ALooper_wake(looper);
+    if (vsyncThread_.joinable()) vsyncThread_.join();
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
     for (auto& [id, wt] : texMap) destroyWinTex(wt);
@@ -1337,12 +1342,42 @@ void VulkanRendererContext::renderFrame() {
     // idle for kFgIdleMs is it drawn on its own, without frame generation.
     fgDeferred_.store(false, std::memory_order_relaxed);
     fgPassthrough_ = false;
+    uint64_t fgNewSourceFrames = 0;
     if (compositeActive()) {
-        const auto now = std::chrono::steady_clock::now();
-        const uint64_t serial = guestFrameSerial_.load(std::memory_order_relaxed);
-        if (serial != fgSeenGuestSerial_) {
-            fgSeenGuestSerial_ = serial;
-            fgLastGuestFrame_  = now;
+        // New guest frames since the last frame-gen pass: presents when the guest
+        // presents through X Present, content uploads otherwise.
+        auto freshGuestFrames = [this](int64_t nowNs, uint64_t& content, uint64_t& present) {
+            content = guestFrameSerial_.load(std::memory_order_relaxed);
+            present = guestPresentSerial_.load(std::memory_order_relaxed);
+            const int64_t lastPresentNs = guestPresentNs_.load(std::memory_order_relaxed);
+            const bool presentsDriving =
+                lastPresentNs != 0 && nowNs - lastPresentNs < kPresentActiveNs;
+            return presentsDriving
+                ? (present > fgSeenPresentSerial_ ? present - fgSeenPresentSerial_ : 0)
+                : (content > fgSeenContentSerial_ ? content - fgSeenContentSerial_ : 0);
+        };
+        auto nowNsOf = [](std::chrono::steady_clock::time_point t) {
+            return (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+                t.time_since_epoch()).count();
+        };
+        auto now = std::chrono::steady_clock::now();
+        uint64_t content = 0, present = 0;
+        uint64_t fresh = freshGuestFrames(nowNsOf(now), content, present);
+        if (fresh > 0) {
+            // Composite at the next vsync. Re-sample afterwards: a frame that
+            // arrives during the wait is drawn now (the draw list is pinned
+            // later), so it must be counted now too, not as a duplicate later.
+            if (kFgVsyncPacing) waitForVsync();
+            if (fbResized.load() || surfaceDetached.load(std::memory_order_acquire)) return;
+            now = std::chrono::steady_clock::now();
+            fresh = std::max(fresh, freshGuestFrames(nowNsOf(now), content, present));
+            fgSeenContentSerial_ = content;
+            fgSeenPresentSerial_ = present;
+            fgLastGuestFrame_    = now;
+            // Counters switching over (first present after content-only
+            // frames) can show a stale gap; one pass never covers more than a
+            // few guest frames.
+            fgNewSourceFrames = std::min<uint64_t>(fresh, 4);
         } else if (now - fgLastGuestFrame_ < std::chrono::milliseconds(kFgIdleMs)) {
             fgDeferred_.store(true, std::memory_order_relaxed);
             return;
@@ -1429,7 +1464,10 @@ void VulkanRendererContext::renderFrame() {
             vk_.DeviceWaitIdle(device);
         if (lsfgEngine_->prepare(compositeW, compositeH, swapchainFmt)) {
             lsfgEngine_->setPresentedRate(fgPresentedRate_);
-            fgPlan_.generations = lsfgEngine_->plan(capacity, ++fgSourceFrames_);
+            // The pacer gets GUEST frames, not compositor passes: with
+            // presents counted, one pass may carry 0..n of them.
+            fgSourceFrames_ += fgNewSourceFrames;
+            fgPlan_.generations = lsfgEngine_->plan(capacity, fgSourceFrames_);
         }
     }
     fgPlan_.presents = fgPlan_.generations + 1;
@@ -1751,6 +1789,61 @@ bool VulkanRendererContext::reattachSurface(ANativeWindow* newWindow) {
 
 void VulkanRendererContext::setTransform(float ox, float oy, float sx, float sy) {
     { std::lock_guard<std::mutex> lk(renderMutex); sceneOffsetX=ox;sceneOffsetY=oy;sceneScaleX=sx;sceneScaleY=sy; }
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+// ===================== Vsync pacing (frame generation) ======================
+
+void VulkanRendererContext::vsyncLoop() {
+    ALooper* looper = ALooper_prepare(0);
+    ALooper_acquire(looper);
+    AChoreographer* choreographer = AChoreographer_getInstance();
+    if (!choreographer) RLOG_E("vsync: AChoreographer unavailable; frame gen paces on delivery");
+    vsyncLooper_.store(looper);
+    while (vsyncRunning_.load()) {
+        if (choreographer && !vsyncPosted_ && vsyncWanted_.load(std::memory_order_acquire)) {
+            vsyncPosted_ = true;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            // The 64-bit variant is API 29; minSdk is 28. Frame time is unused.
+            AChoreographer_postFrameCallback(choreographer, &VulkanRendererContext::onVsync, this);
+#pragma clang diagnostic pop
+        }
+        // Callbacks run inside pollOnce; ALooper_wake() returns it to re-check.
+        ALooper_pollOnce(-1, nullptr, nullptr, nullptr);
+    }
+    vsyncLooper_.store(nullptr);
+    ALooper_release(looper);
+}
+
+void VulkanRendererContext::onVsync(long, void* data) {
+    auto* self = static_cast<VulkanRendererContext*>(data);
+    self->vsyncPosted_ = false;
+    self->vsyncWanted_.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lk(self->dirtyMutex);
+        self->vsyncSerial_.fetch_add(1, std::memory_order_release);
+    }
+    self->dirtyCV.notify_all();
+}
+
+void VulkanRendererContext::waitForVsync() {
+    ALooper* looper = vsyncLooper_.load();
+    if (!looper) return;
+    std::unique_lock<std::mutex> lk(dirtyMutex);
+    const uint64_t start = vsyncSerial_.load(std::memory_order_acquire);
+    if (!vsyncWanted_.exchange(true, std::memory_order_acq_rel)) ALooper_wake(looper);
+    dirtyCV.wait_for(lk, std::chrono::milliseconds(kVsyncWaitMs), [&]{
+        return !isRunning || surfaceDetached.load() || fbResized.load()
+            || vsyncSerial_.load(std::memory_order_acquire) != start; });
+}
+
+void VulkanRendererContext::noteGuestPresent() {
+    guestPresentNs_.store((int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count(), std::memory_order_relaxed);
+    guestPresentSerial_.fetch_add(1, std::memory_order_relaxed);
+    // The content upload for this present usually woke the render thread a
+    // moment earlier and was deferred (no present counted yet); wake it again.
     needsRender.store(true); dirtyCV.notify_one();
 }
 

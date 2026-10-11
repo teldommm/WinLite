@@ -227,6 +227,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPointerPos(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeNoteGuestPresent(
+    JNIEnv*, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->noteGuestPresent();
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetCursorVisible(
     JNIEnv*, jobject, jlong handle, jboolean v)
 {
