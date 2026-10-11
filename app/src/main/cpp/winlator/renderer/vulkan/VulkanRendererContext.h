@@ -124,8 +124,6 @@ struct VkTable {
 
 #include <vulkan/vulkan_android.h>
 #include <android/hardware_buffer.h>
-#include <android/choreographer.h>
-#include <android/looper.h>
 #include <android/native_window.h>
 #include <jni.h>
 #include <vector>
@@ -495,30 +493,6 @@ public:
     // the render loop re-checks after kFgIdleMs so it is never lost.
     std::atomic<bool> fgDeferred_{false};
     static constexpr int kFgIdleMs = 100;
-
-    // --- Vsync pacing for frame generation (Choreographer, as in WinNative) ---
-    // While frame generation is armed, a source frame is composited at the next
-    // display vsync instead of the instant the guest delivers it, so the burst
-    // of presents for one source frame starts in phase with the panel and two
-    // guest frames inside one refresh collapse into the newer one rather than
-    // beating against FIFO. A dedicated looper thread owns the AChoreographer;
-    // the render thread asks it for one callback per frame and waits for it
-    // (bounded, so a missing callback can never stall rendering).
-    std::thread               vsyncThread_;
-    std::atomic<ALooper*>     vsyncLooper_{nullptr};
-    std::atomic<bool>         vsyncRunning_{false};
-    std::atomic<bool>         vsyncWanted_{false};
-    bool                      vsyncPosted_ = false;      // vsync thread only
-    std::atomic<uint64_t>     vsyncSerial_{0};
-    static constexpr int      kVsyncWaitMs = 50;
-    // Set to false to composite frame-gen source frames the moment they arrive
-    // (the previous behaviour). Vsync alignment starts each burst in phase with
-    // the panel at the cost of up to one refresh interval of added latency.
-    static constexpr bool     kFgVsyncPacing = true;
-    void vsyncLoop();
-    static void onVsync(long frameTimeNanos, void* data);
-    // Blocks the render thread until the next vsync (or kVsyncWaitMs).
-    void waitForVsync();
     std::string lsfgCachePath_;
     bool        lsfgEngineTried_ = false;
 
