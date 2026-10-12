@@ -2,6 +2,7 @@
 
 package com.winlator.cmod.ui.container
 
+import com.winlator.cmod.directaudio.DirectAudioDriver
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.content.Context
 import android.graphics.Bitmap
@@ -158,6 +159,7 @@ private class ContainerEditorStateV2(
     var oboeApi by mutableStateOf(editing?.getExtra("oboeApi", "auto") ?: "auto")
     var oboeAdaptive by mutableStateOf((editing?.getExtra("oboeAdaptive", "1") ?: "1") != "0")
     var oboeExclusive by mutableStateOf((editing?.getExtra("oboeExclusive", "0") ?: "0") == "1")
+    var directAudioMic by mutableStateOf(DirectAudioDriver.isMicEnabled(editing?.getExtra(DirectAudioDriver.EXTRA_MIC, "0")))
     var hudMode by mutableIntStateOf(
         editing?.getExtra("hudMode", if (editing.isShowFPS) "1" else "0")?.toIntOrNull() ?: 0
     )
@@ -313,7 +315,7 @@ private class ContainerEditorStateV2(
     }
 
     fun fingerprint(): String = listOf(
-        name, screen, audio, oboeProfile, oboeApi, oboeAdaptive, oboeExclusive, hudMode, locale, soundFont,
+        name, screen, audio, oboeProfile, oboeApi, oboeAdaptive, oboeExclusive, directAudioMic, hudMode, locale, soundFont,
         fullscreen, desktopTheme, desktopBackground, wallpaperStamp, mouseWarp, drives,
         renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat,
         graphicsDriver, graphicsWrapper, graphicsConfig,
@@ -478,6 +480,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.putExtra("oboeApi", state.oboeApi)
         container.putExtra("oboeAdaptive", if (state.oboeAdaptive) "1" else "0")
         container.putExtra("oboeExclusive", if (state.oboeExclusive) "1" else "0")
+        container.putExtra(DirectAudioDriver.EXTRA_MIC, if (state.directAudioMic) "1" else "0")
         container.setEmulator(if (arm64) if (state.emulator == "FEXCore") "FEXCore" else "Box64" else "Box64")
         container.setWinComponents(serializeContainerComponentsV2(state.components))
         container.setShowFPS(state.hudMode != 0)
@@ -560,6 +563,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     .put("oboeApi", state.oboeApi)
                     .put("oboeAdaptive", if (state.oboeAdaptive) "1" else "0")
                     .put("oboeExclusive", if (state.oboeExclusive) "1" else "0")
+                    .put(DirectAudioDriver.EXTRA_MIC, if (state.directAudioMic) "1" else "0")
                     .put("openGlDefaultInitialized", if (state.openGlDefaultInitialized) "1" else "0")
                     .put("autoMesaGlVersionOverride", if (state.autoMesaGlVersionOverride) "1" else "0"))
             }
@@ -750,6 +754,14 @@ private fun ContainerCategoryV2(
                     audioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio,
                     audioEntries
                 ) { s.audio = StringUtils.parseIdentifier(it) }
+                if (DirectAudioDriver.isSelected(s.audio)) {
+                    val micContext = LocalContext.current
+                    SettingsDivider()
+                    SettingToggle("Microphone", s.directAudioMic) {
+                        s.directAudioMic = it
+                        if (it) DirectAudioDriver.requestMicPermission(micContext)
+                    }
+                }
                 if (s.audio == "oboe") {
                     SettingsDivider()
                     val latencyLabel = when (s.oboeProfile) {

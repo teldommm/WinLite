@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.container
 
+import com.winlator.cmod.directaudio.DirectAudioDriver
 import android.widget.Toast
 import com.winlator.cmod.ui.toast.WinToast
 import androidx.compose.foundation.layout.Arrangement
@@ -91,6 +92,7 @@ internal fun ContainerRuntimePane(
     var filterMode by remember { mutableStateOf(container.getRendererFilterMode()) }
     var swapRB by remember { mutableStateOf(container.getRendererSwapRB()) }
     var audio by remember { mutableStateOf(StringUtils.parseIdentifier(container.getAudioDriver())) }
+    var directAudioMic by remember { mutableStateOf(DirectAudioDriver.isMicEnabled(container.getExtra(DirectAudioDriver.EXTRA_MIC, "0"))) }
 
     var wrapper by remember { mutableStateOf(StringUtils.parseIdentifier(container.getDXWrapper())) }
     var wrapperConfig by remember { mutableStateOf(container.getDXWrapperConfig()) }
@@ -175,6 +177,15 @@ internal fun ContainerRuntimePane(
                 audio = StringUtils.parseIdentifier(it)
                 container.setAudioDriver(audio)
                 container.saveData()
+            }
+            if (DirectAudioDriver.isSelected(audio)) {
+                SettingsDivider()
+                SettingToggle("Microphone", directAudioMic) {
+                    directAudioMic = it
+                    container.putExtra(DirectAudioDriver.EXTRA_MIC, if (it) "1" else "0")
+                    container.saveData()
+                    if (it) DirectAudioDriver.requestMicPermission(context)
+                }
             }
         }
 

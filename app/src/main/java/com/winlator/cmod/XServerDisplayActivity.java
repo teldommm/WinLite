@@ -127,6 +127,7 @@ import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.xenvironment.XEnvironment;
 import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
 import com.winlator.cmod.alsaserver.ALSAClient;
+import com.winlator.cmod.directaudio.DirectAudioDriver;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
 import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;
@@ -690,6 +691,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 SaveProfiles.apply(this, container, shortcut);
                 setupWineSystemFiles();
                 extractGraphicsDriverFiles();
+                // After the prefix is ready (the driver is staged into it), before the
+                // registry names the backend.
+                resolveAudioDriver();
                 changeWineAudioDriver();
                 applyGameRefreshRateUnlock();
                 try {
@@ -1170,6 +1174,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
             environment.addComponent(
                     new PulseAudioComponent(
                             UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH)));
+        } else if (DirectAudioDriver.INSTANCE.isSelected(audioDriver)) {
+            // No daemon or socket: the driver talks to AAudio from Wine's unixlib.
+            boolean micRequested = DirectAudioDriver.INSTANCE.isMicEnabled(shortcut != null
+                    ? shortcut.getExtra(DirectAudioDriver.EXTRA_MIC, container.getExtra(DirectAudioDriver.EXTRA_MIC, "0"))
+                    : container.getExtra(DirectAudioDriver.EXTRA_MIC, "0"));
+            boolean micExposed = DirectAudioDriver.INSTANCE.shouldExposeMic(this, micRequested);
+            if (micExposed) envVars.put(DirectAudioDriver.ENV_MIC, "1");
+            if (micRequested && !micExposed) {
+                runOnUiThread(() -> WinToast.show(this,
+                        "DirectAudio: microphone permission not granted, microphone disabled", Toast.LENGTH_LONG));
+            }
+            Log.d("XServerDisplayActivity", "DirectAudio: micRequested=" + micRequested + " micExposed=" + micExposed);
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
@@ -2831,6 +2847,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return overrideEnvVars;
     }
 
+    // DirectAudio must be installed for this Wine layer and prefix before the registry may name
+    // it: mmdevapi failing to load the named driver makes titles that open audio while loading
+    // hang instead of running silent. On failure this launch falls back to the default driver;
+    // the container's saved choice is untouched, so the next launch tries again.
+    private void resolveAudioDriver() {
+        if (!DirectAudioDriver.INSTANCE.isSelected(audioDriver)) return;
+        DirectAudioDriver.Result result = DirectAudioDriver.INSTANCE.install(this, imageFs, wineInfo);
+        if (result.getOk()) return;
+        Log.w("XServerDisplayActivity", "DirectAudio unavailable, falling back to "
+                + Container.DEFAULT_AUDIO_DRIVER + ": " + result.getMessage());
+        audioDriver = Container.DEFAULT_AUDIO_DRIVER;
+        String message = result.getMessage() + " - using PulseAudio";
+        runOnUiThread(() -> WinToast.show(this, message, Toast.LENGTH_LONG));
+    }
+
     private void changeWineAudioDriver() {
         if (!audioDriver.equals(container.getExtra("audioDriver"))) {
             File rootDir = imageFs.getRootDir();
@@ -2840,6 +2871,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     registryEditor.setStringValue("Software\\Wine\\Drivers", "Audio", "alsa");
                 } else if (audioDriver.equals("pulse-audio-gn")) {
                     registryEditor.setStringValue("Software\\Wine\\Drivers", "Audio", "pulse");
+                } else if (DirectAudioDriver.INSTANCE.isSelected(audioDriver)) {
+                    registryEditor.setStringValue("Software\\Wine\\Drivers", "Audio", DirectAudioDriver.IDENTIFIER);
                 }
             }
             container.putExtra("audioDriver", audioDriver);

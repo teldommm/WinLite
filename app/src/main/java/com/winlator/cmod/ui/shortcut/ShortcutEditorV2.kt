@@ -2,6 +2,7 @@
 
 package com.winlator.cmod.ui.shortcut
 
+import com.winlator.cmod.directaudio.DirectAudioDriver
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.app.Activity
 import android.content.Context
@@ -215,6 +216,8 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var oboeApi by mutableStateOf(shortcut.getExtra("oboeApi", container.getExtra("oboeApi", "auto")))
     var oboeAdaptive by mutableStateOf(shortcut.getExtra("oboeAdaptive", container.getExtra("oboeAdaptive", "1")) != "0")
     var oboeExclusive by mutableStateOf(shortcut.getExtra("oboeExclusive", container.getExtra("oboeExclusive", "0")) == "1")
+    var directAudioMic by mutableStateOf(DirectAudioDriver.isMicEnabled(
+        shortcut.getExtra(DirectAudioDriver.EXTRA_MIC, container.getExtra(DirectAudioDriver.EXTRA_MIC, "0"))))
     var wrapper by mutableStateOf(StringUtils.parseIdentifier(shortcut.getExtra("dxwrapper", container.getDXWrapper())))
     var wrapperConfig by mutableStateOf(shortcut.getExtra("dxwrapperConfig", container.getDXWrapperConfig()))
     var dxvkVersion by mutableStateOf(readConfig(wrapperConfig, "version", ',').ifBlank { DefaultVersion.DXVK })
@@ -814,6 +817,14 @@ private fun ShortcutCategoryV2(
             SettingsCard {
                 SettingChoice("Audio Driver", audioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio, audioEntries) {
                     s.audio = StringUtils.parseIdentifier(it); s.extra("audioDriver", s.audio)
+                }
+                if (DirectAudioDriver.isSelected(s.audio)) {
+                    SettingsDivider()
+                    SettingToggle("Microphone", s.directAudioMic) {
+                        s.directAudioMic = it
+                        s.extra(DirectAudioDriver.EXTRA_MIC, if (it) "1" else "0")
+                        if (it) DirectAudioDriver.requestMicPermission(context)
+                    }
                 }
                 if (s.audio == "oboe") {
                     SettingsDivider()
