@@ -4,6 +4,7 @@ package com.winlator.cmod.ui.container
 
 import com.winlator.cmod.contentdialog.DXVKConfig
 import com.winlator.cmod.directaudio.DirectAudioDriver
+import com.winlator.cmod.ssbs.ForceSsbs
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.content.Context
 import android.graphics.Bitmap
@@ -1044,8 +1045,10 @@ private fun ContainerCategoryV2(
                     }
                     SettingsDivider()
                     SettingMappedChoice("FEXCore Preset", s.fexPreset, fexPresets) { s.fexPreset = it }
-                    SettingsDivider()
-                    SettingToggle("Force SSBS", s.forceSsbs) { s.forceSsbs = it }
+                    if (ForceSsbs.isSupportedWine(s.runtime)) {
+                        SettingsDivider()
+                        SettingToggle("Force SSBS", s.forceSsbs) { s.forceSsbs = it }
+                    }
                 }
                 if (!arm64 || s.emulator == "WOWBox64") {
                     catalog?.let { c ->

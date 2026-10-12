@@ -4,6 +4,7 @@ package com.winlator.cmod.ui.shortcut
 
 import com.winlator.cmod.contentdialog.DXVKConfig
 import com.winlator.cmod.directaudio.DirectAudioDriver
+import com.winlator.cmod.ssbs.ForceSsbs
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.app.Activity
 import android.content.Context
@@ -1083,8 +1084,10 @@ private fun ShortcutCategoryV2(
                     }
                     SettingsDivider()
                     SettingMappedChoice("FEXCore Preset", s.fexPreset, fexPresets) { s.fexPreset = it; s.extra("fexcorePreset", it) }
-                    SettingsDivider()
-                    SettingToggle("Force SSBS", s.forceSsbs) { s.forceSsbs = it; s.extra("forceSsbs", if (it) "1" else "0") }
+                    if (ForceSsbs.isSupportedWine(s.container.getWineVersion())) {
+                        SettingsDivider()
+                        SettingToggle("Force SSBS", s.forceSsbs) { s.forceSsbs = it; s.extra("forceSsbs", if (it) "1" else "0") }
+                    }
                 }
                 if (!s.arm64 || s.emulator == "WOWBox64") {
                     catalog?.let { c ->

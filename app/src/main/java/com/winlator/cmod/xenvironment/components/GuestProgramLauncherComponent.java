@@ -14,6 +14,7 @@ import com.winlator.cmod.box64.Box64Preset;
 import com.winlator.cmod.box64.Box64PresetManager;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.ContainerOverlay;
+import com.winlator.cmod.ssbs.ForceSsbs;
 import com.winlator.cmod.container.SharedComponents;
 import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.contents.ContentProfile;
@@ -462,7 +463,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         // and clears SSBS, so game threads run with speculative store bypass disabled. Layers rebuilt with
         // the ntdll fix honour WINE_FORCE_SSBS; libssbs.so sets the bit from outside for layers that
         // predate it. Per-game "1"/"0" overrides the container switch; "" follows it.
-        if (wineInfo.isArm64EC()) {
+        if (wineInfo.isArm64EC() && ForceSsbs.isSupportedWine(wineInfo.identifier())) {
             boolean forceSsbs = container == null || container.isForceSsbs();
             if (shortcut != null) {
                 String ssbsExtra = shortcut.getExtra("forceSsbs");

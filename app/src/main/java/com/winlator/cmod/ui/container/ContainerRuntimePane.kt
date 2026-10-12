@@ -1,6 +1,7 @@
 package com.winlator.cmod.ui.container
 
 import com.winlator.cmod.directaudio.DirectAudioDriver
+import com.winlator.cmod.ssbs.ForceSsbs
 import android.widget.Toast
 import com.winlator.cmod.ui.toast.WinToast
 import androidx.compose.foundation.layout.Arrangement
@@ -291,7 +292,9 @@ internal fun ContainerRuntimePane(
                         SettingsDivider(); SettingInstallChoice("FEXCore Version", fexVersion, c.fex, installing, "FEXCore", { v -> installRuntime("FEXCore", v) { fexVersion = it; container.setFEXCoreVersion(it); container.saveData() } }) { fexVersion = it; container.setFEXCoreVersion(it); container.saveData() }
                     }
                     SettingsDivider(); SettingMappedChoice("FEXCore Preset", fexPreset, fexPresets) { fexPreset = it; container.setFEXCorePreset(it); container.saveData() }
-                    SettingsDivider(); SettingToggle("Force SSBS", forceSsbs) { forceSsbs = it; container.setForceSsbs(it); container.saveData() }
+                    if (ForceSsbs.isSupportedWine(container.getWineVersion())) {
+                        SettingsDivider(); SettingToggle("Force SSBS", forceSsbs) { forceSsbs = it; container.setForceSsbs(it); container.saveData() }
+                    }
                 }
                 if (!arm64 || emulator == "WOWBox64") {
                     catalog?.let { c ->
