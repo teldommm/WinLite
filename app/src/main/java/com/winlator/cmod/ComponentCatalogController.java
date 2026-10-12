@@ -361,9 +361,13 @@ public class ComponentCatalogController {
     // also publish last, or an older picture (an install not in it yet) could overwrite a newer one.
     private synchronized void rebuildCatalog() {
         ArrayList<ComponentEntry> rebuilt = new ArrayList<>(componentCatalog.entries());
-        // Catalog rows grouped by type, newest first; driver rows follow in the order they were listed.
+        // Catalog rows grouped by type, newest version first (by the number in the name: the version
+        // code is 1 for almost every row, and 0 for some newer ones, so it only breaks ties);
+        // driver rows follow in the order they were listed.
         rebuilt.sort(Comparator.comparing((ComponentEntry e) -> e.isDriver())
                 .thenComparing((ComponentEntry e) -> e.type)
+                .thenComparing((ComponentEntry e) -> e.isDriver() ? "" : e.name,
+                        (left, right) -> com.winlator.cmod.core.VersionOrder.compareNewestFirst(left, right))
                 .thenComparing((ComponentEntry e) -> e.versionCode, Comparator.reverseOrder()));
         synchronized (catalog) {
             catalog.clear();

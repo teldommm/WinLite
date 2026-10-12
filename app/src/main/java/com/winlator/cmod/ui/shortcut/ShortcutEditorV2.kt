@@ -124,6 +124,7 @@ import com.winlator.cmod.ui.settings.filterDxvkForVkd3d
 import com.winlator.cmod.ui.settings.installAdrenoDriver
 import com.winlator.cmod.ui.settings.installRuntimeComponent
 import com.winlator.cmod.ui.settings.isDxvkCompatibleWithVkd3d
+import com.winlator.cmod.ui.settings.pickCompatibleInstalledDxvk
 import com.winlator.cmod.ui.settings.isTurnipDriver
 import com.winlator.cmod.ui.settings.isVkd3dEnabled
 import com.winlator.cmod.ui.settings.loadSettingsCatalog
@@ -1020,13 +1021,13 @@ private fun ShortcutCategoryV2(
                                 s.vkd3dVersion = installed
                                 s.wrapperValue("vkd3dVersion", installed)
                                 if (isVkd3dEnabled(installed) && !isDxvkCompatibleWithVkd3d(s.dxvkVersion)) {
-                                    c.dxvk.all.firstOrNull { candidate -> isDxvkCompatibleWithVkd3d(candidate) && candidate in c.dxvk.installed }?.let(s::selectDxvkVersion)
+                                    pickCompatibleInstalledDxvk(c.dxvk)?.let(s::selectDxvkVersion)
                                 }
                             } }) {
                             s.vkd3dVersion = it
                             s.wrapperValue("vkd3dVersion", it)
                             if (isVkd3dEnabled(it) && !isDxvkCompatibleWithVkd3d(s.dxvkVersion)) {
-                                c.dxvk.all.firstOrNull { candidate -> isDxvkCompatibleWithVkd3d(candidate) && candidate in c.dxvk.installed }?.let(s::selectDxvkVersion)
+                                pickCompatibleInstalledDxvk(c.dxvk)?.let(s::selectDxvkVersion)
                             }
                         }
                     }

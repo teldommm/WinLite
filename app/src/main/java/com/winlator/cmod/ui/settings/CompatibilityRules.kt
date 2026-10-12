@@ -8,11 +8,20 @@ internal fun isDxvkCompatibleWithVkd3d(version: String): Boolean {
     return (match.groupValues.getOrNull(1)?.toIntOrNull() ?: 0) >= 2
 }
 
+/**
+ * The DXVK to switch to when the chosen VKD3D needs DXVK 2.x: the newest installed compatible one.
+ * Sarek builds (a separate fork for old GPUs) are only used when nothing else fits.
+ */
+internal fun pickCompatibleInstalledDxvk(catalog: VersionCatalog): String? {
+    val candidates = catalog.all.filter { isDxvkCompatibleWithVkd3d(it) && it in catalog.installed }
+    return candidates.firstOrNull { !it.contains("sarek", ignoreCase = true) } ?: candidates.firstOrNull()
+}
+
 internal fun filterDxvkForVkd3d(catalog: VersionCatalog, vkd3dVersion: String): VersionCatalog {
     if (!isVkd3dEnabled(vkd3dVersion)) return catalog
     val allowed = catalog.all.filter(::isDxvkCompatibleWithVkd3d)
     val installed = catalog.installed.filterTo(linkedSetOf(), ::isDxvkCompatibleWithVkd3d)
-    return VersionCatalog(allowed, installed)
+    return VersionCatalog(allowed, installed) // keeps the order of catalog.all
 }
 
 internal fun normalizeLocaleValue(value: String): String {

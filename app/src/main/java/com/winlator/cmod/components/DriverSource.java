@@ -7,6 +7,7 @@ import com.winlator.cmod.contents.AdrenotoolsManager;
 import com.winlator.cmod.contents.RemoteDriverCatalog;
 import com.winlator.cmod.core.Downloader;
 import com.winlator.cmod.core.RemoteSources;
+import com.winlator.cmod.core.VersionOrder;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -99,36 +100,7 @@ public final class DriverSource implements ComponentSource {
 
     // Text compared case-insensitively, runs of digits by their value: "R9" < "R10".
     static int compareNatural(String a, String b) {
-        int i = 0;
-        int j = 0;
-        while (i < a.length() && j < b.length()) {
-            char x = a.charAt(i);
-            char y = b.charAt(j);
-            if (Character.isDigit(x) && Character.isDigit(y)) {
-                int startA = i;
-                int startB = j;
-                while (i < a.length() && Character.isDigit(a.charAt(i))) i++;
-                while (j < b.length() && Character.isDigit(b.charAt(j))) j++;
-                String numA = stripLeadingZeros(a.substring(startA, i));
-                String numB = stripLeadingZeros(b.substring(startB, j));
-                if (numA.length() != numB.length()) return numA.length() < numB.length() ? -1 : 1;
-                int byValue = numA.compareTo(numB);
-                if (byValue != 0) return byValue;
-            } else {
-                char lx = Character.toLowerCase(x);
-                char ly = Character.toLowerCase(y);
-                if (lx != ly) return lx < ly ? -1 : 1;
-                i++;
-                j++;
-            }
-        }
-        return Integer.compare(a.length() - i, b.length() - j);
-    }
-
-    private static String stripLeadingZeros(String digits) {
-        int start = 0;
-        while (start < digits.length() - 1 && digits.charAt(start) == '0') start++;
-        return digits.substring(start);
+        return VersionOrder.compareNatural(a, b);
     }
 
     private final class InstalledDriverEntry extends ComponentEntry {

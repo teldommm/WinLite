@@ -124,7 +124,9 @@ public class AdrenotoolsManager {
     public ArrayList<String> enumarateInstalledDrivers() {
         ArrayList<String> driversList = new ArrayList<>();
         
-        for (File f : adrenotoolsContentDir.listFiles()) {
+        File[] files = adrenotoolsContentDir.listFiles();
+        if (files == null) return driversList;
+        for (File f : files) {
             boolean fromResources = isFromResources(f.getName());
             if (!fromResources && new File(f, "meta.json").exists())
                 driversList.add(f.getName());
@@ -141,7 +143,16 @@ public class AdrenotoolsManager {
             if (!id.equalsIgnoreCase("System") && isFromResources(id) && !driversList.contains(id))
                 driversList.add(id);
         }
-        for (String id : enumarateInstalledDrivers()) {
+        // The folder listing has no defined order, so sort the installed drivers the same way the
+        // Components screen does: newest first (R10 before R9), ties by id.
+        ArrayList<String> installed = enumarateInstalledDrivers();
+        final java.util.HashMap<String, String> labels = new java.util.HashMap<>();
+        for (String id : installed) labels.put(id, (getDriverName(id) + " " + getDriverVersion(id)).trim());
+        java.util.Collections.sort(installed, (left, right) -> {
+            int byLabel = com.winlator.cmod.core.VersionOrder.compareNatural(labels.get(right), labels.get(left));
+            return byLabel != 0 ? byLabel : left.compareTo(right);
+        });
+        for (String id : installed) {
             if (!driversList.contains(id)) driversList.add(id);
         }
         return driversList;

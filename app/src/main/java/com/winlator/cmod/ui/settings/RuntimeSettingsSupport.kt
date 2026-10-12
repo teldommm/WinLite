@@ -72,6 +72,13 @@ import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
 
 internal data class VersionCatalog(val all: List<String>, val installed: Set<String>)
+
+/** Newest version first, so every DXVK / VKD3D / FEXCore / Box64 / WOWBox64 list reads the same way. */
+internal fun List<String>.newestFirst(): List<String> =
+    sortedWith { left, right -> com.winlator.cmod.core.VersionOrder.compareNewestFirst(left, right) }
+
+internal fun versionCatalogOf(all: Iterable<String>, installed: Set<String>): VersionCatalog =
+    VersionCatalog(all.toList().newestFirst(), installed)
 internal data class DriverOption(
     val id: String,
     val label: String,
@@ -181,7 +188,7 @@ internal fun initialSettingsCatalog(
         // The cache may come from another container; make sure this one's selections are listed.
         fun VersionCatalog.with(selected: String): VersionCatalog =
             if (selected.isBlank() || selected in all) this
-            else VersionCatalog(all + selected, installed + selected)
+            else versionCatalogOf(all + selected, installed + selected)
         return cached.copy(
             dxvk = cached.dxvk.with(selectedDxvk),
             vkd3d = cached.vkd3d.with(selectedVkd3d),
@@ -198,7 +205,7 @@ internal fun initialSettingsCatalog(
         val installed = linkedSetOf<String>()
         bundled.filter { it.isNotBlank() && allowed(it) }.forEach(installed::add)
         if (selected.isNotBlank()) installed.add(selected)
-        return VersionCatalog(installed.toList(), installed)
+        return versionCatalogOf(installed, installed)
     }
 
     val rendererDrivers = linkedMapOf("system" to "System")
@@ -274,7 +281,7 @@ private suspend fun loadSettingsCatalogUncached(
         val installed = linkedSetOf<String>()
         bundled.filter { it.isNotBlank() && allowed(it) }.forEach(installed::add)
         ofType.filter { it.installed }.map { it.name }.filter(allowed).forEach(installed::add)
-        return VersionCatalog(all.toList(), installed)
+        return versionCatalogOf(all, installed)
     }
 
     val adreno = catalog.adrenotools()
