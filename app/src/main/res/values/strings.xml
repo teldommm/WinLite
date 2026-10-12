@@ -62,6 +62,7 @@
     <string name="compatibility">Compatibility</string>
     <string name="intermediate">Intermediate</string>
     <string name="performance">Performance</string>
+    <string name="performance_tso">Performance TSO</string>
     <string name="preset">Preset</string>
     <string name="you_cannot_remove_this_preset">You cannot remove this preset</string>
     <string name="box64_env_var_help__dynarec_safeflags"><![CDATA[

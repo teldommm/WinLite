@@ -36,7 +36,7 @@ public final class RemoteSources {
     /** Kept from when this was the only artwork setting, so keys people already saved still work. */
     public static final String KEY_STEAMGRID_API_KEY = "custom_api_key";
 
-    public static final String DEFAULT_CONTENTS_URL = "https://raw.githubusercontent.com/StevenMXZ/Winlator-Contents/main/contents.json";
+    public static final String DEFAULT_CONTENTS_URL = "https://raw.githubusercontent.com/teldommm/Winlator-Contents/main/contents.json";
     public static final String DEFAULT_INPUT_CONTROLS = "https://raw.githubusercontent.com/brunodev85/winlator/main/input_controls/";
     public static final String DEFAULT_STEAMGRID = "https://www.steamgriddb.com/api/v2/";
     public static final String DEFAULT_GAMESDB_SEARCH = "https://thegamesdb.net/search.php?name={query}&platform_id%5B%5D=1";
@@ -136,7 +136,6 @@ public final class RemoteSources {
         ArrayList<DriverRepo> list = new ArrayList<>();
         list.add(new DriverRepo("StevenMXZ Turnip Drivers", "https://api.github.com/repos/StevenMXZ/freedreno_turnip-CI/releases"));
         list.add(new DriverRepo("Whitebelyash Drivers", "https://api.github.com/repos/whitebelyash/AdrenoToolsDrivers/releases"));
-        list.add(new DriverRepo("Weab-Chan Turnip Drivers", "https://api.github.com/repos/Weab-chan/freedreno_turnip-CI/releases"));
         return list;
     }
 

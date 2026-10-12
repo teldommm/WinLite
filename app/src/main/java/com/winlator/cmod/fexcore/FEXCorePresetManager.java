@@ -51,8 +51,9 @@ public class FEXCorePresetManager {
             envVars.put("FEX_X87REDUCEDPRECISION", "1");
             envVars.put("FEX_MULTIBLOCK", "1");
         }
-        else if (id.equals(FEXCorePreset.PERFORMANCE)) {
-            envVars.put("FEX_TSOENABLED", "0");
+        else if (id.equals(FEXCorePreset.PERFORMANCE) || id.equals(FEXCorePreset.PERFORMANCE_TSO)) {
+            // Performance TSO is identical to Performance, except that TSO is switched on.
+            envVars.put("FEX_TSOENABLED", id.equals(FEXCorePreset.PERFORMANCE_TSO) ? "1" : "0");
             envVars.put("FEX_VECTORTSOENABLED", "0");
             envVars.put("FEX_MEMCPYSETTSOENABLED", "0");
             envVars.put("FEX_HALFBARRIERTSOENABLED", "0");
@@ -79,6 +80,7 @@ public class FEXCorePresetManager {
         presets.add(new FEXCorePreset(FEXCorePreset.COMPATIBILITY, context.getString(R.string.compatibility)));
         presets.add(new FEXCorePreset(FEXCorePreset.INTERMEDIATE, context.getString(R.string.intermediate)));
         presets.add(new FEXCorePreset(FEXCorePreset.PERFORMANCE, context.getString(R.string.performance)));
+        presets.add(new FEXCorePreset(FEXCorePreset.PERFORMANCE_TSO, context.getString(R.string.performance_tso)));
         for (String[] preset : customPresetsIterator(context)) presets.add(new FEXCorePreset(preset[0], preset[1]));
         return presets;
     }
