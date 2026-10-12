@@ -935,7 +935,7 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "AMD FidelityFX Super Resolution", "Lanczos 2 (16-tap)", "Color Boost")
+                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "AMD FidelityFX Super Resolution", "Lanczos 2 (16-tap)", "Color Boost", "Snapdragon Super Resolution HQ")
                 SettingChoice("Texture Filter", filters.getOrElse(s.filterMode) { filters.first() }, filters) {
                     s.filterMode = filters.indexOf(it).coerceAtLeast(0)
                     s.saveRenderer()

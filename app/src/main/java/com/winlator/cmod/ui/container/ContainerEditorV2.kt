@@ -153,7 +153,7 @@ private class ContainerEditorStateV2(
 
     var runtime by mutableStateOf(editing?.wineVersion.orEmpty())
     var name by mutableStateOf(editing?.name ?: "Container-${manager.nextContainerId}")
-    var screen by mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE)
+    var screen by mutableStateOf(editing?.screenSize ?: Container.defaultScreenSizeFor(context))
     var audio by mutableStateOf(editing?.audioDriver ?: Container.DEFAULT_AUDIO_DRIVER)
     var oboeProfile by mutableStateOf(editing?.getExtra("oboeProfile", "low") ?: "low")
     var oboeApi by mutableStateOf(editing?.getExtra("oboeApi", "auto") ?: "auto")
@@ -892,7 +892,8 @@ private fun ContainerCategoryV2(
                     "Snapdragon Super Resolution",
                     "AMD FidelityFX Super Resolution",
                     "Lanczos 2 (16-tap)",
-                    "Color Boost"
+                    "Color Boost",
+                    "Snapdragon Super Resolution HQ"
                 )
                 SettingChoice("Texture Filter", filters.getOrElse(s.filterMode) { filters.first() }, filters) {
                     s.filterMode = filters.indexOf(it).coerceAtLeast(0)

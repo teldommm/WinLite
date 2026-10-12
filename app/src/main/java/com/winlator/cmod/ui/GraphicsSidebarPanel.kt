@@ -69,7 +69,7 @@ object GraphicsSidebarPanelHost {
     }
 }
 
-private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost")
+private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost", "SGSR HQ")
 private val POSTFX_LABELS = listOf("None", "DLS", "CRT", "HDR", "Natural")
 private val FRAMEGEN_LABELS = listOf("Off", "LSFG 2x", "LSFG 3x", "LSFG 4x", "LSFG Adaptive FPS")
 // Index of "LSFG Adaptive FPS": presents paced to a typed-in rate instead of a fixed multiplier.

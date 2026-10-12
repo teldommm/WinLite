@@ -104,6 +104,15 @@ add_custom_command(
 )
 
 add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_hq_frag.h
+    COMMAND glslangValidator -V --vn window_sgsr_hq_frag_code
+            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_hq_frag.h
+            ${VULKAN_RENDERER_DIR}/window_sgsr_hq.frag
+    DEPENDS ${VULKAN_RENDERER_DIR}/window_sgsr_hq.frag
+    COMMENT "Compiling window_sgsr_hq.frag -> window_sgsr_hq_frag.h"
+)
+
+add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_fsr1_frag.h
     COMMAND glslangValidator -V --vn window_fsr1_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_fsr1_frag.h
@@ -173,7 +182,7 @@ if(LANCZOS_DESTROY_POS EQUAL -1)
 endif()
 string(REPLACE
     "${LANCZOS_DESTROY_MARKER}"
-    "    if (fsr1Pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fsr1Pipeline, nullptr);\n    if (lanczosPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, lanczosPipeline, nullptr);\n"
+    "    if (fsr1Pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fsr1Pipeline, nullptr);\n    if (lanczosPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, lanczosPipeline, nullptr);\n    if (sgsrHqPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrHqPipeline, nullptr);\n"
     VULKAN_CONTEXT_TEXT
     "${VULKAN_CONTEXT_TEXT}")
 
@@ -208,12 +217,12 @@ string(REPLACE
 
 string(REPLACE
     "auto modeName=[](int m){ return m==1?\"NEAREST\":m==2?\"SGSR\":m==3?\"FSR1\":\"LINEAR\"; };"
-    "auto modeName=[](int m){ return m==1?\"NEAREST\":m==2?\"SGSR\":m==3?\"FSR\":m==4?\"LANCZOS2\":m==5?\"COLOR_BOOST\":\"LINEAR\"; };"
+    "auto modeName=[](int m){ return m==1?\"NEAREST\":m==2?\"SGSR\":m==3?\"FSR\":m==4?\"LANCZOS2\":m==5?\"COLOR_BOOST\":m==6?\"SGSR_HQ\":\"LINEAR\"; };"
     VULKAN_CONTEXT_TEXT
     "${VULKAN_CONTEXT_TEXT}")
 string(REPLACE
     "filterMode, filterMode==3?\"FSR1\":filterMode==2?\"SGSR\":filterMode==1?\"NEAREST\":\"LINEAR\");"
-    "filterMode, filterMode==5?\"COLOR_BOOST\":filterMode==4?\"LANCZOS2\":filterMode==3?\"FSR\":filterMode==2?\"SGSR\":filterMode==1?\"NEAREST\":\"LINEAR\");"
+    "filterMode, filterMode==6?\"SGSR_HQ\":filterMode==5?\"COLOR_BOOST\":filterMode==4?\"LANCZOS2\":filterMode==3?\"FSR\":filterMode==2?\"SGSR\":filterMode==1?\"NEAREST\":\"LINEAR\");"
     VULKAN_CONTEXT_TEXT
     "${VULKAN_CONTEXT_TEXT}")
 
@@ -256,6 +265,7 @@ add_library(vulkan_renderer SHARED
         ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_fsr1_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_lanczos_frag.h
+        ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_hq_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_postfx_frag.h
 )

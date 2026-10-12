@@ -239,7 +239,7 @@ public class OnboardingActivity extends AppCompatActivity implements ComponentCa
         try {
             JSONObject data = new JSONObject();
             data.put("name", "Container-" + manager.getNextContainerId());
-            data.put("screenSize", Container.DEFAULT_SCREEN_SIZE);
+            data.put("screenSize", Container.defaultScreenSizeFor(this));
             data.put("envVars", Container.DEFAULT_ENV_VARS);
             data.put("graphicsDriver", Container.DEFAULT_GRAPHICS_DRIVER);
             data.put("graphicsDriverConfig", Container.DEFAULT_GRAPHICSDRIVERCONFIG);
