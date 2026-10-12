@@ -77,8 +77,18 @@ internal data class VersionCatalog(val all: List<String>, val installed: Set<Str
 internal fun List<String>.newestFirst(): List<String> =
     sortedWith { left, right -> com.winlator.cmod.core.VersionOrder.compareNewestFirst(left, right) }
 
-internal fun versionCatalogOf(all: Iterable<String>, installed: Set<String>): VersionCatalog =
-    VersionCatalog(all.toList().newestFirst(), installed)
+/**
+ * What a version picker shows: the versions already on the device first, then the ones that still
+ * have to be downloaded; newest first inside each group.
+ */
+internal fun versionCatalogOf(all: Iterable<String>, installed: Set<String>): VersionCatalog {
+    val (have, missing) = all.toList().distinct().partition { version ->
+        installed.any { it.equals(version, ignoreCase = true) }
+    }
+    // "None" (VKD3D off) is not a version: it stays the first row.
+    val off = have.filter { it.equals("None", ignoreCase = true) }
+    return VersionCatalog(off + (have - off.toSet()).newestFirst() + missing.newestFirst(), installed)
+}
 internal data class DriverOption(
     val id: String,
     val label: String,
