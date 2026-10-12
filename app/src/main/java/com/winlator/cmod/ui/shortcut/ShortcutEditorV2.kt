@@ -2,6 +2,7 @@
 
 package com.winlator.cmod.ui.shortcut
 
+import com.winlator.cmod.contentdialog.DXVKConfig
 import com.winlator.cmod.directaudio.DirectAudioDriver
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.app.Activity
@@ -935,9 +936,12 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "AMD FidelityFX Super Resolution", "Lanczos 2 (16-tap)", "Color Boost", "Snapdragon Super Resolution HQ")
-                SettingChoice("Texture Filter", filters.getOrElse(s.filterMode) { filters.first() }, filters) {
-                    s.filterMode = filters.indexOf(it).coerceAtLeast(0)
+                // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
+                // Display order puts NIS right after FSR.
+                val filterIds = listOf(0, 1, 2, 3, 7, 4, 5, 6)
+                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "AMD FidelityFX Super Resolution", "NVIDIA Image Scaling (NIS)", "Lanczos 2 (16-tap)", "Color Boost", "Snapdragon Super Resolution HQ")
+                SettingChoice("Texture Filter", filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
+                    s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
                     s.saveRenderer()
                 }
             }
@@ -1029,6 +1033,14 @@ private fun ShortcutCategoryV2(
                     SettingText("Frame Rate", s.frameRate) { s.frameRate = it.filter(Char::isDigit).take(4); s.wrapperValue("framerate", s.frameRate.ifBlank { "0" }) }
                     SettingsDivider()
                     SettingToggle("Max Frame Latency", s.maxFrameLatency) { s.maxFrameLatency = it; s.wrapperValue("maxFrameLatency", if (it) "1" else "0") }
+                    SettingsDivider()
+                    SettingChoice("Anisotropic Filtering", DXVKConfig.ANISOTROPY_LABELS.getOrElse(DXVKConfig.ANISOTROPY_VALUES.indexOf(readConfig(s.wrapperConfig, "anisotropy", ','))) { DXVKConfig.ANISOTROPY_LABELS[0] }, DXVKConfig.ANISOTROPY_LABELS.toList()) {
+                        s.wrapperValue("anisotropy", DXVKConfig.ANISOTROPY_VALUES[DXVKConfig.ANISOTROPY_LABELS.indexOf(it).coerceAtLeast(0)])
+                    }
+                    SettingsDivider()
+                    SettingChoice("Texture Sharpness (LOD Bias)", DXVKConfig.LOD_BIAS_LABELS.getOrElse(DXVKConfig.LOD_BIAS_VALUES.indexOf(readConfig(s.wrapperConfig, "lodBias", ','))) { DXVKConfig.LOD_BIAS_LABELS[0] }, DXVKConfig.LOD_BIAS_LABELS.toList()) {
+                        s.wrapperValue("lodBias", DXVKConfig.LOD_BIAS_VALUES[DXVKConfig.LOD_BIAS_LABELS.indexOf(it).coerceAtLeast(0)])
+                    }
                     val asyncMode = dxvkAsyncMode(s.dxvkVersion)
                     if (asyncMode != DxvkAsyncMode.NONE) {
                         SettingsDivider()

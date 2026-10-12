@@ -566,6 +566,7 @@ public:
     VkPipeline            fsr1Pipeline    = VK_NULL_HANDLE;
     VkPipeline            lanczosPipeline = VK_NULL_HANDLE;
     VkPipeline            sgsrHqPipeline  = VK_NULL_HANDLE;
+    VkPipeline            nisPipeline     = VK_NULL_HANDLE;
     VkPipeline            stretchPipeline = VK_NULL_HANDLE;
     VkPipeline            postfxPipeline  = VK_NULL_HANDLE;
 
@@ -634,6 +635,7 @@ public:
     void createFsr1Pipeline();
     void createLanczosPipeline();
     void createSgsrHqPipeline();
+    void createNisPipeline();
     void createStretchPipeline();
     void createPostFXPipeline();
     void createFramebuffers();

@@ -69,7 +69,10 @@ object GraphicsSidebarPanelHost {
     }
 }
 
-private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost", "SGSR HQ")
+// Index = filterMode - 2 (saved/native numbering, never reorder). NIS (mode 7) is appended here but
+// shown right after FSR in the dropdown through UPSCALER_DISPLAY_ORDER.
+private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost", "SGSR HQ", "NIS")
+private val UPSCALER_DISPLAY_ORDER = listOf(0, 1, 5, 2, 3, 4)
 private val POSTFX_LABELS = listOf("None", "DLS", "CRT", "HDR", "Natural")
 private val FRAMEGEN_LABELS = listOf("Off", "LSFG 2x", "LSFG 3x", "LSFG 4x", "LSFG Adaptive FPS")
 // Index of "LSFG Adaptive FPS": presents paced to a typed-in rate instead of a fixed multiplier.
@@ -140,11 +143,12 @@ private fun GraphicsSidebarPanel(
                 Spacer(Modifier.height(8.dp))
                 SidebarDropdownField(
                     caption = "Upscaler Mode",
-                    options = UPSCALER_LABELS,
-                    selectedIndex = upscalerIndex,
+                    options = UPSCALER_DISPLAY_ORDER.map { UPSCALER_LABELS[it] },
+                    selectedIndex = UPSCALER_DISPLAY_ORDER.indexOf(upscalerIndex).coerceAtLeast(0),
                     onSelect = {
-                        upscalerIndex = it
-                        callbacks.onUpscalerModeChanged(it)
+                        val mode = UPSCALER_DISPLAY_ORDER[it]
+                        upscalerIndex = mode
+                        callbacks.onUpscalerModeChanged(mode)
                     }
                 )
             }

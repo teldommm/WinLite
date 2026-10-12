@@ -35,7 +35,7 @@ Fork of [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) by Ste
 - Portrait and landscape layouts, themes, HUD (FPS, CPU/GPU load, RAM, power, temperature), debug log viewer.
 
 ### 🖼️ Image quality
-- Upscalers: SGSR, FSR, Lanczos 2, Color Boost (with sharpness).
+- Upscalers: SGSR, SGSR HQ, FSR, Lanczos 2, Color Boost (with sharpness).
 - Post effects: DLS, CRT, HDR, Natural.
 - 12 ReShade-style presets with adjustable strength (Cinematic, Vivid, Retro CRT, Anime Edge, …).
 - FPS limiter (any value) and selectable surface format.

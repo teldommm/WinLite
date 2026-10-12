@@ -2399,6 +2399,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
         envVars.put("MESA_VK_WSI_DEBUG", current + "," + flag);
     }
 
+    // Texture sharpness "Auto" (dxwrapperConfig lodBias=auto): the mip LOD bias matching the spatial
+    // upscaler this game starts with (2 SGSR, 3 FSR, 4 Lanczos 2, 6 SGSR HQ, 7 NIS); other filters give 0.
+    // DXVK reads it once at device creation, so a filter changed later in the sidebar applies next launch.
+    private float autoTextureLodBias() {
+        try {
+            int mode;
+            String saved = readGraphicsExtra("graphicsFilterMode");
+            if (!saved.isEmpty() && Integer.parseInt(saved) > 0) {
+                mode = Integer.parseInt(saved);
+            } else {
+                mode = shortcut != null ? shortcut.getRendererFilterMode()
+                        : (container != null ? container.getRendererFilterMode() : 0);
+            }
+            boolean spatial = mode == 2 || mode == 3 || mode == 4 || mode == 6 || mode == 7;
+            if (!spatial || xServer == null || xServer.screenInfo == null) return 0f;
+            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            return DXVKConfig.autoLodBias(xServer.screenInfo.width, xServer.screenInfo.height,
+                    dm.widthPixels, dm.heightPixels);
+        } catch (Exception e) {
+            return 0f;
+        }
+    }
+
     private void extractGraphicsDriverFiles() {
         String adrenoToolsDriverId = graphicsDriverConfig.get("version");
 
@@ -2407,7 +2431,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         File rootDir = imageFs.getRootDir();
 
         if (dxwrapper.contains("dxvk")) {
-            DXVKConfig.setEnvVars(this, dxwrapperConfig, envVars);
+            DXVKConfig.setEnvVars(this, dxwrapperConfig, envVars, autoTextureLodBias());
             String version = dxwrapperConfig.get("version");
             if (version.equals("1.11.1-sarek")) {
                 Log.d("GraphicsDriverExtraction", "Disabling Wrapper PATCH_OPCONSTCOMP SPIR-V pass");
