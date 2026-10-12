@@ -33,7 +33,7 @@ public class DXVKConfig {
     public static final String[] ANISOTROPY_LABELS = {"Game default", "2x", "4x", "8x", "16x"};
     public static final String LOD_BIAS_AUTO = "auto";
     public static final String[] LOD_BIAS_VALUES = {"0", LOD_BIAS_AUTO, "-0.25", "-0.5", "-0.75", "-1.0"};
-    public static final String[] LOD_BIAS_LABELS = {"Off", "Auto (match upscale)", "-0.25", "-0.5", "-0.75", "-1.0"};
+    public static final String[] LOD_BIAS_LABELS = {"Off", "Auto", "-0.25", "-0.5", "-0.75", "-1.0"};
     private static final float LOD_BIAS_MIN = -2.0f;
 
     /**

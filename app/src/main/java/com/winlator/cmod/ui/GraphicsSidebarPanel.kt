@@ -70,9 +70,9 @@ object GraphicsSidebarPanelHost {
 }
 
 // Index = filterMode - 2 (saved/native numbering, never reorder). NIS (mode 7) is appended here but
-// shown right after FSR in the dropdown through UPSCALER_DISPLAY_ORDER.
+// shown right after SGSR (HQ) and after FSR (NIS) in the dropdown through UPSCALER_DISPLAY_ORDER.
 private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost", "SGSR HQ", "NIS")
-private val UPSCALER_DISPLAY_ORDER = listOf(0, 1, 5, 2, 3, 4)
+private val UPSCALER_DISPLAY_ORDER = listOf(0, 4, 1, 5, 2, 3)
 private val POSTFX_LABELS = listOf("None", "DLS", "CRT", "HDR", "Natural")
 private val FRAMEGEN_LABELS = listOf("Off", "LSFG 2x", "LSFG 3x", "LSFG 4x", "LSFG Adaptive FPS")
 // Index of "LSFG Adaptive FPS": presents paced to a typed-in rate instead of a fixed multiplier.

@@ -242,8 +242,8 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var boxVersion by mutableStateOf(shortcut.getExtra("box64Version", container.getBox64Version().orEmpty()))
     var fexPreset by mutableStateOf(shortcut.getExtra("fexcorePreset", container.getFEXCorePreset()))
     // Force SSBS per game: "" follows the container, "1" forces on, "0" forces off.
-    val forceSsbsContainerDefault: Boolean = container.isForceSsbs()
-    var forceSsbs by mutableStateOf(shortcut.getExtra("forceSsbs", "").let { if (it == "1" || it == "0") it else "" })
+    // Shown as a plain on/off switch; starts from the shortcut override, else from the container value.
+    var forceSsbs by mutableStateOf(shortcut.getExtra("forceSsbs", "").let { if (it == "1" || it == "0") it == "1" else container.isForceSsbs() })
     var boxPreset by mutableStateOf(shortcut.getExtra("box64Preset", container.getBox64Preset()))
 
     var controlsProfile by mutableStateOf(shortcut.getExtra("controlsProfile", "0"))
@@ -941,9 +941,9 @@ private fun ShortcutCategoryV2(
                 }
                 SettingsDivider()
                 // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
-                // Display order puts NIS right after FSR.
-                val filterIds = listOf(0, 1, 2, 3, 7, 4, 5, 6)
-                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "AMD FidelityFX Super Resolution", "NVIDIA Image Scaling (NIS)", "Lanczos 2 (16-tap)", "Color Boost", "Snapdragon Super Resolution HQ")
+                // Display order: SGSR HQ right after SGSR, NIS right after FSR.
+                val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
+                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "Snapdragon Super Resolution HQ", "AMD FidelityFX Super Resolution", "NVIDIA Image Scaling (NIS)", "Lanczos 2 (16-tap)", "Color Boost")
                 SettingChoice("Texture Filter", filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
                     s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
                     s.saveRenderer()
@@ -1036,13 +1036,13 @@ private fun ShortcutCategoryV2(
                     SettingsDivider()
                     SettingText("Frame Rate", s.frameRate) { s.frameRate = it.filter(Char::isDigit).take(4); s.wrapperValue("framerate", s.frameRate.ifBlank { "0" }) }
                     SettingsDivider()
-                    SettingToggle("Max Frame Latency", s.maxFrameLatency) { s.maxFrameLatency = it; s.wrapperValue("maxFrameLatency", if (it) "1" else "0") }
+                    SettingToggle("DXVK Max Frame Latency", s.maxFrameLatency) { s.maxFrameLatency = it; s.wrapperValue("maxFrameLatency", if (it) "1" else "0") }
                     SettingsDivider()
-                    SettingChoice("Anisotropic Filtering", DXVKConfig.ANISOTROPY_LABELS.getOrElse(DXVKConfig.ANISOTROPY_VALUES.indexOf(readConfig(s.wrapperConfig, "anisotropy", ','))) { DXVKConfig.ANISOTROPY_LABELS[0] }, DXVKConfig.ANISOTROPY_LABELS.toList()) {
+                    SettingChoice("DXVK Anisotropic Filtering", DXVKConfig.ANISOTROPY_LABELS.getOrElse(DXVKConfig.ANISOTROPY_VALUES.indexOf(readConfig(s.wrapperConfig, "anisotropy", ','))) { DXVKConfig.ANISOTROPY_LABELS[0] }, DXVKConfig.ANISOTROPY_LABELS.toList()) {
                         s.wrapperValue("anisotropy", DXVKConfig.ANISOTROPY_VALUES[DXVKConfig.ANISOTROPY_LABELS.indexOf(it).coerceAtLeast(0)])
                     }
                     SettingsDivider()
-                    SettingChoice("Texture Sharpness (LOD Bias)", DXVKConfig.LOD_BIAS_LABELS.getOrElse(DXVKConfig.LOD_BIAS_VALUES.indexOf(readConfig(s.wrapperConfig, "lodBias", ','))) { DXVKConfig.LOD_BIAS_LABELS[0] }, DXVKConfig.LOD_BIAS_LABELS.toList()) {
+                    SettingChoice("DXVK Texture Sharpness", DXVKConfig.LOD_BIAS_LABELS.getOrElse(DXVKConfig.LOD_BIAS_VALUES.indexOf(readConfig(s.wrapperConfig, "lodBias", ','))) { DXVKConfig.LOD_BIAS_LABELS[0] }, DXVKConfig.LOD_BIAS_LABELS.toList()) {
                         s.wrapperValue("lodBias", DXVKConfig.LOD_BIAS_VALUES[DXVKConfig.LOD_BIAS_LABELS.indexOf(it).coerceAtLeast(0)])
                     }
                     val asyncMode = dxvkAsyncMode(s.dxvkVersion)
@@ -1084,14 +1084,7 @@ private fun ShortcutCategoryV2(
                     SettingsDivider()
                     SettingMappedChoice("FEXCore Preset", s.fexPreset, fexPresets) { s.fexPreset = it; s.extra("fexcorePreset", it) }
                     SettingsDivider()
-                    SettingMappedChoice(
-                        "Force SSBS (CPU speed fix)", s.forceSsbs,
-                        linkedMapOf(
-                            "" to "Container default (${if (s.forceSsbsContainerDefault) "On" else "Off"})",
-                            "1" to "On",
-                            "0" to "Off"
-                        )
-                    ) { s.forceSsbs = it; s.extra("forceSsbs", it.ifEmpty { null }) }
+                    SettingToggle("Force SSBS", s.forceSsbs) { s.forceSsbs = it; s.extra("forceSsbs", if (it) "1" else "0") }
                 }
                 if (!s.arm64 || s.emulator == "WOWBox64") {
                     catalog?.let { c ->

@@ -268,7 +268,7 @@ internal fun ContainerRuntimePane(
                     }
                     SettingsDivider(); SettingChoice("VKD3D Feature Level", vkd3dLevel, listOf("12_0", "12_1", "12_2")) { vkd3dLevel = it; saveWrapper("vkd3dLevel", it) }
                     SettingsDivider(); SettingText("Frame Rate", frameRate) { frameRate = it.filter(Char::isDigit).take(4); saveWrapper("framerate", frameRate.ifBlank { "0" }) }
-                    SettingsDivider(); SettingToggle("Max Frame Latency", maxFrameLatency) { maxFrameLatency = it; saveWrapper("maxFrameLatency", if (it) "1" else "0") }
+                    SettingsDivider(); SettingToggle("DXVK Max Frame Latency", maxFrameLatency) { maxFrameLatency = it; saveWrapper("maxFrameLatency", if (it) "1" else "0") }
                     SettingsDivider(); SettingToggle("Async", async) { async = it; saveWrapper("async", if (it) "1" else "0") }
                     SettingsDivider(); SettingToggle("Async Cache", asyncCache) { asyncCache = it; saveWrapper("asyncCache", if (it) "1" else "0") }
                     SettingsDivider(); SettingChoice("DDraw Wrapper", ddrawWrapper, listOf("wined3d", "cnc-ddraw", "dd7to9", "none")) { ddrawWrapper = it; saveWrapper("ddrawrapper", it) }
@@ -291,7 +291,7 @@ internal fun ContainerRuntimePane(
                         SettingsDivider(); SettingInstallChoice("FEXCore Version", fexVersion, c.fex, installing, "FEXCore", { v -> installRuntime("FEXCore", v) { fexVersion = it; container.setFEXCoreVersion(it); container.saveData() } }) { fexVersion = it; container.setFEXCoreVersion(it); container.saveData() }
                     }
                     SettingsDivider(); SettingMappedChoice("FEXCore Preset", fexPreset, fexPresets) { fexPreset = it; container.setFEXCorePreset(it); container.saveData() }
-                    SettingsDivider(); SettingToggle("Force SSBS (CPU speed fix)", forceSsbs) { forceSsbs = it; container.setForceSsbs(it); container.saveData() }
+                    SettingsDivider(); SettingToggle("Force SSBS", forceSsbs) { forceSsbs = it; container.setForceSsbs(it); container.saveData() }
                 }
                 if (!arm64 || emulator == "WOWBox64") {
                     catalog?.let { c ->
