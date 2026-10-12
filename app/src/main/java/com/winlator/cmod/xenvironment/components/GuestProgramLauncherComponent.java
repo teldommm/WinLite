@@ -458,6 +458,39 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         execEnvVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
         execEnvVars.put("FAKE_EVDEV_VIBRATION", "1");
 
+        // Force SSBS (arm64ec only): Wine's arm64 signal return rebuilds PSTATE from a Windows CONTEXT
+        // and clears SSBS, so game threads run with speculative store bypass disabled. Layers rebuilt with
+        // the ntdll fix honour WINE_FORCE_SSBS; libssbs.so sets the bit from outside for layers that
+        // predate it. Per-game "1"/"0" overrides the container switch; "" follows it.
+        if (wineInfo.isArm64EC()) {
+            boolean forceSsbs = container == null || container.isForceSsbs();
+            if (shortcut != null) {
+                String ssbsExtra = shortcut.getExtra("forceSsbs");
+                if (ssbsExtra.equals("1") || ssbsExtra.equals("0")) forceSsbs = ssbsExtra.equals("1");
+            }
+            Log.d("GuestLauncher", "Force SSBS: " + (forceSsbs ? "on" : "off"));
+            if (forceSsbs) {
+                File ssbsDest = new File(imageFs.getLibDir(), "libssbs.so");
+                File ssbsSrc = new File(nativeLibDir, "libssbs.so");
+                try {
+                    if (ssbsSrc.exists()) {
+                        FileUtils.copy(ssbsSrc, ssbsDest);
+                        Log.d("GuestLauncher", "Copied libssbs.so to imagefs");
+                    } else if (!ssbsDest.exists()) {
+                        Log.e("GuestLauncher", "libssbs.so NOT FOUND in APK: " + ssbsSrc.getAbsolutePath());
+                    }
+                } catch (Exception e) {
+                    Log.e("GuestLauncher", "Failed to copy libssbs.so: " + e.getMessage());
+                    e.printStackTrace();
+                }
+                if (ssbsDest.exists()) {
+                    if (!ld_preload.isEmpty()) ld_preload += ":";
+                    ld_preload += ssbsDest.getAbsolutePath();
+                }
+            }
+            execEnvVars.put("WINE_FORCE_SSBS", forceSsbs ? "1" : "0");
+        }
+
         // Thin containers run on the copy-on-write prefix overlay: preload libcontaineroverlay.so and
         // tell it which layer is the container's and which is the shared base prefix.
         try {

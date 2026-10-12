@@ -95,6 +95,9 @@ public class Container {
     private String desktopTheme = WineThemeManager.DEFAULT_DESKTOP_THEME;
     private String fexcoreVersion;
     private String fexcorePreset = FEXCorePreset.INTERMEDIATE;
+    // Force SSBS (arm64ec only, on by default): WINE_FORCE_SSBS=1 for layers carrying the ntdll fix plus
+    // libssbs.so preloaded for layers that predate it. Always serialized so an "off" survives a reload.
+    private boolean forceSsbs = true;
     private String box64Preset = Box64Preset.COMPATIBILITY;
     private File rootDir;
     private JSONObject extraData;
@@ -386,6 +389,14 @@ public class Container {
         return fexcorePreset;
     }
 
+    public void setForceSsbs(boolean forceSsbs) {
+        this.forceSsbs = forceSsbs;
+    }
+
+    public boolean isForceSsbs() {
+        return this.forceSsbs;
+    }
+
     public String getBox64Preset() {
         return box64Preset;
     }
@@ -561,6 +572,7 @@ public class Container {
             data.put("startupSelection", startupSelection);
             data.put("box64Version", box64Version);
             data.put("fexcorePreset", fexcorePreset);
+            data.put("forceSsbs", forceSsbs);
             data.put("fexcoreVersion", fexcoreVersion);
             data.put("box64Preset", box64Preset);
             data.put("desktopTheme", desktopTheme);
@@ -666,6 +678,9 @@ public class Container {
                     break;
                 case "fexcorePreset":
                     setFEXCorePreset(data.getString(key));
+                    break;
+                case "forceSsbs":
+                    setForceSsbs(data.getBoolean(key));
                     break;
                 case "box64Preset" :
                     setBox64Preset(data.getString(key));

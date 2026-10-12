@@ -118,6 +118,7 @@ internal fun ContainerRuntimePane(
     var fexVersion by remember { mutableStateOf(container.getFEXCoreVersion().orEmpty()) }
     var boxVersion by remember { mutableStateOf(container.getBox64Version().orEmpty()) }
     var fexPreset by remember { mutableStateOf(container.getFEXCorePreset()) }
+    var forceSsbs by remember { mutableStateOf(container.isForceSsbs()) }
     var boxPreset by remember { mutableStateOf(container.getBox64Preset()) }
 
     var revision by remember { mutableStateOf(0) }
@@ -290,6 +291,7 @@ internal fun ContainerRuntimePane(
                         SettingsDivider(); SettingInstallChoice("FEXCore Version", fexVersion, c.fex, installing, "FEXCore", { v -> installRuntime("FEXCore", v) { fexVersion = it; container.setFEXCoreVersion(it); container.saveData() } }) { fexVersion = it; container.setFEXCoreVersion(it); container.saveData() }
                     }
                     SettingsDivider(); SettingMappedChoice("FEXCore Preset", fexPreset, fexPresets) { fexPreset = it; container.setFEXCorePreset(it); container.saveData() }
+                    SettingsDivider(); SettingToggle("Force SSBS (CPU speed fix)", forceSsbs) { forceSsbs = it; container.setForceSsbs(it); container.saveData() }
                 }
                 if (!arm64 || emulator == "WOWBox64") {
                     catalog?.let { c ->

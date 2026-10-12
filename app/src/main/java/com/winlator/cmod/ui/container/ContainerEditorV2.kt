@@ -227,6 +227,7 @@ private class ContainerEditorStateV2(
     var fexVersion by mutableStateOf(editing?.fexCoreVersion ?: DefaultVersion.FEXCORE)
     var boxVersion by mutableStateOf(editing?.box64Version ?: DefaultVersion.BOX64)
     var fexPreset by mutableStateOf(editing?.fexCorePreset ?: FEXCorePreset.INTERMEDIATE)
+    var forceSsbs by mutableStateOf(editing?.isForceSsbs ?: true)
     var boxPreset by mutableStateOf(editing?.box64Preset ?: Box64Preset.COMPATIBILITY)
 
     var exclusive by mutableStateOf(editing?.isExclusiveXInput ?: true)
@@ -320,7 +321,7 @@ private class ContainerEditorStateV2(
         fullscreen, desktopTheme, desktopBackground, wallpaperStamp, mouseWarp, drives,
         renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat,
         graphicsDriver, graphicsWrapper, graphicsConfig,
-        wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, boxPreset, exclusive, xinput, dinput,
+        wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, forceSsbs, boxPreset, exclusive, xinput, dinput,
         syncCpu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
         cpu64.joinToString(), cpu32.joinToString(), components.entries.sortedBy { it.key }.joinToString()
     ).joinToString("|")
@@ -496,6 +497,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.setBox64Preset(state.boxPreset)
         container.setFEXCoreVersion(state.fexVersion)
         container.setFEXCorePreset(state.fexPreset)
+        container.setForceSsbs(state.forceSsbs)
         container.setDesktopTheme(containerDesktopThemeValueV2(state.desktopTheme, state.desktopBackground, state.wallpaperStamp))
         container.setMidiSoundFont(state.soundFont)
         container.setLC_ALL(state.locale)
@@ -551,6 +553,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 put("box64Preset", state.boxPreset)
                 put("fexcoreVersion", state.fexVersion)
                 put("fexcorePreset", state.fexPreset)
+                put("forceSsbs", state.forceSsbs)
                 put("desktopTheme", containerDesktopThemeValueV2(state.desktopTheme, state.desktopBackground, state.wallpaperStamp))
                 put("wineVersion", state.runtime)
                 put("midiSoundFont", state.soundFont)
@@ -1040,6 +1043,8 @@ private fun ContainerCategoryV2(
                     }
                     SettingsDivider()
                     SettingMappedChoice("FEXCore Preset", s.fexPreset, fexPresets) { s.fexPreset = it }
+                    SettingsDivider()
+                    SettingToggle("Force SSBS (CPU speed fix)", s.forceSsbs) { s.forceSsbs = it }
                 }
                 if (!arm64 || s.emulator == "WOWBox64") {
                     catalog?.let { c ->

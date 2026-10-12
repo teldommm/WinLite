@@ -47,6 +47,19 @@ target_link_libraries(fakeinput
         dl
 )
 
+# Force SSBS: keeps PSTATE.SSBS set across Wine's signal returns on arm64ec layers that were not
+# rebuilt with the SSBS fix (loaded via LD_PRELOAD when the container/game toggle is on).
+# sigaction/signal/bsd_signal must stay default-visible, so no -fvisibility=hidden here.
+add_library(ssbs SHARED
+        winlator/ssbs_adapter.c
+)
+
+target_compile_options(ssbs PRIVATE -Wall -Wextra)
+
+target_link_libraries(ssbs
+        dl
+)
+
 # Copy-on-write Wine prefix overlay (loaded via LD_PRELOAD). A per-container "upper" prefix is
 # layered over one shared read-only base prefix per Wine/Proton version, so containers only
 # store what is theirs. See containeroverlay/README.md. Must NOT be built with FORTIFY.

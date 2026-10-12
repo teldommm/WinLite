@@ -240,6 +240,9 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var fexVersion by mutableStateOf(shortcut.getExtra("fexcoreVersion", container.getFEXCoreVersion().orEmpty()))
     var boxVersion by mutableStateOf(shortcut.getExtra("box64Version", container.getBox64Version().orEmpty()))
     var fexPreset by mutableStateOf(shortcut.getExtra("fexcorePreset", container.getFEXCorePreset()))
+    // Force SSBS per game: "" follows the container, "1" forces on, "0" forces off.
+    val forceSsbsContainerDefault: Boolean = container.isForceSsbs()
+    var forceSsbs by mutableStateOf(shortcut.getExtra("forceSsbs", "").let { if (it == "1" || it == "0") it else "" })
     var boxPreset by mutableStateOf(shortcut.getExtra("box64Preset", container.getBox64Preset()))
 
     var controlsProfile by mutableStateOf(shortcut.getExtra("controlsProfile", "0"))
@@ -1079,6 +1082,15 @@ private fun ShortcutCategoryV2(
                     }
                     SettingsDivider()
                     SettingMappedChoice("FEXCore Preset", s.fexPreset, fexPresets) { s.fexPreset = it; s.extra("fexcorePreset", it) }
+                    SettingsDivider()
+                    SettingMappedChoice(
+                        "Force SSBS (CPU speed fix)", s.forceSsbs,
+                        linkedMapOf(
+                            "" to "Container default (${if (s.forceSsbsContainerDefault) "On" else "Off"})",
+                            "1" to "On",
+                            "0" to "Off"
+                        )
+                    ) { s.forceSsbs = it; s.extra("forceSsbs", it.ifEmpty { null }) }
                 }
                 if (!s.arm64 || s.emulator == "WOWBox64") {
                     catalog?.let { c ->
