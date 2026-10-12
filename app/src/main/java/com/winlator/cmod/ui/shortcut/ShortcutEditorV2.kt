@@ -815,7 +815,8 @@ private fun ShortcutCategoryV2(
                 }
             }
             SettingsCard {
-                SettingChoice("Audio Driver", audioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio, audioEntries) {
+                val visibleAudioEntries = DirectAudioDriver.audioEntriesFor(audioEntries, s.container.getWineVersion())
+                SettingChoice("Audio Driver", visibleAudioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio, visibleAudioEntries) {
                     s.audio = StringUtils.parseIdentifier(it); s.extra("audioDriver", s.audio)
                 }
                 if (DirectAudioDriver.isSelected(s.audio)) {

@@ -748,11 +748,18 @@ private fun ContainerCategoryV2(
                 SettingsDivider()
                 SettingWineRuntimeChoice("Wine / Proton", s.runtime, runtimes, installing, installWine) { s.runtime = it }
             }
+            // DirectAudio exists only for Proton 11 arm64ec; switching away clears the choice.
+            LaunchedEffect(s.runtime) {
+                if (DirectAudioDriver.isSelected(s.audio) && !DirectAudioDriver.isSupportedWine(s.runtime)) {
+                    s.audio = Container.DEFAULT_AUDIO_DRIVER
+                }
+            }
+            val visibleAudioEntries = DirectAudioDriver.audioEntriesFor(audioEntries, s.runtime)
             SettingsCard {
                 SettingChoice(
                     "Audio Driver",
-                    audioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio,
-                    audioEntries
+                    visibleAudioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio,
+                    visibleAudioEntries
                 ) { s.audio = StringUtils.parseIdentifier(it) }
                 if (DirectAudioDriver.isSelected(s.audio)) {
                     val micContext = LocalContext.current

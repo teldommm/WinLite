@@ -55,7 +55,9 @@ internal fun ContainerRuntimePane(
     val screenEntries = remember { context.resources.getStringArray(R.array.screen_size_entries).toList() }
     val graphicsEntries = remember { context.resources.getStringArray(R.array.graphics_driver_entries).toList() }
     val graphicsWrapperEntries = remember { context.resources.getStringArray(R.array.graphics_wrapper_entries).toList() }
-    val audioEntries = remember { context.resources.getStringArray(R.array.audio_driver_entries).toList() }
+    val audioEntries = remember(container.getWineVersion()) {
+        DirectAudioDriver.audioEntriesFor(context.resources.getStringArray(R.array.audio_driver_entries).toList(), container.getWineVersion())
+    }
     val wrapperEntries = remember { context.resources.getStringArray(R.array.dxwrapper_entries).toList() }
     val fexPresets = remember { FEXCorePresetManager.getPresets(context).associate { it.id to it.name } }
     val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associate { it.id to it.name } }

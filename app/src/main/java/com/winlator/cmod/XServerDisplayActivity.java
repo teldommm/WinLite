@@ -693,7 +693,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 extractGraphicsDriverFiles();
                 // After the prefix is ready (the driver is staged into it), before the
                 // registry names the backend.
-                resolveAudioDriver();
+                installDirectAudio();
                 changeWineAudioDriver();
                 applyGameRefreshRateUnlock();
                 try {
@@ -2847,19 +2847,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return overrideEnvVars;
     }
 
-    // DirectAudio must be installed for this Wine layer and prefix before the registry may name
-    // it: mmdevapi failing to load the named driver makes titles that open audio while loading
-    // hang instead of running silent. On failure this launch falls back to the default driver;
-    // the container's saved choice is untouched, so the next launch tries again.
-    private void resolveAudioDriver() {
+    // DirectAudio is only offered for Proton 11 arm64ec; it must be on disk (Wine layer + prefix)
+    // before the registry names it.
+    private void installDirectAudio() {
         if (!DirectAudioDriver.INSTANCE.isSelected(audioDriver)) return;
-        DirectAudioDriver.Result result = DirectAudioDriver.INSTANCE.install(this, imageFs, wineInfo);
-        if (result.getOk()) return;
-        Log.w("XServerDisplayActivity", "DirectAudio unavailable, falling back to "
-                + Container.DEFAULT_AUDIO_DRIVER + ": " + result.getMessage());
-        audioDriver = Container.DEFAULT_AUDIO_DRIVER;
-        String message = result.getMessage() + " - using PulseAudio";
-        runOnUiThread(() -> WinToast.show(this, message, Toast.LENGTH_LONG));
+        if (!DirectAudioDriver.INSTANCE.install(this, imageFs, wineInfo)) {
+            runOnUiThread(() -> WinToast.show(this, "DirectAudio: failed to install the driver", Toast.LENGTH_LONG));
+        }
     }
 
     private void changeWineAudioDriver() {
