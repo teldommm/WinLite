@@ -959,7 +959,7 @@ private fun ShortcutCategoryV2(
                     SettingChoice("Rendering Mode", s.renderingMode, listOf("None", "Sysmem", "Gmem", "Autotuner Profiled")) { s.applyRenderingMode(it) }
                 }
                 SettingsDivider()
-                SettingChoice("Vulkan Version", s.vulkanVersion, listOf("1.1", "1.2", "1.3")) { s.vulkanVersion = it; s.graphics("vulkanVersion", it) }
+                SettingChoice("Vulkan Version", s.vulkanVersion, listOf("1.1", "1.2", "1.3", "1.4")) { s.vulkanVersion = it; s.graphics("vulkanVersion", it) }
                 SettingsDivider()
                 SettingChoice("GPU Name", s.gpuName, gpuNames) { s.gpuName = it; s.graphics("gpuName", it) }
                 SettingsDivider()

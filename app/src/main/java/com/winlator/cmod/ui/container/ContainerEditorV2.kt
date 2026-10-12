@@ -905,7 +905,7 @@ private fun ContainerCategoryV2(
                     }
                     SettingsDivider()
                 }
-                SettingChoice("Vulkan Version", s.vulkanVersion, listOf("1.1", "1.2", "1.3")) {
+                SettingChoice("Vulkan Version", s.vulkanVersion, listOf("1.1", "1.2", "1.3", "1.4")) {
                     s.vulkanVersion = it; s.graphics("vulkanVersion", it)
                 }
                 SettingsDivider()

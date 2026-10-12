@@ -910,7 +910,7 @@ private fun GraphicsDriverOptionsPanel(
                 onSelected = onVersion
             )
             ThinDivider()
-            InlineChoice("Vulkan Version", vulkanVersion, arrayOf("1.1", "1.2", "1.3"), onVulkanVersion)
+            InlineChoice("Vulkan Version", vulkanVersion, arrayOf("1.1", "1.2", "1.3", "1.4"), onVulkanVersion)
             ThinDivider()
             InlineChoice("Present Mode", presentMode, arrayOf("mailbox", "fifo", "immediate", "relaxed"), onPresentMode)
             ThinDivider()
