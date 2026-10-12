@@ -128,7 +128,9 @@ public class ExternalControllerBindingsActivity extends AppCompatActivity {
 
         for (int i = 0; i < axes.length; i++) {
             float value = values[i];
-            byte sign = Mathf.sign(value);
+            // A deliberate push only: with the radial stick dead zone, a stick pushed right also
+            // reports its small vertical wobble, which must not register an AXIS Y binding.
+            byte sign = Math.abs(value) >= 0.5f ? Mathf.sign(value) : 0;
             if (sign != 0) {
                 int keyCode = ExternalControllerBinding.getKeyCodeForAxis(axes[i], sign);
                 updateControllerBinding(keyCode, Binding.NONE);

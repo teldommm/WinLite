@@ -1,5 +1,6 @@
 package com.winlator.cmod.xserver;
 
+import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 
 import androidx.collection.ArraySet;
@@ -19,6 +20,8 @@ public class Keyboard {
     private final ArraySet<Byte> pressedKeys = new ArraySet<>();
     private final ArrayList<OnKeyboardListener> onKeyboardListeners = new ArrayList<>();
     private final XServer xServer;
+    // Android keycode whose press added a synthetic Shift_L, or -1 (main thread only).
+    private int syntheticShiftFor = -1;
 
     public interface OnKeyboardListener {
         void onKeyPress(byte keycode, int keysym);
@@ -113,15 +116,44 @@ public class Keyboard {
             if (xKeycode == null) return false;
 
             if (action == KeyEvent.ACTION_DOWN) {
-                boolean shiftPressed = event.isShiftPressed() || keyCode == KeyEvent.KEYCODE_AT || keyCode == KeyEvent.KEYCODE_STAR || keyCode == KeyEvent.KEYCODE_POUND || keyCode == KeyEvent.KEYCODE_PLUS;
-                if (shiftPressed) xServer.injectKeyPress(XKeycode.KEY_SHIFT_L);
-                xServer.injectKeyPress(xKeycode, xKeycode != XKeycode.KEY_ENTER ? event.getUnicodeChar() : 0);
+                // A Shift is added only when none is held in X (soft keyboards report Shift as a
+                // meta state without Shift key events, and @ * # + are shifted digits/=), and only
+                // that synthetic Shift is released with this key. It used to release Shift_L on
+                // every key-up, dropping a physically held Shift (e.g. sprint while tapping A).
+                boolean needsShift = event.isShiftPressed() || keyCode == KeyEvent.KEYCODE_AT || keyCode == KeyEvent.KEYCODE_STAR || keyCode == KeyEvent.KEYCODE_POUND || keyCode == KeyEvent.KEYCODE_PLUS;
+                if (needsShift && !isShiftHeld()) {
+                    xServer.injectKeyPress(XKeycode.KEY_SHIFT_L);
+                    syntheticShiftFor = keyCode;
+                }
+                xServer.injectKeyPress(xKeycode, xKeycode != XKeycode.KEY_ENTER ? keysymFor(event) : 0);
             } else if (action == KeyEvent.ACTION_UP) {
-                xServer.injectKeyRelease(XKeycode.KEY_SHIFT_L);
                 xServer.injectKeyRelease(xKeycode);
+                if (syntheticShiftFor == keyCode) {
+                    syntheticShiftFor = -1;
+                    xServer.injectKeyRelease(XKeycode.KEY_SHIFT_L);
+                }
             }
         }
         return true;
+    }
+
+    private boolean isShiftHeld() {
+        return pressedKeys.contains(XKeycode.KEY_SHIFT_L.id) || pressedKeys.contains(XKeycode.KEY_SHIFT_R.id);
+    }
+
+    /**
+     * Keysym to bind to the key for this press, or 0 to keep the static (US) keysyms. Only Latin-1
+     * letters are passed, so a QWERTZ/AZERTY layout still types its letters. Anything else is
+     * dropped: the Unicode char of a Cyrillic letter is not a valid keysym (0x446 for 'ц'), and
+     * shifted symbols that differ from US (Shift+2 = '"' on a Russian layout) flipped the key's
+     * keysyms back and forth. Each change also sends MappingNotify, on which Wine rebuilds its
+     * keycode -> VK table and gave those keys OEM codes instead of VK_W / VK_2.
+     */
+    private static int keysymFor(KeyEvent event) {
+        int c = event.getUnicodeChar();
+        if (c <= 0 || (c & KeyCharacterMap.COMBINING_ACCENT) != 0) return 0;
+        if (c < 0x41 || c > 0xFF || !Character.isLetter(c)) return 0;
+        return c;
     }
 
     private static XKeycode[] createKeycodeMap() {

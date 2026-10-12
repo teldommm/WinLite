@@ -232,7 +232,16 @@ public class TouchpadView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        // If mouse is disabled, ignore all input
+        // A physical mouse dragging with a button held arrives here as touch events (its buttons
+        // come separately as ACTION_BUTTON_PRESS/RELEASE via onExternalMouseEvent). Only the
+        // movement matters, in every touch mode: Touchscreen and Off used to drop it, so the
+        // cursor froze while dragging (box selection, drag-and-drop, camera drag).
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE) && event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) {
+            if (event.getActionMasked() == MotionEvent.ACTION_MOVE) externalMouseMoveTo(event.getX(), event.getY());
+            return true;
+        }
+
+        // Touch surface off: ignore finger input
         if (!mouseEnabled) return true;
 
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS) return handleStylusEvent(event);
@@ -254,7 +263,6 @@ public class TouchpadView extends View {
                 Log.d("StylusEvent", "Hover Enter");
                 break;
             case MotionEvent.ACTION_HOVER_MOVE:
-                Log.d("StylusEvent", "Hover Move: (" + event.getX() + ", " + event.getY() + ")");
                 float[] transformedPoint = XForm.transformPoint(xform, event.getX(), event.getY());
                 xServer.injectPointerMove((int) transformedPoint[0], (int) transformedPoint[1]);
                 break;

@@ -12,7 +12,9 @@ import java.nio.channels.FileChannel;
 public class FakeInputWriter {
     private static final String TAG = "FakeInputWriter";
     private static final int EVENT_SIZE = 24;
-    private static final int MAX_EVENTS_PER_UPDATE = 20; // Buttons + axes + sync
+    // Worst case per update: 10 buttons x 2 (MSC_SCAN + KEY) + 8 axes + SYN = 29 events; 20 used
+    // to overflow (BufferOverflowException on the UI thread) e.g. in reset() with many inputs held.
+    private static final int MAX_EVENTS_PER_UPDATE = 32;
     private static final int BUFFER_SIZE = EVENT_SIZE * MAX_EVENTS_PER_UPDATE;
 
     // Event types

@@ -13,6 +13,7 @@ import com.winlator.cmod.inputcontrols.ControlsProfile;
 import com.winlator.cmod.inputcontrols.ExternalController;
 import com.winlator.cmod.inputcontrols.FakeInputWriter;
 import com.winlator.cmod.inputcontrols.GamepadState;
+import com.winlator.cmod.widget.InputControlsView;
 import com.winlator.cmod.xserver.XServer;
 
 import android.content.Context;
@@ -68,7 +69,8 @@ public class WinHandler {
     private static final int MAX_CONTROLLERS = 4;
     private static final int OSC_DEVICE_ID = -1;
     private FakeInputWriter[] writers = new FakeInputWriter[MAX_CONTROLLERS];
-    private Map<Integer, Integer> deviceToSlot = new HashMap<>();
+    // Read by the vibration thread as well, so it must tolerate concurrent changes.
+    private final Map<Integer, Integer> deviceToSlot = new java.util.concurrent.ConcurrentHashMap<>();
     private Set<Integer> usedSlots = new HashSet<>();
     private String fakeInputBasePath;
     private LocalServerSocket vibrationServer;
@@ -99,6 +101,14 @@ public class WinHandler {
 
             @Override
             public void onInputDeviceRemoved(int deviceId) {
+                // Drop whatever the pad was holding (buttons, keys/mouse from its bindings) before
+                // its slot goes, so nothing stays pressed in the game or comes back on reconnect.
+                ExternalController controller = findKnownController(deviceId);
+                if (controller != null) {
+                    InputControlsView icv = activity.getInputControlsView();
+                    if (icv != null) icv.releaseExternalController(controller);
+                    controller.resetState();
+                }
                 releaseSlot(deviceId);
             }
 
@@ -523,9 +533,9 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
                 break;
             }
             case RequestCodes.RELEASE_GAMEPAD: {
-                // currentController = null; // No longer needed
-                // Maybe clear all controllers or reset mapping?
-                // For now, doing nothing is safest as mapping is sticky.
+                // Mapping is sticky, nothing to do. (Used to fall through into
+                // CURSOR_POS_FEEDBACK and move the cursor to garbage coordinates.)
+                break;
             }
             case RequestCodes.CURSOR_POS_FEEDBACK: {
                 short x = receiveData.getShort();
@@ -597,25 +607,18 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
 
     }
 
+    /**
+     * Writes the controller's state to its slot. The controller is the one instance per device
+     * (the profile's when the profile has it, see getController), so raw input and the bindings'
+     * output are merged here: unbound inputs pass through, bound ones are replaced.
+     */
     public void sendGamepadState(ExternalController controller) {
         if (controller == null)
             return;
 
-        ControlsProfile profile = activity.getInputControlsView().getProfile();
-        if (profile != null) {
-            ExternalController profileController = profile.getController(controller.getDeviceId());
-            if (profileController != null && profileController.getControllerBindingCount() > 0) {
-                int slot = assignSlot(controller.getDeviceId());
-                if (slot >= 0 && writers[slot] != null) {
-                    writers[slot].writeGamepadState(controller.remappedState);
-                }
-                return;
-            }
-        }
-
         int slot = assignSlot(controller.getDeviceId());
         if (slot >= 0 && writers[slot] != null) {
-            writers[slot].writeGamepadState(controller.state);
+            writers[slot].writeGamepadState(controller.buildOutputState());
         }
     }
 
@@ -694,7 +697,19 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         }
     }
 
+    /**
+     * The single ExternalController for a device: the active profile's instance if the profile has
+     * one for it (so raw state and remapped state live in the same object), otherwise a cached
+     * plain one. Two separate instances used to exist, and the plain one sent its never-filled
+     * remappedState, i.e. zeros, whenever the profile had a binding for the pad.
+     */
     private ExternalController getController(int deviceId) {
+        InputControlsView icv = activity.getInputControlsView();
+        ControlsProfile profile = icv != null ? icv.getProfile() : null;
+        if (profile != null) {
+            ExternalController profileController = profile.getController(deviceId);
+            if (profileController != null) return profileController;
+        }
         if (controllers.containsKey(deviceId)) {
             return controllers.get(deviceId);
         }
@@ -705,19 +720,31 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         return controller;
     }
 
-    public boolean onGenericMotionEvent(MotionEvent event) {
-        boolean handled = false;
-        ExternalController controller = getController(event.getDeviceId());
-
-        if (controller != null) {
-            handled = controller.updateStateFromMotionEvent(event);
-            if (handled)
-                sendGamepadState(controller);
+    /** Lookup without creating anything (the device may already be gone). */
+    private ExternalController findKnownController(int deviceId) {
+        InputControlsView icv = activity.getInputControlsView();
+        ControlsProfile profile = icv != null ? icv.getProfile() : null;
+        if (profile != null) {
+            ExternalController profileController = profile.getController(deviceId);
+            if (profileController != null) return profileController;
         }
-        return handled;
+        return controllers.get(deviceId);
+    }
+
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        if (!ExternalController.isJoystickDevice(event)) return false;
+        ExternalController controller = getController(event.getDeviceId());
+        if (controller == null || !controller.updateStateFromMotionEvent(event)) return false;
+
+        // Bindings first (they fill remappedState / drive keys and the mouse), then one write.
+        InputControlsView icv = activity.getInputControlsView();
+        if (icv != null) icv.processExternalControllerMotion(controller);
+        sendGamepadState(controller);
+        return true;
     }
 
     public boolean onKeyEvent(KeyEvent event) {
+        if (!ExternalController.isGameController(event.getDevice())) return false;
         boolean handled = false;
         ExternalController controller = getController(event.getDeviceId());
 

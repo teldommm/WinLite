@@ -162,6 +162,8 @@ public class InputControlsView extends View {
     private final Map<Object, Long> mouseAnalogSources = new ConcurrentHashMap<>();
     // External gamepad: last side of each stick/hat axis, per controller id (main thread only).
     private final Map<String, byte[]> joystickAxisSides = new java.util.HashMap<>();
+    // External gamepad: whether each analog trigger's binding is currently pressed (L2, R2).
+    private final Map<String, boolean[]> triggerBindingPressed = new java.util.HashMap<>();
 
     // Vsync-driven loop on its own looper thread (Choreographer works on any Looper thread),
     // running only while some source is non-zero.
@@ -916,21 +918,22 @@ public class InputControlsView extends View {
             }
             if (side != 0) {
                 Binding b = axisBinding(controller, axes[i], side);
-                if (b != null && !b.isMouseMove()) handleInputEvent(controller, b, true, value, false);
+                // Gamepad bindings follow the analog value on every event; key / mouse-button
+                // bindings only on the edge (in Relative Mouse mode a mouse button used to get a
+                // fresh LEFTDOWN on every stick event).
+                if (b != null && !b.isMouseMove() && (b.isGamepad() || prev != side))
+                    handleInputEvent(controller, b, true, value, false);
             }
             sides[i] = side;
         }
 
-        // Handle Analog Triggers (L2/R2)
-        // We use the binding for the digital button (e.g. KEYCODE_BUTTON_L2) to determing where to map the analog value
-        processTriggerInput(controller, controller.state.triggerL, KeyEvent.KEYCODE_BUTTON_L2, false);
-        processTriggerInput(controller, controller.state.triggerR, KeyEvent.KEYCODE_BUTTON_R2, false);
-
-        // Send the updated state once after processing all axes
-        WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
-        if (winHandler != null) {
-            winHandler.sendGamepadState(controller);
+        // Analog triggers only: digital ones (BUTTON_L2/R2 keys) are handled in onKeyEvent, and
+        // reading their absent axis here released the binding on every stick movement.
+        if (controller.hasAnalogTriggers()) {
+            processTriggerInput(controller, controller.state.triggerL, KeyEvent.KEYCODE_BUTTON_L2, 0);
+            processTriggerInput(controller, controller.state.triggerR, KeyEvent.KEYCODE_BUTTON_R2, 1);
         }
+        // The caller (WinHandler) writes the merged state once afterwards.
     }
 
     private static Binding axisBinding(ExternalController controller, int axis, int sign) {
@@ -971,72 +974,71 @@ public class InputControlsView extends View {
         else mouseAnalogSources.remove(key);
     }
 
-    private void processTriggerInput(ExternalController controller, float value, int keyCode, boolean sendUpdate) {
-        ExternalControllerBinding binding = controller.getControllerBinding(keyCode);
-        if (binding != null) {
-            boolean isPressed = value > ControlElement.STICK_DEAD_ZONE; // Use deadzone or simple > 0
-            if (isPressed) {
-                handleInputEvent(controller, binding.getBinding(), true, value, sendUpdate);
-            } else {
-                handleInputEvent(controller, binding.getBinding(), false, 0, sendUpdate);
+    private void processTriggerInput(ExternalController controller, float value, int keyCode, int index) {
+        ExternalControllerBinding controllerBinding = controller.getControllerBinding(keyCode);
+        if (controllerBinding == null) return;
+        Binding binding = controllerBinding.getBinding();
+
+        boolean[] pressed = triggerBindingPressed.get(controller.getId());
+        if (pressed == null) {
+            pressed = new boolean[2];
+            triggerBindingPressed.put(controller.getId(), pressed);
+        }
+        boolean isPressed = value > ControlElement.STICK_DEAD_ZONE;
+        boolean analog = binding.isGamepad() || binding.isMouseMove();
+        if (isPressed) {
+            if (analog || !pressed[index]) handleInputEvent(controller, binding, true, value, false);
+        }
+        else if (pressed[index]) {
+            handleInputEvent(controller, binding, false, 0, false);
+        }
+        pressed[index] = isPressed;
+    }
+
+    /**
+     * Joystick motion of a physical controller, after WinHandler updated its state: runs this
+     * profile's bindings for it (remappedState, keys, mouse). Called directly instead of relying
+     * on this view having focus, which joystick events otherwise need.
+     */
+    public void processExternalControllerMotion(ExternalController controller) {
+        if (editMode || profile == null || controller.getControllerBindingCount() == 0) return;
+        if (profile.getController(controller.getDeviceId()) != controller) return;
+        processJoystickInput(controller);
+    }
+
+    /** Releases everything a controller's stick / trigger bindings hold (device disconnected). */
+    public void releaseExternalController(ExternalController controller) {
+        byte[] sides = joystickAxisSides.remove(controller.getId());
+        if (sides != null) {
+            final int[] axes = {
+                    MotionEvent.AXIS_X, MotionEvent.AXIS_Y,
+                    MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ,
+                    MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_HAT_Y
+            };
+            for (int i = 0; i < axes.length && i < sides.length; i++) {
+                if (sides[i] == 0) continue;
+                Binding b = axisBinding(controller, axes[i], sides[i]);
+                if (b != null && !b.isMouseMove()) handleInputEvent(controller, b, false, 0, false);
             }
         }
-    }
-
-
-
-
-    @Override
-    public boolean dispatchGenericMotionEvent(MotionEvent event) {
-        Log.d("InputControlsView", "dispatchGenericMotionEvent called. Source: " + event.getSource());
-        return super.dispatchGenericMotionEvent(event);
-    }
-
-
-    @Override
-    public boolean onGenericMotionEvent(MotionEvent event) {
-
-        Log.d("InputControlsView", "Motion event received. Source: " + event.getSource());
-        Log.d("InputControlsView", "Device ID: " + event.getDeviceId());
-        Log.d("InputControlsView", "Profile is " + (profile != null ? "set" : "null"));
-
-
-        if (!editMode && profile != null) {
-            // Retrieve the associated controller for this event
-            ExternalController controller = profile.getController(event.getDeviceId());
-
-            if (controller != null && controller.updateStateFromMotionEvent(event)) {
-                // Process L2 and R2 button bindings
-                ExternalControllerBinding controllerBinding;
-
-                // L2 button
-                controllerBinding = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_L2);
-                if (controllerBinding != null) {
-                    handleInputEvent(controller, controllerBinding.getBinding(), controller.state.isPressed(ExternalController.IDX_BUTTON_L2));
-                }
-
-                // R2 button
-                controllerBinding = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_R2);
-                if (controllerBinding != null) {
-                    handleInputEvent(controller, controllerBinding.getBinding(), controller.state.isPressed(ExternalController.IDX_BUTTON_R2));
-                }
-
-                Log.d("InputEvent", "Event source: " + event.getSource());
-                Log.d("InputEvent", "Device ID: " + event.getDeviceId());
-                Log.d("InputEvent", "Action: " + event.getAction());
-
-                // Process joystick inputs for mouse movement and other bindings
-                processJoystickInput(controller);
-
-                // Return true to indicate the motion event was handled
-                return true;
+        boolean[] triggers = triggerBindingPressed.remove(controller.getId());
+        if (triggers != null) {
+            int[] keyCodes = {KeyEvent.KEYCODE_BUTTON_L2, KeyEvent.KEYCODE_BUTTON_R2};
+            for (int i = 0; i < 2; i++) {
+                if (!triggers[i]) continue;
+                ExternalControllerBinding b = controller.getControllerBinding(keyCodes[i]);
+                if (b != null) handleInputEvent(controller, b.getBinding(), false, 0, false);
             }
         }
-
-        // Pass the event to the super method if not handled
-        return super.onGenericMotionEvent(event);
+        mouseAnalogSources.remove("gamepad:" + controller.getId());
     }
 
+
+
+
+    // Physical controllers' joystick motion no longer comes through here: WinHandler handles it
+    // and calls processExternalControllerMotion() (this used to depend on the view having focus,
+    // and the per-event logging ran for every mouse and stick event).
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
@@ -1236,6 +1238,13 @@ public class InputControlsView extends View {
                 ExternalControllerBinding controllerBinding = controller.getControllerBinding(event.getKeyCode());
                 
                 if (controllerBinding != null) {
+                    int keyCode = event.getKeyCode();
+                    if ((keyCode == KeyEvent.KEYCODE_BUTTON_L2 || keyCode == KeyEvent.KEYCODE_BUTTON_R2)
+                            && controller.hasAnalogTriggers()) {
+                        // Analog triggers: the axis drives the binding (processTriggerInput); their
+                        // digital key would fight it.
+                        return true;
+                    }
                     int action = event.getAction();
 
                     if (action == KeyEvent.ACTION_DOWN) {

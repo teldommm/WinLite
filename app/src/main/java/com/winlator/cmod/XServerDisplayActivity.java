@@ -769,7 +769,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             case MotionEvent.ACTION_HOVER_MOVE: {
                 // Captured pointer: getX()/getY() are the device's relative counts. Scale them by
                 // Cursor Speed and carry the fraction, so fine motion isn't rounded away.
-                float[] p = XForm.transformPoint(xform, event.getX(), event.getY());
+                // Relative samples may arrive batched: every historical sample is a delta too.
+                float rawDx = event.getX(), rawDy = event.getY();
+                for (int h = 0, n = event.getHistorySize(); h < n; h++) {
+                    rawDx += event.getHistoricalX(h);
+                    rawDy += event.getHistoricalY(h);
+                }
+                float[] p = XForm.transformPoint(xform, rawDx, rawDy);
                 capturedMouseMotion.add(p[0] * globalCursorSpeed, p[1] * globalCursorSpeed);
                 int dx = capturedMouseMotion.x();
                 int dy = capturedMouseMotion.y();
@@ -2532,29 +2538,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent event) {
-        boolean handledByWinHandler = false;
-        boolean handledByTouchpadView = false;
+        // Physical controller sticks / triggers / HAT: WinHandler updates the pad and runs the
+        // profile's bindings (InputControlsView) itself, so nothing depends on which view has
+        // focus. Returning true also stops the framework from turning the stick into D-pad keys.
+        if (winHandler != null && winHandler.onGenericMotionEvent(event)) return true;
 
-        if (winHandler != null) {
-            handledByWinHandler = winHandler.onGenericMotionEvent(event);
-            if (handledByWinHandler) {
-
-            }
-        }
-
-        if (touchpadView != null) {
-            handledByTouchpadView = touchpadView.onExternalMouseEvent(event);
-            if (handledByTouchpadView) {
-
-            }
-        }
-
+        boolean handledByTouchpadView = touchpadView != null && touchpadView.onExternalMouseEvent(event);
         boolean handledBySuper = super.dispatchGenericMotionEvent(event);
-        if (!handledBySuper) {
-
-        }
-
-        return handledByWinHandler || handledByTouchpadView || handledBySuper;
+        return handledByTouchpadView || handledBySuper;
     }
 
     private static final int RECAPTURE_DELAY_MS = 10000;
@@ -2576,9 +2567,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         }
 
-        return (!inputControlsView.onKeyEvent(event) && !winHandler.onKeyEvent(event)
-                && xServer.keyboard.onKeyEvent(event)) ||
-                (!ExternalController.isGameController(event.getDevice()) && super.dispatchKeyEvent(event));
+        if (inputControlsView != null && inputControlsView.onKeyEvent(event)) return true;
+        if (winHandler != null && winHandler.onKeyEvent(event)) return true;
+        if (xServer != null && xServer.keyboard.onKeyEvent(event)) return true;
+        // Everything from a game controller is consumed, handled or not (key repeats, unknown
+        // buttons): an unhandled gamepad key makes the framework generate fallback keys
+        // (B -> BACK, A -> DPAD_CENTER) and run D-pad focus navigation between our views.
+        if (ExternalController.isGameController(event.getDevice())) return true;
+        return super.dispatchKeyEvent(event);
     }
 
     public InputControlsView getInputControlsView() {

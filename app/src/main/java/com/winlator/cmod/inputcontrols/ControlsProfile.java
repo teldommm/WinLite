@@ -117,6 +117,10 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
             String descriptor = device.getDescriptor();
             for (ExternalController controller : controllers) {
                 if (controller.getId().equals(descriptor)) {
+                    // Same physical controller under a new device id (reconnected): remember the
+                    // new id, or its slot would be keyed by the old one and the game would see a
+                    // second gamepad.
+                    controller.setDeviceId(deviceId);
                     return controller;
                 }
             }
