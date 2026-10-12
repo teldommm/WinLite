@@ -2,7 +2,7 @@
   <img src="logo.png" alt="WinLite" width="600">
 </p>
 
-# WinLite — Winlator Bionic(ludasho) fork
+# WinLite — Winlator Bionic(ludashi) fork
 
 Android app for running Windows (x86\_64) games and apps via Wine. Supports `x86_64` containers (Box86/Box64) and `Arm64EC` containers (FEXCore, optional WowBox64).
 
