@@ -18,6 +18,8 @@ public abstract class ComponentEntry {
 
     public boolean installed;
     public boolean recommended;
+    /** The catalog itself marks this row as recommended ("recommended": true), as opposed to a guess. */
+    public boolean pinnedRecommended;
 
     protected ComponentEntry(String id, String type, String name, int versionCode) {
         this.id = id;

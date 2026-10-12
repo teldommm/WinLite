@@ -63,4 +63,6 @@ public class ContentProfile {
     public String remoteUrl;
     /** Optional SHA-256 (hex) of the remote archive, from the catalog; verified after download when present. */
     public String remoteSha256;
+    /** Catalog only: the catalog's author marked this version as the recommended one ("recommended": true). */
+    public boolean remoteRecommended;
 }

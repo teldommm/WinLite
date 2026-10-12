@@ -421,7 +421,8 @@ public class ComponentCatalogController {
                     entry.removable(),
                     runtime,
                     inUse,
-                    false
+                    false,
+                    entry.pinnedRecommended
             ));
         }
         final boolean bundledInstalled = WineRuntimeGuard.isBundledMainInstalled(context);

@@ -132,6 +132,13 @@ private fun recommendedComponentIds(all: List<OnboardingComponent>): Set<String>
         .mapTo(linkedSetOf()) { it.id }
 
     latestRecommendedTypes.forEach { type ->
+        // Versions the component list marks as recommended win; the guess below is only for a
+        // type where it marks none.
+        val pinned = all.filter { it.type == type && it.pinnedRecommended }
+        if (pinned.isNotEmpty()) {
+            pinned.forEach { result.add(it.id) }
+            return@forEach
+        }
         all.withIndex()
             .filter { it.value.type == type }
             .maxWithOrNull { left, right ->

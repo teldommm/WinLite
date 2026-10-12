@@ -147,6 +147,7 @@ public class ContentsManager {
                     remoteProfile.verCode = object.getInt("verCode");
                     String sha256 = object.optString("sha256", "").trim();
                     remoteProfile.remoteSha256 = sha256.isEmpty() ? null : sha256;
+                    remoteProfile.remoteRecommended = object.optBoolean("recommended", false);
                     parsed.add(remoteProfile);
                 } catch (JSONException e) {
                     e.printStackTrace();
@@ -157,6 +158,20 @@ public class ContentsManager {
         }
         remoteProfiles = parsed;
         syncContents();
+    }
+
+    /**
+     * True when the catalog marks {@code verName} of {@code type} with {@code "recommended": true}.
+     * Asked by name, because a catalog version that is already installed is shown through the
+     * installed package and its catalog twin is not in the profile list any more.
+     */
+    public boolean isRecommendedInCatalog(ContentProfile.ContentType type, String verName) {
+        ArrayList<ContentProfile> remotes = remoteProfiles;
+        if (remotes == null || verName == null) return false;
+        for (ContentProfile remote : remotes) {
+            if (remote.remoteRecommended && remote.type == type && verName.equals(remote.verName)) return true;
+        }
+        return false;
     }
 
     private static final int CATALOG_MAX_BYTES = 2 * 1024 * 1024;

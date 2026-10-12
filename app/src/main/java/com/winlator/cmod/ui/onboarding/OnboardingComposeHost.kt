@@ -37,7 +37,9 @@ data class OnboardingComponent @JvmOverloads constructor(
     val removable: Boolean,
     val runtimeIdentifier: String? = null,
     val inUse: Boolean = false,
-    val bundled: Boolean = false
+    val bundled: Boolean = false,
+    /** The component list itself marks this one as recommended (as opposed to the app guessing). */
+    val pinnedRecommended: Boolean = false
 )
 
 interface OnboardingCallbacks {

@@ -8,6 +8,7 @@ import com.winlator.cmod.contents.ContentProfile;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.Downloader;
 import com.winlator.cmod.core.RemoteSources;
+import com.winlator.cmod.core.VersionOrder;
 import com.winlator.cmod.core.WineRuntimeGuard;
 
 import java.io.File;
@@ -54,6 +55,7 @@ public final class ContentsSource implements ComponentSource {
         // disk, claimed holds the entry names of the packages that are already shown that way.
         Map<ContentProfile, ContentProfile> installedFor = new IdentityHashMap<>();
         Set<String> claimed = new HashSet<>();
+        ArrayList<ContentEntry> contentRows = new ArrayList<>();
 
         for (ContentProfile.ContentType type : ContentProfile.ContentType.values()) {
             List<ContentProfile> profiles = manager.getProfiles(type);
@@ -83,8 +85,15 @@ public final class ContentsSource implements ComponentSource {
                 ContentEntry entry = new ContentEntry(typeName, profile, installed);
                 if (!seen.add(entry.id)) continue;
                 out.add(entry);
+                contentRows.add(entry);
                 ContentEntry current = newest.get(typeName);
-                if (current == null || entry.versionCode > current.versionCode) newest.put(typeName, entry);
+                // The highest version code wins; rows with the same code are told apart by the
+                // number in their name instead of by the order they happen to be listed in.
+                if (current == null || entry.versionCode > current.versionCode
+                        || (entry.versionCode == current.versionCode
+                        && VersionOrder.compareNewestFirst(entry.name, current.name) < 0)) {
+                    newest.put(typeName, entry);
+                }
             }
         }
 
@@ -96,10 +105,24 @@ public final class ContentsSource implements ComponentSource {
                 ContentEntry entry = new ContentEntry(typeName, profile, profile);
                 if (!seen.add(entry.id)) continue;
                 out.add(entry);
+                contentRows.add(entry);
             }
         }
 
-        for (ContentEntry entry : newest.values()) entry.recommended = true;
+        // What is recommended is decided by the catalog: every row it marks with
+        // "recommended": true. Only a type the catalog marks nothing in falls back to a guess
+        // (the newest row of that type).
+        Set<String> typesWithMarks = new HashSet<>();
+        for (ContentEntry entry : contentRows) {
+            if (entry.markedInCatalog()) {
+                entry.recommended = true;
+                entry.pinnedRecommended = true;
+                typesWithMarks.add(entry.type);
+            }
+        }
+        for (Map.Entry<String, ContentEntry> guess : newest.entrySet()) {
+            if (!typesWithMarks.contains(guess.getKey())) guess.getValue().recommended = true;
+        }
         return out;
     }
 
@@ -252,6 +275,13 @@ public final class ContentsSource implements ComponentSource {
             this.installedProfile = installedProfile;
             this.installed = installedProfile != null;
             this.installedName = installedProfile != null ? ContentsManager.getEntryName(installedProfile) : "";
+        }
+
+        /** The catalog marks this version (or the catalog version this package was installed as). */
+        boolean markedInCatalog() {
+            if (manager.isRecommendedInCatalog(profile.type, profile.verName)) return true;
+            return installedProfile != null && installedProfile != profile
+                    && manager.isRecommendedInCatalog(installedProfile.type, installedProfile.verName);
         }
 
         @Override
