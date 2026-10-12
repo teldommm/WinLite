@@ -1,75 +1,121 @@
-
-
 <p align="center">
-  <img src="logo.png" alt="Winlator Bionic" width="600">
+  <img src="logo.png" alt="WinLite" width="600">
 </p>
 
-# Winlator Bionic
+# WinLite — Winlator Bionic(ludasho) fork
 
-Winlator is an Android application that lets you run Windows (x86\_64) applications with Wine. It supports standard `x86_64` containers using Box86/Box64, as well as `Arm64EC` containers which utilize FEXCore (for 64/32-bit) or an optional WowBox64 (for 32-bit).
+Android app for running Windows (x86\_64) games and apps via Wine. Supports `x86_64` containers (Box86/Box64) and `Arm64EC` containers (FEXCore, optional WowBox64).
 
-This is a fork of the **Winlator Bionic** project by [Pipetto-crypto](https://github.com/Pipetto-crypto/winlator).
+Fork of [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) by StevenMXZ, itself based on [Winlator Bionic](https://github.com/Pipetto-crypto/winlator). Focus: built-in frame generation, a fully rewritten interface, lighter containers and safer game saves.
 
-## APK Build Explanations
+## Why this fork
 
-### what is Ludashi?
+| Feature | What you get |
+|---|---|
+| 🎞️ **Frame generation (LSFG)** | Built into the Vulkan renderer: 2x / 3x / 4x or Adaptive FPS. No external layers. |
+| 🎨 **Compose UI** | Whole app rewritten in Jetpack Compose, plus a new in-game sidebar. |
+| 🔊 **DirectAudio** | Wine → AAudio driver for low-latency sound (Proton 11 Arm64EC). |
+| 🧩 **3 Vulkan wrappers** | Default, Adreno and Legacy — pick what suits your GPU. |
+| 💾 **Thin containers** | Much smaller containers via a shared base prefix and shared components. |
+| 🗂️ **Save profiles** | Saves live in `Winlator/saves` and survive any container change. |
+| 🕹️ **Dynamic Stick** | On-screen stick that appears under your finger and follows it. |
+| 📦 **Component catalog** | One place for Proton, drivers and runtimes, with editable download sources. |
 
-The Ludashi Build is functionally identical to the standard Bionic app, but the package name has been renamed to mimic Ludashi, a popular benchmark app. Some Android phones — especially Xiaomi devices — may automatically enable performance mode when such apps are detected, potentially reducing throttling and boosting performance slightly.
+## Features
 
-### Dev-Vanilla Build
+### 🎞️ Frame generation (LSFG Native)
+- Modes: **2x, 3x, 4x** or **Adaptive FPS** (output paced to a target FPS you set).
+- Adjustable flow scale; switch on the fly from the sidebar; set per container or per shortcut.
+- **Requires your own `Lossless.dll`** — it isn't bundled. Import it once in Settings.
 
-This is the standard, unmodified build. It uses the original package name, which allows it to be installed alongside other popular Winlator forks (like the coffincolors version) without any package conflicts.
+### 🎨 Interface
+- Library, game details, containers, shortcuts, settings, file manager and controls editor are all Compose.
+- **In-game sidebar** with Rendering, HUD, Screen, Input and Task Manager panels.
+- Game covers and banners from SteamGridDB / TheGamesDB, with optional animated artwork.
+- Portrait and landscape layouts, themes, HUD (FPS, CPU/GPU load, RAM, power, temperature), debug log viewer.
 
-### RedMagic Build
+### 🖼️ Image quality
+- Upscalers: SGSR, FSR, Lanczos 2, Color Boost (with sharpness).
+- Post effects: DLS, CRT, HDR, Natural.
+- 12 ReShade-style presets with adjustable strength (Cinematic, Vivid, Retro CRT, Anime Edge, …).
+- FPS limiter (any value) and selectable surface format.
 
-This build mimics the package name of Genshin Impact. This is specifically designed for RedMagic devices, as the phone's software may detect this package name to enable hardware-specific gaming enhancements, such as built-in frame generation (framegen). Using this build may unlock these features and improve performance on supported RedMagic phones.
+### 🧩 Graphics & audio
+- Wrappers: **Default / Adreno / Legacy**. Adreno is preselected when supported.
+- Bundled Turnip/Adreno drivers; OpenGL via Zink or freedreno.
+- **DirectAudio** (Proton 11 Arm64EC): AAudio output, optional microphone, 64- and 32-bit guests. Based on [The412Banner/directaudio](https://github.com/The412Banner/directaudio).
 
-# Installation
+### 💾 Thin containers
+- Each container stores only its own changes on top of one shared **base prefix** per Wine/Proton version (copy-on-write overlay; Wine is not modified).
+- DXVK, VKD3D, FEXCore and other components are stored once and shared (e.g. the 228 MB Direct3D pack exists once, not per container).
+- Result: small containers, fast creation.
 
-1.  Download and install the latest APK from this repository's [Releases section](https://github.com/StevenMXZ/Winlator-Ludashi/releases) (choose your preferred build: `dev-vanilla`, `ludashi`, or `redmagic`).
-2.  Launch the app and wait for the installation process to finish.
+### 🗂️ Save profiles & backups
+Normally saves die with the container. A save profile keeps them in Android storage and links them into whichever container you launch from.
 
-# Useful Tips
+- **Mode per shortcut:** *Off* (default) · *Own* (`Winlator/saves/<Game>/`) · *Shared* (`Winlator/saves/_Common/`).
+- **Covers:** `AppData`, `Documents`, `Saved Games`, `Public Documents` **and registry keys** (Unity PlayerPrefs, older games).
+- **Safe:** matched by id (renaming is fine); a re-added game picks its old saves up again; other games in the same container are untouched.
+- **Backups** (`Winlator/backups/<Game>/`): manual, automatic on exit (only if saves changed), and a "before restore" snapshot.
+- Deleting a shortcut offers to delete its saves too (default: keep).
 
-  - Here is a tutorial from ZeroKimchi channel on how to use Winlator Bionic:
-    https://youtu.be/EJDWZUGF9sk?si=e3Z-DdmMJSYKduWz
-  - If you are using an `x86_64` container and experiencing performance issues, try changing the Box86/Box64 preset to **Performance** in Container Settings -\> Advanced Tab.
-  - If you are using an `Arm64EC` container, try swapping between different FEXCore versions (2505,2507 etc) in the container settings for better compatibility or performance.
-  - For applications that use .NET Framework, try installing Wine Mono found in Start Menu -\> System Tools.
-  - If some older games don't open, try adding the environment variable MESA\_EXTENSION\_MAX\_YEAR=2003 in Container Settings -\> Environment Variables.
-  - Try running the games using the shortcut on the Winlator home screen, there you can define individual settings for each game.
-  - To speed up the installers, try changing the Box86/Box64 preset to Intermediate in Container Settings -\> Advanced Tab.
+### 🕹️ Input
+- **Dynamic Stick** (off by default): touch anywhere in the stick's zone and it appears under your finger; drag past its rim and it follows; release and it returns home. Buttons inside the zone keep priority. Tune *Zone Size* (1.5×–5×) and *Follow Speed* per stick.
+- Proper relative mouse and DirectInput on Wine 10+ / Proton 11 (XInput2 in the built-in X server).
+- Smooth, refresh-rate-independent touch pointer acceleration.
+- Gamepad mode per container/shortcut: XInput, DInput, both or none.
+- Haptics, magnifier, Tap to Click, Relative Mouse and Cursor Speed in the sidebar.
 
-# Additional Components & Updates
+### 📦 Components & sources
+- One catalog for Proton/Wine, GPU drivers, FEXCore/Box64, DXVK/VKD3D and more, with verified downloads.
+- **Winlator Services:** replace any download address (components, drivers, controls, artwork) with your own mirror.
+- GitHub "channels" for app updates and component catalogs.
 
-You can find updated components (known as `wcps`) to improve compatibility and performance, as well as new drivers, at the links below:
+## Compared to Ludashi 4.1
 
-  - **Winlator Components (FEXCore, Box64/Box86, DXVK, etc.):**
-      - [StevenMXZ's Winlator-Contents Repository](https://github.com/StevenMXZ/Winlator-Contents)
-  - **Adreno GPU Drivers (Turnip):**
-      - [Kimchi's AdrenoToolsDrivers Releases](https://www.google.com/search?q=https://github.com/K11MCH1/AdrenoToolsDrivers/releases)
+| | Ludashi 4.1 | WinLite |
+|---|---|---|
+| Frame generation | — | LSFG 2x–4x, Adaptive FPS |
+| UI | XML + Fragments | Jetpack Compose |
+| Audio | PulseAudio / ALSA | ALSA + DirectAudio |
+| Vulkan wrapper | 1 | 3 |
+| Containers | Full copy each | Thin overlay + shared components |
+| Saves | In container | Save profiles + backups |
+| On-screen stick | Fixed | Optional Dynamic Stick |
+| Image effects | — | Upscalers, post-FX, 12 ReShade presets |
+| Download sources | Hardcoded | Editable in-app |
+| Artwork | — | SteamGridDB / TheGamesDB |
 
-# Credits and Third-party apps
+Removed to stay lean: OpenGL (EGL) renderer, PulseAudio, OpenXR and Big Picture mode.
 
-  - **Original Winlator** by [brunodev85](https://github.com/brunodev85/winlator)
-  - **Original Winlator Bionic** by [Pipetto-crypto](https://github.com/Pipetto-crypto/winlator)
-  - **Winlator (coffincolors fork)** by [coffincolors](https://github.com/coffincolors/winlator)
-  - Ubuntu RootFs (Bionic Beaver): [releases.ubuntu.com/bionic](https://www.google.com/search?q=https://releases.ubuntu.com/bionic)
-  - Wine: [winehq.org](https://www.winehq.org/)
-  - Box86/Box64 by [ptitseb](https://github.com/ptitSeb)
-  - FEX-Emu by [FEX-Emu](https://github.com/FEX-Emu/FEX)
-  - PRoot: [proot-me.github.io](https://proot-me.github.io)
-  - Mesa (Turnip/Zink/VirGL): [mesa3d.org](https://www.mesa3d.org)
-  - DXVK: [github.com/doitsujin/dxvk](https://github.com/doitsujin/dxvk)
-  - VKD3D: [gitlab.winehq.org/wine/vkd3d](https://gitlab.winehq.org/wine/vkd3d)
-  - D8VK: [github.com/AlpyneDreams/d8vk](https://github.com/AlpyneDreams/d8vk)
-  - CNC DDraw: [github.com/FunkyFr3sh/cnc-ddraw](https://github.com/FunkyFr3sh/cnc-ddraw)
-[ptitseb](https://github.com/ptitSeb) (Box86/Box64), [Danylo](https://blogs.igalia.com/dpiliaiev/tags/mesa/) (Turnip), [alexvorxx](https://github.com/alexvorxx) (Mods/Tips) and others.
+## Installation
+1. Download the latest APK from [Releases](../../releases).
+2. Install, launch and wait for first-time setup.
+3. Create a container, choose Wine/Proton, add your game.
 
+Package: `com.winlite.bionic` · Arm64 only · Android 9+ (`minSdk 28`)
 
+## Tips
+- Frame generation: import `Lossless.dll` in Settings, then choose LSFG in sidebar → Rendering.
+- DirectAudio needs a Proton 11 Arm64EC container.
+- Slow `x86_64` container: set the Box86/Box64 preset to **Performance** (Container → Advanced); use **Intermediate** for installers.
+- `Arm64EC` container: try other FEXCore versions.
+- .NET apps: install Wine Mono (Start Menu → System Tools).
+- Old games not starting: add `MESA_EXTENSION_MAX_YEAR=2003` to environment variables.
+- Launch games from their shortcuts — each has its own settings.
 
+## Building
+JDK 17, Android SDK (compileSdk 35), NDK, `glslang-tools`, `ninja`, `zstd`. See `.github/workflows/build.yml` for exact steps (it also fetches `libadrenotools` and `liblinkernsbypass` at pinned commits).
 
+```bash
+chmod +x gradlew
+./gradlew assembleRelease
+```
 
+## Credits
+[Winlator](https://github.com/brunodev85/winlator) (brunodev85) · [Winlator Bionic](https://github.com/Pipetto-crypto/winlator) (Pipetto-crypto) · [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) (StevenMXZ) · [coffincolors fork](https://github.com/coffincolors/winlator) · [DirectAudio](https://github.com/The412Banner/directaudio) (The412Banner) · LSFG shader/engine code from the Eden Emulator Project (see `lsfg/LICENSE`) · Lossless Scaling by THS
 
+[Wine](https://www.winehq.org/) · [Box86/Box64](https://github.com/ptitSeb) · [FEX-Emu](https://github.com/FEX-Emu/FEX) · [PRoot](https://proot-me.github.io) · [Mesa](https://www.mesa3d.org) · [DXVK](https://github.com/doitsujin/dxvk) · [VKD3D](https://gitlab.winehq.org/wine/vkd3d) · [D8VK](https://github.com/AlpyneDreams/d8vk) · [CNC DDraw](https://github.com/FunkyFr3sh/cnc-ddraw)
 
-
+## License
+See [LICENSE](LICENSE).
