@@ -213,7 +213,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                         nativeSetSharpness(nativeHandle, pendingSharpness);
                         updateTransform();
-                        nativeSetCursorVisible(nativeHandle, cursorVisible);
+                        // Not nativeSetCursorVisible(cursorVisible): that ignores an X cursor the
+                        // game made invisible (empty mask), and lastCursor is unchanged after the
+                        // surface comes back, so nothing would hide it again.
+                        restoreCursorStateLocked();
                         applyFrameGenNative();
                         initComplete = true;
                         return;
@@ -232,13 +235,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
                     updateTransform();
-                    nativeSetCursorVisible(nativeHandle, cursorVisible);
+                    nativeSetCursorVisible(nativeHandle, false);
 
                     if (isColdInit) {
                         Window root = xServer.windowManager.rootWindow;
                         nativeInitRootWindow(nativeHandle, root.id, did(root.getContent()),
                             xServer.screenInfo.width, xServer.screenInfo.height);
                     }
+                    // A fresh native renderer has no cursor image either: re-send the current
+                    // X cursor (image + its own visibility), not just the global flag.
+                    restoreCursorStateLocked();
                 }
             }
             synchronized (lock) {
@@ -337,6 +343,18 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             needScissor,
             viewTransformation.viewOffsetX, viewTransformation.viewOffsetY,
             viewTransformation.viewWidth,   viewTransformation.viewHeight);
+    }
+
+    /**
+     * Re-applies the cursor after the native side was re-attached or re-created (e.g. on return
+     * from ControlsEditorActivity). Must be called with {@code lock} held. Takes the cursor of the
+     * window under the pointer, so a game-hidden cursor (Cursor.isVisible() == false) stays hidden.
+     */
+    private void restoreCursorStateLocked() {
+        if (nativeHandle == 0) return;
+        Window pw = xServer.inputDeviceManager.getPointWindow();
+        lastCursor = pw != null ? pw.attributes.getCursor() : null;
+        sendCursorToNative(lastCursor);
     }
 
     private void sendCursorToNative(Cursor cursor) {
@@ -635,7 +653,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void setCursorVisible(boolean visible) {
         cursorVisible = visible;
         synchronized (lock) {
-            if (nativeHandle != 0) { nativeSetCursorVisible(nativeHandle, visible); if (visible) sendCursorToNative(lastCursor); }
+            if (nativeHandle != 0) {
+                // When shown, go through sendCursorToNative so a game-hidden X cursor is not
+                // flashed visible for a frame before being hidden again.
+                if (visible) sendCursorToNative(lastCursor);
+                else nativeSetCursorVisible(nativeHandle, false);
+            }
         }
     }
 
