@@ -80,6 +80,8 @@ val knownEnvironmentVariables = listOf(
     EnvVariableSpec("WRAPPER_MAX_IMAGE_COUNT", EnvValueKind.TEXT),
     EnvVariableSpec("MESA_GL_VERSION_OVERRIDE", EnvValueKind.TEXT),
     EnvVariableSpec("PULSE_LATENCY_MSEC", EnvValueKind.NUMBER),
+    EnvVariableSpec("ALSA_LATENCY_MS", EnvValueKind.NUMBER),
+    EnvVariableSpec("ALSA_PERFORMANCE_MODE", EnvValueKind.SELECT, listOf("low_latency", "none", "power_saving")),
     EnvVariableSpec("WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER", EnvValueKind.CHECKBOX, listOf("0", "1")),
     EnvVariableSpec("WINE_NEW_MEDIASOURCE", EnvValueKind.CHECKBOX, listOf("0", "1")),
     EnvVariableSpec("GALLIUM_HUD", EnvValueKind.MULTI, listOf("simple", "fps", "frametime")),

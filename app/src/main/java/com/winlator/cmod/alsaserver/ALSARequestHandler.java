@@ -41,7 +41,9 @@ public class ALSARequestHandler implements RequestHandler {
                 if (inputStream.available() < requestLength) return false;
 
                 alsaClient.setChannelCount(inputStream.readByte());
-                alsaClient.setDataType(ALSAClient.DataType.values()[inputStream.readByte()]);
+                int dataType = inputStream.readByte();
+                ALSAClient.DataType[] dataTypes = ALSAClient.DataType.values();
+                alsaClient.setDataType(dataTypes[dataType >= 0 && dataType < dataTypes.length ? dataType : ALSAClient.DataType.S16LE.ordinal()]);
                 alsaClient.setSampleRate(inputStream.readInt());
                 alsaClient.setBufferSize(inputStream.readInt());
                 alsaClient.prepare();
@@ -51,10 +53,13 @@ public class ALSARequestHandler implements RequestHandler {
             case RequestCodes.WRITE:
                 ByteBuffer buffer = alsaClient.getSharedBuffer();
                 if (buffer != null) {
+                    // A length past the shared segment would make limit() throw and kill the client thread.
+                    if (requestLength < 0 || requestLength > buffer.capacity()) break;
                     buffer.limit(requestLength);
                     alsaClient.writeDataToStream(buffer);
                 }
                 else {
+                    if (requestLength < 0) break;
                     if (inputStream.available() < requestLength) return false;
                     alsaClient.writeDataToStream(inputStream.readByteBuffer(requestLength));
                 }

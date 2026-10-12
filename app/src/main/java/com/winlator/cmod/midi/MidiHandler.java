@@ -7,6 +7,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -18,8 +19,9 @@ import jp.kshoji.javax.sound.midi.ShortMessage;
 
 public class MidiHandler {
     private static final String TAG = "MidiHandler";
-    private DatagramSocket socket;
-    private boolean running = false;
+    private volatile DatagramSocket socket;
+    private volatile boolean running = false;
+    private ExecutorService receiveExecutor;
     private static final short SERVER_PORT = 7942;
     private static final short CLIENT_PORT = 7941;
     private static final int BUF_SIZE = 9;
@@ -39,31 +41,45 @@ public class MidiHandler {
         this.sf2SoundBank = soundBank;
     }
 
-    public void start() {
+    public synchronized void start() {
+        if (running) return;
         running = true;
-        Executors.newSingleThreadExecutor().execute(() -> {
+        receiveExecutor = Executors.newSingleThreadExecutor();
+        receiveExecutor.execute(() -> {
+            DatagramSocket localSocket = null;
             try {
-                socket = new DatagramSocket(null);
-                socket.setReuseAddress(true);
-                socket.bind(new InetSocketAddress((InetAddress) null, SERVER_PORT));
+                localSocket = new DatagramSocket(null);
+                localSocket.setReuseAddress(true);
+                localSocket.bind(new InetSocketAddress((InetAddress) null, SERVER_PORT));
+                socket = localSocket;
+                // stop() may have run before the socket existed; it could not close it then.
+                if (!running) return;
 
                 while (running) {
-                    socket.receive(receivePacket);
+                    localSocket.receive(receivePacket);
                     receiveData.rewind();
                     handleRequest(receiveData);
-
                 }
             } catch (IOException e) {
+            } finally {
+                if (localSocket != null) localSocket.close();
+                if (socket == localSocket) socket = null;
             }
         });
     }
 
-    public void stop() {
+    public synchronized void stop() {
         running = false;
 
-        if (socket != null) {
-            socket.close();
-            socket = null;
+        DatagramSocket activeSocket = socket;
+        if (activeSocket != null) activeSocket.close();
+        socket = null;
+
+        // The receive thread exits on the closed socket; without shutdown the executor's idle
+        // thread would leak on every launch.
+        if (receiveExecutor != null) {
+            receiveExecutor.shutdown();
+            receiveExecutor = null;
         }
 
         clearRecv();
