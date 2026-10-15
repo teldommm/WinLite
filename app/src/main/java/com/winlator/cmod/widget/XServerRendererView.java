@@ -45,9 +45,16 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract void onUpdateWindowContentDirect(Window window, Drawable drawable, short xOff, short yOff);
     public abstract void onPointerMove(short x, short y);
     // A guest frame was presented through the X Present extension (PresentPixmap). Renderers
-    // show the pixmap in the window and count the present in one step; the default only runs
-    // the pixmap's ordinary content-update path.
-    public void onGuestPresent(Window window, Drawable pixmap) { pixmap.updateDirect(); }
+    // show the pixmap in the window and count the present in one step, and fill in when the X
+    // server may hand buffers back (plan: release time, on-screen-until time, max buffers out;
+    // all 0 = at once). guestFrameNs: how long the guest took for this frame, -1 if unknown.
+    // The default only runs the pixmap's ordinary content-update path.
+    public void onGuestPresent(Window window, Drawable pixmap, long guestFrameNs, long[] plan) {
+        pixmap.updateDirect();
+    }
+    // The display's vsync count and time (CLOCK_MONOTONIC ns) for Present's MSC/UST; -1 = none.
+    public long getVsyncMsc() { return -1; }
+    public long getVsyncUstNs() { return 0; }
     public abstract void requestRender();
     public abstract void queueEvent(Runnable action);
     public abstract void onSurfaceChanged(int width, int height);

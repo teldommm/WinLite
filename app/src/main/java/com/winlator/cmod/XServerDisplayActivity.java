@@ -1804,7 +1804,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         int initialFpsLimit = loadFpsLimit();
         if (vkRenderer != null) vkRenderer.setFpsLimit(initialFpsLimit);
-        if (frameGenRenderer != null && activeLsfgMultiplier >= 2) applyFrameGenDisplayMode();
+        // Frame generation picks its own display mode; an FPS limit wants one it divides evenly.
+        if ((frameGenRenderer != null && activeLsfgMultiplier >= 2) || initialFpsLimit > 0)
+            applyFrameGenDisplayMode();
 
         // FSR/Upscaler/PostFX/Sharpness prefer the per-shortcut value over the container-wide
         // one, exactly like SidebarCleanupView's bolted-on autosave used to (it re-read these
@@ -1851,8 +1853,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             public void onFpsLimitChanged(int fps) {
                 saveFpsLimit(fps);
                 if (vkRenderer != null) vkRenderer.setFpsLimit(fps);
-                // A fixed multiplier with an FPS limit picks its display mode from the limit.
-                if (activeLsfgMultiplier >= 2 && activeLsfgTargetRate == 0) applyFrameGenDisplayMode();
+                // A fixed multiplier with an FPS limit picks its display mode from the limit, and
+                // so does a plain limit: 30/40/60 on 144 Hz cannot be shown evenly, on 120 Hz they can.
+                if (activeLsfgMultiplier < 2 || activeLsfgTargetRate == 0) applyFrameGenDisplayMode();
             }
 
             @Override
@@ -2433,7 +2436,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         File rootDir = imageFs.getRootDir();
 
         if (dxwrapper.contains("dxvk")) {
-            DXVKConfig.setEnvVars(this, dxwrapperConfig, envVars, autoTextureLodBias());
+            DXVKConfig.setEnvVars(this, dxwrapperConfig, envVars, autoTextureLodBias(), loadFpsLimit() > 0);
             String version = dxwrapperConfig.get("version");
             if (version.equals("1.11.1-sarek")) {
                 Log.d("GraphicsDriverExtraction", "Disabling Wrapper PATCH_OPCONSTCOMP SPIR-V pass");
@@ -3039,8 +3042,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
         boolean frameGenOn = activeLsfgMultiplier >= 2;
 
         if (!frameGenOn) {
-            float userRate = preferences.getBoolean("high_refresh_rate_mode", false)
-                    ? pickHighestRefreshRate() : 0f;
+            boolean highRefresh = preferences.getBoolean("high_refresh_rate_mode", false);
+            int limit = xServerView != null ? xServerView.getFpsLimit() : 0;
+            android.view.Display.Mode cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh) : null;
+            if (cadence != null) {
+                // Every limited frame then stays on screen for the same number of refreshes.
+                if (params.preferredDisplayModeId != cadence.getModeId() || params.preferredRefreshRate != 0f) {
+                    params.preferredDisplayModeId = cadence.getModeId();
+                    params.preferredRefreshRate = 0f;
+                    window.setAttributes(params);
+                    Log.i("XServerDisplayActivity", "FPS limit " + limit + ": display mode "
+                            + Math.round(cadence.getRefreshRate()) + "Hz (mode " + cadence.getModeId() + ")");
+                }
+                pushFrameGenRefreshRate(cadence.getRefreshRate());
+                return;
+            }
+            float userRate = highRefresh ? pickHighestRefreshRate() : 0f;
             if (params.preferredDisplayModeId != 0 || params.preferredRefreshRate != userRate) {
                 params.preferredDisplayModeId = 0;
                 params.preferredRefreshRate = userRate;
@@ -3094,6 +3111,28 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (aCadence != bCadence) return aCadence;
         }
         return a < b;
+    }
+
+    /**
+     * Display mode (same resolution) whose refresh rate the FPS limit divides evenly. With the
+     * high refresh preference the fastest such mode; otherwise the current mode when it already
+     * qualifies (null = keep the user's setting), else the slowest one that does. Null when no
+     * mode fits (e.g. a 35 FPS limit): the user's own refresh preference stays.
+     */
+    private static android.view.Display.Mode pickCadenceMode(android.view.Display display, int limit,
+                                                             boolean preferHighest) {
+        android.view.Display.Mode active = display.getMode();
+        if (!preferHighest && isFrameCadenceCompatible(active.getRefreshRate(), limit)) return null;
+        android.view.Display.Mode best = null;
+        for (android.view.Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() != active.getPhysicalWidth()
+                    || mode.getPhysicalHeight() != active.getPhysicalHeight()) continue;
+            if (!isFrameCadenceCompatible(mode.getRefreshRate(), limit)) continue;
+            if (best == null
+                    || (preferHighest ? mode.getRefreshRate() > best.getRefreshRate()
+                                      : mode.getRefreshRate() < best.getRefreshRate())) best = mode;
+        }
+        return best;
     }
 
     private static boolean isFrameCadenceCompatible(float refreshRate, int fpsLimit) {

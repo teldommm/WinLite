@@ -117,6 +117,7 @@ struct VkTable {
 };
 
 #include <android/log.h>
+#include <deque>
 #include <string>
 #define WLOG_TAG "Winlator_Renderer"
 #define RLOG(...) if(verboseLog) __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,__VA_ARGS__)
@@ -186,13 +187,37 @@ public:
     // contentId: the window content the texture belongs to. sourceId: the drawable the buffer
     // belongs to (the window content itself, or the DRI3 pixmap it presents). Both are
     // Drawable.uid values: unique for the process lifetime, never reused.
-    // present: this update IS a guest frame presented through X Present (PresentPixmap). The
-    // content change and the present are published together and wake the render thread once
-    // (two separate wakes could render the same frame twice into the FIFO queue).
+    // Content drawn by the X server itself (not a guest present): shown at once.
     void updateWindowContentAHB(int64_t contentId, int64_t sourceId, AHardwareBuffer* ahb,
-                                short w, short h, int x, int y, bool present);
+                                short w, short h, int x, int y);
     // Panel refresh rate, for render pacing. 0/unknown disables pacing.
     void setDisplayRefreshRate(float hz);
+
+    // --- Frame limiter / guest frame pacing ----------------------------------------------
+    // A guest frame presented through X Present (PresentPixmap).
+    // guestFrameNs: how long the guest took from getting this buffer back (IdleNotify) to
+    // presenting it again, -1 if unknown. Fills the X server's buffer-release plan:
+    //   out[0] releaseNs   - earliest time to give a buffer back to the guest (0 = now)
+    //   out[1] onScreenNs  - the previously presented buffer stays on screen until then: it
+    //                        must not be given back before (0 = no constraint)
+    //   out[2] depth       - buffers the guest may hold at once (0 = no limit)
+    // With an FPS limit and a vsync clock this is where the cadence is made:
+    //  * the frame gets a display slot on the vsync grid, refresh/limit vsyncs after the last
+    //    one (a fractional ratio alternates, e.g. 45 on 120 Hz -> 3,3,2), and is held until
+    //    just before it, so every frame is shown for the same number of refreshes;
+    //  * the guest gets a buffer as late as still lets the frame drawn into it make its slot
+    //    (measured guest frame time + margin): input is sampled as late as possible. It renders
+    //    one frame at a time (depth 1) while that fits; after repeated misses it may overlap two
+    //    for a while (depth 2), then tries one again;
+    //  * never sooner than one limit interval after the previous release (the rate cap).
+    // Without a vsync clock, or with frame generation (which paces itself), the limit is a plain
+    // release cadence and frames are shown at once.
+    void presentFrame(int64_t contentId, int64_t sourceId, AHardwareBuffer* ahb,
+                      int64_t guestFrameNs, int64_t out[3]);
+    void setFpsLimit(int fps);
+    // Choreographer timing from Java, once per vsync. deadlineNs/presentNs are the preferred
+    // frame timeline (API 33+); 0 when unavailable.
+    void onVsync(int64_t frameTimeNs, int64_t deadlineNs, int64_t presentNs);
     // The Java drawable with this uid is gone: drop it as window content and as a buffer source.
     // Its import is destroyed once no window shows it and the GPU has finished with it.
     void releaseDrawable(int64_t id);
@@ -616,6 +641,26 @@ public:
     int64_t presentSlotEndNs_ = 0;   // render thread only
     int64_t pacingWaitNs(bool content) const;
     void    notePresentedForPacing(uint32_t presents);
+
+    // Limiter state. Atomics are written from Java threads; the rest is renderMutex.
+    std::atomic<int>     fpsLimit_{0};
+    std::atomic<int64_t> vsyncDeadlineNs_{0};   // a recent point of the queue-deadline grid
+    std::atomic<int64_t> vsyncSeenNs_{0};       // when the clock last ticked
+    struct PendingPresent { int64_t srcId; int64_t dueNs; };
+    std::unordered_map<int64_t, std::deque<PendingPresent>> pendingPresents_;  // by content
+    std::atomic<int64_t> nextPendingDueNs_{0};  // earliest dueNs, 0 = none
+    int64_t idealSlotNs_   = 0;    // unsnapped slot accumulator (keeps fractional ratios exact)
+    int64_t lastReleaseNs_ = 0;
+    double  guestFrameMeanNs_ = 0.0, guestFrameDevNs_ = 0.0;
+    bool    guestFrameValid_  = false;
+    int     pipelineDepth_    = 1;      // guest buffers in flight under the limiter
+    uint32_t lateHistory_     = 0;      // bit per recent frame: missed its slot
+    int64_t depthTwoUntilNs_  = 0;
+    bool    acquireSourceLocked(int64_t srcId, AHardwareBuffer* ahb);
+    void    showSourceLocked(int64_t contentId, int64_t srcId);
+    void    dropPendingLocked(int64_t contentId);
+    void    applyDuePresentsLocked(int64_t nowNs);
+    void    updateNextPendingDueLocked();
     std::atomic<bool> globalPriorityHigh_{false};
 
     std::thread       renderThread;

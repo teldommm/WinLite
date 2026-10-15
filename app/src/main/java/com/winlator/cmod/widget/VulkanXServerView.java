@@ -83,6 +83,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private FrameRating classicHudRef = null;
     private volatile int fpsWindowId = -1;
     private volatile int fpsLimit = 0;
+    // Display vsync for frame pacing and for Present's MSC/UST; runs while a renderer exists.
+    private final VsyncClock vsyncClock = new VsyncClock(this::onVsyncTick);
 
     private static volatile boolean nativeLibLoaded = false;
 
@@ -128,8 +130,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
     @FastNative private native void nativeUpdateWindowContentAHB(long handle, long contentId,
-        long sourceId, long ahbPtr, short width, short height, int x, int y, boolean present);
+        long sourceId, long ahbPtr, short width, short height, int x, int y);
     @FastNative private native void nativeSetDisplayRefreshRate(long handle, float hz);
+    @FastNative private native void nativePresentFrame(long handle, long contentId, long sourceId,
+        long ahbPtr, long guestFrameNs, long[] plan);
+    @FastNative private native void nativeSetFpsLimit(long handle, int fps);
+    @FastNative private native void nativeOnVsync(long handle, long frameTimeNs, long deadlineNs, long presentNs);
     @FastNative private native void nativeReleaseDrawable(long handle, long drawableId);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
         float ox, float oy, float sx, float sy,
@@ -220,6 +226,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         // surface comes back, so nothing would hide it again.
                         restoreCursorStateLocked();
                         pushDisplayRefreshRateLocked();
+                        nativeSetFpsLimit(nativeHandle, fpsLimit);
+                        vsyncClock.start();
                         // Frame gen setup may build/verify the shader cache: never under lock.
                         queueEvent(this::applyFrameGenNative);
                         initComplete = true;
@@ -241,6 +249,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetSharpness(nativeHandle, pendingSharpness);
                     updateTransform();
                     pushDisplayRefreshRateLocked();
+                    nativeSetFpsLimit(nativeHandle, fpsLimit);
+                    vsyncClock.start();
                     nativeSetCursorVisible(nativeHandle, false);
 
                     if (isColdInit) {
@@ -323,10 +333,23 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             initExecutor = null;
         }
+        vsyncClock.stop();
         synchronized (lock) {
             if (nativeHandle != 0) nativeDetachSurface(nativeHandle);
         }
     }
+
+    private void onVsyncTick(long frameTimeNs, long deadlineNs, long presentNs) {
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeOnVsync(nativeHandle, frameTimeNs, deadlineNs, presentNs);
+        }
+    }
+
+    @Override
+    public long getVsyncMsc() { return vsyncClock.msc(); }
+
+    @Override
+    public long getVsyncUstNs() { return vsyncClock.lastVsyncNs(); }
 
     @Override
     public void onDestroy() {
@@ -342,6 +365,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             initExecutor = null;
         }
         compositeRedirectedWindows.clear();
+        vsyncClock.stop();
         synchronized (lock) {
             if (nativeHandle != 0) {
                 nativeDestroy(nativeHandle);
@@ -572,21 +596,47 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void onUpdateWindowContentDirect(Window window, Drawable pixmap, short xOff, short yOff) {
-        showPixmap(window, pixmap, xOff, yOff, false);
+        countFrameForHud(window);
+        synchronized (lock) {
+            if (nativeHandle == 0 || pixmap == null) return;
+            final Drawable content = window.getContent();
+            if (content == null) return;
+            final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
+            synchronized (pixmap.renderLock) {
+                final long ahb = pixmap.backingAHB;
+                if (ahb != 0) {
+                    // The window shows the pixmap: the texture is keyed by the window's content,
+                    // the imported buffer by the pixmap it came from.
+                    nativeUpdateWindowContentAHB(nativeHandle, did(content), did(pixmap),
+                        ahb, pixmap.width, pixmap.height, rx, ry);
+                }
+            }
+        }
     }
 
     /**
-     * PresentPixmap: one call into the renderer that both swaps the window's content and counts
-     * the present, so the render thread wakes once per guest frame (the content update and a
-     * separate present notification used to wake it twice, which could queue the same frame
-     * twice in FIFO).
+     * PresentPixmap: one call into the renderer that swaps the window's content (at once, or at
+     * the frame's display slot under the FPS limit), counts the present, wakes the render thread
+     * once, and returns the plan for handing buffers back to the guest.
      */
     @Override
-    public void onGuestPresent(Window window, Drawable pixmap) {
-        showPixmap(window, pixmap, (short) 0, (short) 0, true);
+    public void onGuestPresent(Window window, Drawable pixmap, long guestFrameNs, long[] plan) {
+        countFrameForHud(window);
+        synchronized (lock) {
+            if (nativeHandle == 0 || pixmap == null) return;
+            final Drawable content = window.getContent();
+            if (content == null) return;
+            synchronized (pixmap.renderLock) {
+                final long ahb = pixmap.backingAHB;
+                if (ahb != 0) {
+                    nativePresentFrame(nativeHandle, did(content), did(pixmap), ahb,
+                        guestFrameNs, plan);
+                }
+            }
+        }
     }
 
-    private void showPixmap(Window window, Drawable pixmap, short xOff, short yOff, boolean present) {
+    private void countFrameForHud(Window window) {
         if (window.id == fpsWindowId) {
             float frameGenRate = (nativeHandle != 0 && pendingLsfgMultiplier >= 2 && frameGenError.isEmpty())
                     ? nativeGetFrameGenPresentedRate(nativeHandle) : 0f;
@@ -597,21 +647,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             if (classicHudRef != null) {
                 classicHudRef.setFrameGenPresentedRate(frameGenRate);
                 classicHudRef.update();
-            }
-        }
-        synchronized (lock) {
-            if (nativeHandle == 0 || pixmap == null) return;
-            final Drawable content = window.getContent();
-            if (content == null) return;
-            final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
-            synchronized (pixmap.renderLock) {
-                final long ahb = pixmap.backingAHB;
-                if (ahb != 0) {
-                    // The window shows the presented pixmap: the texture is keyed by the window's
-                    // content, the imported buffer by the pixmap it came from.
-                    nativeUpdateWindowContentAHB(nativeHandle, did(content), did(pixmap),
-                        ahb, pixmap.width, pixmap.height, rx, ry, present);
-                }
             }
         }
     }
@@ -705,7 +740,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 final long ahb = drawable.backingAHB;
                 if (ahb != 0) {
                     nativeUpdateWindowContentAHB(nativeHandle, did(drawable), did(drawable),
-                        ahb, drawable.width, drawable.height, rx, ry, false);
+                        ahb, drawable.width, drawable.height, rx, ry);
                 }
             }
         }
@@ -927,7 +962,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public int getFpsLimit() {
         return fpsLimit;
     }
-    public void setFpsLimit(int limit) { this.fpsLimit = Math.max(0, Math.min(1000, limit)); }
+    public void setFpsLimit(int limit) {
+        this.fpsLimit = Math.max(0, Math.min(1000, limit));
+        synchronized (lock) { if (nativeHandle != 0) nativeSetFpsLimit(nativeHandle, fpsLimit); }
+    }
     public void setPipMode(boolean pip) { inPipMode = pip; }
     public int getSurfaceWidth() { return surfaceWidth; }
     public int getSurfaceHeight() { return surfaceHeight; }

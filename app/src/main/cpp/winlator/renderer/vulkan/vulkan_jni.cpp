@@ -201,13 +201,44 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContent(
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
     JNIEnv*, jobject, jlong handle, jlong contentId, jlong sourceId, jlong ahbPtr,
-    jshort w, jshort h, jint x, jint y, jboolean present)
+    jshort w, jshort h, jint x, jint y)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r && ahbPtr)
         r->updateWindowContentAHB(contentId, sourceId,
-                                  reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y,
-                                  present == JNI_TRUE);
+                                  reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativePresentFrame(
+    JNIEnv* env, jobject, jlong handle, jlong contentId, jlong sourceId, jlong ahbPtr,
+    jlong guestFrameNs, jlongArray jout)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    int64_t out[3] = {0, 0, 0};
+    if (r && ahbPtr)
+        r->presentFrame(contentId, sourceId, reinterpret_cast<AHardwareBuffer*>(ahbPtr),
+                        guestFrameNs, out);
+    if (jout && env->GetArrayLength(jout) >= 3) {
+        jlong vals[3] = {(jlong)out[0], (jlong)out[1], (jlong)out[2]};
+        env->SetLongArrayRegion(jout, 0, 3, vals);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetFpsLimit(
+    JNIEnv*, jobject, jlong handle, jint fps)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setFpsLimit(fps);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeOnVsync(
+    JNIEnv*, jobject, jlong handle, jlong frameTimeNs, jlong deadlineNs, jlong presentNs)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->onVsync(frameTimeNs, deadlineNs, presentNs);
 }
 
 extern "C" JNIEXPORT void JNICALL

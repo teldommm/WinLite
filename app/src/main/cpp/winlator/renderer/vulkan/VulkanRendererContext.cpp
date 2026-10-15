@@ -35,6 +35,12 @@ VKAPI_ATTR VkBool32 VKAPI_CALL logValidationMessage(
 }
 }
 
+// CLOCK_MONOTONIC, the clock of System.nanoTime() and Choreographer.
+static int64_t steadyNowNs() {
+    return (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
                                              void* aHandle, bool enableValidation)
     : window(win), surfaceWidth(cW), surfaceHeight(cH),
@@ -1293,8 +1299,22 @@ void VulkanRendererContext::renderLoop() {
                 const bool detached = surfaceDetached.load();
                 if (!detached && fbResized.load()) break;
                 const bool content = needsRender.load();
-                if (!detached && (content || cursorMoved.load())) {
-                    const int64_t wait = pacingWaitNs(content);
+                const bool cursor  = cursorMoved.load();
+                // A guest frame held by the limiter for its display slot.
+                const int64_t due  = nextPendingDueNs_.load(std::memory_order_relaxed);
+                if (!detached && (content || cursor || due != 0)) {
+                    const int64_t now = steadyNowNs();
+                    int64_t wait = INT64_MAX;
+                    if (content) wait = pacingWaitNs(true);
+                    else if (cursor) {
+                        wait = pacingWaitNs(false);
+                        // Cursor motion shortly before a held frame's slot rides along with
+                        // that frame: a separate cursor present there would sit in the queue
+                        // in front of it and push the frame a refresh late.
+                        const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+                        if (due != 0 && due - now < period) wait = std::max(wait, due - now);
+                    }
+                    if (due != 0) wait = std::min(wait, due - now);
                     if (wait <= 0) break;
                     // Woken early by newer updates; re-evaluated each time (a content update
                     // during a cursor-only wait is allowed sooner).
@@ -1328,11 +1348,6 @@ void VulkanRendererContext::renderLoop() {
                 return !isRunning||surfaceDetached.load(); });
         }
     }
-}
-
-static int64_t steadyNowNs() {
-    return (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
@@ -1639,6 +1654,9 @@ void VulkanRendererContext::renderFrame() {
 
         if (hasCustomScissor) effectiveScissor = rotateRectLogicalToIdentity(customScissor);
 
+        // Frames held for their display slot go on screen now if their time has come.
+        applyDuePresentsLocked(steadyNowNs());
+
         if (treeDirty) { rebuildRenderListFromTree(); treeDirty = false; }
 
         frameDraws.clear();
@@ -1916,36 +1934,37 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
     needsRender.store(true); wakeRender();
 }
 
-void VulkanRendererContext::updateWindowContentAHB(int64_t contentId, int64_t srcId,
-                                                   AHardwareBuffer* ahb, short, short, int, int,
-                                                   bool present) {
-    if (!ahb || contentId==0 || srcId==0) return;
-    std::lock_guard<std::mutex> lk(renderMutex);
+bool VulkanRendererContext::acquireSourceLocked(int64_t srcId, AHardwareBuffer* ahb) {
     auto sit = srcImports.find(srcId);
     if (sit != srcImports.end() && (sit->second.released || sit->second.ahb != ahb)) {
         // A drawable's buffer never changes and a released one is never presented again; if
         // either happens anyway, never sample the stale import. Windows still showing it keep
         // the borrowed handles until they move on (retired only once unused).
-        RLOG_E("updateWindowContentAHB: stale import for source %" PRId64 " (released=%d)",
+        RLOG_E("acquireSource: stale import for source %" PRId64 " (released=%d)",
                srcId, (int)sit->second.released);
         if (!sit->second.released) {
             sit->second.released = true;
             if (sit->second.users <= 0) retireSourceLocked(sit);
         }
-        return;
+        return false;
     }
-    if (sit == srcImports.end()) {
-        SourceImport imp{};
-        if (!importAHBToWinTex(imp.wt, ahb)) {
-            RLOG_E("updateWindowContentAHB: import failed for source %" PRId64, srcId);
-            return;
-        }
-        AHardwareBuffer_acquire(ahb);
-        imp.ahb = ahb;
-        sit = srcImports.emplace(srcId, imp).first;
-        RLOG("updateWindowContentAHB: imported source %" PRId64 " img=%p for content %" PRId64 " (%dx%d, %zu imports)",
-            srcId, (void*)imp.wt.img, contentId, imp.wt.w, imp.wt.h, srcImports.size());
+    if (sit != srcImports.end()) return true;
+    SourceImport imp{};
+    if (!importAHBToWinTex(imp.wt, ahb)) {
+        RLOG_E("acquireSource: import failed for source %" PRId64, srcId);
+        return false;
     }
+    AHardwareBuffer_acquire(ahb);
+    imp.ahb = ahb;
+    srcImports.emplace(srcId, imp);
+    RLOG("acquireSource: imported source %" PRId64 " img=%p (%dx%d, %zu imports)",
+        srcId, (void*)imp.wt.img, imp.wt.w, imp.wt.h, srcImports.size());
+    return true;
+}
+
+void VulkanRendererContext::showSourceLocked(int64_t contentId, int64_t srcId) {
+    auto sit = srcImports.find(srcId);
+    if (sit == srcImports.end()) return;
     SourceImport& src = sit->second;
     WinTex& wt = texMap[contentId];
     const int64_t previousSrc = wt.isAHB ? wt.srcId : 0;
@@ -1953,19 +1972,194 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t contentId, int64_t sr
     if (previousSrc != srcId) src.users++;
     wt = WinTex{};
     wt.img  = src.wt.img; wt.mem  = src.wt.mem; wt.view = src.wt.view; wt.ds = src.wt.ds;
-    wt.isAHB = true; wt.ahb = ahb; wt.srcId = srcId; wt.w = src.wt.w; wt.h = src.wt.h;
+    wt.isAHB = true; wt.ahb = src.ahb; wt.srcId = srcId; wt.w = src.wt.w; wt.h = src.wt.h;
     wt.needsTransition = false; // The first-use layout belongs to the import.
     // After the new reference is taken: the old source may be a released pixmap that this
     // window was the last one showing.
     if (previousSrc != 0 && previousSrc != srcId) unrefSourceLocked(previousSrc);
+}
+
+void VulkanRendererContext::updateWindowContentAHB(int64_t contentId, int64_t srcId,
+                                                   AHardwareBuffer* ahb, short, short, int, int) {
+    if (!ahb || contentId==0 || srcId==0) return;
+    std::lock_guard<std::mutex> lk(renderMutex);
+    if (!acquireSourceLocked(srcId, ahb)) return;
+    // A newer frame replaces anything still waiting for its slot.
+    dropPendingLocked(contentId);
+    showSourceLocked(contentId, srcId);
     guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
-    if (present) {
-        // Frame generation paces on presents: publish it before the single wake below, so the
-        // render thread never sees the content without the present that belongs to it.
-        guestPresentNs_.store(steadyNowNs(), std::memory_order_relaxed);
-        guestPresentSerial_.fetch_add(1, std::memory_order_relaxed);
-    }
     needsRender.store(true); wakeRender();
+}
+
+void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHardwareBuffer* ahb,
+                                         int64_t guestFrameNs, int64_t out[3]) {
+    out[0] = out[1] = out[2] = 0;
+    if (!ahb || contentId==0 || srcId==0) return;
+    std::lock_guard<std::mutex> lk(renderMutex);
+    if (!acquireSourceLocked(srcId, ahb)) return;
+    const int64_t now = steadyNowNs();
+
+    // One publish, one wake: the content change and the present belong together (frame
+    // generation paces on presents; two wakes could queue the same frame twice in FIFO).
+    guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
+    guestPresentNs_.store(now, std::memory_order_relaxed);
+    guestPresentSerial_.fetch_add(1, std::memory_order_relaxed);
+
+    if (guestFrameNs >= 0 && guestFrameNs < 1000000000LL) {
+        if (!guestFrameValid_) {
+            guestFrameMeanNs_ = (double)guestFrameNs; guestFrameDevNs_ = guestFrameNs * 0.25;
+        } else {
+            const double d = (double)guestFrameNs - guestFrameMeanNs_;
+            guestFrameMeanNs_ += 0.1 * d;
+            guestFrameDevNs_  += 0.1 * (std::fabs(d) - guestFrameDevNs_);
+        }
+        guestFrameValid_ = true;
+    }
+
+    const int     fps    = fpsLimit_.load(std::memory_order_relaxed);
+    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+    bool staged = false;
+
+    if (fps > 0) {
+        const int64_t spacing  = 1000000000LL / fps;
+        const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
+        const bool clockFresh  = deadline != 0 &&
+            now - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
+        // Hold-to-slot only when it means something: a live vsync clock, a limit below the
+        // refresh rate, and no frame generation (which plans its own presents).
+        const bool grid = clockFresh && period > 0 && spacing > period + period / 20 &&
+                          !fgArmed_.load(std::memory_order_relaxed);
+        if (grid) {
+            // Composite this long before the slot's queue deadline (GPU blit + submit).
+            const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+            const auto snap = [&](int64_t t) {
+                return deadline + (int64_t)std::llround((double)(t - deadline) / (double)period) * period; };
+            const auto ceilGrid = [&](int64_t t) {
+                return deadline + (int64_t)std::ceil((double)(t - deadline) / (double)period) * period; };
+            const int64_t earliest = now + lead + 500000LL;
+            int64_t ideal = idealSlotNs_ ? idealSlotNs_ + spacing : 0;
+            int64_t slot  = ideal ? snap(ideal) : 0;
+            const bool late = ideal != 0 && slot < earliest;
+            lateHistory_ = (lateHistory_ << 1) | (late ? 1u : 0u);
+            // First frame or a late one (missed its slot): restart the cadence from the next
+            // slot that can still be made.
+            if (!ideal || late) { slot = ceilGrid(earliest); ideal = slot; }
+            auto& q = pendingPresents_[contentId];
+            if (q.size() >= 2) {
+                // The guest got ahead (spare buffers at start-up): show the newest frame in
+                // the last queued slot instead of letting the queue - and latency - grow.
+                unrefSourceLocked(q.back().srcId);
+                q.back().srcId = srcId;
+                srcImports[srcId].users++;
+                slot  = q.back().dueNs + lead;
+                ideal = idealSlotNs_;
+            } else {
+                q.push_back({srcId, slot - lead});
+                srcImports[srcId].users++;   // the pending entry keeps the import alive
+                idealSlotNs_ = ideal;
+            }
+            staged = true;
+            const int64_t due = slot - lead;
+
+            // One frame in flight while that makes its slots; two for a while after misses.
+            const int misses = __builtin_popcount(lateHistory_ & 0x3FFFFFFFu);   // last 30
+            if (pipelineDepth_ == 1 && misses >= 2) {
+                pipelineDepth_ = 2; depthTwoUntilNs_ = now + 5000000000LL; lateHistory_ = 0;
+                RLOG("frame pacing: guest misses its slots, overlapping two frames for 5 s");
+            } else if (pipelineDepth_ == 2 && now > depthTwoUntilNs_) {
+                pipelineDepth_ = 1; lateHistory_ = 0;
+            }
+            // The buffer given back now is drawn into for the next slot (depth 1) or the one
+            // after (depth 2); it should come back just before that slot's composite.
+            const int64_t target = snap(ideal + spacing * pipelineDepth_);
+            const int64_t guestEst = guestFrameValid_
+                ? (int64_t)(guestFrameMeanNs_ + 3.0 * guestFrameDevNs_) : spacing / 2;
+            const int64_t justInTime = target - lead - guestEst - 2000000LL;
+            out[0] = std::max<int64_t>({justInTime, lastReleaseNs_ + spacing * 95 / 100, now});
+            out[1] = due + 1500000LL;   // previous frame off screen and its GPU reads done
+            out[2] = pipelineDepth_;
+        } else {
+            // Release cadence only (frame generation, no clock, or limit >= refresh). Two
+            // buffers may overlap so a heavy guest keeps its CPU/GPU pipelining.
+            idealSlotNs_ = 0;
+            out[0] = std::max(now, lastReleaseNs_ + spacing);
+            out[1] = 0;
+            out[2] = 2;
+        }
+        lastReleaseNs_ = out[0];
+    } else {
+        idealSlotNs_ = 0;
+        lastReleaseNs_ = 0;
+        pipelineDepth_ = 1; lateHistory_ = 0;
+    }
+
+    if (staged) {
+        updateNextPendingDueLocked();
+    } else {
+        dropPendingLocked(contentId);
+        showSourceLocked(contentId, srcId);
+        needsRender.store(true);
+    }
+    wakeRender();
+}
+
+void VulkanRendererContext::dropPendingLocked(int64_t contentId) {
+    auto it = pendingPresents_.find(contentId);
+    if (it == pendingPresents_.end()) return;
+    std::deque<PendingPresent> q = std::move(it->second);
+    pendingPresents_.erase(it);
+    for (const auto& p : q) unrefSourceLocked(p.srcId);
+    updateNextPendingDueLocked();
+}
+
+void VulkanRendererContext::applyDuePresentsLocked(int64_t nowNs) {
+    if (pendingPresents_.empty()) return;
+    // A wake can be a little early or late; anything due within the next 0.25 ms goes now.
+    const int64_t horizon = nowNs + 250000LL;
+    for (auto it = pendingPresents_.begin(); it != pendingPresents_.end();) {
+        auto& q = it->second;
+        while (!q.empty() && q.front().dueNs <= horizon) {
+            const int64_t src = q.front().srcId;
+            q.pop_front();
+            showSourceLocked(it->first, src);
+            unrefSourceLocked(src);   // the pending entry's reference
+        }
+        if (q.empty()) it = pendingPresents_.erase(it); else ++it;
+    }
+    updateNextPendingDueLocked();
+}
+
+void VulkanRendererContext::updateNextPendingDueLocked() {
+    int64_t due = 0;
+    for (const auto& [content, q] : pendingPresents_)
+        if (!q.empty() && (due == 0 || q.front().dueNs < due)) due = q.front().dueNs;
+    nextPendingDueNs_.store(due, std::memory_order_relaxed);
+}
+
+void VulkanRendererContext::setFpsLimit(int fps) {
+    fps = std::clamp(fps, 0, 1000);
+    if (fpsLimit_.exchange(fps, std::memory_order_relaxed) == fps) return;
+    {
+        std::lock_guard<std::mutex> lk(renderMutex);
+        idealSlotNs_ = 0;
+        lastReleaseNs_ = 0;
+        // Frames held for the old cadence are shown right away.
+        for (auto& [content, q] : pendingPresents_)
+            for (auto& p : q) p.dueNs = 1;   // in the past (0 means "none")
+        updateNextPendingDueLocked();
+    }
+    RLOG("setFpsLimit: %d", fps);
+    wakeRender();
+}
+
+void VulkanRendererContext::onVsync(int64_t frameTimeNs, int64_t deadlineNs, int64_t) {
+    // Before API 33 there is no frame timeline: a frame queued before the next app vsync makes
+    // the same display refresh as one queued right after this one, so that is the grid.
+    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+    const int64_t grid = deadlineNs > 0 ? deadlineNs : (period > 0 ? frameTimeNs + period : 0);
+    if (grid <= 0) return;
+    vsyncDeadlineNs_.store(grid, std::memory_order_relaxed);
+    vsyncSeenNs_.store(steadyNowNs(), std::memory_order_relaxed);
 }
 
 void VulkanRendererContext::unrefSourceLocked(int64_t srcId) {
@@ -1989,6 +2183,7 @@ void VulkanRendererContext::retireSourceLocked(std::unordered_map<int64_t, Sourc
 }
 
 void VulkanRendererContext::eraseContentLocked(int64_t contentId) {
+    dropPendingLocked(contentId);
     auto it = texMap.find(contentId);
     if (it == texMap.end()) return;
     if (it->second.isAHB) {

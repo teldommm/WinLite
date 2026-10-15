@@ -86,11 +86,23 @@ public class DXVKConfig {
     }
 
     public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
-        setEnvVars(context, config, envVars, 0f);
+        setEnvVars(context, config, envVars, 0f, false);
     }
 
-    /** @param autoLodBias what lodBias=auto resolves to for this launch (see autoLodBias); 0 = none. */
     public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars, float autoLodBias) {
+        setEnvVars(context, config, envVars, autoLodBias, false);
+    }
+
+    /**
+     * @param autoLodBias what lodBias=auto resolves to for this launch (see autoLodBias); 0 = none.
+     * @param frameLimiterActive the X server's FPS limiter is on for this launch. It throttles the
+     *        game by holding its swapchain buffers; with DXVK's default frame latency (3) the game
+     *        thread then keeps running up to three frames ahead of what is shown, and every one of
+     *        those frames is input lag. One frame of latency keeps the limiter's wait in front of
+     *        the game's input sampling instead.
+     */
+    public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars, float autoLodBias,
+                                  boolean frameLimiterActive) {
         String content = "";
 
         String framerate = config.get("framerate");
@@ -102,9 +114,9 @@ public class DXVKConfig {
         }
 
         String maxFrameLatency = config.get("maxFrameLatency");
-        if (!maxFrameLatency.isEmpty() && !maxFrameLatency.equals("0")) {
+        if (frameLimiterActive || (!maxFrameLatency.isEmpty() && !maxFrameLatency.equals("0"))) {
             if (!content.isEmpty()) content += "; ";
-            content += "dxgi.maxFrameLatency = 1";
+            content += "dxgi.maxFrameLatency = 1; d3d9.maxFrameLatency = 1";
         }
 
         String async = config.get("async");
