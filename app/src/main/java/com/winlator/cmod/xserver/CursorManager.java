@@ -2,6 +2,7 @@ package com.winlator.cmod.xserver;
 
 import android.util.SparseArray;
 
+import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
 
@@ -40,7 +41,9 @@ public class CursorManager extends XResourceManager {
     }
 
     private static boolean isEmptyMaskImage(Drawable maskImage) {
-        IntBuffer maskData = maskImage.lockBuffer(maskImage.backingAHB).asIntBuffer();
+        ByteBuffer maskBuffer = maskImage.lockBuffer(maskImage.backingAHB);
+        if (maskBuffer == null) return true;
+        IntBuffer maskData = maskBuffer.asIntBuffer();
         boolean result = true;
         for (int i = 0; i < maskData.capacity(); i++) {
             if (maskData.get(i) != 0x000000) {

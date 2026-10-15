@@ -43,6 +43,7 @@ import java.util.Set;
 import java.util.Iterator;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class WinHandler {
@@ -764,11 +765,19 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
     }
 
 
+    private static final ScheduledExecutorService DELAYED_EXEC =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "WinHandler-delayed-exec");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     public void execWithDelay(String command, int delaySeconds) {
         if (command == null || command.trim().isEmpty() || delaySeconds < 0)
             return;
 
-        Executors.newSingleThreadScheduledExecutor().schedule(() -> exec(command), delaySeconds, TimeUnit.SECONDS);
+        // One shared daemon scheduler: a new executor per call left a thread alive for good.
+        DELAYED_EXEC.schedule(() -> exec(command), delaySeconds, TimeUnit.SECONDS);
     }
 
 }

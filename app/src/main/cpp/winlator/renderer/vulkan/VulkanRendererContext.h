@@ -185,7 +185,14 @@ public:
     // A guest frame was presented through the X Present extension (PresentPixmap).
     void noteGuestPresent();
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
-    void updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short w, short h, int x, int y);
+    // contentId: the window content the texture belongs to. sourceId: the drawable the buffer
+    // belongs to (the window content itself, or the DRI3 pixmap it presents). Both are
+    // Drawable.uid values: unique for the process lifetime, never reused.
+    void updateWindowContentAHB(int64_t contentId, int64_t sourceId, AHardwareBuffer* ahb,
+                                short w, short h, int x, int y);
+    // The Java drawable with this uid is gone: drop it as window content and as a buffer source.
+    // Its import is destroyed once no window shows it and the GPU has finished with it.
+    void releaseDrawable(int64_t id);
     void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);
@@ -247,6 +254,15 @@ private:
         bool                 isAHB          = false;
         bool                 needsTransition = false;
         AHardwareBuffer*     ahb            = nullptr;
+        int64_t              srcId          = 0;   // isAHB: the SourceImport this borrows from
+    };
+    // One Vulkan import per source drawable's AHardwareBuffer, shared by every window texture
+    // that shows it (texMap entries borrow img/view/ds). Holds its own AHB reference.
+    struct SourceImport {
+        WinTex           wt;
+        AHardwareBuffer* ahb      = nullptr;
+        int              users    = 0;      // texMap entries currently showing it
+        bool             released = false;  // the Java drawable is gone
     };
     // A texture whose window is gone. It is destroyed once the frame that last drew it has
     // finished on the GPU (serial <= completedSerial), so nothing waits for the device to go idle.
@@ -310,7 +326,7 @@ public:
     int postFXMode  = 0;
     float stretchStrength = 0.40f;
     float stretchProfile  = 0.60f;
-    float sharpness = 0.5f;
+    std::atomic<float> sharpness{0.5f};   // written by the UI, read while recording
     bool swapRB = false;
     float maxAnisotropy           = 1.0f;
     VkPhysicalDeviceMemoryProperties memProperties{};
@@ -320,8 +336,9 @@ public:
 
     std::unordered_map<int64_t, WinTex>         texMap;
 
-    std::unordered_map<AHardwareBuffer*, WinTex>              ahbImportCache;
-    std::unordered_map<int64_t, std::vector<AHardwareBuffer*>> windowAhbs;
+    // Keyed by source drawable uid. Keying by AHardwareBuffer* (as before) could not be cleaned
+    // up from the pixmap side and is unsafe once buffers are actually freed (address reuse).
+    std::unordered_map<int64_t, SourceImport> srcImports;
 
     std::vector<RetiredTex> deleteQueue;
     std::atomic<bool> retirePending{false};
@@ -650,7 +667,11 @@ public:
 
     bool  createWinTexResources(WinTex& wt, int w, int h);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
-    void  cleanupAllAHBCache();
+    void  destroyAllSourceImports();
+    // renderMutex held for all of these.
+    void  unrefSourceLocked(int64_t srcId);
+    void  retireSourceLocked(std::unordered_map<int64_t, SourceImport>::iterator it);
+    void  eraseContentLocked(int64_t contentId);
     void  flushDeleteQueue();
     void  destroyTexNow(RetiredTex& retired);
     void  destroyWinTex(WinTex& wt);

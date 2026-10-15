@@ -545,3 +545,9 @@ Java_com_winlator_cmod_xserver_Drawable_unlockBuffer(JNIEnv *env, jclass obj, jl
     
     AHardwareBuffer_unlock(hardwareBuffer, NULL);
 }
+JNIEXPORT void JNICALL
+Java_com_winlator_cmod_xserver_Drawable_releaseBuffer(JNIEnv *env, jclass obj, jlong ahb) {
+    // Drops the reference the Drawable owns (from AHardwareBuffer_allocate, or the one received
+    // over the DRI3 socket). Renderer imports hold references of their own.
+    if (ahb) AHardwareBuffer_release((AHardwareBuffer *)ahb);
+}

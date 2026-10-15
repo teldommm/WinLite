@@ -200,12 +200,21 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContent(
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
-    JNIEnv*, jobject, jlong handle, jlong id, jlong ahbPtr,
+    JNIEnv*, jobject, jlong handle, jlong contentId, jlong sourceId, jlong ahbPtr,
     jshort w, jshort h, jint x, jint y)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r && ahbPtr)
-        r->updateWindowContentAHB(id, reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
+        r->updateWindowContentAHB(contentId, sourceId,
+                                  reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeReleaseDrawable(
+    JNIEnv*, jobject, jlong handle, jlong drawableId)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->releaseDrawable(drawableId);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -270,14 +279,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetRenderList(
     env->ReleasePrimitiveArrayCritical(jys,  ys,  JNI_ABORT);
     env->ReleasePrimitiveArrayCritical(jxs,  xs,  JNI_ABORT);
     env->ReleasePrimitiveArrayCritical(jids, ids, JNI_ABORT);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeRemoveWindow(
-    JNIEnv*, jobject, jlong handle, jlong id)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->removeWindow(id);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -427,7 +428,12 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetSupportedPresentModes(
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (!r) return env->NewIntArray(0);
-    auto modes = r->getSupportedPresentModes();
+    std::vector<int> modes;
+    {
+        // Rewritten by createSwapchain() on the render thread.
+        std::shared_lock<std::shared_mutex> frameLock(r->frameMutex);
+        modes = r->getSupportedPresentModes();
+    }
     jintArray arr = env->NewIntArray((jsize)modes.size());
     if (!modes.empty())
         env->SetIntArrayRegion(arr, 0, (jsize)modes.size(), modes.data());

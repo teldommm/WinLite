@@ -36,6 +36,18 @@ public class GPUImage {
             System.err.println("Error: Failed to create hardware buffer");
     }
 
+    /**
+     * Drops this image's buffer reference. Only for an image that never became a Drawable's
+     * backing; a Drawable owns (and releases) the buffer of the GPUImage it was built from.
+     */
+    public void destroy() {
+        if (hardwareBufferPtr != 0) {
+            destroyHardwareBuffer(hardwareBufferPtr);
+            hardwareBufferPtr = 0;
+            virtualData = null;
+        }
+    }
+
     public short getStride() {
         return stride;
     }

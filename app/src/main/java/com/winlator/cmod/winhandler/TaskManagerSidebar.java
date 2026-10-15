@@ -78,7 +78,14 @@ public class TaskManagerSidebar implements OnGetProcessInfoListener {
                     window = xServer.windowManager.findWindowByProcessName(processInfo.name);
                 }
 
-                Bitmap icon = window != null ? xServer.pixmapManager.getWindowIcon(window) : null;
+                // Reads pixmap buffers: hold the locks FreePixmap holds, so the icon pixmaps
+                // cannot be released underneath the copy.
+                Bitmap icon = null;
+                if (window != null) {
+                    try (XLock xlock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
+                        icon = xServer.pixmapManager.getWindowIcon(window);
+                    }
+                }
 
                 ProcessRowData row = new ProcessRowData(
                         processInfo.pid,

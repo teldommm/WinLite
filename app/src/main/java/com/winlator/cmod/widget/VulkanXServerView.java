@@ -21,7 +21,6 @@ import com.winlator.cmod.renderer.GPUImage;
 import com.winlator.cmod.xserver.Bitmask;
 import com.winlator.cmod.xserver.Cursor;
 import com.winlator.cmod.xserver.Drawable;
-import com.winlator.cmod.xserver.Pixmap;
 import com.winlator.cmod.xserver.Pointer;
 import com.winlator.cmod.xserver.Property;
 import com.winlator.cmod.xserver.Window;
@@ -35,6 +34,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import dalvik.annotation.optimization.FastNative;
@@ -127,8 +127,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
-    @FastNative private native void nativeUpdateWindowContentAHB(long handle, long id,
-        long ahbPtr, short width, short height, int x, int y);
+    @FastNative private native void nativeUpdateWindowContentAHB(long handle, long contentId,
+        long sourceId, long ahbPtr, short width, short height, int x, int y);
+    @FastNative private native void nativeReleaseDrawable(long handle, long drawableId);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
         float ox, float oy, float sx, float sy,
         boolean hasScissor, int scX, int scY, int scW, int scH);
@@ -137,7 +138,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeSetCursorVisible(long handle, boolean visible);
     @FastNative private native void nativeUpdateCursorImage(long handle,
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY);
-    @FastNative private native void nativeRemoveWindow(long handle, long id);
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
 
@@ -167,8 +167,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSyncChildOrder(long handle, long parentId, long[] orderedChildIds, int count);
     private native void nativeSetWindowViewable(long handle, long id, boolean viewable);
 
+    // Renderer key of a drawable: its process-unique uid (0 for "no drawable", e.g. an
+    // InputOnly window). identityHashCode() was used here before and is not unique.
     private static long did(Drawable d) {
-        return (long) System.identityHashCode(d);
+        return d != null ? d.uid : 0L;
     }
 
     @Override
@@ -300,9 +302,18 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 nativeHandle = 0;
             }
         }
+        // Queued tasks still run (they see nativeHandle == 0 and do nothing); the thread then
+        // exits instead of outliving the view.
+        eventExecutor.shutdown();
     }
 
-    public void queueEvent(Runnable r) { eventExecutor.execute(r); }
+    public void queueEvent(Runnable r) {
+        try {
+            eventExecutor.execute(r);
+        } catch (RejectedExecutionException ignored) {
+            // The view was destroyed; there is no renderer left to update.
+        }
+    }
     @Override
     public void onPause()  {}
     @Override
@@ -366,15 +377,18 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             cd = cursor.cursorImage; hotX = (short)cursor.hotSpotX; hotY = (short)cursor.hotSpotY;
         } else { cd = rootCursorDrawable; }
         nativeSetCursorVisible(nativeHandle, effVis);
-        if (effVis && cd != null && cd.backingAHB != 0) {
+        if (effVis && cd != null) {
+            // Checked under renderLock: Drawable.release() zeroes backingAHB under it.
             synchronized (cd.renderLock) {
-                ByteBuffer pixels = cd.lockBuffer(cd.backingAHB);
+                final long ahb = cd.backingAHB;
+                if (ahb == 0) return;
+                ByteBuffer pixels = cd.lockBuffer(ahb);
                 if (pixels != null) {
                     try {
                         nativeUpdateCursorImage(nativeHandle, pixels, cd.width, cd.height,
                             cd.getStride(), hotX, hotY);
                     } finally {
-                        cd.unlockBuffer(cd.backingAHB);
+                        cd.unlockBuffer(ahb);
                     }
                 }
             }
@@ -526,11 +540,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         }
         synchronized (lock) {
             if (nativeHandle == 0 || pixmap == null) return;
+            final Drawable content = window.getContent();
+            if (content == null) return;
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
-                if (pixmap.backingAHB != 0) {
-                    nativeUpdateWindowContentAHB(nativeHandle, did(window.getContent()),
-                        pixmap.backingAHB, pixmap.width, pixmap.height, rx, ry);
+                final long ahb = pixmap.backingAHB;
+                if (ahb != 0) {
+                    // The window shows the presented pixmap: the texture is keyed by the window's
+                    // content, the imported buffer by the pixmap it came from.
+                    nativeUpdateWindowContentAHB(nativeHandle, did(content), did(pixmap),
+                        ahb, pixmap.width, pixmap.height, rx, ry);
                 }
             }
         }
@@ -540,15 +559,15 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     }
 
-    public void nativeRemoveDirectContent(int windowId, int pixmapId) {
-        Pixmap pixmap = xServer.pixmapManager.getPixmap(pixmapId);
-        if (pixmap == null || pixmap.drawable == null) return;
-        final long contentId = did(pixmap.drawable);
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeRemoveWindow(nativeHandle, contentId);
-            }
-        });
+    @Override
+    public void onDrawableReleased(Drawable drawable) {
+        if (drawable == null) return;
+        // Synchronous (not queueEvent): the native side must stop resolving this drawable before
+        // the X server can hand its id to a new one. The renderer keeps its own buffer reference
+        // until the GPU has finished the frames that sampled it.
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeReleaseDrawable(nativeHandle, did(drawable));
+        }
     }
 
     @Override
@@ -622,9 +641,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
             final int rx = window.getRootX(), ry = window.getRootY();
             synchronized (drawable.renderLock) {
-                if (drawable.backingAHB != 0) {
-                    nativeUpdateWindowContentAHB(nativeHandle, did(drawable),
-                        drawable.backingAHB, drawable.width, drawable.height, rx, ry);
+                final long ahb = drawable.backingAHB;
+                if (ahb != 0) {
+                    nativeUpdateWindowContentAHB(nativeHandle, did(drawable), did(drawable),
+                        ahb, drawable.width, drawable.height, rx, ry);
                 }
             }
         }

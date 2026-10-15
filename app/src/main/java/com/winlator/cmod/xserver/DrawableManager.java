@@ -3,6 +3,8 @@ package com.winlator.cmod.xserver;
 import android.util.SparseArray;
 
 import com.winlator.cmod.core.Callback;
+import com.winlator.cmod.renderer.GPUImage;
+import com.winlator.cmod.widget.XServerRendererView;
 
 public class DrawableManager extends XResourceManager implements XResourceManager.OnResourceLifecycleListener {
     private final XServer xServer;
@@ -43,6 +45,19 @@ public class DrawableManager extends XResourceManager implements XResourceManage
         return drawable;
     }
 
+    /**
+     * A drawable whose backing is a buffer the client sent (DRI3). Unlike createDrawable() this
+     * allocates nothing: the old path allocated (and cleared) a full-size buffer here only to
+     * overwrite the pointer with the client's buffer a moment later, leaking the allocation.
+     */
+    public Drawable createDrawableFromBuffer(int id, short width, short height, byte depth, GPUImage gpuImage) {
+        if (id == 0 || drawables.indexOfKey(id) >= 0) return null;
+        Drawable drawable = new Drawable(id, width, height,
+                xServer.pixmapManager.getVisualForDepth(depth), gpuImage);
+        drawables.put(id, drawable);
+        return drawable;
+    }
+
     public void removeDrawable(int id) {
         Drawable drawable = drawables.get(id);
         if (drawable == null) {
@@ -57,6 +72,12 @@ public class DrawableManager extends XResourceManager implements XResourceManage
 
         drawable.setOnDrawListener(null);
         drawables.remove(id);
+
+        // The renderer drops its textures for this drawable first (it keeps its own buffer
+        // reference until the GPU is done with them), then the drawable's own reference goes.
+        XServerRendererView view = xServer.getXServerView();
+        if (view != null) view.onDrawableReleased(drawable);
+        drawable.release();
     }
 
 

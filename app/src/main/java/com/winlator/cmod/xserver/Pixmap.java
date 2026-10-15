@@ -16,6 +16,7 @@ public class Pixmap extends XResource {
         long maskData = maskPixmap != null ? maskPixmap.drawable.backingAHB : 0;
         short maskStride = maskPixmap != null ? maskPixmap.drawable.getStride() : 0;
         Bitmap bitmap = Bitmap.createBitmap(drawable.width, drawable.height, Bitmap.Config.ARGB_8888);
+        if (drawable.backingAHB == 0 || (maskPixmap != null && maskData == 0)) return bitmap;
         toBitmap(drawable.getStride(), drawable.backingAHB, maskStride, maskData, bitmap);
         return bitmap;
     }

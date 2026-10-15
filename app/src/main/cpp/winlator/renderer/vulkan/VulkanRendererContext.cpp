@@ -54,6 +54,9 @@ VulkanRendererContext::~VulkanRendererContext() {
     vk_.DeviceWaitIdle(device);
     for (auto& [id, wt] : texMap) destroyWinTex(wt);
     texMap.clear();
+    // Every import still holds an AHardwareBuffer reference of its own (this was never freed
+    // before: cleanupAllAHBCache() had no caller).
+    destroyAllSourceImports();
 
     for (auto& retired : deleteQueue) destroyTexNow(retired);
     deleteQueue.clear();
@@ -700,6 +703,8 @@ void VulkanRendererContext::createPostFXPipeline() {
 }
 
 void VulkanRendererContext::setPostFXMode(int mode) {
+    // Destroys a pipeline the render thread may be recording with: exclusive frame lock.
+    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
     RLOG("setPostFXMode: %d -> %d", postFXMode, mode);
     if (postFXMode == mode) return;
     postFXMode = mode;
@@ -1529,7 +1534,7 @@ void VulkanRendererContext::renderFrame() {
     VkBuffer curUpload=VK_NULL_HANDLE; bool hasCurUpload=false;
     VkRect2D effectiveScissor{{0,0},swapchainExt};
     // First-use transitions are only marked done once the submit that carries them succeeded.
-    struct PendingAHBTransition { AHardwareBuffer* ahb; VkImage image; };
+    struct PendingAHBTransition { int64_t srcId; VkImage image; };
     struct PendingTexTransition { int64_t id; VkImage image; };
     std::vector<PendingAHBTransition> pendingAHB;
     std::vector<PendingTexTransition> pendingTex;
@@ -1560,13 +1565,13 @@ void VulkanRendererContext::renderFrame() {
             DrawEntry de{wt.img,wt.ds,VK_NULL_HANDLE,re.x,re.y,wt.w,wt.h};
             de.isAHB=wt.isAHB;
             if (wt.isAHB) {
-                auto cit=ahbImportCache.find(wt.ahb);
-                if (cit!=ahbImportCache.end() && cit->second.img==wt.img &&
-                    cit->second.needsTransition &&
+                auto sit=srcImports.find(wt.srcId);
+                if (sit!=srcImports.end() && sit->second.wt.img==wt.img &&
+                    sit->second.wt.needsTransition &&
                     std::none_of(pendingAHB.begin(),pendingAHB.end(),
                         [&](const PendingAHBTransition& p){return p.image==wt.img;})) {
                     de.needsTransition=true;
-                    pendingAHB.push_back({wt.ahb,wt.img});
+                    pendingAHB.push_back({wt.srcId,wt.img});
                 }
             } else if (wt.needsTransition &&
                 std::none_of(pendingTex.begin(),pendingTex.end(),
@@ -1671,9 +1676,9 @@ void VulkanRendererContext::renderFrame() {
         if (k == 0 && (!pendingAHB.empty() || !pendingTex.empty())) {
             std::lock_guard<std::mutex> lk(renderMutex);
             for (const auto& p:pendingAHB) {
-                auto it=ahbImportCache.find(p.ahb);
-                if (it!=ahbImportCache.end() && it->second.img==p.image)
-                    it->second.needsTransition=false;
+                auto it=srcImports.find(p.srcId);
+                if (it!=srcImports.end() && it->second.wt.img==p.image)
+                    it->second.wt.needsTransition=false;
             }
             for (const auto& p:pendingTex) {
                 auto it=texMap.find(p.id);
@@ -1834,30 +1839,99 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
     needsRender.store(true); dirtyCV.notify_one();
 }
 
-void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short, short, int, int) {
-    if (!ahb) return;
+void VulkanRendererContext::updateWindowContentAHB(int64_t contentId, int64_t srcId,
+                                                   AHardwareBuffer* ahb, short, short, int, int) {
+    if (!ahb || contentId==0 || srcId==0) return;
     std::lock_guard<std::mutex> lk(renderMutex);
-    auto cit = ahbImportCache.find(ahb);
-    if (cit == ahbImportCache.end()) {
-        WinTex tmp{};
-        if (!importAHBToWinTex(tmp, ahb)) {
-            RLOG_E("updateWindowContentAHB: import failed for id=%" PRId64, id);
+    auto sit = srcImports.find(srcId);
+    if (sit != srcImports.end() && (sit->second.released || sit->second.ahb != ahb)) {
+        // A drawable's buffer never changes and a released one is never presented again; if
+        // either happens anyway, never sample the stale import. Windows still showing it keep
+        // the borrowed handles until they move on (retired only once unused).
+        RLOG_E("updateWindowContentAHB: stale import for source %" PRId64 " (released=%d)",
+               srcId, (int)sit->second.released);
+        if (!sit->second.released) {
+            sit->second.released = true;
+            if (sit->second.users <= 0) retireSourceLocked(sit);
+        }
+        return;
+    }
+    if (sit == srcImports.end()) {
+        SourceImport imp{};
+        if (!importAHBToWinTex(imp.wt, ahb)) {
+            RLOG_E("updateWindowContentAHB: import failed for source %" PRId64, srcId);
             return;
         }
         AHardwareBuffer_acquire(ahb);
-        ahbImportCache[ahb] = tmp;
-        windowAhbs[id].push_back(ahb);
-        cit = ahbImportCache.find(ahb);
-        RLOG("updateWindowContentAHB: imported new AHB %p img=%p for id=%" PRId64 " (%dx%d)",
-            (void*)ahb, (void*)tmp.img, id, tmp.w, tmp.h);
+        imp.ahb = ahb;
+        sit = srcImports.emplace(srcId, imp).first;
+        RLOG("updateWindowContentAHB: imported source %" PRId64 " img=%p for content %" PRId64 " (%dx%d, %zu imports)",
+            srcId, (void*)imp.wt.img, contentId, imp.wt.w, imp.wt.h, srcImports.size());
     }
-    WinTex& src = cit->second;
-    WinTex& wt  = texMap[id];
+    SourceImport& src = sit->second;
+    WinTex& wt = texMap[contentId];
+    const int64_t previousSrc = wt.isAHB ? wt.srcId : 0;
     if (!wt.isAHB && wt.img!=VK_NULL_HANDLE) destroyWinTex(wt);
-    wt.img  = src.img; wt.mem  = src.mem; wt.view = src.view; wt.ds   = src.ds;
-    wt.isAHB = true; wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
-    wt.needsTransition = false; // The first-use layout belongs to the cached VkImage.
+    if (previousSrc != srcId) src.users++;
+    wt = WinTex{};
+    wt.img  = src.wt.img; wt.mem  = src.wt.mem; wt.view = src.wt.view; wt.ds = src.wt.ds;
+    wt.isAHB = true; wt.ahb = ahb; wt.srcId = srcId; wt.w = src.wt.w; wt.h = src.wt.h;
+    wt.needsTransition = false; // The first-use layout belongs to the import.
+    // After the new reference is taken: the old source may be a released pixmap that this
+    // window was the last one showing.
+    if (previousSrc != 0 && previousSrc != srcId) unrefSourceLocked(previousSrc);
     guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::unrefSourceLocked(int64_t srcId) {
+    auto it = srcImports.find(srcId);
+    if (it == srcImports.end()) return;
+    if (--it->second.users <= 0) {
+        it->second.users = 0;
+        if (it->second.released) retireSourceLocked(it);
+    }
+}
+
+void VulkanRendererContext::retireSourceLocked(std::unordered_map<int64_t, SourceImport>::iterator it) {
+    // Destroyed (and its AHB reference dropped) once the last frame that may have sampled it
+    // has completed on the GPU - see renderFrame()'s deleteQueue sweep.
+    WinTex deferred = it->second.wt;
+    deferred.isAHB = false;
+    deleteQueue.push_back({deferred, pendingFrameSerial ? pendingFrameSerial : submittedSerial,
+                           it->second.ahb});
+    retirePending.store(true, std::memory_order_release);
+    srcImports.erase(it);
+}
+
+void VulkanRendererContext::eraseContentLocked(int64_t contentId) {
+    auto it = texMap.find(contentId);
+    if (it == texMap.end()) return;
+    if (it->second.isAHB) {
+        const int64_t srcId = it->second.srcId;
+        texMap.erase(it);
+        unrefSourceLocked(srcId);
+    } else {
+        destroyWinTex(it->second);
+        texMap.erase(it);
+    }
+}
+
+void VulkanRendererContext::releaseDrawable(int64_t id) {
+    if (id == 0) return;
+    std::lock_guard<std::mutex> lk(renderMutex);
+    // As window content (a destroyed window, or the old content of a resized one).
+    eraseContentLocked(id);
+    renderList.erase(std::remove_if(renderList.begin(),renderList.end(),
+        [id](const RenderEntry& e){return e.id==id;}),renderList.end());
+    // As a buffer source (a freed pixmap, or the content above). A window may still be showing
+    // it - e.g. the last frame of a swapchain the game just recreated - so it lives until that
+    // window shows something else.
+    auto sit = srcImports.find(id);
+    if (sit != srcImports.end()) {
+        sit->second.released = true;
+        if (sit->second.users <= 0) retireSourceLocked(sit);
+    }
     needsRender.store(true); dirtyCV.notify_one();
 }
 
@@ -1870,25 +1944,7 @@ void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, con
 
 void VulkanRendererContext::removeWindow(int64_t id) {
     std::lock_guard<std::mutex> lk(renderMutex);
-    auto it = texMap.find(id);
-    if (it != texMap.end()) {
-        if (!it->second.isAHB) destroyWinTex(it->second);
-        else it->second = {};
-        texMap.erase(it);
-    }
-    auto wit = windowAhbs.find(id);
-    if (wit != windowAhbs.end()) {
-        for (AHardwareBuffer* ahb : wit->second) {
-            auto cit = ahbImportCache.find(ahb);
-            if (cit != ahbImportCache.end()) {
-                WinTex deferred = cit->second; deferred.isAHB = false;
-                deleteQueue.push_back({deferred, pendingFrameSerial ? pendingFrameSerial : submittedSerial, ahb});
-                retirePending.store(true, std::memory_order_release);
-                ahbImportCache.erase(cit);
-            }
-        }
-        windowAhbs.erase(wit);
-    }
+    eraseContentLocked(id);
     renderList.erase(std::remove_if(renderList.begin(),renderList.end(),
         [id](const RenderEntry& e){return e.id==id;}),renderList.end());
     needsRender.store(true); dirtyCV.notify_one();
@@ -1984,6 +2040,11 @@ void VulkanRendererContext::updateWindowGeometryNode(int64_t id, int64_t content
     if (it == windowTree.end()) return;
     it->second.x = x; it->second.y = y;
     it->second.width = width; it->second.height = height;
+    // A resize replaces the window's content drawable. Java releases the old one (which also
+    // drops it here), but this call is queued and may arrive first or after: dropping the stale
+    // texture here too keeps the two orders equivalent.
+    if (it->second.contentId != contentId && it->second.contentId != 0)
+        eraseContentLocked(it->second.contentId);
     it->second.contentId = contentId;
     treeDirty = true;
     needsRender.store(true); dirtyCV.notify_one();
@@ -2046,15 +2107,17 @@ void VulkanRendererContext::rebuildRenderListFromTree() {
     renderList.assign(flat.begin() + start, flat.end());
 }
 
-void VulkanRendererContext::cleanupAllAHBCache() {
-    for (auto& [ahb, wt] : ahbImportCache) {
+void VulkanRendererContext::destroyAllSourceImports() {
+    // Device idle (destructor only).
+    for (auto& [srcId, imp] : srcImports) {
+        WinTex& wt = imp.wt;
         if (wt.ds   != VK_NULL_HANDLE) vk_.FreeDescriptorSets(device, winTexPool, 1, &wt.ds);
         if (wt.view != VK_NULL_HANDLE) vk_.DestroyImageView(device, wt.view, nullptr);
         if (wt.img  != VK_NULL_HANDLE) vk_.DestroyImage(device, wt.img, nullptr);
         if (wt.mem  != VK_NULL_HANDLE) vk_.FreeMemory(device, wt.mem, nullptr);
-        AHardwareBuffer_release(ahb);
+        if (imp.ahb) AHardwareBuffer_release(imp.ahb);
     }
-    ahbImportCache.clear(); windowAhbs.clear();
+    srcImports.clear();
 }
 
 void VulkanRendererContext::dumpRendererInfo() {
@@ -2080,6 +2143,12 @@ void VulkanRendererContext::dumpRendererInfo() {
 }
 
 void VulkanRendererContext::setFilterMode(int mode) {
+    // vkDeviceWaitIdle needs every queue externally synchronised, and the sampler and the
+    // descriptor sets rewritten below are in use by the frame being recorded: run between
+    // frames (frameMutex) and with the texture maps stable (renderMutex), the same order
+    // renderFrame() takes them in.
+    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    std::lock_guard<std::mutex> mapLock(renderMutex);
     auto modeName=[](int m){ return m==1?"NEAREST":m==2?"SGSR":m==3?"FSR1":"LINEAR"; };
     RLOG("setFilterMode: %d -> %d (%s->%s)", filterMode, mode, modeName(filterMode), modeName(mode));
     if (filterMode==mode) { RLOG("setFilterMode: already set, skipping"); return; }
@@ -2100,12 +2169,13 @@ void VulkanRendererContext::setFilterMode(int mode) {
         vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
     };
     for (auto& [id,wt]:texMap) updateDS(wt.ds, wt.view);
-    for (auto& [ahb,wt]:ahbImportCache) updateDS(wt.ds, wt.view);
+    for (auto& [srcId,imp]:srcImports) updateDS(imp.wt.ds, imp.wt.view);
     if (cursorDS!=VK_NULL_HANDLE&&cursorView!=VK_NULL_HANDLE) updateDS(cursorDS, cursorView);
     needsRender.store(true); dirtyCV.notify_one();
 }
 
 void VulkanRendererContext::setStretchMode(int mode) {
+    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
     RLOG("setStretchMode: %d -> %d", stretchMode, mode);
     if (stretchMode == mode) return;
     stretchMode = mode;
@@ -2114,12 +2184,15 @@ void VulkanRendererContext::setStretchMode(int mode) {
 }
 
 void VulkanRendererContext::setSwapRB(bool enabled) {
+    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
     if (swapRB == enabled) return;
     swapRB = enabled;
     RLOG("setSwapRB: %d", (int)swapRB);
 }
 
 void VulkanRendererContext::setPresentMode(VkPresentModeKHR mode) {
+    // availablePresentModes is rewritten by createSwapchain() on the render thread.
+    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
     bool supported = false;
     for (auto pm : availablePresentModes) if (pm == mode) { supported = true; break; }
     VkPresentModeKHR target = supported ? mode : VK_PRESENT_MODE_FIFO_KHR;

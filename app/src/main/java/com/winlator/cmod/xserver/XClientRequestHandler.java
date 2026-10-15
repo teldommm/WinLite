@@ -218,7 +218,7 @@ public class XClientRequestHandler implements RequestHandler {
                     }
                     break;
                 case ClientOpcodes.CONFIGURE_WINDOW:
-                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
                         WindowRequests.configureWindow(client, inputStream, outputStream);
                     }
                     break;
@@ -488,4 +488,4 @@ public class XClientRequestHandler implements RequestHandler {
         if (opcode < 0) Log.w("XClientRequestHandler", "Unsupported extension opcode " + index + " (minor " + (requestData & 0xff) + "), ignored");
         else Log.w("XClientRequestHandler", "Unsupported opcode " + index + ", ignored");
     }
-}
+}

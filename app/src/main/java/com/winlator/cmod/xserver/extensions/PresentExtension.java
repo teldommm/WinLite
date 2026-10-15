@@ -259,6 +259,9 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     public void onFreeResource(XResource resource) {
         if (resource instanceof Window) {
             Window window = (Window) resource;
+            synchronized (limiterLock) {
+                if (limiterDeadlines != null) limiterDeadlines.remove(window.id);
+            }
             synchronized (events) {
                 for (int i = events.size() - 1; i >= 0; i--) {
                     Event event = events.valueAt(i);

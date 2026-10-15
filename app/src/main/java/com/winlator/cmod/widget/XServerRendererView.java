@@ -33,7 +33,10 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract void setUnviewableWMClasses(String... classes);
 
     public abstract void addDirectContent(int windowId, Drawable drawable, GPUImage gpuImage);
-    public abstract void nativeRemoveDirectContent(int windowId, int pixmapId);
+    // A drawable's backing buffer is about to be released (pixmap freed, window destroyed,
+    // window content replaced on resize). Called under the DRAWABLE_MANAGER lock. Renderers drop
+    // whatever they hold for it; the default holds nothing.
+    public void onDrawableReleased(Drawable drawable) {}
     public abstract void nativeSetCompositeRedirected(int windowId, boolean redirected);
     // Returns true if the copy was handled by moving windows; false means the caller must do a real pixel copy.
     public abstract boolean nativeCompositeRedirect(int srcDrawableId, int dstDrawableId, short dstX, short dstY);
