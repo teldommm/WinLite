@@ -646,6 +646,19 @@ public:
     std::atomic<int>     fpsLimit_{0};
     std::atomic<int64_t> vsyncDeadlineNs_{0};   // a recent point of the queue-deadline grid
     std::atomic<int64_t> vsyncSeenNs_{0};       // when the clock last ticked
+    // expected presentation - deadline of the preferred frame timeline (API 33+), 0 unknown
+    std::atomic<int64_t> vsyncPresentOffsetNs_{0};
+
+    // --- Frame generation present timing (VK_GOOGLE_display_timing) ----------------------
+    // The presents of one source frame used to be queued back to back in FIFO, so they went
+    // out on consecutive refreshes: even only when refresh == multiplier x source rate (2x of
+    // 30 FPS on 120 Hz showed 1 refresh, then 3). With display timing each present carries a
+    // desired presentation time spread evenly over the source frame interval (2, 2), which is
+    // also when an interpolated frame belongs on screen. Without the extension: as before.
+    bool displayTimingOk_ = false;
+    int64_t fgSourceIntervalNs() const;
+    // Fills desired[k] (CLOCK_MONOTONIC ns, 0 = as soon as possible) for this frame's presents.
+    void fgPresentTimes(uint32_t presents, int64_t desired[]) const;
     struct PendingPresent { int64_t srcId; int64_t dueNs; };
     std::unordered_map<int64_t, std::deque<PendingPresent>> pendingPresents_;  // by content
     std::atomic<int64_t> nextPendingDueNs_{0};  // earliest dueNs, 0 = none

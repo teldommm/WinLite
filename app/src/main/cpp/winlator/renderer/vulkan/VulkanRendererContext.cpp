@@ -343,6 +343,7 @@ void VulkanRendererContext::createLogicalDevice() {
     PFN_vkEnumerateDeviceExtensionProperties enumDevExts =
         (PFN_vkEnumerateDeviceExtensionProperties)gipa(instance, "vkEnumerateDeviceExtensionProperties");
     bool hasForeignQueue = false;
+    bool hasDisplayTiming = false;
     const char* globalPriorityExt = nullptr;
     if (enumDevExts) {
         uint32_t extCount = 0;
@@ -354,6 +355,8 @@ void VulkanRendererContext::createLogicalDevice() {
                          ext.extensionName, ext.specVersion);
                     if (strcmp(ext.extensionName, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME) == 0)
                         hasForeignQueue = true;
+                    if (strcmp(ext.extensionName, "VK_GOOGLE_display_timing") == 0)
+                        hasDisplayTiming = true;
                     // KHR is the promoted name of EXT; same queue create struct and values.
                     if (strcmp(ext.extensionName, "VK_KHR_global_priority") == 0)
                         globalPriorityExt = "VK_KHR_global_priority";
@@ -379,6 +382,10 @@ void VulkanRendererContext::createLogicalDevice() {
     // same GPU; with a HIGH priority queue the driver can schedule (or preempt for) it first, so
     // a composite does not miss its vsync because the guest is mid-frame. A driver may refuse
     // the level (VK_ERROR_NOT_PERMITTED): the device is then created exactly as before.
+    // Desired presentation times for frame generation's presents (the Android loader implements
+    // it on top of the native window's buffer timestamps).
+    if (hasDisplayTiming) extList.push_back("VK_GOOGLE_display_timing");
+    displayTimingOk_ = hasDisplayTiming;
     VkDeviceQueueGlobalPriorityCreateInfoEXT queuePriority{};
     queuePriority.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT;
     queuePriority.globalPriority = VK_QUEUE_GLOBAL_PRIORITY_HIGH_EXT;
@@ -446,8 +453,10 @@ void VulkanRendererContext::createLogicalDevice() {
         deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
     }
     globalPriorityHigh_.store(globalPriorityExt != nullptr);
-    __android_log_print(ANDROID_LOG_INFO, WLOG_TAG, "createLogicalDevice: compositor queue priority %s",
-           globalPriorityExt ? "HIGH" : "default (global priority unavailable)");
+    __android_log_print(ANDROID_LOG_INFO, WLOG_TAG,
+           "createLogicalDevice: compositor queue priority %s, display timing %s",
+           globalPriorityExt ? "HIGH" : "default (global priority unavailable)",
+           displayTimingOk_ ? "available" : "unavailable (frame gen presents back to back)");
     if (deviceResult!=VK_SUCCESS) {
         // A driver that rejects the feature chain must not cost us the whole
         // renderer: retry once with the pre-LSFG device create, unchanged.
@@ -1717,6 +1726,9 @@ void VulkanRendererContext::renderFrame() {
         : (VkPipelineStageFlags)VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSwapchainKHR scs[]={swapchain};
 
+    int64_t desiredPresent[kMaxPresentsPerFrame] = {};
+    if (fgPlan_.presents > 1) fgPresentTimes(fgPlan_.presents, desiredPresent);
+
     // The slot's fence rides on the LAST submit. A fence signal is ordered
     // after every command submitted earlier on the same queue, so it still
     // covers all of this frame's work.
@@ -1793,6 +1805,14 @@ void VulkanRendererContext::renderFrame() {
         VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         pi.waitSemaphoreCount=1; pi.pWaitSemaphores=&sSem;
         pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&fgPlan_.imgIdx[k];
+        VkPresentTimeGOOGLE presentTime{0, (uint64_t)desiredPresent[k]};
+        VkPresentTimesInfoGOOGLE presentTimes{};
+        if (desiredPresent[k] > 0) {
+            presentTimes.sType = VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE;
+            presentTimes.swapchainCount = 1;
+            presentTimes.pTimes = &presentTime;
+            pi.pNext = &presentTimes;
+        }
         res=vk_.QueuePresentKHR(graphicsQueue,&pi);
         presented++;
         if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR||res==VK_SUBOPTIMAL_KHR) {
@@ -2152,7 +2172,50 @@ void VulkanRendererContext::setFpsLimit(int fps) {
     wakeRender();
 }
 
-void VulkanRendererContext::onVsync(int64_t frameTimeNs, int64_t deadlineNs, int64_t) {
+int64_t VulkanRendererContext::fgSourceIntervalNs() const {
+    // Under an FPS limit the source frames come exactly at the limit; otherwise the pacer's
+    // measured guest rate.
+    const int fps = fpsLimit_.load(std::memory_order_relaxed);
+    if (fps > 0) return 1000000000LL / fps;
+    const float rate = lsfgEngine_ ? lsfgEngine_->sourceRate() : 0.0f;
+    return rate > 1.0f ? (int64_t)(1.0e9f / rate) : 0;
+}
+
+void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[]) const {
+    for (uint32_t k = 0; k < presents; k++) desired[k] = 0;
+    if (!displayTimingOk_ || presents < 2) return;
+    const int64_t period   = refreshPeriodNs_.load(std::memory_order_relaxed);
+    const int64_t interval = fgSourceIntervalNs();
+    const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
+    const int64_t now      = steadyNowNs();
+    if (period <= 0 || interval <= 0 || deadline == 0 ||
+        now - vsyncSeenNs_.load(std::memory_order_relaxed) > 250000000LL) return;
+    // Spreading only changes anything when the presents would get more than one refresh each;
+    // otherwise back to back IS even, and holding frames would only add latency.
+    const double step = (double)interval / (double)presents;
+    if (step < 1.5 * (double)period) return;
+    // When the first present will be on screen: the first queue deadline its composite can
+    // still make, plus the deadline -> presentation offset (from the frame timeline on API 33+,
+    // one refresh before that).
+    const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+    const int64_t firstDeadline = deadline +
+        (int64_t)std::ceil((double)(now + lead - deadline) / (double)period) * period;
+    int64_t offset = vsyncPresentOffsetNs_.load(std::memory_order_relaxed);
+    if (offset <= 0 || offset > 4 * period) offset = period;
+    const int64_t first = firstDeadline + offset;
+    for (uint32_t k = 0; k < presents; k++) {
+        const int64_t refreshes = (int64_t)std::llround(k * step / (double)period);
+        // Half a refresh early: the compositor shows a buffer at the first refresh whose
+        // expected presentation is not before the desired time, so this lands on the intended
+        // refresh even if the estimate is off by up to half of one. Only later presents get a
+        // time; the first goes out as soon as it is ready.
+        if (k > 0) desired[k] = first + refreshes * period - period / 2;
+    }
+}
+
+void VulkanRendererContext::onVsync(int64_t frameTimeNs, int64_t deadlineNs, int64_t presentNs) {
+    if (deadlineNs > 0 && presentNs > deadlineNs)
+        vsyncPresentOffsetNs_.store(presentNs - deadlineNs, std::memory_order_relaxed);
     // Before API 33 there is no frame timeline: a frame queued before the next app vsync makes
     // the same display refresh as one queued right after this one, so that is the grid.
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
