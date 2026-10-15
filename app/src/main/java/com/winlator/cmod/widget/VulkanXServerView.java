@@ -346,10 +346,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     @Override
-    public long getVsyncMsc() { return vsyncClock.msc(); }
-
-    @Override
-    public long getVsyncUstNs() { return vsyncClock.lastVsyncNs(); }
+    public boolean getVsync(long nowNs, long[] out) { return vsyncClock.sampleAt(nowNs, out); }
 
     @Override
     public void onDestroy() {

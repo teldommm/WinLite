@@ -81,7 +81,6 @@ internal fun ContainerRuntimePane(
     var vulkanVersion by remember { mutableStateOf(readConfig(graphicsConfig, "vulkanVersion", ';').ifBlank { "1.3" }) }
     var maxDeviceMemory by remember { mutableStateOf(readConfig(graphicsConfig, "maxDeviceMemory", ';').ifBlank { "0" }) }
     var graphicsPresentMode by remember { mutableStateOf(readConfig(graphicsConfig, "presentMode", ';').ifBlank { "mailbox" }) }
-    var syncFrame by remember { mutableStateOf(readConfig(graphicsConfig, "syncFrame", ';') == "1") }
     var disablePresentWait by remember { mutableStateOf(readConfig(graphicsConfig, "disablePresentWait", ';') == "1") }
     var resourceType by remember { mutableStateOf(readConfig(graphicsConfig, "resourceType", ';').ifBlank { "auto" }) }
     var bcnEmulation by remember { mutableStateOf(readConfig(graphicsConfig, "bcnEmulation", ';').ifBlank { "auto" }) }
@@ -247,7 +246,6 @@ internal fun ContainerRuntimePane(
                 SettingsDivider(); SettingChoice("Vulkan Version", vulkanVersion, listOf("1.1", "1.2", "1.3", "1.4")) { vulkanVersion = it; saveGraphics("vulkanVersion", it) }
                 SettingsDivider(); SettingChoice("Max Device Memory", maxDeviceMemory, listOf("0", "512", "1024", "2048", "4096", "8192", "12288", "16384")) { maxDeviceMemory = it; saveGraphics("maxDeviceMemory", it) }
                 SettingsDivider(); SettingChoice("Driver Present Mode", graphicsPresentMode, listOf("mailbox", "fifo", "immediate", "relaxed")) { graphicsPresentMode = it; saveGraphics("presentMode", it) }
-                SettingsDivider(); SettingToggle("Sync Frame", syncFrame) { syncFrame = it; saveGraphics("syncFrame", if (it) "1" else "0") }
                 SettingsDivider(); SettingToggle("Disable Present Wait", disablePresentWait) { disablePresentWait = it; saveGraphics("disablePresentWait", if (it) "1" else "0") }
                 SettingsDivider(); SettingChoice("Resource Type", resourceType, listOf("auto", "dmabuf", "ahb", "opaque")) { resourceType = it; saveGraphics("resourceType", it) }
                 SettingsDivider(); SettingChoice("BCN Emulation", bcnEmulation, listOf("none", "partial", "full", "auto")) { bcnEmulation = it; saveGraphics("bcnEmulation", it) }

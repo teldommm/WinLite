@@ -207,7 +207,6 @@ private class ContainerEditorStateV2(
     var gpuName by mutableStateOf(readConfig(graphicsConfig, "gpuName", ';').ifBlank { "Device" })
     var maxMemory by mutableStateOf(readConfig(graphicsConfig, "maxDeviceMemory", ';').ifBlank { "0" })
     var driverPresentMode by mutableStateOf(readConfig(graphicsConfig, "presentMode", ';').ifBlank { "mailbox" })
-    var syncFrame by mutableStateOf(readConfig(graphicsConfig, "syncFrame", ';') == "1")
     var disablePresentWait by mutableStateOf(readConfig(graphicsConfig, "disablePresentWait", ';') == "1")
     var resourceType by mutableStateOf(readConfig(graphicsConfig, "resourceType", ';').ifBlank { "auto" })
     var bcn by mutableStateOf(readConfig(graphicsConfig, "bcnEmulation", ';').ifBlank { "auto" })
@@ -948,8 +947,6 @@ private fun ContainerCategoryV2(
                 SettingChoice("Driver Present Mode", s.driverPresentMode, listOf("mailbox", "fifo", "immediate", "relaxed")) {
                     s.driverPresentMode = it; s.graphics("presentMode", it)
                 }
-                SettingsDivider()
-                SettingToggle("Sync Frame", s.syncFrame) { s.syncFrame = it; s.graphics("syncFrame", if (it) "1" else "0") }
                 SettingsDivider()
                 SettingToggle("Disable Present Wait", s.disablePresentWait) {
                     s.disablePresentWait = it; s.graphics("disablePresentWait", if (it) "1" else "0")

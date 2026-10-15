@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -40,7 +41,8 @@ import java.util.concurrent.TimeUnit;
 
 public class PresentExtension implements Extension, XResourceManager.OnResourceLifecycleListener, WindowManager.OnWindowModificationListener {
     public static final byte MAJOR_OPCODE = -103;
-    private static final int FAKE_INTERVAL = 1000000 / 60;
+    // Fallback MSC clock (no display vsync): the same 60 Hz time base VsyncClock anchors to.
+    private static final long FAKE_INTERVAL_NS = com.winlator.cmod.widget.XServerRendererView.FALLBACK_MSC_PERIOD_NS;
     public enum Kind {PIXMAP, MSC_NOTIFY}
     public enum Mode {COPY, FLIP, SKIP}
     private final SparseArray<Event> events = new SparseArray<>();
@@ -83,7 +85,15 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         final ArrayDeque<Presented> held = new ArrayDeque<>();
         // Handed back (or scheduled to be) and not presented again since: pixmap -> release time.
         final HashMap<Pixmap, Long> outstanding = new HashMap<>();
+        // Live pixmaps this window has been presented with. A client with a single buffer
+        // (a swapchain of one image) must get it back after every present: holding the newest
+        // one would leave it nothing to draw into.
+        final HashSet<Pixmap> seen = new HashSet<>();
         ScheduledFuture<?> stallGuard;
+        long lastMsc = Long.MIN_VALUE;
+
+        /** How many of the newest presented pixmaps stay held. */
+        int keep() { return seen.size() >= 2 ? 1 : 0; }
     }
 
     // Guarded by limiterLock.
@@ -204,9 +214,10 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         final long releaseNs = plan[0];
         final long onScreenNs = plan[1];
         final int depth = (int) plan[2];
-        while (wp.held.size() > 1 && (depth <= 0 || wp.outstanding.size() < depth)) {
+        final int keep = wp.keep();
+        while (wp.held.size() > keep && (depth <= 0 || wp.outstanding.size() < depth)) {
             Presented p = wp.held.pollFirst();
-            boolean shownUntilNewFrame = wp.held.size() == 1;
+            boolean shownUntilNewFrame = keep == 1 && wp.held.size() == 1;
             long at = shownUntilNewFrame ? Math.max(releaseNs, onScreenNs) : releaseNs;
             releaseLocked(wp, p, at, nowNs, now);
         }
@@ -222,7 +233,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         wp.stallGuard = limiterExecutor().schedule(() -> {
             ArrayList<Presented> now = new ArrayList<>(1);
             synchronized (limiterLock) {
-                if (pacing.get(windowId) != wp || wp.held.size() <= 1) return;
+                if (pacing.get(windowId) != wp || wp.held.size() <= wp.keep()) return;
                 releaseLocked(wp, wp.held.pollFirst(), 0, System.nanoTime(), now);
             }
             for (Presented p : now) sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
@@ -272,6 +283,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
                 pacing.put(window.id, wp);
             }
             // How long the guest took for this frame: from getting the buffer back to now.
+            wp.seen.add(pixmap);
             Long releasedAt = wp.outstanding.remove(pixmap);
             if (releasedAt != null && releasedAt <= nowNs) guestFrameNs = nowNs - releasedAt;
             // Presenting a pixmap that is still held (a client that does not wait for idle):
@@ -285,16 +297,23 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         presentToRenderer(client, window, pixmap, guestFrameNs, plan);
 
         com.winlator.cmod.widget.XServerRendererView view = client.xServer.getXServerView();
-        long msc = view != null ? view.getVsyncMsc() : -1;
-        long ust;
-        if (msc >= 0) {
+        long[] vsync = new long[2];
+        long msc, ustNs;
+        if (view != null && view.getVsync(nowNs, vsync)) {
             // The display's own vsync count and time (Choreographer), not a made-up 60 Hz clock.
-            ust = view.getVsyncUstNs() / 1000;
+            msc = vsync[0];
+            ustNs = vsync[1];
         } else {
-            ust = nowNs / 1000;
-            msc = ust / FAKE_INTERVAL;
+            msc = nowNs / FAKE_INTERVAL_NS;
+            ustNs = msc * FAKE_INTERVAL_NS;
         }
-        sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+        synchronized (limiterLock) {
+            // MSC must never go backwards for a window (clock switch, surface re-creation):
+            // WSIs compute their next target from the last completed MSC.
+            if (msc < wp.lastMsc) msc = wp.lastMsc;
+            wp.lastMsc = msc;
+        }
+        sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ustNs / 1000, msc);
 
         synchronized (limiterLock) {
             wp.held.addLast(new Presented(window, pixmap, serial, idleFence));
@@ -365,6 +384,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             synchronized (limiterLock) {
                 for (WindowPacing wp : pacing.values()) {
                     wp.outstanding.remove(pixmap);
+                    wp.seen.remove(pixmap);
                     wp.held.removeIf(p -> p.pixmap == pixmap);
                 }
             }

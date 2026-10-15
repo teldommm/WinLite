@@ -52,9 +52,11 @@ public abstract class XServerRendererView extends SurfaceView {
     public void onGuestPresent(Window window, Drawable pixmap, long guestFrameNs, long[] plan) {
         pixmap.updateDirect();
     }
-    // The display's vsync count and time (CLOCK_MONOTONIC ns) for Present's MSC/UST; -1 = none.
-    public long getVsyncMsc() { return -1; }
-    public long getVsyncUstNs() { return 0; }
+    // The display's vsync count and time (CLOCK_MONOTONIC ns) at nowNs for Present's MSC/UST:
+    // out[0] = msc, out[1] = ust ns. false = no display clock (the caller falls back to 60 Hz).
+    public boolean getVsync(long nowNs, long[] out) { return false; }
+    // Period of the 60 Hz time base the fallback MSC (and the real one's anchor) uses.
+    public static final long FALLBACK_MSC_PERIOD_NS = 16_666_667L;
     public abstract void requestRender();
     public abstract void queueEvent(Runnable action);
     public abstract void onSurfaceChanged(int width, int height);

@@ -1602,7 +1602,14 @@ void VulkanRendererContext::renderFrame() {
             // Could not get every image we planned for. Anything already
             // acquired has a semaphore nobody will wait on, so the only safe
             // move is to drop this frame entirely rather than leak a signal.
-            if (k == 0) return;
+            if (k == 0) {
+                // Nothing acquired. A failure that comes back at once (device lost) with a
+                // held frame already due would otherwise loop straight back here: retry at the
+                // calm pace of a failed swapchain instead (cleared by the next good present).
+                if (!swapchainRetryPending.exchange(true))
+                    RLOG_E("renderFrame: acquire failed (res=%d), retrying", (int)ar);
+                return;
+            }
             RLOG_E("renderFrame: acquire %u/%u failed (res=%d) - dropping frame",
                    k, fgPlan_.presents, (int)ar);
             fbResized.store(true);
@@ -1616,6 +1623,8 @@ void VulkanRendererContext::renderFrame() {
         }
         fgPlan_.imgIdx[k] = idx;
     }
+    // A working acquire ends any failure back-off (it would otherwise pace every frame at 50 ms).
+    if (swapchainRetryPending.load(std::memory_order_relaxed)) swapchainRetryPending.store(false);
     // Real frame N is presented LAST; generated frames take the earlier slots.
     const uint32_t imgIdx = fgPlan_.imgIdx[fgPlan_.presents - 1];
     VkResult res = VK_SUCCESS;
@@ -2025,15 +2034,26 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
     guestPresentNs_.store(now, std::memory_order_relaxed);
     guestPresentSerial_.fetch_add(1, std::memory_order_relaxed);
 
-    if (guestFrameNs >= 0 && guestFrameNs < 1000000000LL) {
-        if (!guestFrameValid_) {
-            guestFrameMeanNs_ = (double)guestFrameNs; guestFrameDevNs_ = guestFrameNs * 0.25;
-        } else {
-            const double d = (double)guestFrameNs - guestFrameMeanNs_;
-            guestFrameMeanNs_ += 0.1 * d;
-            guestFrameDevNs_  += 0.1 * (std::fabs(d) - guestFrameDevNs_);
+    // Windows that stopped presenting (closed launcher, recreated swapchain) drop their state.
+    if (pacers_.size() > 1) {
+        for (auto it = pacers_.begin(); it != pacers_.end();) {
+            if (it->first != contentId && now - it->second.lastPresentNs > 2000000000LL)
+                it = pacers_.erase(it);
+            else ++it;
         }
-        guestFrameValid_ = true;
+    }
+    Pacer& pc = pacers_[contentId];
+    pc.lastPresentNs = now;
+
+    if (guestFrameNs >= 0 && guestFrameNs < 1000000000LL) {
+        if (!pc.guestFrameValid) {
+            pc.guestFrameMeanNs = (double)guestFrameNs; pc.guestFrameDevNs = guestFrameNs * 0.25;
+        } else {
+            const double d = (double)guestFrameNs - pc.guestFrameMeanNs;
+            pc.guestFrameMeanNs += 0.1 * d;
+            pc.guestFrameDevNs  += 0.1 * (std::fabs(d) - pc.guestFrameDevNs);
+        }
+        pc.guestFrameValid = true;
     }
 
     const int     fps    = fpsLimit_.load(std::memory_order_relaxed);
@@ -2057,10 +2077,10 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
             const auto ceilGrid = [&](int64_t t) {
                 return deadline + (int64_t)std::ceil((double)(t - deadline) / (double)period) * period; };
             const int64_t earliest = now + lead + 500000LL;
-            int64_t ideal = idealSlotNs_ ? idealSlotNs_ + spacing : 0;
+            int64_t ideal = pc.idealSlotNs ? pc.idealSlotNs + spacing : 0;
             int64_t slot  = ideal ? snap(ideal) : 0;
             const bool late = ideal != 0 && slot < earliest;
-            lateHistory_ = (lateHistory_ << 1) | (late ? 1u : 0u);
+            pc.lateHistory = (pc.lateHistory << 1) | (late ? 1u : 0u);
             // First frame or a late one (missed its slot): restart the cadence from the next
             // slot that can still be made.
             if (!ideal || late) { slot = ceilGrid(earliest); ideal = slot; }
@@ -2072,45 +2092,45 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
                 q.back().srcId = srcId;
                 srcImports[srcId].users++;
                 slot  = q.back().dueNs + lead;
-                ideal = idealSlotNs_;
+                ideal = pc.idealSlotNs;
             } else {
                 q.push_back({srcId, slot - lead});
                 srcImports[srcId].users++;   // the pending entry keeps the import alive
-                idealSlotNs_ = ideal;
+                pc.idealSlotNs = ideal;
             }
             staged = true;
             const int64_t due = slot - lead;
 
             // One frame in flight while that makes its slots; two for a while after misses.
-            const int misses = __builtin_popcount(lateHistory_ & 0x3FFFFFFFu);   // last 30
-            if (pipelineDepth_ == 1 && misses >= 2) {
-                pipelineDepth_ = 2; depthTwoUntilNs_ = now + 5000000000LL; lateHistory_ = 0;
+            const int misses = __builtin_popcount(pc.lateHistory & 0x3FFFFFFFu);   // last 30
+            if (pc.pipelineDepth == 1 && misses >= 2) {
+                pc.pipelineDepth = 2; pc.depthTwoUntilNs = now + 5000000000LL; pc.lateHistory = 0;
                 RLOG("frame pacing: guest misses its slots, overlapping two frames for 5 s");
-            } else if (pipelineDepth_ == 2 && now > depthTwoUntilNs_) {
-                pipelineDepth_ = 1; lateHistory_ = 0;
+            } else if (pc.pipelineDepth == 2 && now > pc.depthTwoUntilNs) {
+                pc.pipelineDepth = 1; pc.lateHistory = 0;
             }
             // The buffer given back now is drawn into for the next slot (depth 1) or the one
             // after (depth 2); it should come back just before that slot's composite.
-            const int64_t target = snap(ideal + spacing * pipelineDepth_);
-            const int64_t guestEst = guestFrameValid_
-                ? (int64_t)(guestFrameMeanNs_ + 3.0 * guestFrameDevNs_) : spacing / 2;
+            const int64_t target = snap(ideal + spacing * pc.pipelineDepth);
+            const int64_t guestEst = pc.guestFrameValid
+                ? (int64_t)(pc.guestFrameMeanNs + 3.0 * pc.guestFrameDevNs) : spacing / 2;
             const int64_t justInTime = target - lead - guestEst - 2000000LL;
-            out[0] = std::max<int64_t>({justInTime, lastReleaseNs_ + spacing * 95 / 100, now});
+            out[0] = std::max<int64_t>({justInTime, pc.lastReleaseNs + spacing * 95 / 100, now});
             out[1] = due + 1500000LL;   // previous frame off screen and its GPU reads done
-            out[2] = pipelineDepth_;
+            out[2] = pc.pipelineDepth;
         } else {
             // Release cadence only (frame generation, no clock, or limit >= refresh). Two
             // buffers may overlap so a heavy guest keeps its CPU/GPU pipelining.
-            idealSlotNs_ = 0;
-            out[0] = std::max(now, lastReleaseNs_ + spacing);
+            pc.idealSlotNs = 0;
+            out[0] = std::max(now, pc.lastReleaseNs + spacing);
             out[1] = 0;
             out[2] = 2;
         }
-        lastReleaseNs_ = out[0];
+        pc.lastReleaseNs = out[0];
     } else {
-        idealSlotNs_ = 0;
-        lastReleaseNs_ = 0;
-        pipelineDepth_ = 1; lateHistory_ = 0;
+        pc.idealSlotNs = 0;
+        pc.lastReleaseNs = 0;
+        pc.pipelineDepth = 1; pc.lateHistory = 0;
     }
 
     if (staged) {
@@ -2161,8 +2181,7 @@ void VulkanRendererContext::setFpsLimit(int fps) {
     if (fpsLimit_.exchange(fps, std::memory_order_relaxed) == fps) return;
     {
         std::lock_guard<std::mutex> lk(renderMutex);
-        idealSlotNs_ = 0;
-        lastReleaseNs_ = 0;
+        for (auto& [content, pc] : pacers_) pc.resetCadence();
         // Frames held for the old cadence are shown right away.
         for (auto& [content, q] : pendingPresents_)
             for (auto& p : q) p.dueNs = 1;   // in the past (0 means "none")
@@ -2173,12 +2192,13 @@ void VulkanRendererContext::setFpsLimit(int fps) {
 }
 
 int64_t VulkanRendererContext::fgSourceIntervalNs() const {
-    // Under an FPS limit the source frames come exactly at the limit; otherwise the pacer's
-    // measured guest rate.
+    // The pacer's measured guest rate; an FPS limit is only a floor - a guest that cannot
+    // reach the limit delivers its frames further apart than the limit says.
     const int fps = fpsLimit_.load(std::memory_order_relaxed);
-    if (fps > 0) return 1000000000LL / fps;
+    const int64_t limitInterval = fps > 0 ? 1000000000LL / fps : 0;
     const float rate = lsfgEngine_ ? lsfgEngine_->sourceRate() : 0.0f;
-    return rate > 1.0f ? (int64_t)(1.0e9f / rate) : 0;
+    const int64_t measured = rate > 1.0f ? (int64_t)(1.0e9f / rate) : 0;
+    return std::max(limitInterval, measured);
 }
 
 void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[]) const {
@@ -2195,13 +2215,15 @@ void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[])
     const double step = (double)interval / (double)presents;
     if (step < 1.5 * (double)period) return;
     // When the first present will be on screen: the first queue deadline its composite can
-    // still make, plus the deadline -> presentation offset (from the frame timeline on API 33+,
-    // one refresh before that).
+    // still make, plus the deadline -> presentation offset from the frame timeline.
     const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
     const int64_t firstDeadline = deadline +
         (int64_t)std::ceil((double)(now + lead - deadline) / (double)period) * period;
-    int64_t offset = vsyncPresentOffsetNs_.load(std::memory_order_relaxed);
-    if (offset <= 0 || offset > 4 * period) offset = period;
+    // Only with a measured offset (frame timeline, API 33+). A guessed one that is off by more
+    // than half a refresh moves every later present one refresh away from the first, which is
+    // less even than plain back-to-back FIFO.
+    const int64_t offset = vsyncPresentOffsetNs_.load(std::memory_order_relaxed);
+    if (offset <= 0 || offset > 4 * period) return;
     const int64_t first = firstDeadline + offset;
     for (uint32_t k = 0; k < presents; k++) {
         const int64_t refreshes = (int64_t)std::llround(k * step / (double)period);
@@ -2247,6 +2269,7 @@ void VulkanRendererContext::retireSourceLocked(std::unordered_map<int64_t, Sourc
 
 void VulkanRendererContext::eraseContentLocked(int64_t contentId) {
     dropPendingLocked(contentId);
+    pacers_.erase(contentId);
     auto it = texMap.find(contentId);
     if (it == texMap.end()) return;
     if (it->second.isAHB) {

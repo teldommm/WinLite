@@ -205,7 +205,6 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var vulkanVersion by mutableStateOf(readConfig(graphicsConfig, "vulkanVersion", ';').ifBlank { "1.3" })
     var maxMemory by mutableStateOf(readConfig(graphicsConfig, "maxDeviceMemory", ';').ifBlank { "0" })
     var graphicsPresentMode by mutableStateOf(readConfig(graphicsConfig, "presentMode", ';').ifBlank { "mailbox" })
-    var syncFrame by mutableStateOf(readConfig(graphicsConfig, "syncFrame", ';') == "1")
     var disablePresentWait by mutableStateOf(readConfig(graphicsConfig, "disablePresentWait", ';') == "1")
     var resourceType by mutableStateOf(readConfig(graphicsConfig, "resourceType", ';').ifBlank { "auto" })
     var bcn by mutableStateOf(readConfig(graphicsConfig, "bcnEmulation", ';').ifBlank { "auto" })
@@ -991,8 +990,6 @@ private fun ShortcutCategoryV2(
                 SettingChoice("Driver Present Mode", s.graphicsPresentMode, listOf("mailbox", "fifo", "immediate", "relaxed")) {
                     s.graphicsPresentMode = it; s.graphics("presentMode", it)
                 }
-                SettingsDivider()
-                SettingToggle("Sync Frame", s.syncFrame) { s.syncFrame = it; s.graphics("syncFrame", if (it) "1" else "0") }
                 SettingsDivider()
                 SettingToggle("Disable Present Wait", s.disablePresentWait) { s.disablePresentWait = it; s.graphics("disablePresentWait", if (it) "1" else "0") }
                 SettingsDivider()

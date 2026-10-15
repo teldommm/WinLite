@@ -2390,8 +2390,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
-    // MESA_VK_WSI_DEBUG is a comma separated flag list: "Disable DRI3" (sw) and
-    // "Sync Frame" (forcesync) must not overwrite each other.
+    // MESA_VK_WSI_DEBUG is a comma separated flag list: flags must not overwrite each other.
     private void appendWsiDebugFlag(String flag) {
         String current = envVars.get("MESA_VK_WSI_DEBUG");
         if (current.isEmpty()) {
@@ -2507,16 +2506,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         String presentMode = graphicsDriverConfig.get("presentMode");
         if (presentMode.contains("immediate")) {
-            envVars.put("WRAPPER_MAX_IMAGE_COUNT", "1");
+            // Two, not one: with a single image the guest draws into the very buffer the
+            // compositor is showing (the X server has to hand it back right after every present),
+            // so frames tear or show half-drawn. Two is the minimum for whole frames; the server
+            // hands the older one back at once without an FPS limit, so latency stays the same.
+            envVars.put("WRAPPER_MAX_IMAGE_COUNT", "2");
         }
         envVars.put("MESA_VK_WSI_PRESENT_MODE", presentMode);
 
         String resourceType = graphicsDriverConfig.get("resourceType");
         envVars.put("WRAPPER_RESOURCE_TYPE", resourceType);
 
-        String syncFrame = graphicsDriverConfig.get("syncFrame");
-        if (syncFrame.equals("1"))
-            appendWsiDebugFlag("forcesync");
+        // "Sync Frame" (WSI forcesync) is gone: the wrappers now wait for each frame's render
+        // fence in their present thread themselves, without blocking the game's thread.
 
         String disablePresentWait = graphicsDriverConfig.get("disablePresentWait");
         envVars.put("WRAPPER_DISABLE_PRESENT_WAIT", disablePresentWait);
@@ -3116,13 +3118,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
     /**
      * Display mode (same resolution) whose refresh rate the FPS limit divides evenly. With the
      * high refresh preference the fastest such mode; otherwise the current mode when it already
-     * qualifies (null = keep the user's setting), else the slowest one that does. Null when no
-     * mode fits (e.g. a 35 FPS limit): the user's own refresh preference stays.
+     * qualifies (pinned explicitly: releasing the preference would let the system move the
+     * display to a rate the limit no longer divides), else the slowest one that does. Null when
+     * no mode fits (e.g. a 35 FPS limit): the user's own refresh preference stays.
      */
     private static android.view.Display.Mode pickCadenceMode(android.view.Display display, int limit,
                                                              boolean preferHighest) {
         android.view.Display.Mode active = display.getMode();
-        if (!preferHighest && isFrameCadenceCompatible(active.getRefreshRate(), limit)) return null;
+        if (!preferHighest && isFrameCadenceCompatible(active.getRefreshRate(), limit)) return active;
         android.view.Display.Mode best = null;
         for (android.view.Display.Mode mode : display.getSupportedModes()) {
             if (mode.getPhysicalWidth() != active.getPhysicalWidth()

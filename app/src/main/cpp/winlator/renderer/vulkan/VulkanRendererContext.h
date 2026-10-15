@@ -662,13 +662,21 @@ public:
     struct PendingPresent { int64_t srcId; int64_t dueNs; };
     std::unordered_map<int64_t, std::deque<PendingPresent>> pendingPresents_;  // by content
     std::atomic<int64_t> nextPendingDueNs_{0};  // earliest dueNs, 0 = none
-    int64_t idealSlotNs_   = 0;    // unsnapped slot accumulator (keeps fractional ratios exact)
-    int64_t lastReleaseNs_ = 0;
-    double  guestFrameMeanNs_ = 0.0, guestFrameDevNs_ = 0.0;
-    bool    guestFrameValid_  = false;
-    int     pipelineDepth_    = 1;      // guest buffers in flight under the limiter
-    uint32_t lateHistory_     = 0;      // bit per recent frame: missed its slot
-    int64_t depthTwoUntilNs_  = 0;
+    // Limiter/pacing state of one presenting window (content). Two windows presenting at the
+    // same time (a launcher behind the game, a second swapchain) used to share one cadence,
+    // frame-time estimate and depth controller and disturbed each other.
+    struct Pacer {
+        int64_t idealSlotNs   = 0;    // unsnapped slot accumulator (keeps fractional ratios exact)
+        int64_t lastReleaseNs = 0;
+        double  guestFrameMeanNs = 0.0, guestFrameDevNs = 0.0;
+        bool    guestFrameValid  = false;
+        int     pipelineDepth    = 1;      // guest buffers in flight under the limiter
+        uint32_t lateHistory     = 0;      // bit per recent frame: missed its slot
+        int64_t depthTwoUntilNs  = 0;
+        int64_t lastPresentNs    = 0;
+        void resetCadence() { idealSlotNs = 0; lastReleaseNs = 0; }
+    };
+    std::unordered_map<int64_t, Pacer> pacers_;   // by content, under renderMutex
     bool    acquireSourceLocked(int64_t srcId, AHardwareBuffer* ahb);
     void    showSourceLocked(int64_t contentId, int64_t srcId);
     void    dropPendingLocked(int64_t contentId);
