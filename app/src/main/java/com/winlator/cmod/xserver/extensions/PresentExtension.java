@@ -136,7 +136,12 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
 
             if (limiterExecutor == null) {
                 ThreadFactory factory = runnable -> {
-                    Thread thread = new Thread(runnable, "PresentFpsLimiter");
+                    // The idle notify IS the frame release; a late wake-up is a late frame.
+                    Thread thread = new Thread(() -> {
+                        android.os.Process.setThreadPriority(
+                                android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY);
+                        runnable.run();
+                    }, "PresentFpsLimiter");
                     thread.setDaemon(true);
                     return thread;
                 };
@@ -189,8 +194,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             long ust = System.nanoTime() / 1000;
             long msc = ust / FAKE_INTERVAL;
 
-            pixmap.drawable.updateDirect();
-        notifyGuestFramePresented(client);
+            presentToRenderer(client, window, pixmap);
             sendIdleNotify(window, pixmap, serial, idleFence);
             sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
             return;
@@ -199,16 +203,17 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         long ust = System.nanoTime() / 1000;
         long msc = ust / (1_000_000L / targetFps);
 
-        pixmap.drawable.updateDirect();
-        notifyGuestFramePresented(client);
+        presentToRenderer(client, window, pixmap);
         sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
         scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps);
     }
 
-    // Frame generation paces on guest frames; a present is the exact frame clock.
-    private static void notifyGuestFramePresented(XClient client) {
+    // One renderer call per present: shows the pixmap in the window and counts the present (the
+    // exact frame clock frame generation paces on) together, waking the render thread once.
+    private static void presentToRenderer(XClient client, Window window, Pixmap pixmap) {
         com.winlator.cmod.widget.XServerRendererView view = client.xServer.getXServerView();
-        if (view != null) view.onGuestFramePresented();
+        if (view != null) view.onGuestPresent(window, pixmap.drawable);
+        else pixmap.drawable.updateDirect();
     }
 
     private void selectInput(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {

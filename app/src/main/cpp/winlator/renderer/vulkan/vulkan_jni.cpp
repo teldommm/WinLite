@@ -201,12 +201,21 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContent(
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
     JNIEnv*, jobject, jlong handle, jlong contentId, jlong sourceId, jlong ahbPtr,
-    jshort w, jshort h, jint x, jint y)
+    jshort w, jshort h, jint x, jint y, jboolean present)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r && ahbPtr)
         r->updateWindowContentAHB(contentId, sourceId,
-                                  reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
+                                  reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y,
+                                  present == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetDisplayRefreshRate(
+    JNIEnv*, jobject, jlong handle, jfloat hz)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setDisplayRefreshRate(hz);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -233,14 +242,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPointerPos(
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r) r->updatePointerPosition(x, y);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeNoteGuestPresent(
-    JNIEnv*, jobject, jlong handle)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->noteGuestPresent();
 }
 
 extern "C" JNIEXPORT void JNICALL

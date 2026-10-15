@@ -128,13 +128,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
     @FastNative private native void nativeUpdateWindowContentAHB(long handle, long contentId,
-        long sourceId, long ahbPtr, short width, short height, int x, int y);
+        long sourceId, long ahbPtr, short width, short height, int x, int y, boolean present);
+    @FastNative private native void nativeSetDisplayRefreshRate(long handle, float hz);
     @FastNative private native void nativeReleaseDrawable(long handle, long drawableId);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
         float ox, float oy, float sx, float sy,
         boolean hasScissor, int scX, int scY, int scW, int scH);
     @FastNative private native void nativeSetPointerPos(long handle, short x, short y);
-    @FastNative private native void nativeNoteGuestPresent(long handle);
     @FastNative private native void nativeSetCursorVisible(long handle, boolean visible);
     @FastNative private native void nativeUpdateCursorImage(long handle,
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY);
@@ -219,7 +219,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         // game made invisible (empty mask), and lastCursor is unchanged after the
                         // surface comes back, so nothing would hide it again.
                         restoreCursorStateLocked();
-                        applyFrameGenNative();
+                        pushDisplayRefreshRateLocked();
+                        // Frame gen setup may build/verify the shader cache: never under lock.
+                        queueEvent(this::applyFrameGenNative);
                         initComplete = true;
                         return;
                     }
@@ -234,9 +236,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
+                    nativeSetStretchMode(nativeHandle, pendingStretchMode);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
                     updateTransform();
+                    pushDisplayRefreshRateLocked();
                     nativeSetCursorVisible(nativeHandle, false);
 
                     if (isColdInit) {
@@ -253,7 +257,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (nativeHandle != 0) {
                     nativeSetVerboseLog(nativeHandle, true);
                     nativeDumpRendererInfo(nativeHandle);
-                    applyFrameGenNative();
+                    queueEvent(this::applyFrameGenNative);
                 }
             }
             initComplete = true;
@@ -265,8 +269,50 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         surfaceWidth = width; surfaceHeight = height;
         viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height);
         synchronized (lock) {
-            if (nativeHandle != 0) { nativeResize(nativeHandle, width, height); updateTransform(); }
+            if (nativeHandle != 0) {
+                nativeResize(nativeHandle, width, height);
+                updateTransform();
+                pushDisplayRefreshRateLocked();
+            }
         }
+    }
+
+    /**
+     * The render thread paces cursor-only and back-to-back frames against the panel's refresh
+     * period. Must be called with {@code lock} held; re-sent on every display mode change.
+     */
+    private void pushDisplayRefreshRateLocked() {
+        if (nativeHandle == 0) return;
+        android.view.Display display = getDisplay();
+        float hz = display != null ? display.getRefreshRate() : 0f;
+        if (hz > 1f) nativeSetDisplayRefreshRate(nativeHandle, hz);
+    }
+
+    private final android.hardware.display.DisplayManager.DisplayListener displayListener =
+            new android.hardware.display.DisplayManager.DisplayListener() {
+        @Override public void onDisplayAdded(int displayId) {}
+        @Override public void onDisplayRemoved(int displayId) {}
+        @Override public void onDisplayChanged(int displayId) {
+            android.view.Display display = getDisplay();
+            if (display == null || display.getDisplayId() != displayId) return;
+            synchronized (lock) { pushDisplayRefreshRateLocked(); }
+        }
+    };
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
+                getContext().getSystemService(Context.DISPLAY_SERVICE);
+        if (dm != null) dm.registerDisplayListener(displayListener, getHandler());
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
+                getContext().getSystemService(Context.DISPLAY_SERVICE);
+        if (dm != null) dm.unregisterDisplayListener(displayListener);
+        super.onDetachedFromWindow();
     }
 
     public void onSurfaceDestroyed() {
@@ -526,6 +572,21 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void onUpdateWindowContentDirect(Window window, Drawable pixmap, short xOff, short yOff) {
+        showPixmap(window, pixmap, xOff, yOff, false);
+    }
+
+    /**
+     * PresentPixmap: one call into the renderer that both swaps the window's content and counts
+     * the present, so the render thread wakes once per guest frame (the content update and a
+     * separate present notification used to wake it twice, which could queue the same frame
+     * twice in FIFO).
+     */
+    @Override
+    public void onGuestPresent(Window window, Drawable pixmap) {
+        showPixmap(window, pixmap, (short) 0, (short) 0, true);
+    }
+
+    private void showPixmap(Window window, Drawable pixmap, short xOff, short yOff, boolean present) {
         if (window.id == fpsWindowId) {
             float frameGenRate = (nativeHandle != 0 && pendingLsfgMultiplier >= 2 && frameGenError.isEmpty())
                     ? nativeGetFrameGenPresentedRate(nativeHandle) : 0f;
@@ -549,7 +610,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     // The window shows the presented pixmap: the texture is keyed by the window's
                     // content, the imported buffer by the pixmap it came from.
                     nativeUpdateWindowContentAHB(nativeHandle, did(content), did(pixmap),
-                        ahb, pixmap.width, pixmap.height, rx, ry);
+                        ahb, pixmap.width, pixmap.height, rx, ry, present);
                 }
             }
         }
@@ -644,16 +705,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 final long ahb = drawable.backingAHB;
                 if (ahb != 0) {
                     nativeUpdateWindowContentAHB(nativeHandle, did(drawable), did(drawable),
-                        ahb, drawable.width, drawable.height, rx, ry);
+                        ahb, drawable.width, drawable.height, rx, ry, false);
                 }
             }
-        }
-    }
-
-    @Override
-    public void onGuestFramePresented() {
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeNoteGuestPresent(nativeHandle);
         }
     }
 
@@ -739,40 +793,76 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             pendingLsfgFlowScale = flowScale;
             pendingLsfgTargetRate = pendingLsfgMultiplier < 2 ? 0 : Math.max(0, targetRate);
         }
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) applyFrameGenNative();
-            }
-        });
+        queueEvent(this::applyFrameGenNative);
     }
 
     public void setFrameGenRefreshRate(float refreshHz) {
         pendingFrameGenRefreshHz = refreshHz;
-        queueEvent(() -> { synchronized (lock) { if (nativeHandle != 0) applyFrameGenNative(); } });
+        synchronized (lock) { pushDisplayRefreshRateLocked(); }
+        queueEvent(this::applyFrameGenNative);
     }
 
-    // Runs on an existing worker, under lock; cache translation never blocks the UI.
+    // Last successful cache check, so a refresh-rate change or surface re-attach does not hash
+    // the DLL again. Event-executor thread only.
+    private String verifiedCacheKey = null;
+    private String verifiedCachePath = null;
+
+    /**
+     * Runs on eventExecutor (serial: a later request always applies after an earlier one), and
+     * NOT under {@code lock}: building or verifying the shader cache can take from a DLL hash up
+     * to a full translation, and every X request that shows content, plus pointer motion from the
+     * UI thread, needs {@code lock}. Only the snapshot and the native configure call hold it.
+     */
     private void applyFrameGenNative() {
-        int multiplier = pendingLsfgMultiplier;
-        String error = null;
-        String cachePath = null;
-        if (multiplier >= 2) {
+        final long handle;
+        final int requestedMultiplier;
+        final File dll;
+        final float flowScale;
+        final int targetRate;
+        final boolean preferFp16;
+        synchronized (lock) {
+            handle = nativeHandle;
+            if (handle == 0) return;
+            requestedMultiplier = pendingLsfgMultiplier;
+            dll = pendingLsfgDll;
+            flowScale = pendingLsfgFlowScale;
+            targetRate = pendingLsfgTargetRate;
             // Prefer the fp16 shader set when the device enabled shaderFloat16.
             // Only DLLs with precompiled SPIR-V carry it; others fall back to fp32 or
             // the DXBC-translated set on their own (see lsfg_dll selectVariant).
-            boolean preferFp16 = nativeFrameGenSupportsFp16(nativeHandle);
-            int status = LsfgNative.ensureCache(getContext(), pendingLsfgDll, preferFp16);
-            if (status == LsfgNative.STATUS_OK)
-                cachePath = LsfgNative.cacheFile(getContext(), preferFp16).getAbsolutePath();
-            else {
-                error = LsfgNative.explain(status);
-                multiplier = 0;
+            preferFp16 = requestedMultiplier >= 2 && nativeFrameGenSupportsFp16(handle);
+        }
+
+        int multiplier = requestedMultiplier;
+        String error = null;
+        String cachePath = null;
+        if (multiplier >= 2) {
+            String key = dll == null ? null : dll.getAbsolutePath() + '|' + dll.length() + '|'
+                    + dll.lastModified() + '|' + preferFp16;
+            if (key != null && key.equals(verifiedCacheKey)) {
+                cachePath = verifiedCachePath;
+            } else {
+                int status = LsfgNative.ensureCache(getContext(), dll, preferFp16);
+                if (status == LsfgNative.STATUS_OK) {
+                    cachePath = LsfgNative.cacheFile(getContext(), preferFp16).getAbsolutePath();
+                    verifiedCacheKey = key;
+                    verifiedCachePath = cachePath;
+                } else {
+                    error = LsfgNative.explain(status);
+                    multiplier = 0;
+                }
             }
         }
         float refreshHz = pendingFrameGenRefreshHz > 0f ? pendingFrameGenRefreshHz
                 : getDisplay() != null ? getDisplay().getRefreshRate() : 0f;
-        String nativeError = nativeConfigureFrameGen(nativeHandle, cachePath,
-                multiplier, pendingLsfgFlowScale, refreshHz, pendingLsfgTargetRate);
+
+        String nativeError;
+        synchronized (lock) {
+            // The renderer may have been destroyed or re-created while the cache was checked.
+            if (nativeHandle != handle) return;
+            nativeError = nativeConfigureFrameGen(handle, cachePath,
+                    multiplier, flowScale, refreshHz, targetRate);
+        }
         if (error == null) error = nativeError;
         if (error != null) {
             boolean oldDriver = error.contains("Vulkan version below") || error.contains("storage images")

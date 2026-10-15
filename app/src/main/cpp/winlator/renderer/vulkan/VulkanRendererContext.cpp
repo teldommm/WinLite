@@ -11,6 +11,9 @@
 #include <chrono>
 #include <inttypes.h>
 #include <dlfcn.h>
+#include <cerrno>
+#include <sys/resource.h>
+#include <unistd.h>
 #include "window_vert.h"
 #include "window_frag.h"
 #include "window_sgsr_frag.h"
@@ -48,7 +51,7 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
 }
 
 VulkanRendererContext::~VulkanRendererContext() {
-    isRunning = false; dirtyCV.notify_all();
+    isRunning = false; wakeRender(true);
     if (renderThread.joinable()) renderThread.join();
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
@@ -334,6 +337,7 @@ void VulkanRendererContext::createLogicalDevice() {
     PFN_vkEnumerateDeviceExtensionProperties enumDevExts =
         (PFN_vkEnumerateDeviceExtensionProperties)gipa(instance, "vkEnumerateDeviceExtensionProperties");
     bool hasForeignQueue = false;
+    const char* globalPriorityExt = nullptr;
     if (enumDevExts) {
         uint32_t extCount = 0;
         if (enumDevExts(physicalDevice, nullptr, &extCount, nullptr) == VK_SUCCESS && extCount > 0) {
@@ -344,6 +348,11 @@ void VulkanRendererContext::createLogicalDevice() {
                          ext.extensionName, ext.specVersion);
                     if (strcmp(ext.extensionName, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME) == 0)
                         hasForeignQueue = true;
+                    // KHR is the promoted name of EXT; same queue create struct and values.
+                    if (strcmp(ext.extensionName, "VK_KHR_global_priority") == 0)
+                        globalPriorityExt = "VK_KHR_global_priority";
+                    else if (!globalPriorityExt && strcmp(ext.extensionName, "VK_EXT_global_priority") == 0)
+                        globalPriorityExt = "VK_EXT_global_priority";
                 }
             }
         }
@@ -359,6 +368,17 @@ void VulkanRendererContext::createLogicalDevice() {
         extList.push_back(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
     } else {
         RLOG_E("AHB imports want VK_EXT_queue_family_foreign, but the Vulkan device does not advertise it; continuing without it");
+    }
+    // The compositor's work per frame is tiny but sits behind the game's long submissions on the
+    // same GPU; with a HIGH priority queue the driver can schedule (or preempt for) it first, so
+    // a composite does not miss its vsync because the guest is mid-frame. A driver may refuse
+    // the level (VK_ERROR_NOT_PERMITTED): the device is then created exactly as before.
+    VkDeviceQueueGlobalPriorityCreateInfoEXT queuePriority{};
+    queuePriority.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT;
+    queuePriority.globalPriority = VK_QUEUE_GLOBAL_PRIORITY_HIGH_EXT;
+    if (globalPriorityExt) {
+        extList.push_back(globalPriorityExt);
+        qi.pNext = &queuePriority;
     }
     for (const char* ext : extList)
         RLOG("Enabled Vulkan device extension: %s", ext);
@@ -409,7 +429,20 @@ void VulkanRendererContext::createLogicalDevice() {
         lsfgCaps_.featuresEnabled = true;
     }
 
-    if (vk_.CreateDevice(physicalDevice,&ci,nullptr,&device)!=VK_SUCCESS) {
+    VkResult deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
+    if (deviceResult!=VK_SUCCESS && globalPriorityExt) {
+        RLOG_E("createLogicalDevice: HIGH queue priority refused (%d); retrying at default priority",
+               (int)deviceResult);
+        qi.pNext = nullptr;
+        extList.pop_back();
+        ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
+        globalPriorityExt = nullptr;
+        deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
+    }
+    globalPriorityHigh_.store(globalPriorityExt != nullptr);
+    __android_log_print(ANDROID_LOG_INFO, WLOG_TAG, "createLogicalDevice: compositor queue priority %s",
+           globalPriorityExt ? "HIGH" : "default (global priority unavailable)");
+    if (deviceResult!=VK_SUCCESS) {
         // A driver that rejects the feature chain must not cost us the whole
         // renderer: retry once with the pre-LSFG device create, unchanged.
         if (lsfgCaps_.featuresEnabled) {
@@ -719,12 +752,12 @@ void VulkanRendererContext::setPostFXMode(int mode) {
             RLOG("setPostFXMode: postfxPipeline destruído");
         }
     }
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::setSharpness(float s) {
     sharpness = std::clamp(s, 0.0f, 1.0f);
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::createFramebuffers() {
@@ -1242,18 +1275,39 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
 }
 
 void VulkanRendererContext::renderLoop() {
+    // The compositor sits on the path of every frame and of the cursor; at the default nice 0 it
+    // competes on equal terms with the emulator's guest threads. -10 is what Android uses for
+    // its own display-critical threads; an app may lower its own threads' nice value.
+    if (setpriority(PRIO_PROCESS, 0, -10) != 0)
+        RLOG_E("renderLoop: could not raise render thread priority (errno=%d)", errno);
     while (isRunning) {
-        { std::unique_lock<std::mutex> lk(dirtyMutex);
-          auto wake=[this]{
-              return !isRunning||(!surfaceDetached.load()&&
-                  (needsRender.load()||fbResized.load()||cursorMoved.load())); };
-          // A deferred frame-gen wake (cursor/transform change while the guest
-          // was drawing) is re-run after the idle window even if nothing else
-          // arrives, so a game that stops presenting still gets its cursor.
-          if (fgDeferred_.load(std::memory_order_relaxed))
-              dirtyCV.wait_for(lk,std::chrono::milliseconds(kFgIdleMs),wake);
-          else
-              dirtyCV.wait(lk,wake); }
+        {
+            std::unique_lock<std::mutex> lk(dirtyMutex);
+            // A deferred frame-gen wake (cursor/transform change while the guest was drawing)
+            // is re-run after the idle window even if nothing else arrives, so a game that stops
+            // presenting still gets its cursor.
+            const bool fgWait = fgDeferred_.load(std::memory_order_relaxed);
+            const auto fgDeadline = std::chrono::steady_clock::now() +
+                                    std::chrono::milliseconds(kFgIdleMs);
+            while (isRunning) {
+                const bool detached = surfaceDetached.load();
+                if (!detached && fbResized.load()) break;
+                const bool content = needsRender.load();
+                if (!detached && (content || cursorMoved.load())) {
+                    const int64_t wait = pacingWaitNs(content);
+                    if (wait <= 0) break;
+                    // Woken early by newer updates; re-evaluated each time (a content update
+                    // during a cursor-only wait is allowed sooner).
+                    dirtyCV.wait_for(lk, std::chrono::nanoseconds(wait));
+                    continue;
+                }
+                if (fgWait) {
+                    if (dirtyCV.wait_until(lk, fgDeadline) == std::cv_status::timeout) break;
+                    continue;
+                }
+                dirtyCV.wait(lk);
+            }
+        }
         if (!isRunning) break;
         try { renderFrame(); }
         catch (const std::exception& error) {
@@ -1274,6 +1328,37 @@ void VulkanRendererContext::renderLoop() {
                 return !isRunning||surfaceDetached.load(); });
         }
     }
+}
+
+static int64_t steadyNowNs() {
+    return (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
+    // Frame generation plans and paces its own presents (and defers non-content wakes itself).
+    if (fgArmed_.load(std::memory_order_relaxed)) return 0;
+    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+    if (period <= 0) return 0;
+    // Time until the display has drained everything presented so far, in the model.
+    const int64_t pending = presentSlotEndNs_ - steadyNowNs();
+    // Content may have one frame waiting behind the one being shown; cursor-only motion none.
+    const int64_t wait = pending - (content ? period : 0);
+    // The model can only be wrong by about one refresh; never hold a frame longer than two.
+    return std::min(wait, 2 * period);
+}
+
+void VulkanRendererContext::notePresentedForPacing(uint32_t presents) {
+    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+    if (period <= 0 || presents == 0) return;
+    presentSlotEndNs_ = std::max(presentSlotEndNs_, steadyNowNs()) + (int64_t)presents * period;
+}
+
+void VulkanRendererContext::setDisplayRefreshRate(float hz) {
+    const int64_t period = (hz > 1.0f && hz < 1000.0f) ? (int64_t)(1.0e9 / (double)hz) : 0;
+    if (refreshPeriodNs_.exchange(period, std::memory_order_relaxed) != period)
+        RLOG("setDisplayRefreshRate: %.2f Hz (pacing %s)", hz, period ? "on" : "off");
+    wakeRender();
 }
 
 void VulkanRendererContext::flushDeleteQueue() {
@@ -1319,7 +1404,7 @@ void VulkanRendererContext::renderFrame() {
             fbResized.store(false);
             swapchainRetryPending.store(false);
             needsRender.store(true);
-            dirtyCV.notify_one();
+            wakeRender();
         }
         return;
     }
@@ -1714,18 +1799,19 @@ void VulkanRendererContext::renderFrame() {
         pendingFrameSerial=0;
     }
     trackPresentedRate(presented);
+    notePresentedForPacing(presented);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
 }
 
 void VulkanRendererContext::onSurfaceResized(int w, int h) {
     std::lock_guard<std::mutex> lk(renderMutex);
     if (w==0||h==0) return;
-    surfaceWidth=w; surfaceHeight=h; fbResized.store(true); dirtyCV.notify_one();
+    surfaceWidth=w; surfaceHeight=h; fbResized.store(true); wakeRender();
 }
 
 void VulkanRendererContext::detachSurface() {
     surfaceDetached.store(true, std::memory_order_release);
-    dirtyCV.notify_all();
+    wakeRender(true);
     { std::unique_lock<std::shared_mutex> frameLock(frameMutex); }
     vk_.DeviceWaitIdle(device);
     cleanupSwapchain();
@@ -1768,32 +1854,23 @@ bool VulkanRendererContext::reattachSurface(ANativeWindow* newWindow) {
         surfaceDetached.store(false, std::memory_order_release);
     }
     needsRender.store(true, std::memory_order_release);
-    dirtyCV.notify_all();
+    wakeRender(true);
     __android_log_print(ANDROID_LOG_DEBUG, "Winlator_Renderer", "reattachSurface: OK");
     return true;
 }
 
 void VulkanRendererContext::setTransform(float ox, float oy, float sx, float sy) {
     { std::lock_guard<std::mutex> lk(renderMutex); sceneOffsetX=ox;sceneOffsetY=oy;sceneScaleX=sx;sceneScaleY=sy; }
-    needsRender.store(true); dirtyCV.notify_one();
-}
-
-void VulkanRendererContext::noteGuestPresent() {
-    guestPresentNs_.store((int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count(), std::memory_order_relaxed);
-    guestPresentSerial_.fetch_add(1, std::memory_order_relaxed);
-    // The content upload for this present usually woke the render thread a
-    // moment earlier and was deferred (no present counted yet); wake it again.
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::updatePointerPosition(short x, short y) {
     pointerX.store(x); pointerY.store(y);
-    if (cursorVisible.load()) { cursorMoved.store(true); dirtyCV.notify_one(); }
+    if (cursorVisible.load()) { cursorMoved.store(true); wakeRender(); }
 }
 
 void VulkanRendererContext::setCursorVisible(bool v) {
-    cursorVisible.store(v); cursorMoved.store(true); dirtyCV.notify_one();
+    cursorVisible.store(v); cursorMoved.store(true); wakeRender();
 }
 
 void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short stride, short hotX, short hotY) {
@@ -1807,7 +1884,7 @@ void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short 
     for (int y=0;y<h;y++) memcpy(dst+(size_t)y*rowBytes,src+(size_t)y*srcStrideBytes,rowBytes);
     cursorPendingW=w; cursorPendingH=h;
     cursorHotX=hotX; cursorHotY=hotY;
-    isCursorImageDirty.store(true); needsRender.store(true); dirtyCV.notify_one();
+    isCursorImageDirty.store(true); needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, short h, short stride, int, int) {
@@ -1836,11 +1913,12 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
         if (it!=texMap.end()) it->second.dirty=true;
     }
     guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::updateWindowContentAHB(int64_t contentId, int64_t srcId,
-                                                   AHardwareBuffer* ahb, short, short, int, int) {
+                                                   AHardwareBuffer* ahb, short, short, int, int,
+                                                   bool present) {
     if (!ahb || contentId==0 || srcId==0) return;
     std::lock_guard<std::mutex> lk(renderMutex);
     auto sit = srcImports.find(srcId);
@@ -1881,7 +1959,13 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t contentId, int64_t sr
     // window was the last one showing.
     if (previousSrc != 0 && previousSrc != srcId) unrefSourceLocked(previousSrc);
     guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
-    needsRender.store(true); dirtyCV.notify_one();
+    if (present) {
+        // Frame generation paces on presents: publish it before the single wake below, so the
+        // render thread never sees the content without the present that belongs to it.
+        guestPresentNs_.store(steadyNowNs(), std::memory_order_relaxed);
+        guestPresentSerial_.fetch_add(1, std::memory_order_relaxed);
+    }
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::unrefSourceLocked(int64_t srcId) {
@@ -1932,14 +2016,14 @@ void VulkanRendererContext::releaseDrawable(int64_t id) {
         sit->second.released = true;
         if (sit->second.users <= 0) retireSourceLocked(sit);
     }
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, const int* ys, int count) {
     std::lock_guard<std::mutex> lk(renderMutex);
     renderList.resize(count);
     for (int i=0;i<count;i++) renderList[i]={ids[i],xs[i],ys[i]};
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::removeWindow(int64_t id) {
@@ -1947,7 +2031,7 @@ void VulkanRendererContext::removeWindow(int64_t id) {
     eraseContentLocked(id);
     renderList.erase(std::remove_if(renderList.begin(),renderList.end(),
         [id](const RenderEntry& e){return e.id==id;}),renderList.end());
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::initRootWindow(int64_t rootId, int64_t contentId, int width, int height) {
@@ -2000,7 +2084,7 @@ void VulkanRendererContext::mapWindowNode(int64_t id) {
     if (it == windowTree.end()) return;
     it->second.mapped = true;
     treeDirty = true;
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::unmapWindowNode(int64_t id) {
@@ -2047,7 +2131,7 @@ void VulkanRendererContext::updateWindowGeometryNode(int64_t id, int64_t content
         eraseContentLocked(it->second.contentId);
     it->second.contentId = contentId;
     treeDirty = true;
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::syncChildOrder(int64_t parentId, const int64_t* orderedChildIds, int count) {
@@ -2056,7 +2140,7 @@ void VulkanRendererContext::syncChildOrder(int64_t parentId, const int64_t* orde
     if (it == windowTree.end()) return;
     it->second.children.assign(orderedChildIds, orderedChildIds + count);
     treeDirty = true;
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::setWindowViewable(int64_t id, bool viewable) {
@@ -2139,6 +2223,9 @@ void VulkanRendererContext::dumpRendererInfo() {
         filterMode, filterMode==3?"FSR1":filterMode==2?"SGSR":filterMode==1?"NEAREST":"LINEAR");
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Surface: %dx%d container: %dx%d",surfaceWidth,surfaceHeight,containerWidth,containerHeight);
+    __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
+        "Pacing: refresh period %.3f ms, compositor queue priority %s",
+        refreshPeriodNs_.load() / 1.0e6, globalPriorityHigh_.load() ? "HIGH" : "default");
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,"=== END RENDERER INFO ===");
 }
 
@@ -2171,7 +2258,7 @@ void VulkanRendererContext::setFilterMode(int mode) {
     for (auto& [id,wt]:texMap) updateDS(wt.ds, wt.view);
     for (auto& [srcId,imp]:srcImports) updateDS(imp.wt.ds, imp.wt.view);
     if (cursorDS!=VK_NULL_HANDLE&&cursorView!=VK_NULL_HANDLE) updateDS(cursorDS, cursorView);
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::setStretchMode(int mode) {
@@ -2180,7 +2267,7 @@ void VulkanRendererContext::setStretchMode(int mode) {
     if (stretchMode == mode) return;
     stretchMode = mode;
     if (mode == 1 && stretchPipeline == VK_NULL_HANDLE) createStretchPipeline();
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::setSwapRB(bool enabled) {
@@ -2199,7 +2286,7 @@ void VulkanRendererContext::setPresentMode(VkPresentModeKHR mode) {
     RLOG("setPresentMode: requested=%d supported=%d -> applying=%d",(int)mode,(int)supported,(int)target);
     if (requestedPresentMode==target) { RLOG("setPresentMode: already set, skipping"); return; }
     requestedPresentMode=target;
-    fbResized.store(true); dirtyCV.notify_one();
+    fbResized.store(true); wakeRender();
 }
 
 std::vector<int> VulkanRendererContext::getSupportedPresentModes() const {
@@ -2212,13 +2299,13 @@ void VulkanRendererContext::setCustomScissor(int x, int y, int w, int h) {
     std::lock_guard<std::mutex> lk(renderMutex);
     customScissor  = {{x, y}, {(uint32_t)std::max(0, w), (uint32_t)std::max(0, h)}};
     hasCustomScissor = true;
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::clearCustomScissor() {
     std::lock_guard<std::mutex> lk(renderMutex);
     hasCustomScissor = false;
-    needsRender.store(true); dirtyCV.notify_one();
+    needsRender.store(true); wakeRender();
 }
 
 #pragma GCC diagnostic pop

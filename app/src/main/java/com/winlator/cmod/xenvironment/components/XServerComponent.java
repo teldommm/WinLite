@@ -23,6 +23,10 @@ public class XServerComponent extends EnvironmentComponent {
         connector = new XConnectorEpoll(socketConfig, new XClientConnectionHandler(xServer), new XClientRequestHandler());
         connector.setInitialInputBufferCapacity(262144);
         connector.setCanReceiveAncillaryMessages(true);
+        // One thread serves every X client: every guest present, every input event to the guest
+        // and every cursor update passes through it, so it must not queue behind the emulator's
+        // guest threads (default nice 0). Same level as the present limiter.
+        connector.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY);
         connector.start();
     }
 

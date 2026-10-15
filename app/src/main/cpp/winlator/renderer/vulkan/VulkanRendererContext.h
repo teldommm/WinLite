@@ -182,14 +182,17 @@ public:
     void onSurfaceResized(int width, int height);
     void setTransform(float ox, float oy, float sx, float sy);
     void updatePointerPosition(short x, short y);
-    // A guest frame was presented through the X Present extension (PresentPixmap).
-    void noteGuestPresent();
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
     // contentId: the window content the texture belongs to. sourceId: the drawable the buffer
     // belongs to (the window content itself, or the DRI3 pixmap it presents). Both are
     // Drawable.uid values: unique for the process lifetime, never reused.
+    // present: this update IS a guest frame presented through X Present (PresentPixmap). The
+    // content change and the present are published together and wake the render thread once
+    // (two separate wakes could render the same frame twice into the FIFO queue).
     void updateWindowContentAHB(int64_t contentId, int64_t sourceId, AHardwareBuffer* ahb,
-                                short w, short h, int x, int y);
+                                short w, short h, int x, int y, bool present);
+    // Panel refresh rate, for render pacing. 0/unknown disables pacing.
+    void setDisplayRefreshRate(float hz);
     // The Java drawable with this uid is gone: drop it as window content and as a buffer source.
     // Its import is destroyed once no window shows it and the GPU has finished with it.
     void releaseDrawable(int64_t id);
@@ -600,6 +603,21 @@ public:
     VkDescriptorPool winTexPool = VK_NULL_HANDLE;
 
     std::atomic<bool> needsRender{false};
+
+    // --- Render pacing (frame gen off). The render thread is woken by content updates and by
+    // cursor motion alone. Every wake used to composite and present at once: with FIFO, cursor
+    // motion plus guest frames produce more than one frame per refresh, the swapchain queue fills
+    // to its depth, and every later frame waits behind it. A simple model of the display queue
+    // (each present occupies one refresh after the later of "now" and the previous frame's slot)
+    // gates the wakes: cursor-only frames are drawn only once the queue is drained (at most one
+    // per refresh), content frames only while at most one frame is waiting - a deferred frame
+    // composites the newest guest content when it does run.
+    std::atomic<int64_t> refreshPeriodNs_{0};
+    int64_t presentSlotEndNs_ = 0;   // render thread only
+    int64_t pacingWaitNs(bool content) const;
+    void    notePresentedForPacing(uint32_t presents);
+    std::atomic<bool> globalPriorityHigh_{false};
+
     std::thread       renderThread;
     std::atomic<bool> isRunning{false};
     std::atomic<bool> fbResized{false};
@@ -607,6 +625,13 @@ public:
     std::mutex        renderMutex;
     std::mutex        dirtyMutex;
     std::condition_variable dirtyCV;
+    // Wake the render thread. The waiter checks its flags and goes to sleep under dirtyMutex;
+    // notifying without passing through that mutex can land between the two, and the wake (a
+    // guest frame, say) is lost until something else happens. Callers must not hold dirtyMutex.
+    void wakeRender(bool all = false) {
+        { std::lock_guard<std::mutex> lk(dirtyMutex); }
+        if (all) dirtyCV.notify_all(); else dirtyCV.notify_one();
+    }
     std::shared_mutex frameMutex;
 
     VkRect2D          customScissor    = {{0,0},{0,0}};

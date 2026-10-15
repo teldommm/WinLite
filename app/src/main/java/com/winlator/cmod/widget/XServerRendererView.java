@@ -44,9 +44,10 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract void onUpdateWindowContentDirect(Window window, Drawable drawable);
     public abstract void onUpdateWindowContentDirect(Window window, Drawable drawable, short xOff, short yOff);
     public abstract void onPointerMove(short x, short y);
-    // A guest frame was presented through the X Present extension. Renderers that
-    // pace frame generation on guest frames override this; the default ignores it.
-    public void onGuestFramePresented() {}
+    // A guest frame was presented through the X Present extension (PresentPixmap). Renderers
+    // show the pixmap in the window and count the present in one step; the default only runs
+    // the pixmap's ordinary content-update path.
+    public void onGuestPresent(Window window, Drawable pixmap) { pixmap.updateDirect(); }
     public abstract void requestRender();
     public abstract void queueEvent(Runnable action);
     public abstract void onSurfaceChanged(int width, int height);

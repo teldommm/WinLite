@@ -77,8 +77,26 @@ public class XConnectorEpoll implements Runnable {
         epollThread = null;
     }
 
+    // Nice value for the threads that serve clients (the epoll thread, and per-client threads in
+    // multithreaded mode). 0 keeps the default.
+    private volatile int threadPriority = 0;
+
+    public void setThreadPriority(int priority) {
+        this.threadPriority = priority;
+    }
+
+    private void applyThreadPriority() {
+        if (threadPriority == 0) return;
+        try {
+            android.os.Process.setThreadPriority(threadPriority);
+        } catch (RuntimeException e) {
+            android.util.Log.w("XConnectorEpoll", "could not set thread priority " + threadPriority, e);
+        }
+    }
+
     @Override
     public void run() {
+        applyThreadPriority();
         while (running && doEpollIndefinitely(epollFd, serverFd, !multithreadedClients));
         shutdown();
     }
@@ -90,6 +108,7 @@ public class XConnectorEpoll implements Runnable {
         if (multithreadedClients) {
             client.shutdownFd = createEventFd();
             client.pollThread = new Thread(() -> {
+                applyThreadPriority();
                 connectionHandler.handleNewConnection(client);
                 while (client.connected && waitForSocketRead(client.clientSocket.fd, client.shutdownFd));
             });

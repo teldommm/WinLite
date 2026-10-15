@@ -487,7 +487,7 @@ void VulkanRendererContext::setFrameGenArmed(bool armed, int multiplier, int tar
     // The swapchain's usage flags and image count both depend on this, so it
     // has to be rebuilt. The existing resize path already does that safely.
     fbResized.store(true);
-    dirtyCV.notify_one();
+    wakeRender();
 }
 
 bool VulkanRendererContext::compositeActive() const {
