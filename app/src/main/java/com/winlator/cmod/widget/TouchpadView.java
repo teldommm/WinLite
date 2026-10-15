@@ -232,6 +232,7 @@ public class TouchpadView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        UnbufferedInput.onTouchEvent(this, event);
         // A physical mouse dragging with a button held arrives here as touch events (its buttons
         // come separately as ACTION_BUTTON_PRESS/RELEASE via onExternalMouseEvent). Only the
         // movement matters, in every touch mode: Touchscreen and Off used to drop it, so the

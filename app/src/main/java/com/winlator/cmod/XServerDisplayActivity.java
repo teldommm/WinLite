@@ -1337,6 +1337,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         isTouchscreenTimeout = preferences.getBoolean("touchscreen_timeout_enabled", false);
         inputControlsView.setAutoHideEnabled(isTouchscreenTimeout);
         rootView.addView(inputControlsView);
+        // Touch, mouse and stick motion reach the game as they arrive, not once per frame.
+        com.winlator.cmod.widget.UnbufferedInput.install(this, touchpadView, inputControlsView);
 
         if (container != null) {
             int hudMode = resolveHudMode();
