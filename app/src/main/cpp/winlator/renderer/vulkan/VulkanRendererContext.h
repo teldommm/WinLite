@@ -640,7 +640,8 @@ public:
     std::atomic<int64_t> refreshPeriodNs_{0};
     int64_t presentSlotEndNs_ = 0;   // render thread only
     int64_t pacingWaitNs(bool content) const;
-    void    notePresentedForPacing(uint32_t presents);
+    // lastDesiredNs: desired presentation time of the last present (display timing), 0 = none.
+    void    notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs = 0);
 
     // Limiter state. Atomics are written from Java threads; the rest is renderMutex.
     std::atomic<int>     fpsLimit_{0};
@@ -658,8 +659,24 @@ public:
     bool displayTimingOk_ = false;
     int64_t fgSourceIntervalNs() const;
     // Fills desired[k] (CLOCK_MONOTONIC ns, 0 = as soon as possible) for this frame's presents.
-    void fgPresentTimes(uint32_t presents, int64_t desired[]) const;
-    struct PendingPresent { int64_t srcId; int64_t dueNs; };
+    // anchorSlotNs: the queue deadline of the display slot this source frame was held for
+    // (limiter grid), 0 = none - then the first present goes out as soon as it is ready.
+    void fgPresentTimes(uint32_t presents, int64_t desired[], int64_t anchorSlotNs) const;
+
+    // --- Frame generation on the limiter grid ------------------------------------------------
+    // With an FPS limit, frame generation's source frames are held for their display slot like
+    // any other limited frame; the composite is started early enough for the whole chain
+    // (fgChainCostNs_) and the group's presents carry desired times from that slot on.
+    std::atomic<int64_t> fgChainCostNs_{0};   // smoothed cost of one source frame's chain, 0 = unknown
+    int64_t fgLeadNs(int64_t baseLead, int64_t spacing) const;
+    void    noteGuestFrameLocked(int64_t nowNs);   // a guest frame went on screen
+    int64_t fgAnchorSlotNs_ = 0;              // render thread: slot of the frame just applied
+    // Display slots the generated frames may use (fractional, carried between source frames):
+    // presents above the panel's refresh only queue up in FIFO and add latency.
+    double  fgSlotCredit_ = 0.0;              // render thread
+    uint32_t fgCapLog_ = 0;
+    uint32_t fgPresentCap(uint32_t capacity, int64_t groupStartNs);
+    struct PendingPresent { int64_t srcId; int64_t dueNs; int64_t slotNs; };
     std::unordered_map<int64_t, std::deque<PendingPresent>> pendingPresents_;  // by content
     std::atomic<int64_t> nextPendingDueNs_{0};  // earliest dueNs, 0 = none
     // Limiter/pacing state of one presenting window (content). Two windows presenting at the

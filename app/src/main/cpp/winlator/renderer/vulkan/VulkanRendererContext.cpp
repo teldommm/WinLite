@@ -1372,10 +1372,49 @@ int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
     return std::min(wait, 2 * period);
 }
 
-void VulkanRendererContext::notePresentedForPacing(uint32_t presents) {
+void VulkanRendererContext::notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs) {
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
     if (period <= 0 || presents == 0) return;
     presentSlotEndNs_ = std::max(presentSlotEndNs_, steadyNowNs()) + (int64_t)presents * period;
+    // Presents held for a desired time occupy the display until that refresh is over.
+    // (desired = intended presentation - half a refresh; the frame stays one refresh.)
+    // The model counts in queue deadlines; desired times are presentation times (deadline +
+    // the frame timeline's offset), so convert back.
+    if (lastDesiredNs > 0) {
+        const int64_t offset = vsyncPresentOffsetNs_.load(std::memory_order_relaxed);
+        presentSlotEndNs_ = std::max(presentSlotEndNs_, lastDesiredNs + period / 2 - offset + period);
+    }
+}
+
+uint32_t VulkanRendererContext::fgPresentCap(uint32_t capacity, int64_t groupStartNs) {
+    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+    if (period <= 0) return capacity;
+    const int64_t now = steadyNowNs();
+    // Where this group starts: its slot (limiter grid), else the next refresh it can make.
+    const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+    const int64_t start = groupStartNs > now ? groupStartNs : now + lead;
+    // Refreshes still taken by earlier presents at that point: they go first in FIFO.
+    const int64_t backlog = presentSlotEndNs_ - start;
+    const int64_t queued = backlog > period / 2 ? (backlog + period / 2) / period : 0;
+    // Refreshes one source frame lasts, carried as credit so a fractional ratio (70 FPS on
+    // 120 Hz = 1.71) alternates instead of always rounding one way. Unknown source rate: no
+    // limit from it, only from the backlog.
+    const int64_t interval = fgSourceIntervalNs();
+    double slots;
+    if (interval > 0) {
+        const double perFrame = (double)interval / (double)period;
+        fgSlotCredit_ = std::min(fgSlotCredit_ + perFrame, perFrame + 1.0);
+        slots = std::floor(fgSlotCredit_ + 0.05);
+    } else {
+        fgSlotCredit_ = 0.0;
+        slots = (double)(capacity + 1);
+    }
+    const int64_t presents = (int64_t)slots - queued;   // the real frame always goes
+    const uint32_t cap = presents <= 1 ? 0u : (uint32_t)std::min<int64_t>(presents - 1, capacity);
+    if (cap < capacity && (fgCapLog_++ % 240u) == 0u)
+        RLOG("lsfg-native: present cap %u of %u (slots %.2f, queued %lld)",
+             cap, capacity, slots, (long long)queued);
+    return cap;
 }
 
 void VulkanRendererContext::setDisplayRefreshRate(float hz) {
@@ -1451,6 +1490,13 @@ void VulkanRendererContext::renderFrame() {
     // idle for kFgIdleMs is it drawn on its own, without frame generation.
     fgDeferred_.store(false, std::memory_order_relaxed);
     fgPassthrough_ = false;
+    fgAnchorSlotNs_ = 0;
+    // Frames held for their display slot go on screen now if their time has come - before the
+    // frame generation check below, which takes them as this pass's new source frame.
+    if (nextPendingDueNs_.load(std::memory_order_relaxed) != 0) {
+        std::lock_guard<std::mutex> lk(renderMutex);
+        applyDuePresentsLocked(steadyNowNs());
+    }
     uint64_t fgNewSourceFrames = 0;
     if (compositeActive()) {
         // New guest frames since the last frame-gen pass: presents when the guest
@@ -1562,7 +1608,8 @@ void VulkanRendererContext::renderFrame() {
             // The pacer gets GUEST frames, not compositor passes: with
             // presents counted, one pass may carry 0..n of them.
             fgSourceFrames_ += fgNewSourceFrames;
-            fgPlan_.generations = lsfgEngine_->plan(capacity, fgSourceFrames_);
+            const uint32_t cap = fgPresentCap(capacity, fgAnchorSlotNs_);
+            fgPlan_.generations = lsfgEngine_->plan(cap, fgSourceFrames_);
         }
     }
     fgPlan_.presents = fgPlan_.generations + 1;
@@ -1672,8 +1719,10 @@ void VulkanRendererContext::renderFrame() {
 
         if (hasCustomScissor) effectiveScissor = rotateRectLogicalToIdentity(customScissor);
 
-        // Frames held for their display slot go on screen now if their time has come.
-        applyDuePresentsLocked(steadyNowNs());
+        // A held frame that came due while this pass waited for its image goes along too -
+        // not with frame generation, which counted its source frame at the start of the pass
+        // (taking one now would show it without generated frames and count it next pass).
+        if (!compositeActive()) applyDuePresentsLocked(steadyNowNs());
 
         if (treeDirty) { rebuildRenderListFromTree(); treeDirty = false; }
 
@@ -1736,7 +1785,7 @@ void VulkanRendererContext::renderFrame() {
     VkSwapchainKHR scs[]={swapchain};
 
     int64_t desiredPresent[kMaxPresentsPerFrame] = {};
-    if (fgPlan_.presents > 1) fgPresentTimes(fgPlan_.presents, desiredPresent);
+    if (compositeActive()) fgPresentTimes(fgPlan_.presents, desiredPresent, fgAnchorSlotNs_);
 
     // The slot's fence rides on the LAST submit. A fence signal is ordered
     // after every command submitted earlier on the same queue, so it still
@@ -1846,7 +1895,8 @@ void VulkanRendererContext::renderFrame() {
         pendingFrameSerial=0;
     }
     trackPresentedRate(presented);
-    notePresentedForPacing(presented);
+    notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0);
+    if (compositeActive()) fgSlotCredit_ = std::max(0.0, fgSlotCredit_ - (double)presented);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
 }
 
@@ -2028,12 +2078,6 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
     if (!acquireSourceLocked(srcId, ahb)) return;
     const int64_t now = steadyNowNs();
 
-    // One publish, one wake: the content change and the present belong together (frame
-    // generation paces on presents; two wakes could queue the same frame twice in FIFO).
-    guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
-    guestPresentNs_.store(now, std::memory_order_relaxed);
-    guestPresentSerial_.fetch_add(1, std::memory_order_relaxed);
-
     // Windows that stopped presenting (closed launcher, recreated swapchain) drop their state.
     if (pacers_.size() > 1) {
         for (auto it = pacers_.begin(); it != pacers_.end();) {
@@ -2065,13 +2109,15 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
         const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
         const bool clockFresh  = deadline != 0 &&
             now - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
-        // Hold-to-slot only when it means something: a live vsync clock, a limit below the
-        // refresh rate, and no frame generation (which plans its own presents).
-        const bool grid = clockFresh && period > 0 && spacing > period + period / 20 &&
-                          !fgArmed_.load(std::memory_order_relaxed);
+        // Hold-to-slot only when it means something: a live vsync clock and a limit below the
+        // refresh rate. Frame generation too: its group of presents starts at the slot.
+        const bool fg   = fgArmed_.load(std::memory_order_relaxed);
+        const bool grid = clockFresh && period > 0 && spacing > period + period / 20;
         if (grid) {
-            // Composite this long before the slot's queue deadline (GPU blit + submit).
-            const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+            // Composite this long before the slot's queue deadline (GPU blit + submit; with
+            // frame generation also the chain up to the first generated frame).
+            const int64_t baseLead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+            const int64_t lead = fg ? fgLeadNs(baseLead, spacing) : baseLead;
             const auto snap = [&](int64_t t) {
                 return deadline + (int64_t)std::llround((double)(t - deadline) / (double)period) * period; };
             const auto ceilGrid = [&](int64_t t) {
@@ -2091,10 +2137,10 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
                 unrefSourceLocked(q.back().srcId);
                 q.back().srcId = srcId;
                 srcImports[srcId].users++;
-                slot  = q.back().dueNs + lead;
+                slot  = q.back().slotNs;
                 ideal = pc.idealSlotNs;
             } else {
-                q.push_back({srcId, slot - lead});
+                q.push_back({srcId, slot - lead, slot});
                 srcImports[srcId].users++;   // the pending entry keeps the import alive
                 pc.idealSlotNs = ideal;
             }
@@ -2119,8 +2165,8 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
             out[1] = due + 1500000LL;   // previous frame off screen and its GPU reads done
             out[2] = pc.pipelineDepth;
         } else {
-            // Release cadence only (frame generation, no clock, or limit >= refresh). Two
-            // buffers may overlap so a heavy guest keeps its CPU/GPU pipelining.
+            // Release cadence only (no clock, or limit >= refresh). Two buffers may overlap so
+            // a heavy guest keeps its CPU/GPU pipelining.
             pc.idealSlotNs = 0;
             out[0] = std::max(now, pc.lastReleaseNs + spacing);
             out[1] = 0;
@@ -2134,13 +2180,35 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
     }
 
     if (staged) {
+        // Counted as a guest frame when it goes on screen (applyDuePresentsLocked): frame
+        // generation takes a new source frame from these counters, and one counted now would
+        // be composited with the previous content still showing.
         updateNextPendingDueLocked();
     } else {
         dropPendingLocked(contentId);
         showSourceLocked(contentId, srcId);
+        // One publish, one wake: the content change and the present belong together (frame
+        // generation paces on presents; two wakes could queue the same frame twice in FIFO).
+        noteGuestFrameLocked(now);
         needsRender.store(true);
     }
     wakeRender();
+}
+
+void VulkanRendererContext::noteGuestFrameLocked(int64_t nowNs) {
+    guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
+    guestPresentNs_.store(nowNs, std::memory_order_relaxed);
+    guestPresentSerial_.fetch_add(1, std::memory_order_relaxed);
+}
+
+int64_t VulkanRendererContext::fgLeadNs(int64_t baseLead, int64_t spacing) const {
+    // The whole chain (shared passes + every generation) runs before the first present; a
+    // margin over its smoothed cost covers frame-to-frame variance. Unknown cost: a guess that
+    // fits mid-range GPUs at 1080p until the first timestamps are in.
+    const int64_t cost = fgChainCostNs_.load(std::memory_order_relaxed);
+    const int64_t chain = cost > 0 ? cost + cost / 4 + 1000000LL : 8000000LL;
+    // Never so early that the slot is mostly spent waiting: at most 3/4 of the source interval.
+    return std::clamp<int64_t>(baseLead + chain, baseLead, std::max(baseLead, spacing * 3 / 4));
 }
 
 void VulkanRendererContext::dropPendingLocked(int64_t contentId) {
@@ -2160,9 +2228,11 @@ void VulkanRendererContext::applyDuePresentsLocked(int64_t nowNs) {
         auto& q = it->second;
         while (!q.empty() && q.front().dueNs <= horizon) {
             const int64_t src = q.front().srcId;
+            fgAnchorSlotNs_ = q.front().slotNs;
             q.pop_front();
             showSourceLocked(it->first, src);
             unrefSourceLocked(src);   // the pending entry's reference
+            noteGuestFrameLocked(nowNs);
         }
         if (q.empty()) it = pendingPresents_.erase(it); else ++it;
     }
@@ -2201,37 +2271,46 @@ int64_t VulkanRendererContext::fgSourceIntervalNs() const {
     return std::max(limitInterval, measured);
 }
 
-void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[]) const {
+void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[],
+                                           int64_t anchorSlotNs) const {
     for (uint32_t k = 0; k < presents; k++) desired[k] = 0;
-    if (!displayTimingOk_ || presents < 2) return;
+    if (!displayTimingOk_ || presents == 0) return;
     const int64_t period   = refreshPeriodNs_.load(std::memory_order_relaxed);
     const int64_t interval = fgSourceIntervalNs();
     const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
     const int64_t now      = steadyNowNs();
     if (period <= 0 || interval <= 0 || deadline == 0 ||
         now - vsyncSeenNs_.load(std::memory_order_relaxed) > 250000000LL) return;
-    // Spreading only changes anything when the presents would get more than one refresh each;
-    // otherwise back to back IS even, and holding frames would only add latency.
-    const double step = (double)interval / (double)presents;
-    if (step < 1.5 * (double)period) return;
-    // When the first present will be on screen: the first queue deadline its composite can
-    // still make, plus the deadline -> presentation offset from the frame timeline.
-    const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
-    const int64_t firstDeadline = deadline +
-        (int64_t)std::ceil((double)(now + lead - deadline) / (double)period) * period;
     // Only with a measured offset (frame timeline, API 33+). A guessed one that is off by more
     // than half a refresh moves every later present one refresh away from the first, which is
     // less even than plain back-to-back FIFO.
     const int64_t offset = vsyncPresentOffsetNs_.load(std::memory_order_relaxed);
     if (offset <= 0 || offset > 4 * period) return;
-    const int64_t first = firstDeadline + offset;
+    const double step = (double)interval / (double)presents;
+    // The first queue deadline the composite can still make. A frame held for a limiter slot
+    // starts exactly there (unless the chain ran late), so the whole group is timed from it:
+    // every source frame then starts on its own slot, and its presents fall on the same
+    // refreshes of that slot each time. Without a slot only the spread matters, and only when
+    // a present gets more than one refresh - back to back IS even otherwise, and holding
+    // frames would only add latency.
+    const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+    const int64_t reachable = deadline +
+        (int64_t)std::ceil((double)(now + lead - deadline) / (double)period) * period;
+    // A slot whose queue deadline has already passed (the chain ran late) is not kept.
+    const bool anchored = anchorSlotNs > now;
+    if (!anchored && (presents < 2 || step < 1.5 * (double)period)) return;
+    const int64_t first = (anchored ? anchorSlotNs : reachable) + offset;
+    int64_t prevRefreshes = -1;
     for (uint32_t k = 0; k < presents; k++) {
-        const int64_t refreshes = (int64_t)std::llround(k * step / (double)period);
+        int64_t refreshes = (int64_t)std::llround(k * step / (double)period);
+        // Two presents for one refresh would drop the earlier one at the compositor.
+        refreshes = std::max(refreshes, prevRefreshes + 1);
+        prevRefreshes = refreshes;
         // Half a refresh early: the compositor shows a buffer at the first refresh whose
         // expected presentation is not before the desired time, so this lands on the intended
-        // refresh even if the estimate is off by up to half of one. Only later presents get a
-        // time; the first goes out as soon as it is ready.
-        if (k > 0) desired[k] = first + refreshes * period - period / 2;
+        // refresh even if the estimate is off by up to half of one. Unanchored, the first goes
+        // out as soon as it is ready.
+        if (anchored || k > 0) desired[k] = first + refreshes * period - period / 2;
     }
 }
 

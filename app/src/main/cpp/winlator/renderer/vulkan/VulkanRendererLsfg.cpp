@@ -201,6 +201,15 @@ void VulkanRendererContext::readFgQueryResult() {
     fgChainMsPerGen_ = fgChainMsPerGen_ < 0.0f
         ? perGen
         : fgChainMsPerGen_ + (perGen - fgChainMsPerGen_) * 0.1f;
+    // The whole chain of one source frame, for the limiter: a frame held for its display slot
+    // starts compositing this much earlier. Follows rises at once and falls slowly, so a
+    // heavier frame is covered right away and one light frame does not cut the margin.
+    {
+        const int64_t total = (int64_t)(ms * 1.0e6);
+        const int64_t prev  = fgChainCostNs_.load(std::memory_order_relaxed);
+        fgChainCostNs_.store(prev <= 0 || total > prev ? total : prev + (total - prev) / 16,
+                             std::memory_order_relaxed);
+    }
     // Same cadence as the engine's own telemetry, so a log carries the cost
     // next to the rates it explains.
     if ((fgChainLogCount_++ % 120u) == 0u)
@@ -482,6 +491,7 @@ void VulkanRendererContext::setFrameGenArmed(bool armed, int multiplier, int tar
     if (was == armed) return;
 
     fgArmed_.store(armed, std::memory_order_relaxed);
+    fgChainCostNs_.store(0, std::memory_order_relaxed);
     RLOG("lsfg-native: frame gen %s (multiplier=%d) - recreating swapchain",
          armed ? "ARMED" : "disarmed", multiplier);
     // The swapchain's usage flags and image count both depend on this, so it
