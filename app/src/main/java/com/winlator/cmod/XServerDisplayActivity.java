@@ -2438,7 +2438,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         File rootDir = imageFs.getRootDir();
 
         if (dxwrapper.contains("dxvk")) {
-            DXVKConfig.setEnvVars(this, dxwrapperConfig, envVars, autoTextureLodBias(), loadFpsLimit() > 0);
+            DXVKConfig.setEnvVars(this, dxwrapperConfig, envVars, autoTextureLodBias());
             String version = dxwrapperConfig.get("version");
             if (version.equals("1.11.1-sarek")) {
                 Log.d("GraphicsDriverExtraction", "Disabling Wrapper PATCH_OPCONSTCOMP SPIR-V pass");
