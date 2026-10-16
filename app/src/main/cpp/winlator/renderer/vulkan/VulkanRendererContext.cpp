@@ -85,6 +85,7 @@ VulkanRendererContext::~VulkanRendererContext() {
     }
     for (auto sem : imgAvailSems) vk_.DestroySemaphore(device, sem, nullptr);
     for (auto sem : renderDoneSems) vk_.DestroySemaphore(device, sem, nullptr);
+    if (gpuTimeline_ != VK_NULL_HANDLE) vk_.DestroySemaphore(device, gpuTimeline_, nullptr);
     vk_.DestroyCommandPool(device, cmdPool, nullptr);
     vk_.DestroyRenderPass(device, renderPass, nullptr);
     vk_.DestroyDevice(device, nullptr);
@@ -201,6 +202,9 @@ void VulkanRendererContext::loadDeviceDispatch() {
     LOAD_D2(WaitForFences);
     LOAD_D2(ResetFences);
     LOAD_D2(GetFenceStatus);
+    vk_.GetSemaphoreCounterValue = (PFN_vkGetSemaphoreCounterValue)d("vkGetSemaphoreCounterValue");
+    if (!vk_.GetSemaphoreCounterValue)
+        vk_.GetSemaphoreCounterValue = (PFN_vkGetSemaphoreCounterValue)d("vkGetSemaphoreCounterValueKHR");
 
     vk_.GetAndroidHardwareBufferPropertiesANDROID =
         (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)d("vkGetAndroidHardwareBufferPropertiesANDROID");
@@ -414,15 +418,15 @@ void VulkanRendererContext::createLogicalDevice() {
 
     VkPhysicalDeviceVulkan12Features lsfgV12{};
     VkPhysicalDeviceFeatures2        lsfgF2{};
+    lsfgV12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    lsfgF2.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     if (lsfgCaps_.features.nativeGatesPass()) {
-        lsfgF2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         lsfgF2.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
         lsfgF2.features.shaderStorageImageExtendedFormats    = VK_TRUE;
 
         const bool wantMemoryModel = lsfgCaps_.features.translatedGatesPass();
         const bool wantFloat16     = lsfgCaps_.features.shaderFloat16;
         if (lsfgCaps_.features.apiAtLeast12 && (wantMemoryModel || wantFloat16)) {
-            lsfgV12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
             if (wantMemoryModel) {
                 lsfgV12.vulkanMemoryModel = VK_TRUE;
                 // Device scope is a separate SPIR-V capability; enable it only
@@ -431,51 +435,92 @@ void VulkanRendererContext::createLogicalDevice() {
                     lsfgCaps_.features.vulkanMemoryModelDeviceScope ? VK_TRUE : VK_FALSE;
             }
             if (wantFloat16) lsfgV12.shaderFloat16 = VK_TRUE;
-            lsfgF2.pNext = &lsfgV12;
             lsfgCaps_.memoryModelEnabled = wantMemoryModel;
             lsfgCaps_.float16Enabled     = wantFloat16;
         }
-
-        // pEnabledFeatures MUST stay null while a VkPhysicalDeviceFeatures2 is
-        // chained - the two are mutually exclusive.
-        ci.pNext = &lsfgF2;
         lsfgCaps_.featuresEnabled = true;
     }
+    // The compositor's own GPU-progress counter (see gpuTimeline_).
+    bool timelineEnabled = lsfgCaps_.features.apiAtLeast12 && lsfgCaps_.features.timelineSemaphore;
+    if (timelineEnabled) lsfgV12.timelineSemaphore = VK_TRUE;
 
-    VkResult deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
-    if (deviceResult!=VK_SUCCESS && globalPriorityExt) {
-        RLOG_E("createLogicalDevice: HIGH queue priority refused (%d); retrying at default priority",
-               (int)deviceResult);
+    // pEnabledFeatures MUST stay null while a VkPhysicalDeviceFeatures2 is chained - the two are
+    // mutually exclusive. With nothing to enable the device is created exactly as it always was.
+    const auto chainFeatures = [&]() {
+        const bool v12 = lsfgV12.vulkanMemoryModel || lsfgV12.shaderFloat16 || lsfgV12.timelineSemaphore;
+        lsfgF2.pNext = v12 ? &lsfgV12 : nullptr;
+        ci.pNext = (lsfgCaps_.featuresEnabled || v12) ? &lsfgF2 : nullptr;
+    };
+    const auto dropPriority = [&]() {
         qi.pNext = nullptr;
-        extList.pop_back();
+        extList.erase(std::remove(extList.begin(), extList.end(), globalPriorityExt), extList.end());
         ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
         globalPriorityExt = nullptr;
+    };
+    const auto dropLsfg = [&]() {
+        lsfgF2.features.shaderStorageImageWriteWithoutFormat = VK_FALSE;
+        lsfgF2.features.shaderStorageImageExtendedFormats    = VK_FALSE;
+        lsfgV12.vulkanMemoryModel = VK_FALSE;
+        lsfgV12.vulkanMemoryModelDeviceScope = VK_FALSE;
+        lsfgV12.shaderFloat16 = VK_FALSE;
+        lsfgCaps_.featuresEnabled    = false;
+        lsfgCaps_.memoryModelEnabled = false;
+        lsfgCaps_.float16Enabled     = false;
+        chainFeatures();
+    };
+    chainFeatures();
+
+    // Each optional piece is given up separately, so a driver that rejects one of them keeps the
+    // others: a refused queue priority (VK_ERROR_NOT_PERMITTED) costs only the priority, a feature
+    // chain it rejects only frame generation, and only then everything at once.
+    VkResult deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
+    if (deviceResult == VK_ERROR_NOT_PERMITTED_KHR && globalPriorityExt) {
+        RLOG_E("createLogicalDevice: HIGH queue priority not permitted; retrying at default priority");
+        dropPriority();
         deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
     }
+    if (deviceResult != VK_SUCCESS && lsfgCaps_.featuresEnabled) {
+        RLOG_E("createLogicalDevice: CreateDevice failed WITH LSFG features (%d); retrying without",
+               (int)deviceResult);
+        dropLsfg();
+        deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
+    }
+    if (deviceResult != VK_SUCCESS && globalPriorityExt) {
+        // Some drivers refuse the priority with a generic error rather than NOT_PERMITTED.
+        RLOG_E("createLogicalDevice: CreateDevice failed (%d); retrying at default priority",
+               (int)deviceResult);
+        dropPriority();
+        deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
+    }
+    if (deviceResult != VK_SUCCESS && timelineEnabled) {
+        RLOG_E("createLogicalDevice: CreateDevice failed (%d); retrying without timeline semaphores",
+               (int)deviceResult);
+        lsfgV12.timelineSemaphore = VK_FALSE;
+        timelineEnabled = false;
+        chainFeatures();
+        deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
+    }
+    if (deviceResult != VK_SUCCESS) throw std::runtime_error("device");
     globalPriorityHigh_.store(globalPriorityExt != nullptr);
     __android_log_print(ANDROID_LOG_INFO, WLOG_TAG,
-           "createLogicalDevice: compositor queue priority %s, display timing %s",
+           "createLogicalDevice: compositor queue priority %s, display timing %s, frame gen features %s",
            globalPriorityExt ? "HIGH" : "default (global priority unavailable)",
-           displayTimingOk_ ? "available" : "unavailable (frame gen presents back to back)");
-    if (deviceResult!=VK_SUCCESS) {
-        // A driver that rejects the feature chain must not cost us the whole
-        // renderer: retry once with the pre-LSFG device create, unchanged.
-        if (lsfgCaps_.featuresEnabled) {
-            RLOG_E("createLogicalDevice: CreateDevice failed WITH LSFG features; retrying without");
-            ci.pNext = nullptr;
-            lsfgCaps_.featuresEnabled    = false;
-            lsfgCaps_.memoryModelEnabled = false;
-            lsfgCaps_.float16Enabled     = false;
-            if (vk_.CreateDevice(physicalDevice,&ci,nullptr,&device)!=VK_SUCCESS)
-                throw std::runtime_error("device");
-        } else {
-            throw std::runtime_error("device");
-        }
-    }
+           displayTimingOk_ ? "available" : "unavailable (frame gen presents back to back)",
+           lsfgCaps_.featuresEnabled ? "on" : "off");
 
     vk_.GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)gipa(instance, "vkGetDeviceProcAddr");
     loadDeviceDispatch();
     vk_.GetDeviceQueue(device,graphicsQueueFamilyIndex,0,&graphicsQueue);
+
+    if (timelineEnabled && vk_.GetSemaphoreCounterValue) {
+        VkSemaphoreTypeCreateInfo ti{}; ti.sType=VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+        ti.semaphoreType=VK_SEMAPHORE_TYPE_TIMELINE; ti.initialValue=0;
+        VkSemaphoreCreateInfo si{}; si.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO; si.pNext=&ti;
+        if (vk_.CreateSemaphore(device,&si,nullptr,&gpuTimeline_)!=VK_SUCCESS) gpuTimeline_=VK_NULL_HANDLE;
+    }
+    RLOG("createLogicalDevice: guest buffers handed back %s",
+         gpuTimeline_ != VK_NULL_HANDLE ? "after the GPU is done with them (timeline)"
+                                        : "on timing only (no timeline semaphore)");
 
     vk_.GetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
@@ -548,6 +593,8 @@ void VulkanRendererContext::createSwapchain() {
     // LSFG presents generated frames before the real one and relies on FIFO
     // ordering them onto consecutive vblanks; mailbox would let them collapse.
     if (nativeFg) presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    swapchainFifo_.store(presentMode == VK_PRESENT_MODE_FIFO_KHR ||
+                         presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR, std::memory_order_relaxed);
     if(verboseLog){
         std::string pmList;
         for(auto pm:availablePresentModes) pmList+=std::to_string((int)pm)+" ";
@@ -1362,6 +1409,8 @@ void VulkanRendererContext::renderLoop() {
 int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
     // Frame generation plans and paces its own presents (and defers non-content wakes itself).
     if (fgArmed_.load(std::memory_order_relaxed)) return 0;
+    // No queue to drain outside FIFO: a newer frame simply replaces the waiting one.
+    if (!swapchainFifo_.load(std::memory_order_relaxed)) return 0;
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
     if (period <= 0) return 0;
     // Time until the display has drained everything presented so far, in the model.
@@ -1736,6 +1785,7 @@ void VulkanRendererContext::renderFrame() {
             de.isAHB=wt.isAHB;
             if (wt.isAHB) {
                 auto sit=srcImports.find(wt.srcId);
+                if (sit!=srcImports.end()) sit->second.lastSerial = pendingFrameSerial;
                 if (sit!=srcImports.end() && sit->second.wt.img==wt.img &&
                     sit->second.wt.needsTransition &&
                     std::none_of(pendingAHB.begin(),pendingAHB.end(),
@@ -1825,6 +1875,18 @@ void VulkanRendererContext::renderFrame() {
         si.waitSemaphoreCount=1; si.pWaitSemaphores=&wSem; si.pWaitDstStageMask=&waitStage;
         si.commandBufferCount=1; si.pCommandBuffers=&cb;
         si.signalSemaphoreCount=1; si.pSignalSemaphores=&sSem;
+        // The frame's last submit also moves the GPU-progress timeline to this frame's serial:
+        // once it is reached, every guest buffer this frame sampled can go back to the guest.
+        VkSemaphore signalSems[2] = {sSem, gpuTimeline_};
+        uint64_t signalValues[2] = {0, (uint64_t)pendingFrameSerial};
+        VkTimelineSemaphoreSubmitInfo timelineInfo{};
+        if (last && gpuTimeline_ != VK_NULL_HANDLE && pendingFrameSerial != 0) {
+            timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+            timelineInfo.signalSemaphoreValueCount = 2;
+            timelineInfo.pSignalSemaphoreValues = signalValues;
+            si.pNext = &timelineInfo;
+            si.signalSemaphoreCount = 2; si.pSignalSemaphores = signalSems;
+        }
         if (vk_.QueueSubmit(graphicsQueue,1,&si, last ? inFlightFences[currentFrame] : VK_NULL_HANDLE)!=VK_SUCCESS) {
             // The fence was reset above and may now never signal; replace it
             // with a signalled one so the next use of this slot does not wait
@@ -2071,8 +2133,8 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t contentId, int64_t sr
 }
 
 void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHardwareBuffer* ahb,
-                                         int64_t guestFrameNs, int64_t out[3]) {
-    out[0] = out[1] = out[2] = 0;
+                                         int64_t guestFrameNs, int64_t out[4]) {
+    out[0] = out[1] = out[2] = out[3] = 0;
     if (!ahb || contentId==0 || srcId==0) return;
     std::lock_guard<std::mutex> lk(renderMutex);
     if (!acquireSourceLocked(srcId, ahb)) return;
@@ -2150,10 +2212,15 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
             // One frame in flight while that makes its slots; two for a while after misses.
             const int misses = __builtin_popcount(pc.lateHistory & 0x3FFFFFFFu);   // last 30
             if (pc.pipelineDepth == 1 && misses >= 2) {
-                pc.pipelineDepth = 2; pc.depthTwoUntilNs = now + 5000000000LL; pc.lateHistory = 0;
-                RLOG("frame pacing: guest misses its slots, overlapping two frames for 5 s");
+                // Missing again within 3 s of the last try at depth 1: it does not fit yet,
+                // stay overlapped longer before the next try (up to a minute).
+                pc.depthTwoHoldNs = (pc.depthOneSinceNs != 0 && now - pc.depthOneSinceNs < 3000000000LL)
+                    ? std::min<int64_t>(pc.depthTwoHoldNs * 2, 60000000000LL) : 5000000000LL;
+                pc.pipelineDepth = 2; pc.depthTwoUntilNs = now + pc.depthTwoHoldNs; pc.lateHistory = 0;
+                RLOG("frame pacing: guest misses its slots, overlapping two frames for %lld s",
+                     (long long)(pc.depthTwoHoldNs / 1000000000LL));
             } else if (pc.pipelineDepth == 2 && now > pc.depthTwoUntilNs) {
-                pc.pipelineDepth = 1; pc.lateHistory = 0;
+                pc.pipelineDepth = 1; pc.lateHistory = 0; pc.depthOneSinceNs = now;
             }
             // The buffer given back now is drawn into for the next slot (depth 1) or the one
             // after (depth 2); it should come back just before that slot's composite.
@@ -2164,6 +2231,12 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
             out[0] = std::max<int64_t>({justInTime, pc.lastReleaseNs + spacing * 95 / 100, now});
             out[1] = due + 1500000LL;   // previous frame off screen and its GPU reads done
             out[2] = pc.pipelineDepth;
+            // The present is complete when it goes on screen - at its slot, not now. Guests
+            // that start their next frame on completion (DXVK 2.3+ with present_wait and frame
+            // latency 1, FIFO WSIs) then read input right after the frame is shown instead of a
+            // whole slot earlier. Overlapped (depth 2, the guest misses its slots): at once, so
+            // a heavy guest keeps its full frame time.
+            if (pc.pipelineDepth == 1) out[3] = slot;
         } else {
             // Release cadence only (no clock, or limit >= refresh). Two buffers may overlap so
             // a heavy guest keeps its CPU/GPU pipelining.
@@ -2193,6 +2266,21 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
         needsRender.store(true);
     }
     wakeRender();
+}
+
+bool VulkanRendererContext::sourceBusy(int64_t srcId) {
+    if (gpuTimeline_ == VK_NULL_HANDLE || !vk_.GetSemaphoreCounterValue) return false;
+    uint64_t serial = 0;
+    {
+        std::lock_guard<std::mutex> lk(renderMutex);
+        auto it = srcImports.find(srcId);
+        if (it == srcImports.end()) return false;
+        serial = it->second.lastSerial;
+    }
+    if (serial == 0) return false;
+    uint64_t done = 0;
+    if (vk_.GetSemaphoreCounterValue(device, gpuTimeline_, &done) != VK_SUCCESS) return false;
+    return done < serial;
 }
 
 void VulkanRendererContext::noteGuestFrameLocked(int64_t nowNs) {

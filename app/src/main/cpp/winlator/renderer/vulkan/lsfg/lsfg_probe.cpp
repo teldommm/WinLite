@@ -40,6 +40,7 @@ FeatureSupport queryFeatures(const VkTable& vk, VkPhysicalDevice pd) {
         fs.vulkanMemoryModel            = v12.vulkanMemoryModel == VK_TRUE;
         fs.vulkanMemoryModelDeviceScope = v12.vulkanMemoryModelDeviceScope == VK_TRUE;
         fs.shaderFloat16                = v12.shaderFloat16 == VK_TRUE;
+        fs.timelineSemaphore            = v12.timelineSemaphore == VK_TRUE;
     }
     return fs;
 }

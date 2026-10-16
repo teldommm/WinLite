@@ -65,12 +65,20 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
      * one shown until the new frame's slot not before it has left the screen.
      */
     private static final long STALL_GUARD_NS = 200_000_000L;
+    private static final long NO_TOKEN = Long.MIN_VALUE;
+    // A buffer the renderer's GPU work may still be reading is held back in steps of this, for
+    // at most GPU_BUSY_MAX_TRIES steps (a stalled renderer must not stall the guest for good).
+    private static final long GPU_BUSY_RETRY_NS = 500_000L;
+    private static final int GPU_BUSY_MAX_TRIES = 100;
 
     private static final class Presented {
         final Window window;
         final Pixmap pixmap;
         final int serial;
         final int idleFence;
+        // The hand-back this present was planned for (its entry in WindowPacing.outstanding);
+        // NO_TOKEN = none, deliver unconditionally. Guarded by limiterLock.
+        long token = NO_TOKEN;
 
         Presented(Window window, Pixmap pixmap, int serial, int idleFence) {
             this.window = window;
@@ -91,6 +99,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         final HashSet<Pixmap> seen = new HashSet<>();
         ScheduledFuture<?> stallGuard;
         long lastMsc = Long.MIN_VALUE;
+        long lastCompleteAtNs = 0;   // when the latest CompleteNotify is (or was) due
 
         /** How many of the newest presented pixmaps stay held. */
         int keep() { return seen.size() >= 2 ? 1 : 0; }
@@ -198,12 +207,36 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     private void releaseLocked(WindowPacing wp, Presented p, long atNs, long nowNs, ArrayList<Presented> now) {
         long when = Math.max(atNs, nowNs);
         wp.outstanding.put(p.pixmap, when);
+        p.token = when;
         if (when - nowNs <= 200_000L) {
             now.add(p);
         } else {
-            limiterExecutor().schedule(() -> sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence),
-                    when - nowNs, TimeUnit.NANOSECONDS);
+            limiterExecutor().schedule(() -> deliverIdle(p, 0), when - nowNs, TimeUnit.NANOSECONDS);
         }
+    }
+
+    /**
+     * Sends a planned hand-back, unless it no longer applies, and not while the renderer's GPU
+     * work may still be reading the buffer: the guest would draw into it under a composite
+     * (with no limit the previous buffer goes back the moment the next one is presented, while
+     * the composite that showed it can still be running).
+     */
+    private void deliverIdle(Presented p, int tries) {
+        if (p.token != NO_TOKEN) {
+            synchronized (limiterLock) {
+                WindowPacing wp = pacing.get(p.window.id);
+                Long planned = wp != null ? wp.outstanding.get(p.pixmap) : null;
+                // Freed (pixmap or window) or presented again since: not ours to idle any more.
+                if (planned == null || planned != p.token) return;
+            }
+        }
+        com.winlator.cmod.widget.XServerRendererView view = xServer.getXServerView();
+        if (tries < GPU_BUSY_MAX_TRIES && view != null && view.isGuestBufferBusy(p.pixmap.drawable)) {
+            limiterExecutor().schedule(() -> deliverIdle(p, tries + 1),
+                    GPU_BUSY_RETRY_NS, TimeUnit.NANOSECONDS);
+            return;
+        }
+        sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
     }
 
     /**
@@ -236,7 +269,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
                 if (pacing.get(windowId) != wp || wp.held.size() <= wp.keep()) return;
                 releaseLocked(wp, wp.held.pollFirst(), 0, System.nanoTime(), now);
             }
-            for (Presented p : now) sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
+            for (Presented p : now) deliverIdle(p, 0);
         }, STALL_GUARD_NS, TimeUnit.NANOSECONDS);
     }
 
@@ -272,7 +305,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         if (pixmap == null) throw new BadPixmap(pixmapId);
 
         final long nowNs = System.nanoTime();
-        final long[] plan = new long[3];
+        final long[] plan = new long[4];
         long guestFrameNs = -1;
         WindowPacing wp;
         ArrayList<Presented> releaseNow = new ArrayList<>(2);
@@ -296,7 +329,35 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
 
         presentToRenderer(client, window, pixmap, guestFrameNs, plan);
 
-        com.winlator.cmod.widget.XServerRendererView view = client.xServer.getXServerView();
+        // Complete when the frame goes on screen (plan[3], its display slot), not when it is
+        // received: a guest that starts its next frame on completion (DXVK 2.3+ through
+        // present_wait) then samples input right after this one is shown. Never before an
+        // earlier present's completion, so they stay in order.
+        long completeAt = plan[3];
+        final WindowPacing pacingState = wp;
+        synchronized (limiterLock) {
+            if (wp.lastCompleteAtNs > nowNs && wp.lastCompleteAtNs > completeAt)
+                completeAt = wp.lastCompleteAtNs;
+            wp.lastCompleteAtNs = completeAt;
+        }
+        if (completeAt - nowNs > 200_000L) {
+            limiterExecutor().schedule(() -> sendComplete(window, pacingState, serial),
+                    completeAt - nowNs, TimeUnit.NANOSECONDS);
+        } else {
+            sendComplete(window, wp, serial);
+        }
+
+        synchronized (limiterLock) {
+            wp.held.addLast(new Presented(window, pixmap, serial, idleFence));
+            planReleasesLocked(wp, plan, nowNs, releaseNow);
+            armStallGuardLocked(window.id, wp);
+        }
+        for (Presented p : releaseNow) deliverIdle(p, 0);
+    }
+
+    private void sendComplete(Window window, WindowPacing wp, int serial) {
+        final long nowNs = System.nanoTime();
+        com.winlator.cmod.widget.XServerRendererView view = xServer.getXServerView();
         long[] vsync = new long[2];
         long msc, ustNs;
         if (view != null && view.getVsync(nowNs, vsync)) {
@@ -314,13 +375,6 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             wp.lastMsc = msc;
         }
         sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ustNs / 1000, msc);
-
-        synchronized (limiterLock) {
-            wp.held.addLast(new Presented(window, pixmap, serial, idleFence));
-            planReleasesLocked(wp, plan, nowNs, releaseNow);
-            armStallGuardLocked(window.id, wp);
-        }
-        for (Presented p : releaseNow) sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
     }
 
     // One renderer call per present: shows the pixmap in the window and counts the present (the

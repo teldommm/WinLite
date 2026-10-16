@@ -34,6 +34,18 @@ final class VsyncClock {
         }
     }
     private volatile Sample sample;   // null before the first tick
+    // The display's own period (from its refresh rate). Counting and learning are anchored to
+    // it: starting from a fixed 60 Hz guess, a 120/144/165 Hz panel never passed the learning
+    // gate and missed vsyncs were counted at 60 Hz (5 missed at 144 Hz counted as 2).
+    private volatile long nominalPeriodNs = 0;
+
+    /** The display's refresh period; a change (mode switch) restarts period learning from it. */
+    void setNominalPeriod(long periodNs) {
+        if (periodNs <= 0 || periodNs == nominalPeriodNs) return;
+        nominalPeriodNs = periodNs;
+        Sample s = sample;
+        if (s != null) sample = new Sample(s.msc, s.frameTimeNs, periodNs);
+    }
 
     private final Choreographer.FrameCallback frameCallback = this::onFrame;
     private Object vsyncCallback;   // Choreographer.VsyncCallback on API 33+
@@ -113,14 +125,17 @@ final class VsyncClock {
         if (prev == null) {
             // Anchored to the same 60 Hz time base the fallback clock uses, so switching from
             // the fallback to the real clock does not move the MSC backwards by much.
-            sample = new Sample(frameTimeNs / ANCHOR_PERIOD_NS, frameTimeNs, ANCHOR_PERIOD_NS);
+            long nominal = nominalPeriodNs;
+            sample = new Sample(frameTimeNs / ANCHOR_PERIOD_NS, frameTimeNs,
+                    nominal > 0 ? nominal : ANCHOR_PERIOD_NS);
         } else {
             long dt = frameTimeNs - prev.frameTimeNs;
             if (dt > 0) {
                 long period = prev.periodNs;
                 long n = Math.max(1, (dt + period / 2) / period);
-                // Learn the period from consecutive vsyncs only (n == 1 and plausible).
-                if (n == 1 && dt > period / 2 && dt < period * 3 / 2) period = (period * 7 + dt) / 8;
+                // Refine the period from consecutive vsyncs only (n == 1, within 25 %): the
+                // measured one absorbs the panel's small deviation from its nominal rate.
+                if (n == 1 && dt * 4 >= period * 3 && dt * 4 <= period * 5) period = (period * 7 + dt) / 8;
                 sample = new Sample(prev.msc + n, frameTimeNs, period);
             }
         }

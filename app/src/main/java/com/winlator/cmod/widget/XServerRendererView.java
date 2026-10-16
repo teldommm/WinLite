@@ -55,6 +55,9 @@ public abstract class XServerRendererView extends SurfaceView {
     // The display's vsync count and time (CLOCK_MONOTONIC ns) at nowNs for Present's MSC/UST:
     // out[0] = msc, out[1] = ust ns. false = no display clock (the caller falls back to 60 Hz).
     public boolean getVsync(long nowNs, long[] out) { return false; }
+    // Whether the renderer's GPU work may still be reading this guest buffer (a composite that
+    // sampled it has not finished). The X server holds it back from the guest until then.
+    public boolean isGuestBufferBusy(Drawable buffer) { return false; }
     // Period of the 60 Hz time base the fallback MSC (and the real one's anchor) uses.
     public static final long FALLBACK_MSC_PERIOD_NS = 16_666_667L;
     public abstract void requestRender();

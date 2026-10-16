@@ -21,6 +21,7 @@ struct FeatureSupport {
     bool storageImageWriteWithoutFormat = false;
     bool storageImageExtendedFormats = false;
     bool shaderFloat16               = false;
+    bool timelineSemaphore           = false;  // core 1.2 (used by the compositor, not LSFG)
     uint32_t deviceApiVersion        = 0;
 
     // Gates every variant needs (the precompiled SPIR-V 1.0 sets).

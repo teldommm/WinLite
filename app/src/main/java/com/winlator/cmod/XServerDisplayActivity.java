@@ -195,6 +195,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Adaptive frame gen: target Hz, 0 = fixed multiplier. Stored with
     // lsfgMultiplier = 4 (the ceiling the pacer may use to reach the target).
     private int activeLsfgTargetRate = 0;
+    // The display's refresh rate before this activity pinned any mode for an FPS limit or frame
+    // generation: the ceiling for a cadence mode without the high refresh preference.
+    private float baseRefreshHz = 0f;
     // Last Adaptive target, kept while a fixed multiplier is selected (activeLsfgTargetRate is 0
     // then, which is what gets passed to native) so switching back restores it. Persisted
     // separately as lsfgTargetMemo; never 0 (falls back to DEFAULT_LSFG_TARGET_RATE).
@@ -3042,11 +3045,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (window == null || display == null) return;
         android.view.WindowManager.LayoutParams params = window.getAttributes();
         boolean frameGenOn = activeLsfgMultiplier >= 2;
+        if (baseRefreshHz <= 0f) baseRefreshHz = display.getMode().getRefreshRate();
 
         if (!frameGenOn) {
             boolean highRefresh = preferences.getBoolean("high_refresh_rate_mode", false);
             int limit = xServerView != null ? xServerView.getFpsLimit() : 0;
-            android.view.Display.Mode cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh) : null;
+            android.view.Display.Mode cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh, baseRefreshHz) : null;
             if (cadence != null) {
                 // Every limited frame then stays on screen for the same number of refreshes.
                 if (params.preferredDisplayModeId != cadence.getModeId() || params.preferredRefreshRate != 0f) {
@@ -3116,24 +3120,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     /**
-     * Display mode (same resolution) whose refresh rate the FPS limit divides evenly. With the
-     * high refresh preference the fastest such mode; otherwise the current mode when it already
-     * qualifies (pinned explicitly: releasing the preference would let the system move the
-     * display to a rate the limit no longer divides), else the slowest one that does. Null when
-     * no mode fits (e.g. a 35 FPS limit): the user's own refresh preference stays.
+     * Display mode (same resolution) whose refresh rate the FPS limit divides evenly: the
+     * fastest such mode, up to the display's own rate before any pin ({@code ceilingHz}) or
+     * without a ceiling under the high refresh preference. Fastest, not slowest: the display
+     * and compositor pipeline costs about two refreshes of latency, a touch panel samples at the
+     * refresh rate, and the on-screen controls run at it too - a 60 FPS limit on a 144 Hz panel
+     * belongs on 120 Hz, not 60, and 30 FPS never on a 30 Hz mode. Null when no mode fits (e.g.
+     * a 35 FPS limit): the user's own refresh preference stays.
      */
     private static android.view.Display.Mode pickCadenceMode(android.view.Display display, int limit,
-                                                             boolean preferHighest) {
+                                                             boolean preferHighest, float ceilingHz) {
         android.view.Display.Mode active = display.getMode();
-        if (!preferHighest && isFrameCadenceCompatible(active.getRefreshRate(), limit)) return active;
+        final float ceiling = preferHighest || ceilingHz <= 0f ? Float.MAX_VALUE : ceilingHz + 0.5f;
         android.view.Display.Mode best = null;
         for (android.view.Display.Mode mode : display.getSupportedModes()) {
             if (mode.getPhysicalWidth() != active.getPhysicalWidth()
                     || mode.getPhysicalHeight() != active.getPhysicalHeight()) continue;
+            if (mode.getRefreshRate() > ceiling) continue;
             if (!isFrameCadenceCompatible(mode.getRefreshRate(), limit)) continue;
-            if (best == null
-                    || (preferHighest ? mode.getRefreshRate() > best.getRefreshRate()
-                                      : mode.getRefreshRate() < best.getRefreshRate())) best = mode;
+            if (best == null || mode.getRefreshRate() > best.getRefreshRate()) best = mode;
         }
         return best;
     }

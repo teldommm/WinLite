@@ -215,14 +215,23 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativePresentFrame(
     jlong guestFrameNs, jlongArray jout)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    int64_t out[3] = {0, 0, 0};
+    int64_t out[4] = {0, 0, 0, 0};
     if (r && ahbPtr)
         r->presentFrame(contentId, sourceId, reinterpret_cast<AHardwareBuffer*>(ahbPtr),
                         guestFrameNs, out);
-    if (jout && env->GetArrayLength(jout) >= 3) {
-        jlong vals[3] = {(jlong)out[0], (jlong)out[1], (jlong)out[2]};
-        env->SetLongArrayRegion(jout, 0, 3, vals);
+    if (jout) {
+        const jsize n = std::min<jsize>(env->GetArrayLength(jout), 4);
+        jlong vals[4] = {(jlong)out[0], (jlong)out[1], (jlong)out[2], (jlong)out[3]};
+        if (n > 0) env->SetLongArrayRegion(jout, 0, n, vals);
     }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSourceBusy(
+    JNIEnv*, jobject, jlong handle, jlong sourceId)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return (r && r->sourceBusy(sourceId)) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL

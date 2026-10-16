@@ -135,6 +135,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativePresentFrame(long handle, long contentId, long sourceId,
         long ahbPtr, long guestFrameNs, long[] plan);
     @FastNative private native void nativeSetFpsLimit(long handle, int fps);
+    @FastNative private native boolean nativeSourceBusy(long handle, long sourceId);
     @FastNative private native void nativeOnVsync(long handle, long frameTimeNs, long deadlineNs, long presentNs);
     @FastNative private native void nativeReleaseDrawable(long handle, long drawableId);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
@@ -295,7 +296,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         if (nativeHandle == 0) return;
         android.view.Display display = getDisplay();
         float hz = display != null ? display.getRefreshRate() : 0f;
-        if (hz > 1f) nativeSetDisplayRefreshRate(nativeHandle, hz);
+        if (hz > 1f) {
+            nativeSetDisplayRefreshRate(nativeHandle, hz);
+            vsyncClock.setNominalPeriod(Math.round(1.0e9 / hz));
+        }
     }
 
     private final android.hardware.display.DisplayManager.DisplayListener displayListener =
@@ -347,6 +351,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public boolean getVsync(long nowNs, long[] out) { return vsyncClock.sampleAt(nowNs, out); }
+
+    @Override
+    public boolean isGuestBufferBusy(Drawable buffer) {
+        synchronized (lock) {
+            return nativeHandle != 0 && buffer != null && nativeSourceBusy(nativeHandle, did(buffer));
+        }
+    }
 
     @Override
     public void onDestroy() {

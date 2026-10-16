@@ -112,6 +112,7 @@ struct VkTable {
     PFN_vkWaitForFences WaitForFences;
     PFN_vkResetFences ResetFences;
     PFN_vkGetFenceStatus GetFenceStatus;
+    PFN_vkGetSemaphoreCounterValue GetSemaphoreCounterValue;
 
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID GetAndroidHardwareBufferPropertiesANDROID;
 };
@@ -212,8 +213,10 @@ public:
     //  * never sooner than one limit interval after the previous release (the rate cap).
     // Without a vsync clock, or with frame generation (which paces itself), the limit is a plain
     // release cadence and frames are shown at once.
+    // out[0] release time, out[1] previous frame on screen until, out[2] depth (0 = no limit),
+    // out[3] when to send the present's CompleteNotify (0 = now).
     void presentFrame(int64_t contentId, int64_t sourceId, AHardwareBuffer* ahb,
-                      int64_t guestFrameNs, int64_t out[3]);
+                      int64_t guestFrameNs, int64_t out[4]);
     void setFpsLimit(int fps);
     // Choreographer timing from Java, once per vsync. deadlineNs/presentNs are the preferred
     // frame timeline (API 33+); 0 when unavailable.
@@ -291,6 +294,7 @@ private:
         AHardwareBuffer* ahb      = nullptr;
         int              users    = 0;      // texMap entries currently showing it
         bool             released = false;  // the Java drawable is gone
+        uint64_t         lastSerial = 0;    // last frame (submittedSerial) that sampled it
     };
     // A texture whose window is gone. It is destroyed once the frame that last drew it has
     // finished on the GPU (serial <= completedSerial), so nothing waits for the device to go idle.
@@ -638,6 +642,9 @@ public:
     // per refresh), content frames only while at most one frame is waiting - a deferred frame
     // composites the newest guest content when it does run.
     std::atomic<int64_t> refreshPeriodNs_{0};
+    // The compositor's own swapchain mode: the pacing model is a FIFO queue; with MAILBOX or
+    // IMMEDIATE there is no queue to drain and holding a frame only delays it.
+    std::atomic<bool> swapchainFifo_{true};
     int64_t presentSlotEndNs_ = 0;   // render thread only
     int64_t pacingWaitNs(bool content) const;
     // lastDesiredNs: desired presentation time of the last present (display timing), 0 = none.
@@ -690,6 +697,10 @@ public:
         int     pipelineDepth    = 1;      // guest buffers in flight under the limiter
         uint32_t lateHistory     = 0;      // bit per recent frame: missed its slot
         int64_t depthTwoUntilNs  = 0;
+        // How long depth 2 is kept after misses: doubles when the guest misses again soon after
+        // going back to 1 (a game that only just does not fit), back to 5 s once it settles.
+        int64_t depthTwoHoldNs   = 5000000000LL;
+        int64_t depthOneSinceNs  = 0;
         int64_t lastPresentNs    = 0;
         void resetCadence() { idealSlotNs = 0; lastReleaseNs = 0; }
     };
@@ -700,6 +711,14 @@ public:
     void    applyDuePresentsLocked(int64_t nowNs);
     void    updateNextPendingDueLocked();
     std::atomic<bool> globalPriorityHigh_{false};
+    // Timeline semaphore the last submit of every frame signals with that frame's serial, so any
+    // thread can ask whether the GPU is done with a frame (vkGetSemaphoreCounterValue) without
+    // touching the render thread's fences. VK_NULL_HANDLE when the device has no timelines.
+    VkSemaphore gpuTimeline_ = VK_NULL_HANDLE;
+    // Whether the GPU may still be reading the guest buffer `srcId` (a frame that sampled it
+    // has not finished). False when unknown (no timeline semaphore): callers then fall back
+    // to their own timing.
+    bool sourceBusy(int64_t srcId);
 
     std::thread       renderThread;
     std::atomic<bool> isRunning{false};
