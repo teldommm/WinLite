@@ -93,6 +93,7 @@ import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingDriverChoice
 import com.winlator.cmod.ui.settings.SettingInstallChoice
 import com.winlator.cmod.ui.settings.SettingMappedChoice
+import com.winlator.cmod.ui.settings.ResolutionField
 import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.settings.SettingToggle
 import com.winlator.cmod.ui.settings.SettingWineRuntimeChoice
@@ -868,7 +869,7 @@ private fun ContainerCategoryV2(
                 }
                 if (shownScreen == "Custom") {
                     SettingsDivider()
-                    SettingText("Custom resolution", s.screen) { s.screen = it }
+                    ResolutionField(s.screen) { s.screen = it }
                 }
                 SettingsDivider()
                 SettingChoice("Renderer", s.renderer, listOf("Vulkan")) {

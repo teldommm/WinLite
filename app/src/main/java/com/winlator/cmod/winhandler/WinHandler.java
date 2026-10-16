@@ -77,11 +77,6 @@ public class WinHandler {
     private LocalServerSocket vibrationServer;
     private volatile boolean vibrationRunning = false;
     private boolean[] vibrationEnabledSlots = new boolean[MAX_CONTROLLERS];
-    // Per slot: uptime until which a rumble started here is still playing. A "stop" from the
-    // game only cancels the vibrator while its own rumble is running — games send zero-rumble
-    // updates freely, and Vibrator.cancel() also killed the on-screen controls' touch clicks
-    // (on the phone vibrator the two share the same app vibration).
-    private final long[] rumbleUntil = new long[MAX_CONTROLLERS];
 
     // GamepadMode.NONE: the game gets no gamepad at all — no slot is ever assigned, so no fake
     // evdev node is created and Wine enumerates nothing (touch-controls and physical pads alike).
@@ -372,106 +367,75 @@ public class WinHandler {
     }
 
     private void triggerVibration(int strong, int weak, int durationMs, int slot) {
-    if (!isValidSlot(slot) || !vibrationEnabledSlots[slot])
-        return;
+        if (!isValidSlot(slot) || !vibrationEnabledSlots[slot])
+            return;
 
-    boolean shouldCancel = (durationMs == 0 && strong == 0 && weak == 0);
+        boolean stop = strong <= 0 && weak <= 0;
 
-    Vibrator vibrator = null;
-    android.os.VibratorManager vibratorManager = null;
-    boolean hasMultiMotor = false;
-
-    Integer deviceId = null;
-    for (Map.Entry<Integer, Integer> entry : deviceToSlot.entrySet()) {
-        if (entry.getValue() == slot) {
-            deviceId = entry.getKey();
-            break;
+        Integer deviceId = null;
+        for (Map.Entry<Integer, Integer> entry : deviceToSlot.entrySet()) {
+            if (entry.getValue() == slot) {
+                deviceId = entry.getKey();
+                break;
+            }
         }
-    }
+        if (deviceId == null) return;
 
-    if (deviceId != null && deviceId.equals(OSC_DEVICE_ID)) {
-        vibrator = (Vibrator) activity.getSystemService(Context.VIBRATOR_SERVICE);
-    } else if (deviceId != null) {
+        // On-screen gamepad: the phone vibrates (through TouchHaptics, the vibrator's single
+        // owner, so rumble and touch clicks don't cut each other off).
+        if (deviceId.equals(OSC_DEVICE_ID)) {
+            rumbleOnPhone(slot, strong, weak, durationMs);
+            return;
+        }
+
         android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
-        if (device != null) {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                vibratorManager = device.getVibratorManager();
-                if (vibratorManager != null && vibratorManager.getVibratorIds().length > 1) {
-                    hasMultiMotor = true;
-                }
+        if (device == null) return;
+
+        Vibrator vibrator = null;
+        android.os.VibratorManager vibratorManager = null;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            vibratorManager = device.getVibratorManager();
+            int[] ids = vibratorManager != null ? vibratorManager.getVibratorIds() : new int[0];
+
+            // Dual-motor controller: strong -> first motor, weak -> second.
+            if (ids.length > 1) {
+                vibrateMotor(vibratorManager.getVibrator(ids[0]), stop ? 0 : strong, durationMs);
+                vibrateMotor(vibratorManager.getVibrator(ids[1]), stop ? 0 : weak, durationMs);
+                return;
             }
-
-            if (!hasMultiMotor) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
-                        && vibratorManager != null) {
-                    int[] ids = vibratorManager.getVibratorIds();
-                    if (ids.length > 0) {
-                        vibrator = vibratorManager.getVibrator(ids[0]);
-                    }
-                } else {
-                    vibrator = device.getVibrator();
-                }
-
-                if (vibrator == null || !vibrator.hasVibrator()) {
-                    if (!deviceToSlot.containsKey(OSC_DEVICE_ID)
-                            && (fallbackSlot == -1 || fallbackSlot == slot)) {
-                        vibrator = (Vibrator) activity.getSystemService(Context.VIBRATOR_SERVICE);
-                        fallbackSlot = slot;
-                    } else {
-                        vibrator = null;
-                    }
-                }
-            }
-        }
-    }
-
-    if (hasMultiMotor && vibratorManager != null
-            && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-        int[] vibratorIds = vibratorManager.getVibratorIds();
-
-        if (vibratorIds.length >= 1) {
-            Vibrator vStrong = vibratorManager.getVibrator(vibratorIds[0]);
-            if (!shouldCancel && strong > 0) {
-                int amplitude = clampAmplitude(strong);
-                int duration = Math.max(1, durationMs);
-                vStrong.vibrate(VibrationEffect.createOneShot(duration, amplitude));
-            } else {
-                vStrong.cancel();
-            }
-        }
-
-        if (vibratorIds.length >= 2) {
-            Vibrator vWeak = vibratorManager.getVibrator(vibratorIds[1]);
-            if (!shouldCancel && weak > 0) {
-                int amplitude = clampAmplitude(weak);
-                int duration = Math.max(1, durationMs);
-                vWeak.vibrate(VibrationEffect.createOneShot(duration, amplitude));
-            } else {
-                vWeak.cancel();
-            }
-        }
-        return;
-    }
-
-    if (vibrator == null || !vibrator.hasVibrator())
-        return;
-
-    if (!shouldCancel && (strong > 0 || weak > 0)) {
-        int intensity = Math.max(strong, weak);
-        int amplitude = clampAmplitude(intensity);
-        int duration = Math.max(1, durationMs);
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(duration, amplitude));
+            if (ids.length == 1) vibrator = vibratorManager.getVibrator(ids[0]);
         } else {
-            vibrator.vibrate(duration);
+            vibrator = device.getVibrator();
         }
-        rumbleUntil[slot] = android.os.SystemClock.uptimeMillis() + duration;
-    } else if (android.os.SystemClock.uptimeMillis() < rumbleUntil[slot]) {
-        vibrator.cancel();
-        rumbleUntil[slot] = 0;
+
+        if (vibrator != null && vibrator.hasVibrator()) {
+            vibrateMotor(vibrator, stop ? 0 : Math.max(strong, weak), durationMs);
+            return;
+        }
+
+        // Controller without a motor: one such slot may fall back to the phone, unless the
+        // on-screen gamepad already uses it.
+        if (!deviceToSlot.containsKey(OSC_DEVICE_ID) && (fallbackSlot == -1 || fallbackSlot == slot)) {
+            fallbackSlot = slot;
+            rumbleOnPhone(slot, strong, weak, durationMs);
+        }
     }
-}
+
+    private void rumbleOnPhone(int slot, int strong, int weak, int durationMs) {
+        com.winlator.cmod.widget.TouchHaptics.shared(activity).rumble(slot, strong, weak, durationMs);
+    }
+
+    // A controller's own motor (not shared with touch clicks, so a stop can always cancel).
+    private void vibrateMotor(Vibrator motor, int magnitude, int durationMs) {
+        if (motor == null) return;
+        if (magnitude <= 0) {
+            motor.cancel();
+            return;
+        }
+        // evdev replay.length 0 = "until stopped"; a 1 ms pulse used to be played instead.
+        int duration = durationMs > 0 ? durationMs : 10_000;
+        motor.vibrate(VibrationEffect.createOneShot(duration, clampAmplitude(magnitude)));
+    }
 
 private int clampAmplitude(int value) {
     return Math.min(255, Math.max(1, (int) ((value / 65535.0f) * 255)));
@@ -648,6 +612,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
     private void releaseSlot(int deviceId) {
         Integer slot = deviceToSlot.remove(deviceId);
         if (slot != null) {
+            com.winlator.cmod.widget.TouchHaptics.shared(activity).stopRumble(slot);
             if (fallbackSlot == slot) fallbackSlot = -1;
             if (writers[slot] != null) {
                 writers[slot].destroy();
@@ -687,6 +652,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         usedSlots.clear();
         controllers.clear();
         fallbackSlot = -1;
+        com.winlator.cmod.widget.TouchHaptics.shared(activity).stopAllRumble();
 
         vibrationRunning = false;
         if (vibrationServer != null) {

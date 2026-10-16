@@ -834,6 +834,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             ProcessHelper.pauseAllWineProcesses();
+            // The paused game can't send its rumble "stop" any more.
+            com.winlator.cmod.widget.TouchHaptics.shared(this).stopAllRumble();
         }
 
         savePlaytimeData();

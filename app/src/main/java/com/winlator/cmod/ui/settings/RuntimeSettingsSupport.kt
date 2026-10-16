@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
@@ -811,6 +812,66 @@ internal fun SettingText(
         keyboardOptions = KeyboardOptions(imeAction = if (minLines > 1) ImeAction.Default else ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() })
     )
+}
+
+private const val RESOLUTION_MIN = 64
+private const val RESOLUTION_MAX = 7680
+
+private fun resolutionPart(value: String, index: Int): String =
+    value.lowercase().split('x', '×', '*').getOrNull(index)?.filter(Char::isDigit)?.take(4).orEmpty()
+
+private fun isValidResolutionPart(value: String): Boolean =
+    value.toIntOrNull()?.let { it in RESOLUTION_MIN..RESOLUTION_MAX } == true
+
+/**
+ * Custom resolution editor: two numeric fields with a fixed "×" between them,
+ * so the separator cannot be removed. [onValid] receives "WxH" only when both
+ * parts are valid; intermediate (incomplete) input stays local to the field.
+ */
+@Composable
+internal fun ResolutionField(
+    value: String,
+    onValid: (String) -> Unit
+) {
+    val focusManager = LocalFocusManager.current
+    var width by remember(value) { mutableStateOf(resolutionPart(value, 0)) }
+    var height by remember(value) { mutableStateOf(resolutionPart(value, 1)) }
+
+    fun push() {
+        if (isValidResolutionPart(width) && isValidResolutionPart(height)) onValid("${width}x${height}")
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = width,
+            onValueChange = { width = it.filter(Char::isDigit).take(4); push() },
+            label = { Text("Width") },
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            isError = !isValidResolutionPart(width),
+            shape = WinZShapes.Small,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+        )
+        Text(
+            "×",
+            modifier = Modifier.padding(horizontal = 10.dp),
+            style = MaterialTheme.typography.titleMedium
+        )
+        OutlinedTextField(
+            value = height,
+            onValueChange = { height = it.filter(Char::isDigit).take(4); push() },
+            label = { Text("Height") },
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            isError = !isValidResolutionPart(height),
+            shape = WinZShapes.Small,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() })
+        )
+    }
 }
 
 @Composable

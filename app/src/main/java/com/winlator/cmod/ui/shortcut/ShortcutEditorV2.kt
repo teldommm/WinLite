@@ -112,6 +112,7 @@ import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingDriverChoice
 import com.winlator.cmod.ui.settings.SettingInstallChoice
 import com.winlator.cmod.ui.settings.SettingMappedChoice
+import com.winlator.cmod.ui.settings.ResolutionField
 import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.settings.SettingToggle
 import com.winlator.cmod.ui.settings.SettingsCard
@@ -908,9 +909,9 @@ private fun ShortcutCategoryV2(
                 }
                 if (screenChoice == "Custom") {
                     SettingsDivider()
-                    SettingText("Custom resolution", s.screen) { value ->
+                    ResolutionField(s.screen) { value ->
                         s.screen = value
-                        if (Regex("\\d{2,5}x\\d{2,5}").matches(value.trim())) s.extra("screenSize", normalizeResolution(value))
+                        s.extra("screenSize", value)
                     }
                 }
                 SettingsDivider()

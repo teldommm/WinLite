@@ -32,6 +32,7 @@ import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingDriverChoice
 import com.winlator.cmod.ui.settings.SettingInstallChoice
 import com.winlator.cmod.ui.settings.SettingMappedChoice
+import com.winlator.cmod.ui.settings.ResolutionField
 import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.settings.SettingToggle
 import com.winlator.cmod.ui.settings.SettingsCard
@@ -223,11 +224,9 @@ internal fun ContainerRuntimePane(
                     }
                 }
                 if (screenChoice.equals("Custom", true)) {
-                    SettingsDivider(); SettingText("Custom resolution", screen) {
+                    SettingsDivider(); ResolutionField(screen) {
                         screen = it
-                        if (Regex("\\d{2,5}x\\d{2,5}", RegexOption.IGNORE_CASE).matches(it.trim())) {
-                            container.setScreenSize(normalizeResolution(it)); container.saveData()
-                        }
+                        container.setScreenSize(it); container.saveData()
                     }
                 }
             }

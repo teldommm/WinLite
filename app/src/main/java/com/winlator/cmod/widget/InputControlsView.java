@@ -1533,7 +1533,7 @@ public class InputControlsView extends View {
     // the editor and when the sidebar's touchscreen vibration is off.
     public void playTouchHaptic(int kind) {
         if (!touchHapticsEnabled || kind == TouchHaptics.NONE) return;
-        if (touchHaptics == null) touchHaptics = new TouchHaptics(getContext());
+        if (touchHaptics == null) touchHaptics = TouchHaptics.shared(getContext());
         touchHaptics.play(kind);
     }
 

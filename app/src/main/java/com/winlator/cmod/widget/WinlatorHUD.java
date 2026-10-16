@@ -180,7 +180,7 @@ public class WinlatorHUD extends View {
     private volatile float frameGenPresentedRate = 0f;
 
     private int snapGpu = -1, snapCpu = -1, snapCpuTemp = -1;
-    // Signed battery power in mW (+ charging, - draining); PWR_NA when unavailable.
+    // Battery power magnitude in mW; PWR_NA when unavailable.
     private static final int PWR_NA = Integer.MIN_VALUE;
     // |PWR| below this (mW) is shown without a sign: it rounds to 0.0W.
     private static final int PWR_SIGN_MIN_MW = 50;
@@ -269,8 +269,18 @@ public class WinlatorHUD extends View {
         detectGpuPathsOnce();
         detectGpuNameOnce();
         loadPrefs();
+        dropLegacyPowerPrefs();
         refreshBackendRenderer(false);
         setLayerType(LAYER_TYPE_HARDWARE, null);
+    }
+
+    private void dropLegacyPowerPrefs() {
+        if (prefs.contains(LEGACY_KEY_DRAIN_SIGN_BM) || prefs.contains(LEGACY_KEY_DRAIN_SIGN_SYSFS)) {
+            prefs.edit()
+                    .remove(LEGACY_KEY_DRAIN_SIGN_BM)
+                    .remove(LEGACY_KEY_DRAIN_SIGN_SYSFS)
+                    .apply();
+        }
     }
 
     private void initPaints(float density) {
@@ -646,9 +656,8 @@ public class WinlatorHUD extends View {
     private void readBattery() {
         try {
             // Fresh sticky intent on every read (registerReceiver(null, ...) is one cheap binder
-            // call, no receiver is registered). It used to be cached for 5 s, so right after
-            // plugging in, "plugged" was still 0 while the current was already charging, and
-            // the charging direction got learned as "draining" (PWR then showed "-" on charger).
+            // call, no receiver is registered), so plug state, status and the PWR sign derived
+            // from them always describe the same moment.
             Intent batt = getContext().registerReceiver(null, batteryIntentFilter);
             if (batt == null) return;
 
@@ -678,34 +687,41 @@ public class WinlatorHUD extends View {
                 }
             }
 
-            // Signed: + = net current into the battery (charging), - = draining.
-            // Only fact that is certain: on battery and the system itself reports DISCHARGING.
-            boolean confirmedDischarging = plugged == 0
-                    && status == BatteryManager.BATTERY_STATUS_DISCHARGING;
-            float amps = getBatteryCurrentSignedAmps(plugged != 0, confirmedDischarging,
-                    status == BatteryManager.BATTERY_STATUS_CHARGING);
+            // Direction comes only from the state reported in this same sticky intent, never
+            // from the sign of CURRENT_NOW / current_now: that sign differs between devices, and
+            // some kernels report the magnitude only. It used to be learned and stored in prefs,
+            // and a wrongly learned value (plug-in race, unsigned kernel, old builds) showed
+            // "-" on the charger in every later session.
+            //  - status CHARGING                     -> "+" (matches the CHG label);
+            //  - on battery                          -> "-" (nothing else can feed the battery);
+            //  - external power, DISCHARGING         -> "-" (charger can't cover the load);
+            //  - external power, FULL / NOT_CHARGING -> no sign (bypass / charge limit, ~0 W).
+            boolean onExternalPower = plugged != 0;
+            boolean statusCharging = status == BatteryManager.BATTERY_STATUS_CHARGING;
+            boolean statusDischarging = status == BatteryManager.BATTERY_STATUS_DISCHARGING;
+            int sign;
+            if (statusCharging) sign = 1;
+            else if (!onExternalPower) sign = -1;
+            else if (statusDischarging) sign = -1;
+            else sign = 0;
+
+            float amps = getBatteryCurrentAmps(onExternalPower,
+                    !onExternalPower && statusDischarging, statusCharging);
             float watts = (!Float.isNaN(amps) && voltageMv > 0)
                     ? (voltageMv / 1000f) * amps : Float.NaN;
-            int sign = Float.isNaN(watts) ? 0 : (int) Math.signum(watts);
 
             // Only when the current is unavailable. A real 0 A net current on external power
-            // (bypass / charge limit) is a valid reading and must stay 0.0W; it used to fall
-            // through to power_now and show an unsigned value of unknown meaning instead.
+            // (bypass / charge limit) is a valid reading and must stay 0.0W.
             if (Float.isNaN(watts)) {
                 long powerUw = readFirstSysFsLong(POWER_CHANNELS);
-                if (powerUw != 0L) {
-                    // power_now has no reliable sign across devices: unplugged it can only be
-                    // draining; on external power the direction is unknown, so no sign.
-                    float magnitude = Math.abs(powerUw) / 1_000_000f;
-                    sign = plugged == 0 ? -1 : 0;
-                    watts = plugged == 0 ? -magnitude : magnitude;
-                }
+                if (powerUw != 0L) watts = Math.abs(powerUw) / 1_000_000f;
             }
 
             if (!Float.isNaN(watts) && prefs.getBoolean(KEY_DUAL_CELL, false)) {
                 watts *= 2f;
             }
 
+            // Magnitude in mW; the direction is kept separately in "sign".
             int mw = Float.isNaN(watts) ? PWR_NA : Math.round(watts * 1000f);
             // Below 50 mW the value prints as 0.0W, so a sign there is noise ("+0.0W"/"−0.0W").
             if (mw != PWR_NA && Math.abs(mw) < PWR_SIGN_MIN_MW) sign = 0;
@@ -745,7 +761,7 @@ public class WinlatorHUD extends View {
     // kept in a static field per process) read the near-zero net current of bypass / charge
     // limit / FULL as amps: a few mA showed as +20..50 W on the charger, possibly for the whole
     // session. Now the unit is learned per source and stored in prefs (device calibration, like
-    // the drain sign), so it is decided once per install:
+    // the screen layout), so it is decided once per install:
     //  - any reading >= 20000                      -> uA (certain);
     //  - certain discharge with 50..19999 (raw)    -> mA (in uA that would be < 20 mA while the
     //    screen is on and a game runs, which is impossible), after SIGN_CONFIRM_SAMPLES samples.
@@ -798,35 +814,21 @@ public class WinlatorHUD extends View {
         return milli ? magnitude / 1000f : magnitude / 1_000_000f;
     }
 
-    // ---------- Current direction ----------
-    // Android documents CURRENT_NOW as positive = charging, negative = discharging, but many
-    // devices (and most sysfs current_now nodes) use the opposite sign. So the sign that means
-    // "draining" is learned per source the first time the device is unplugged (the only moment
-    // the direction is certain) and kept in prefs. Until then: unplugged = draining, plugged =
-    // the documented convention.
-    private static final String KEY_DRAIN_SIGN_BM = "hud_drain_sign_bm";
-    private static final String KEY_DRAIN_SIGN_SYSFS = "hud_drain_sign_sysfs";
-    // Below this the sign of an unplugged reading is noise, not direction (mA).
-    private static final float SIGN_LEARN_MIN_MA = 50f;
-    // Consecutive confirming samples (stats thread only) needed to store a learned sign.
+    // ---------- Current magnitude ----------
+    // Consecutive confirming samples (stats thread only) needed to store a learned unit.
     private static final int SIGN_CONFIRM_SAMPLES = 2;
-    private String signLearnKey = null;
-    private int signLearnSign = 0;
-    private int signLearnCount = 0;
-
-    private int drainSign(String key) {
-        return prefs.getInt(key, 0);
-    }
+    // Stored "draining" sign of the old direction learning. No longer used; removed on start.
+    private static final String LEGACY_KEY_DRAIN_SIGN_BM = "hud_drain_sign_bm";
+    private static final String LEGACY_KEY_DRAIN_SIGN_SYSFS = "hud_drain_sign_sysfs";
 
     /**
-     * Battery current in A: + = into the battery (charging), - = out of it (draining); NaN if
-     * unavailable. On external power a net current of 0 is a real reading (the charger covers
-     * the whole load, e.g. bypass charging / charge limit) and returns 0, so PWR shows 0.0W.
+     * Magnitude of the battery current in A; NaN if unavailable. The direction is not taken
+     * from here (see readBattery). On external power a net current of 0 is a real reading (the
+     * charger covers the whole load: bypass charging / charge limit) and returns 0.
      */
-    private float getBatteryCurrentSignedAmps(boolean onExternalPower, boolean confirmedDischarging,
-                                              boolean statusCharging) {
+    private float getBatteryCurrentAmps(boolean onExternalPower, boolean confirmedDischarging,
+                                        boolean statusCharging) {
         long raw = Long.MIN_VALUE;
-        String signKey = KEY_DRAIN_SIGN_BM;
         String unitKey = KEY_UNIT_BM;
         if (batteryManager != null) {
             raw = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
@@ -835,52 +837,14 @@ public class WinlatorHUD extends View {
             long sysfs = readFirstSysFsLong(CURRENT_CHANNELS);
             if (sysfs != 0L) {
                 raw = sysfs;
-                signKey = KEY_DRAIN_SIGN_SYSFS;
                 unitKey = KEY_UNIT_SYSFS;
             }
         }
         if (raw == Long.MIN_VALUE) return Float.NaN;
         if (raw == 0L) return onExternalPower ? 0f : Float.NaN;
 
-        long magnitude = Math.abs(raw);
-        float amps = currentMagnitudeToAmps(magnitude, unitKey, onExternalPower,
+        return currentMagnitudeToAmps(Math.abs(raw), unitKey, onExternalPower,
                 confirmedDischarging, statusCharging);
-
-        int rawSign = raw > 0 ? 1 : -1;
-        int drain = drainSign(signKey);
-
-        // Learn the "draining" sign only from a certain fact (unplugged + status DISCHARGING),
-        // and only after SIGN_CONFIRM_SAMPLES consecutive identical readings, so a single
-        // sample taken while the plug state is changing can never overwrite it. Charging
-        // direction is deliberately not learned: status CHARGING does not guarantee the net
-        // battery current is positive (weak charger under a heavy load).
-        if (confirmedDischarging && amps * 1000f >= SIGN_LEARN_MIN_MA) {
-            if (drain != rawSign) {
-                if (signKey.equals(signLearnKey) && signLearnSign == rawSign) {
-                    signLearnCount++;
-                } else {
-                    signLearnKey = signKey;
-                    signLearnSign = rawSign;
-                    signLearnCount = 1;
-                }
-                if (signLearnCount >= SIGN_CONFIRM_SAMPLES) {
-                    drain = rawSign;
-                    prefs.edit().putInt(signKey, drain).apply();
-                    signLearnCount = 0;
-                }
-            } else {
-                signLearnCount = 0;
-            }
-        } else {
-            signLearnCount = 0;
-        }
-
-        boolean draining;
-        if (confirmedDischarging) draining = true; // certain, regardless of what was learned
-        else if (drain != 0) draining = rawSign == drain;
-        else if (!onExternalPower) draining = true;
-        else draining = rawSign < 0; // documented convention until learned
-        return draining ? -amps : amps;
     }
 
     private long readFirstSysFsLong(String[] paths) {
@@ -1818,12 +1782,16 @@ public class WinlatorHUD extends View {
 
     // Prefs-only variants for when the HUD view doesn't exist yet; it reads these on creation.
     // Metrics: back to "show everything, no dual-cell correction". The mask is written explicitly (not
-    // removed) so the pref listener sees the change. The learned battery drain-sign and
-    // current-unit keys are device calibration, not a setting, and are left alone.
+    // removed) so the pref listener sees the change. The learned current-unit keys are cleared
+    // too (relearned on the next reads), so a reset also recovers from a wrongly learned unit.
     public static void resetSavedMetrics(Context context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putInt(KEY_SHOW, SHOW_DEFAULT)
                 .remove(KEY_DUAL_CELL)
+                .remove(KEY_UNIT_BM)
+                .remove(KEY_UNIT_SYSFS)
+                .remove(LEGACY_KEY_DRAIN_SIGN_BM)
+                .remove(LEGACY_KEY_DRAIN_SIGN_SYSFS)
                 .apply();
     }
     public static void resetSavedLayout(Context context) {
