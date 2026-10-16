@@ -31,6 +31,8 @@ public class XClientRequestHandler implements RequestHandler {
     public static final int MAX_REQUEST_LENGTH = 65535;
     /* opcodes (core, and extension major opcodes) already reported as unsupported */
     private static final boolean[] reportedOpcodes = new boolean[256];
+    /* opcodes whose handler already failed with a RuntimeException once (stack trace logged) */
+    private static final boolean[] failedOpcodes = new boolean[256];
 
     @Override
     public boolean handleRequest(Client client) throws IOException {
@@ -170,6 +172,8 @@ public class XClientRequestHandler implements RequestHandler {
         client.generateSequenceNumber();
         client.setRequestData(requestData);
         client.setRequestLength(requestLength);
+        // Where the next request starts, to resynchronise after a handler error.
+        final int requestEnd = inputStream.getActivePosition() + requestLength;
 
         try {
             switch (opcode) {
@@ -197,6 +201,7 @@ public class XClientRequestHandler implements RequestHandler {
                     try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
                         WindowRequests.destroySubWindows(client, inputStream, outputStream);
                     }
+                    break;
                 case ClientOpcodes.REPARENT_WINDOW:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER)) {
                         WindowRequests.reparentWindow(client, inputStream, outputStream);
@@ -472,11 +477,41 @@ public class XClientRequestHandler implements RequestHandler {
             if (remaining > 0) inputStream.skip(remaining);
         }
         catch (XRequestError e) {
-            client.skipRequest();
+            skipToRequestEnd(inputStream, requestEnd);
             e.sendError(client, opcode);
+        }
+        catch (RuntimeException e) {
+            /* A bug in one request handler (UnsupportedOperationException, IllegalStateException,
+             * a BufferUnderflowException from a malformed request, ...) used to escape through
+             * the epoll loop and end the X server's only request thread: every client froze for
+             * good. Drop just this request instead. No error is sent, for the same reason unknown
+             * requests get none: Wine hands unexpected X errors to Xlib's fatal handler. */
+            skipToRequestEnd(inputStream, requestEnd);
+            reportRequestFailure(opcode, client.getRequestData(), e);
         }
 
         return true;
+    }
+
+    /* Puts the stream at the start of the next request, whether the handler read too little or
+     * (on a failure half-way through) too much of this one. */
+    private static void skipToRequestEnd(XInputStream inputStream, int requestEnd) {
+        int position = inputStream.getActivePosition();
+        if (position != requestEnd) inputStream.setActivePosition(requestEnd);
+    }
+
+    private static void reportRequestFailure(byte opcode, byte requestData, RuntimeException e) {
+        int index = opcode & 0xff;
+        boolean first;
+        synchronized (failedOpcodes) {
+            first = !failedOpcodes[index];
+            failedOpcodes[index] = true;
+        }
+        String what = "Request opcode " + index + " (minor " + (requestData & 0xff) + ") failed, dropped";
+        /* Full stack trace once per opcode, one line after that: a game can repeat the same
+         * failing request every frame. */
+        if (first) Log.e("XClientRequestHandler", what, e);
+        else Log.w("XClientRequestHandler", what + ": " + e);
     }
 
     private static void reportUnsupported(byte opcode, byte requestData) {

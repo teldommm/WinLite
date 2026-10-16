@@ -286,6 +286,7 @@ private:
         bool                 needsTransition = false;
         AHardwareBuffer*     ahb            = nullptr;
         int64_t              srcId          = 0;   // isAHB: the SourceImport this borrows from
+        VkFormat             fmt            = VK_FORMAT_UNDEFINED;   // of img/view (view rebuilds)
     };
     // One Vulkan import per source drawable's AHardwareBuffer, shared by every window texture
     // that shows it (texMap entries borrow img/view/ds). Holds its own AHB reference.
@@ -646,6 +647,11 @@ public:
     // IMMEDIATE there is no queue to drain and holding a frame only delays it.
     std::atomic<bool> swapchainFifo_{true};
     int64_t presentSlotEndNs_ = 0;   // render thread only
+    // When the last frame was presented (render thread only). Outside FIFO there is no display
+    // queue to model, but a frame that only moves the cursor is still not worth more than one
+    // per refresh: with MAILBOX every pointer event (unbuffered, up to the mouse's polling rate)
+    // used to be a full composite, hundreds per second, taking GPU time from the game.
+    int64_t lastPresentNs_ = 0;
     int64_t pacingWaitNs(bool content) const;
     // lastDesiredNs: desired presentation time of the last present (display timing), 0 = none.
     void    notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs = 0);
@@ -792,6 +798,14 @@ public:
     void createSyncObjects();
     void cleanupSwapchain();
 
+    // Swizzle of every content view: R and B exchanged when swapRB is set.
+    VkComponentMapping contentSwizzle() const {
+        const VkComponentSwizzle id = VK_COMPONENT_SWIZZLE_IDENTITY;
+        return swapRB ? VkComponentMapping{VK_COMPONENT_SWIZZLE_B, id, VK_COMPONENT_SWIZZLE_R, id}
+                      : VkComponentMapping{id, id, id, id};
+    }
+    // Replaces wt.view by one with the current swizzle and points wt.ds at it. Device idle.
+    bool  rebuildContentView(WinTex& wt);
     bool  createWinTexResources(WinTex& wt, int w, int h);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
     void  destroyAllSourceImports();

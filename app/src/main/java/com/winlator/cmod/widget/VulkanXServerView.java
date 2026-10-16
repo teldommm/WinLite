@@ -26,6 +26,7 @@ import com.winlator.cmod.xserver.Property;
 import com.winlator.cmod.xserver.Window;
 import com.winlator.cmod.xserver.WindowAttributes;
 import com.winlator.cmod.xserver.WindowManager;
+import com.winlator.cmod.xserver.XLock;
 import com.winlator.cmod.xserver.XServer;
 
 import java.nio.ByteBuffer;
@@ -127,23 +128,28 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native boolean nativeReattachSurface(long handle, Surface surface);
     private native int[] nativeGetSwapchainSize(long handle);
 
-    @FastNative private native void nativeUpdateWindowContent(long handle, long id,
+    /* @FastNative only where the native side never waits: a thread in a @FastNative call cannot
+     * be suspended, so one that blocks (renderMutex is held across texture imports, and across
+     * a fence wait when the cursor changes size; frameMutex across a whole frame) holds up every
+     * garbage collection - and every thread, the UI thread included - until it returns. The
+     * methods that lock renderMutex or frameMutex are plain native calls. */
+    private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
-    @FastNative private native void nativeUpdateWindowContentAHB(long handle, long contentId,
+    private native void nativeUpdateWindowContentAHB(long handle, long contentId,
         long sourceId, long ahbPtr, short width, short height, int x, int y);
     @FastNative private native void nativeSetDisplayRefreshRate(long handle, float hz);
-    @FastNative private native void nativePresentFrame(long handle, long contentId, long sourceId,
+    private native void nativePresentFrame(long handle, long contentId, long sourceId,
         long ahbPtr, long guestFrameNs, long[] plan);
-    @FastNative private native void nativeSetFpsLimit(long handle, int fps);
-    @FastNative private native boolean nativeSourceBusy(long handle, long sourceId);
+    private native void nativeSetFpsLimit(long handle, int fps);
+    private native boolean nativeSourceBusy(long handle, long sourceId);
     @FastNative private native void nativeOnVsync(long handle, long frameTimeNs, long deadlineNs, long presentNs);
-    @FastNative private native void nativeReleaseDrawable(long handle, long drawableId);
-    @FastNative private native void nativeSetTransformAndScissor(long handle,
+    private native void nativeReleaseDrawable(long handle, long drawableId);
+    private native void nativeSetTransformAndScissor(long handle,
         float ox, float oy, float sx, float sy,
         boolean hasScissor, int scX, int scY, int scW, int scH);
     @FastNative private native void nativeSetPointerPos(long handle, short x, short y);
     @FastNative private native void nativeSetCursorVisible(long handle, boolean visible);
-    @FastNative private native void nativeUpdateCursorImage(long handle,
+    private native void nativeUpdateCursorImage(long handle,
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY);
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
@@ -151,8 +157,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native String nativeConfigureFrameGen(long handle, String cachePath,
                                                    int multiplier, float flowScale, float refreshHz,
                                                    int targetRate);
-    @FastNative private native float nativeGetFrameGenPresentedRate(long handle);
-    @FastNative private native boolean nativeFrameGenSupportsFp16(long handle);
+    private native float nativeGetFrameGenPresentedRate(long handle);
+    private native boolean nativeFrameGenSupportsFp16(long handle);
 
     private native void nativeDumpRendererInfo(long handle);
     private native void nativeSetFilterMode(long handle, int mode);
@@ -262,6 +268,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     // A fresh native renderer has no cursor image either: re-send the current
                     // X cursor (image + its own visibility), not just the global flag.
                     restoreCursorStateLocked();
+                    // ...and no window tree. Window events only ever reached the renderer that
+                    // existed when they happened: after a failed re-attach (renderer re-created)
+                    // the screen stayed black for good, and windows created before the first
+                    // renderer was up were never shown. Queued behind every window event already
+                    // sent, so it rebuilds the tree from the X server's current state.
+                    queueEvent(this::replayWindowTree);
                 }
             }
             synchronized (lock) {
@@ -471,6 +483,61 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 }
             }
         }
+    }
+
+    /**
+     * Sends the X server's whole window tree (geometry, stacking, map state, viewability and the
+     * X-drawn content) to the native renderer. Runs on eventExecutor, in order with the window
+     * events: a change made after the snapshot below is queued behind this and applied on top.
+     * Lock order is the X server's locks first, then {@code lock}, as everywhere else.
+     */
+    private void replayWindowTree() {
+        try (XLock xLock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
+            synchronized (lock) {
+                if (nativeHandle == 0) return;
+                Window root = xServer.windowManager.rootWindow;
+                nativeInitRootWindow(nativeHandle, root.id, did(root.getContent()),
+                    xServer.screenInfo.width, xServer.screenInfo.height);
+                replayChildrenLocked(root);
+            }
+        }
+    }
+
+    private void replayChildrenLocked(Window parent) {
+        List<Window> children = parent.getChildren();
+        if (children.isEmpty()) return;
+        final long[] orderedIds = new long[children.size()];
+        for (int i = 0; i < orderedIds.length; i++) {
+            Window window = children.get(i);
+            orderedIds[i] = window.id;
+            Drawable content = window.getContent();
+            nativeCreateWindow(nativeHandle, window.id, parent.id, did(content),
+                window.getX(), window.getY(), window.getWidth(), window.getHeight());
+            nativeSetWindowViewable(nativeHandle, window.id, isViewable(window));
+            if (window.attributes.isMapped()) {
+                nativeMapWindow(nativeHandle, window.id);
+                if (content != null) {
+                    synchronized (content.renderLock) {
+                        final long ahb = content.backingAHB;
+                        if (ahb != 0) {
+                            nativeUpdateWindowContentAHB(nativeHandle, did(content), did(content),
+                                ahb, content.width, content.height, window.getRootX(), window.getRootY());
+                        }
+                    }
+                }
+            }
+            replayChildrenLocked(window);
+        }
+        // Exact stacking order (also drops any duplicate child entries the creates may leave).
+        nativeSyncChildOrder(nativeHandle, parent.id, orderedIds, orderedIds.length);
+    }
+
+    /** checkViewable()'s verdict without its side effects. */
+    private boolean isViewable(Window window) {
+        if (unviewableWMClasses == null || window == xServer.windowManager.rootWindow) return true;
+        String wc = window.getClassName();
+        for (String cls : unviewableWMClasses) if (wc.contains(cls)) return false;
+        return true;
     }
 
     private void checkViewable(Window window) {

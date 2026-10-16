@@ -164,13 +164,9 @@ public abstract class DrawRequests {
         if (graphicsContext == null) throw new BadGraphicsContext(gcId);
         int length = client.getRemainingRequestLength();
 
-        while (length != 0) {
-            short x = inputStream.readShort();
-            short y = inputStream.readShort();
-            short width = inputStream.readShort();
-            short height = inputStream.readShort();
-            drawable.fillRect(x, y, width, height, graphicsContext.getBackground());
-            length -= 8;
-        }
+        // Read all rectangles first and draw them with one buffer lock and one content update.
+        short[] rects = new short[(length / 8) * 4];
+        for (int i = 0; i < rects.length; i++) rects[i] = inputStream.readShort();
+        drawable.fillRects(rects, graphicsContext.getBackground());
     }
 }

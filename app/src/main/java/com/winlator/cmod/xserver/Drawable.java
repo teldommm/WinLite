@@ -167,15 +167,21 @@ public class Drawable extends XResource {
         final long ahb = backingAHB;
         if (ahb == 0) return;
         if (depth == 1) {
-            drawBitmap(width, height, data, this.getStride(), ahb);
+            // Placed at (dstX, dstY) and clipped by the native side (it used to be drawn at 0,0
+            // and not clipped at all).
+            drawBitmap(dstX, dstY, width, height, data, this.getStride(), this.width, this.height, ahb);
         }
         else if (depth == 24 || depth == 32) {
-            dstX = (short)Mathf.clamp(dstX, 0, this.width-1);
-            dstY = (short)Mathf.clamp(dstY, 0, this.height-1);
-            if ((dstX + width) > this.width) width = (short)((this.width - dstX));
-            if ((dstY + height) > this.height) height = (short)((this.height - dstY));
+            // Clip to the drawable, moving the source origin along: clamping the destination
+            // alone shifted the image (negative dstX) and could read past the source.
+            int sx = srcX, sy = srcY, dx = dstX, dy = dstY, w = width, h = height;
+            if (dx < 0) { sx -= dx; w += dx; dx = 0; }
+            if (dy < 0) { sy -= dy; h += dy; dy = 0; }
+            if (dx + w > this.width) w = this.width - dx;
+            if (dy + h > this.height) h = this.height - dy;
+            if (w <= 0 || h <= 0 || sx < 0 || sy < 0) { data.rewind(); return; }
 
-            copyArea1(srcX, srcY, dstX, dstY, width, height, totalWidth, this.getStride(), data, ahb);
+            copyArea1((short)sx, (short)sy, (short)dx, (short)dy, (short)w, (short)h, totalWidth, this.getStride(), data, ahb);
         }
 
         data.rewind();
@@ -208,15 +214,21 @@ public class Drawable extends XResource {
         final long dstAhb = backingAHB;
         final long srcAhb = drawable.backingAHB;
         if (dstAhb == 0 || srcAhb == 0) return;
-        dstX = (short)Mathf.clamp(dstX, 0, this.width-1);
-        dstY = (short)Mathf.clamp(dstY, 0, this.height-1);
-        if ((dstX + width) > this.width) width = (short)(this.width - dstX);
-        if ((dstY + height) > this.height) height = (short)(this.height - dstY);
+        // Clip to both drawables: the source rectangle was not checked at all, so a copy from
+        // beyond the source's edge read past its buffer.
+        int sx = srcX, sy = srcY, dx = dstX, dy = dstY, w = width, h = height;
+        if (sx < 0) { dx -= sx; w += sx; sx = 0; }
+        if (sy < 0) { dy -= sy; h += sy; sy = 0; }
+        if (dx < 0) { sx -= dx; w += dx; dx = 0; }
+        if (dy < 0) { sy -= dy; h += dy; dy = 0; }
+        w = Math.min(w, Math.min(drawable.width - sx, this.width - dx));
+        h = Math.min(h, Math.min(drawable.height - sy, this.height - dy));
+        if (w <= 0 || h <= 0) return;
 
         if (gcFunction == GraphicsContext.Function.COPY) {
-            copyArea3(srcX, srcY, dstX, dstY, width, height, drawable.getStride(), this.getStride(), srcAhb, dstAhb);
+            copyArea3((short)sx, (short)sy, (short)dx, (short)dy, (short)w, (short)h, drawable.getStride(), this.getStride(), srcAhb, dstAhb);
         }
-        else copyAreaOp(srcX, srcY, dstX, dstY, width, height, drawable.getStride(), this.getStride(), srcAhb, dstAhb, gcFunction.ordinal());
+        else copyAreaOp((short)sx, (short)sy, (short)dx, (short)dy, (short)w, (short)h, drawable.getStride(), this.getStride(), srcAhb, dstAhb, gcFunction.ordinal());
         Runnable listener = onDrawListener;
         if (listener != null) listener.run();
     }
@@ -228,10 +240,13 @@ public class Drawable extends XResource {
     public void fillRect(int x, int y, int width, int height, int color) {
         final long ahb = backingAHB;
         if (ahb == 0) return;
-        x = (short)Mathf.clamp(x, 0, this.width-1);
-        y = (short)Mathf.clamp(y, 0, this.height-1);
-        if ((x + width) > this.width) width = (short)((this.width - x));
-        if ((y + height) > this.height) height = (short)((this.height - y));
+        // Clipped, not clamped: a rectangle starting left of / above the drawable used to keep
+        // its full size from the edge.
+        if (x < 0) { width += x; x = 0; }
+        if (y < 0) { height += y; y = 0; }
+        if ((x + width) > this.width) width = this.width - x;
+        if ((y + height) > this.height) height = this.height - y;
+        if (width <= 0 || height <= 0) return;
 
         fillRect((short)x, (short)y, (short)width, (short)height, color, this.getStride(), ahb);
 
@@ -239,15 +254,61 @@ public class Drawable extends XResource {
         if (listener != null) listener.run();
     }
 
-    public void drawLines(int color, int lineWidth, short... points) {
-        for (int i = 2; i < points.length; i += 2) {
-            drawLine(points[i-2], points[i-1], points[i+0], points[i+1], color, (short)lineWidth);
+    /**
+     * PolyFillRectangle: rects holds (x, y, width, height) quadruples. Every rectangle is clipped
+     * like {@link #fillRect}, then the whole request is drawn with one buffer lock and one content
+     * update - it used to be one lock/unlock (a cache flush of the whole buffer on many gralloc
+     * implementations) and one renderer wake-up per rectangle.
+     */
+    public void fillRects(short[] rects, int color) {
+        final long ahb = backingAHB;
+        if (ahb == 0 || rects.length < 4) return;
+        short[] clipped = new short[rects.length - rects.length % 4];
+        int count = 0;
+        for (int i = 0; i + 3 < rects.length; i += 4) {
+            int x = rects[i], y = rects[i+1], w = rects[i+2], h = rects[i+3];
+            if (x < 0) { w += x; x = 0; }
+            if (y < 0) { h += y; y = 0; }
+            if (x + w > this.width) w = this.width - x;
+            if (y + h > this.height) h = this.height - y;
+            if (w <= 0 || h <= 0) continue;
+            clipped[count*4] = (short)x; clipped[count*4+1] = (short)y;
+            clipped[count*4+2] = (short)w; clipped[count*4+3] = (short)h;
+            count++;
         }
+        if (count == 0) return;
+
+        fillRects(clipped, count, color, this.getStride(), ahb);
+
+        Runnable listener = onDrawListener;
+        if (listener != null) listener.run();
+    }
+
+    /** PolyLine: the segments between consecutive points, with one buffer lock and one content
+     *  update for the whole request (it was one per segment). Endpoints are clamped as in
+     *  {@link #drawLine}. */
+    public void drawLines(int color, int lineWidth, short... points) {
+        final long ahb = backingAHB;
+        if (ahb == 0 || points.length < 4) return;
+        if (lineWidth <= 0 || lineWidth > width || lineWidth > height) return;
+        final int count = points.length / 2;
+        short[] clamped = new short[count * 2];
+        for (int i = 0; i < count; i++) {
+            clamped[i*2] = (short)Mathf.clamp(points[i*2], 0, width-lineWidth);
+            clamped[i*2+1] = (short)Mathf.clamp(points[i*2+1], 0, height-lineWidth);
+        }
+
+        drawPolyLine(clamped, count, color, (short)lineWidth, this.getStride(), ahb);
+
+        Runnable listener = onDrawListener;
+        if (listener != null) listener.run();
     }
 
     public void drawLine(int x0, int y0, int x1, int y1, int color, int lineWidth) {
         final long ahb = backingAHB;
         if (ahb == 0) return;
+        // The square pen must fit the drawable, or the clamps below go negative.
+        if (lineWidth <= 0 || lineWidth > width || lineWidth > height) return;
         x0 = Mathf.clamp(x0, 0, width-lineWidth);
         y0 = Mathf.clamp(y0, 0, height-lineWidth);
         x1 = Mathf.clamp(x1, 0, width-lineWidth);
@@ -336,7 +397,7 @@ public class Drawable extends XResource {
         }
     }
 
-    private static native void drawBitmap(short width, short height, ByteBuffer srcData, short stride, long dstAHB);
+    private static native void drawBitmap(short dstX, short dstY, short width, short height, ByteBuffer srcData, short stride, short dstWidth, short dstHeight, long dstAHB);
 
     private static native void drawAlphaMaskedBitmap(byte foreRed, byte foreGreen, byte foreBlue, byte backRed, byte backGreen, byte backBlue, long srcAHB, short srcStride, long maskAHB, short maskStride, short width, short height, short stride, long dstAHB);
 
@@ -349,6 +410,10 @@ public class Drawable extends XResource {
     private static native void copyAreaOp(short srcX, short srcY, short dstX, short dstY, short width, short height, short srcStride, short dstStride, long srcAHB, long dstAHB, int gcFunction);
 
     private static native void fillRect(short x, short y, short width, short height, int color, short stride, long dstAHB);
+
+    private static native void fillRects(short[] rects, int count, int color, short stride, long dstAHB);
+
+    private static native void drawPolyLine(short[] points, int count, int color, short lineWidth, short stride, long dstAHB);
 
     private static native void drawLine(short x0, short y0, short x1, short y1, int color, short lineWidth, short stride, long dstAHB);
 

@@ -7,6 +7,7 @@ import com.winlator.cmod.xconnector.XOutputStream;
 import com.winlator.cmod.xconnector.XStreamLock;
 import com.winlator.cmod.xserver.Drawable;
 import com.winlator.cmod.xserver.GraphicsContext;
+import com.winlator.cmod.xserver.SHMSegmentManager;
 import com.winlator.cmod.xserver.XClient;
 import com.winlator.cmod.xserver.XLock;
 import com.winlator.cmod.xserver.XServer;
@@ -67,7 +68,7 @@ public class MITSHMExtension implements Extension {
         int xid = inputStream.readInt();
         int shmid = inputStream.readInt();
         inputStream.skip(4);
-        client.xServer.getSHMSegmentManager().attach(xid, shmid);
+        client.xServer.getSHMSegmentManager().attach(client, xid, shmid);
     }
 
     private static void detach(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
@@ -104,6 +105,14 @@ public class MITSHMExtension implements Extension {
         }
 
         drawable.drawImage(srcX, srcY, dstX, dstY, srcWidth, srcHeight, depth, data, totalWidth, totalHeight);
+    }
+
+    /* Xlib does not detach a process's segments when it exits; the mappings stayed for the rest
+     * of the session. Called with all X server locks held (SHMSEGMENT_MANAGER included). */
+    @Override
+    public void onClientDisconnected(XClient client) {
+        SHMSegmentManager shmSegmentManager = client.xServer.getSHMSegmentManager();
+        if (shmSegmentManager != null) shmSegmentManager.detachAll(client);
     }
 
     @Override

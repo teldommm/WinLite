@@ -580,9 +580,6 @@ void VulkanRendererContext::createSwapchain() {
     lsfg::explain(lsfgCaps_, lsfgCacheVariant_);
     RLOG("lsfg-native: %s", lsfgCaps_.reason);
     const bool nativeFg = fgArmed_.load() && fgCapsOk();
-    uint32_t imgCount=caps.minImageCount+1;
-    if (nativeFg) imgCount = std::max(imgCount, std::min(caps.minImageCount + kMaxPresentsPerFrame, 8u));
-    if (caps.maxImageCount>0&&imgCount>caps.maxImageCount) imgCount=caps.maxImageCount;
 
     uint32_t pmCount=0;
     vk_.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice,surface,&pmCount,nullptr);
@@ -593,6 +590,14 @@ void VulkanRendererContext::createSwapchain() {
     // LSFG presents generated frames before the real one and relies on FIFO
     // ordering them onto consecutive vblanks; mailbox would let them collapse.
     if (nativeFg) presentMode = VK_PRESENT_MODE_FIFO_KHR;
+
+    // One image above the minimum in every mode. In FIFO the render pacing already keeps at
+    // most one frame waiting, so the spare image adds no latency while the model holds; it is
+    // the margin for a late latch or release fence (with minImageCount 2 and no spare, any late
+    // composite repeats a frame). Frame generation needs room for a whole group of presents.
+    uint32_t imgCount = caps.minImageCount + 1;
+    if (nativeFg) imgCount = std::max(caps.minImageCount + 1, std::min(caps.minImageCount + kMaxPresentsPerFrame, 8u));
+    if (caps.maxImageCount>0&&imgCount>caps.maxImageCount) imgCount=caps.maxImageCount;
     swapchainFifo_.store(presentMode == VK_PRESENT_MODE_FIFO_KHR ||
                          presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR, std::memory_order_relaxed);
     if(verboseLog){
@@ -852,10 +857,14 @@ void VulkanRendererContext::createSampler() {
 }
 
 void VulkanRendererContext::createWinTexPool() {
-    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 129};
+    // One set per imported guest buffer, per CPU-filled texture and one for the cursor. 129 ran
+    // out with many windows plus swapchain images awaiting retirement, and every import past
+    // that failed: a black window. Sets are small; the pool is created once.
+    constexpr uint32_t kWinTexSets = 1024;
+    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kWinTexSets};
     VkDescriptorPoolCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     ci.flags=VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    ci.poolSizeCount=1; ci.pPoolSizes=&ps; ci.maxSets=129;
+    ci.poolSizeCount=1; ci.pPoolSizes=&ps; ci.maxSets=kWinTexSets;
     if (vk_.CreateDescriptorPool(device,&ci,nullptr,&winTexPool)!=VK_SUCCESS) throw std::runtime_error("wintexpool");
 }
 
@@ -975,7 +984,7 @@ bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
     if (vk_.AllocateMemory(device,&ai,nullptr,&wt.mem)!=VK_SUCCESS){vk_.DestroyImage(device,wt.img,nullptr);wt.img=VK_NULL_HANDLE;return false;}
     vk_.BindImageMemory(device,wt.img,wt.mem,0);
     VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=VK_FORMAT_B8G8R8A8_UNORM; vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-    vi.components={swapRB?VK_COMPONENT_SWIZZLE_B:VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,swapRB?VK_COMPONENT_SWIZZLE_R:VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY};
+    vi.components=contentSwizzle();
     if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){destroyWinTex(wt);return false;}
     VkDescriptorSetAllocateInfo dsai{}; dsai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO; dsai.descriptorPool=winTexPool; dsai.descriptorSetCount=1; dsai.pSetLayouts=&dsLayout;
     if (vk_.AllocateDescriptorSets(device,&dsai,&wt.ds)!=VK_SUCCESS){destroyWinTex(wt);return false;}
@@ -986,7 +995,7 @@ bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
     createBuffer(stgSz,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,wt.stg,wt.stgMem);
     vk_.MapMemory(device,wt.stgMem,0,stgSz,0,&wt.mapped);
-    wt.cap=stgSz; wt.w=w; wt.h=h; wt.needsTransition=true;
+    wt.cap=stgSz; wt.w=w; wt.h=h; wt.needsTransition=true; wt.fmt=VK_FORMAT_B8G8R8A8_UNORM;
     return true;
 }
 
@@ -1058,8 +1067,9 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D;
     vi.format=imageFormat;
-    vi.components={VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,
-                   VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY};
+    // Guest content: "Swap red/blue" applies here too. It used to be applied only to textures
+    // filled from CPU memory, which nothing creates any more, so the setting did nothing.
+    vi.components=contentSwizzle();
     vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
     if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){
         destroyWinTex(wt);
@@ -1090,6 +1100,7 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
 
     wt.needsTransition=true;
     wt.isAHB=true;
+    wt.fmt=imageFormat;
     wt.w=(int)desc.width;
     wt.h=(int)desc.height;
     return true;
@@ -1409,11 +1420,30 @@ void VulkanRendererContext::renderLoop() {
 int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
     // Frame generation plans and paces its own presents (and defers non-content wakes itself).
     if (fgArmed_.load(std::memory_order_relaxed)) return 0;
-    // No queue to drain outside FIFO: a newer frame simply replaces the waiting one.
-    if (!swapchainFifo_.load(std::memory_order_relaxed)) return 0;
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+    // No queue to drain outside FIFO: a newer frame simply replaces the waiting one, so content
+    // goes at once. Cursor-only frames are kept to one per refresh period all the same; the
+    // cursor is drawn at its latest position by whichever frame comes next.
+    if (!swapchainFifo_.load(std::memory_order_relaxed)) {
+        if (content || period <= 0 || lastPresentNs_ == 0) return 0;
+        const int64_t now = steadyNowNs();
+        const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
+        const bool clockFresh = deadline != 0 &&
+            now - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
+        if (!clockFresh) return lastPresentNs_ + period - now;
+        // With the vsync clock: composite just before the first queue deadline after the last
+        // present (the same lead the limiter uses), so the frame that reaches the display
+        // carries the newest pointer position - no later than an unpaced composite would.
+        const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+        const int64_t next = deadline + (int64_t)std::floor((double)(lastPresentNs_ + lead - deadline)
+                                                           / (double)period + 1.0) * period;
+        return next - lead - now;
+    }
     if (period <= 0) return 0;
     // Time until the display has drained everything presented so far, in the model.
+    // Content is composited as soon as it may join the queue (one frame waiting at most), not
+    // held for the queue deadline: holding only helps a guest faster than the display, and
+    // costs a refresh of GPU margin for every slower one (the FPS limiter covers the former).
     const int64_t pending = presentSlotEndNs_ - steadyNowNs();
     // Content may have one frame waiting behind the one being shown; cursor-only motion none.
     const int64_t wait = pending - (content ? period : 0);
@@ -1957,6 +1987,7 @@ void VulkanRendererContext::renderFrame() {
         pendingFrameSerial=0;
     }
     trackPresentedRate(presented);
+    if (presented > 0) lastPresentNs_ = steadyNowNs();
     notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0);
     if (compositeActive()) fgSlotCredit_ = std::max(0.0, fgSlotCredit_ - (double)presented);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
@@ -2484,6 +2515,10 @@ void VulkanRendererContext::removeWindow(int64_t id) {
 
 void VulkanRendererContext::initRootWindow(int64_t rootId, int64_t contentId, int width, int height) {
     std::lock_guard<std::mutex> lk(renderMutex);
+    // Only called on a fresh renderer and by the Java window-tree replay, which re-sends every
+    // window right after: start from an empty tree, so nodes created by window events queued
+    // ahead of the replay are rebuilt from the X server's current state, not merged with it.
+    windowTree.clear();
     rootWindowId = rootId;
     treeScreenW = width; treeScreenH = height;
     WinNode node;
@@ -2497,6 +2532,11 @@ void VulkanRendererContext::initRootWindow(int64_t rootId, int64_t contentId, in
 void VulkanRendererContext::createWindowNode(int64_t id, int64_t parentId, int64_t contentId,
                                               int x, int y, int width, int height) {
     std::lock_guard<std::mutex> lk(renderMutex);
+    // An X id is only reused after DestroyWindow, which erases the node first. A node that
+    // already exists therefore means a CreateWindow queued behind the window-tree replay, which
+    // already built it from newer state: re-creating it would wipe its children and map state
+    // and list it twice in its parent (drawn twice until the next restack).
+    if (windowTree.count(id)) return;
     WinNode node;
     node.id = id; node.parentId = parentId; node.contentId = contentId;
     node.x = x; node.y = y; node.width = width; node.height = height;
@@ -2718,11 +2758,49 @@ void VulkanRendererContext::setStretchMode(int mode) {
     needsRender.store(true); wakeRender();
 }
 
+bool VulkanRendererContext::rebuildContentView(WinTex& wt) {
+    if (wt.img==VK_NULL_HANDLE || wt.view==VK_NULL_HANDLE || wt.fmt==VK_FORMAT_UNDEFINED) return false;
+    VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=wt.fmt;
+    vi.components=contentSwizzle();
+    vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    VkImageView view=VK_NULL_HANDLE;
+    if (vk_.CreateImageView(device,&vi,nullptr,&view)!=VK_SUCCESS) return false;
+    vk_.DestroyImageView(device,wt.view,nullptr);
+    wt.view=view;
+    if (wt.ds!=VK_NULL_HANDLE) {
+        VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        dii.imageView=view; dii.sampler=sampler;
+        VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wr.dstSet=wt.ds; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        wr.descriptorCount=1; wr.pImageInfo=&dii;
+        vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
+    }
+    return true;
+}
+
 void VulkanRendererContext::setSwapRB(bool enabled) {
+    // Views and descriptor sets in use by the frame being recorded are replaced: same locking
+    // as setFilterMode() (between frames, texture maps stable), and the GPU must be done with
+    // the old views.
     std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    std::lock_guard<std::mutex> mapLock(renderMutex);
     if (swapRB == enabled) return;
     swapRB = enabled;
     RLOG("setSwapRB: %d", (int)swapRB);
+    if (srcImports.empty() && texMap.empty()) return;   // nothing imported yet (start-up)
+    vk_.DeviceWaitIdle(device);
+    // Imports own their views; window textures that show one borrow its handles.
+    for (auto& [srcId, imp] : srcImports) rebuildContentView(imp.wt);
+    for (auto& [id, wt] : texMap) {
+        if (wt.isAHB) {
+            auto sit = srcImports.find(wt.srcId);
+            if (sit != srcImports.end() && sit->second.wt.img == wt.img) wt.view = sit->second.wt.view;
+        } else {
+            rebuildContentView(wt);
+        }
+    }
+    needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::setPresentMode(VkPresentModeKHR mode) {

@@ -138,6 +138,18 @@ public class XConnectorEpoll implements Runnable {
         catch (IOException e) {
             killConnection(client);
         }
+        catch (RuntimeException e) {
+            /* Last line of defence: an exception escaping here went back through JNI into the
+             * native epoll loop and ended this connector's thread, i.e. every client of it. Only
+             * the offending connection goes now. */
+            android.util.Log.e("XConnectorEpoll", "Request handling failed, closing connection fd=" + fd, e);
+            try {
+                killConnection(client);
+            }
+            catch (RuntimeException e2) {
+                android.util.Log.e("XConnectorEpoll", "Closing connection fd=" + fd + " failed", e2);
+            }
+        }
     }
 
     public Client getClient(int fd) {

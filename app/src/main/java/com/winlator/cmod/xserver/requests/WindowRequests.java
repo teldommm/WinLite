@@ -111,7 +111,14 @@ public abstract class WindowRequests {
     }
 
     public static void destroySubWindows(XClient client, XInputStream inputStream, XOutputStream outputStream) {
-        client.xServer.windowManager.destroyWindow(inputStream.readInt());
+        // DestroySubwindows destroys the children, not the window itself (this used to call
+        // destroyWindow() on the window), in bottom-to-top stacking order. The children list is
+        // ordered bottom first; it is copied because destroyWindow() removes from it.
+        Window window = client.xServer.windowManager.getWindow(inputStream.readInt());
+        if (window == null) return;
+        for (Window child : new java.util.ArrayList<>(window.getChildren())) {
+            client.xServer.windowManager.destroyWindow(child.id);
+        }
     }
 
     public static void reparentWindow(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {

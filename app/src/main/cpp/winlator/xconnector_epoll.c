@@ -10,12 +10,11 @@
 #include <malloc.h>
 #include <jni.h>
 #include <android/log.h>
+#include <errno.h>
 
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "System.out", __VA_ARGS__);
 #define MAX_EVENTS 10
 #define MAX_FDS 32
-
-struct epoll_event events[MAX_EVENTS];
 
 JNIEXPORT jint JNICALL
 Java_com_winlator_cmod_xconnector_XConnectorEpoll_createAFUnixSocket(JNIEnv *env, jobject obj,
@@ -62,7 +61,13 @@ Java_com_winlator_cmod_xconnector_XConnectorEpoll_doEpollIndefinitely(JNIEnv *en
     jmethodID handleNewConnection = (*env)->GetMethodID(env, cls, "handleNewConnection", "(I)V");
     jmethodID handleExistingConnection = (*env)->GetMethodID(env, cls, "handleExistingConnection", "(I)V");
 
+    /* Per call, on this thread's stack: the array used to be one global shared by every
+     * connector (X server, SysV SHM, ALSA), each running this loop on its own thread. */
+    struct epoll_event events[MAX_EVENTS];
     int numFds = epoll_wait(epollFd, events, MAX_EVENTS, -1);
+    /* epoll_wait is never restarted after a signal handler (whatever SA_RESTART says): a signal
+     * is not an error, and returning false here ended the loop and shut every client down. */
+    if (numFds < 0) return errno == EINTR ? JNI_TRUE : JNI_FALSE;
     for (int i = 0; i < numFds; i++) {
         if (events[i].data.fd == serverFd) {
             int clientFd = accept(serverFd, NULL, NULL);
@@ -79,12 +84,17 @@ Java_com_winlator_cmod_xconnector_XConnectorEpoll_doEpollIndefinitely(JNIEnv *en
                 else (*env)->CallVoidMethod(env, obj, handleNewConnection, clientFd);
             }
         }
-        else if (events[i].events & EPOLLIN) {
+        /* A hung-up or failed socket can be reported without EPOLLIN; nobody read it then and
+         * level-triggered epoll returned it again at once, spinning the thread. The read in
+         * handleExistingConnection sees EOF/an error and closes the connection. */
+        else if (events[i].events & (EPOLLIN | EPOLLHUP | EPOLLERR)) {
             (*env)->CallVoidMethod(env, obj, handleExistingConnection, events[i].data.fd);
         }
+        /* No JNI calls with an exception pending: let it reach Java. */
+        if ((*env)->ExceptionCheck(env)) return JNI_FALSE;
     }
 
-    return numFds >= 0;
+    return JNI_TRUE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -204,9 +214,14 @@ Java_com_winlator_cmod_xconnector_XConnectorEpoll_waitForSocketRead(JNIEnv *env,
     pfds[1].events = POLLIN;
 
     int res = poll(pfds, 2, -1);
-    if (res < 0 || (pfds[1].revents & POLLIN)) return JNI_FALSE;
+    /* Interrupted by a signal: wait again. Returning false here left the client's thread
+     * without anyone reading its socket. */
+    if (res < 0) return errno == EINTR ? JNI_TRUE : JNI_FALSE;
+    if (pfds[1].revents & POLLIN) return JNI_FALSE;
+    if (pfds[0].revents & POLLNVAL) return JNI_FALSE;
 
-    if (pfds[0].revents & POLLIN) {
+    /* Hang-up/error without POLLIN: handled like data, the read reports EOF/the error. */
+    if (pfds[0].revents & (POLLIN | POLLHUP | POLLERR)) {
         jclass cls = (*env)->GetObjectClass(env, obj);
         jmethodID handleExistingConnection = (*env)->GetMethodID(env, cls, "handleExistingConnection", "(I)V");
         (*env)->CallVoidMethod(env, obj, handleExistingConnection, clientFd);
