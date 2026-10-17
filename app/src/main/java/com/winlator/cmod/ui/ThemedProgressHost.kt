@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.tabularNumbers
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.view.View
 import android.view.ViewGroup
@@ -67,7 +68,7 @@ object ThemedProgressHost {
                                 "${progress.percent}%",
                                 modifier = Modifier.fillMaxWidth(),
                                 textAlign = TextAlign.Center,
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MaterialTheme.typography.titleMedium.tabularNumbers(),
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(Modifier.height(8.dp))

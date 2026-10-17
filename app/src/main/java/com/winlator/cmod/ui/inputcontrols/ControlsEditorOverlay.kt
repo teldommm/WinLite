@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.inputcontrols
 
+import com.winlator.cmod.ui.theme.WinZMotion
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.graphics.RectF
@@ -192,8 +193,8 @@ class ControlsEditorOverlay(
                     val maxHeight = with(LocalDensity.current) { panelMaxHeightPx.intValue.toDp() }
                     AnimatedVisibility(
                         visible = panelOpen.value,
-                        enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(180)),
-                        exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.96f, animationSpec = tween(140))
+                        enter = WinZMotion.dialogCardEnter(initialScale = 0.96f),
+                        exit = WinZMotion.dialogCardExit(targetScale = 0.96f)
                     ) {
                         val model = panelModel.value
                         if (model != null) {

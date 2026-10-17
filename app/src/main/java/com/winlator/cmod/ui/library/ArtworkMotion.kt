@@ -3,14 +3,13 @@ package com.winlator.cmod.ui.library
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.util.LruCache
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +20,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.preference.PreferenceManager
 import com.winlator.cmod.steamgrid.ArtworkRepository
+import kotlinx.coroutines.isActive
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -31,13 +31,19 @@ import kotlin.math.sin
 // Rules of the road:
 //  - Only large artwork in focus moves, never the tiles of the grid/list.
 //  - The screen decides whether motion is allowed by providing LocalArtworkMotion: the Library
-//    tab provides "setting on && tab selected && no detail screen on top" (MainShell keeps the
-//    other tabs composed at alpha 0, so without that they would keep animating unseen), the game
-//    detail provides the setting alone.
+//    tab provides the "Animated artwork" setting, the game detail and the launch screen too.
+//  - Whether it may move *right now* is a separate thing: LocalArtworkMotionPaused. The Library
+//    tab pauses while it is not the selected tab or a detail screen covers it (MainShell keeps
+//    the other tabs composed, so they would otherwise keep animating unseen). Paused artwork
+//    freezes on its current frame instead of snapping back to 100%: the snap used to be visible
+//    through the game page while it faded in over the Library.
 //  - The setting lives in Settings > COVER ART ("Animated artwork", default on).
 
-// True where artwork may animate. Default false so a screen that never provides it stays still.
+// True where artwork may animate at all. Default false so a screen that never provides it stays still.
 internal val LocalArtworkMotion = staticCompositionLocalOf { false }
+
+// True while motion is allowed but the screen is not visible: the clock stops, the frame stays.
+internal val LocalArtworkMotionPaused = compositionLocalOf { false }
 
 // The "Animated artwork" setting as observable state (the Library tab stays composed while the
 // user changes it in Settings, so a one-time read would go stale).
@@ -63,6 +69,9 @@ internal fun rememberArtworkMotionEnabled(): Boolean {
  * so the motion is smooth at both ends and seamless at the loop point. It is read only inside the
  * graphicsLayer block (draw phase), so a frame never triggers recomposition.
  *
+ * The clock is an Animatable driven by an effect rather than an infinite transition, so it can be
+ * paused (LocalArtworkMotionPaused) and resumed from the same frame.
+ *
  * The drift is a fraction (pan) of the margin the current zoom leaves, so the picture never slides
  * far enough to show its edge. The caller must clip the parent (clipToBounds / a clipped Surface):
  * the scaled layer overflows its bounds.
@@ -82,13 +91,18 @@ internal fun Modifier.kenBurns(
     strength: Float = 1f
 ): Modifier {
     if (!LocalArtworkMotion.current || strength <= 0f) return this
-    val transition = rememberInfiniteTransition(label = "artworkMotion")
-    val clock = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(periodMs, easing = LinearEasing), RepeatMode.Restart),
-        label = "artworkMotionClock"
-    )
+    val paused = LocalArtworkMotionPaused.current
+    val clock = remember { Animatable(0f) }
+    LaunchedEffect(paused, periodMs) {
+        if (paused) return@LaunchedEffect
+        while (isActive) {
+            val from = clock.value
+            val remaining = ((1f - from) * periodMs).toInt().coerceAtLeast(1)
+            clock.animateTo(1f, tween(remaining, easing = LinearEasing))
+            // 1 and 0 are the same frame of the loop (whole sine periods), so the wrap is invisible.
+            clock.snapTo(0f)
+        }
+    }
     return this.graphicsLayer {
         val angle = (clock.value + phase) * 2f * PI.toFloat()
         val breathe = (1f - cos(angle)) / 2f
@@ -118,6 +132,15 @@ internal object SoftArt {
         val full = LibraryImageCache.load(path) ?: return null
         val soft = from(full)
         cache.put(key, soft)
+        return soft
+    }
+
+    // from() with a cache entry under the source's LibraryImageCache key (null key = not cached).
+    // Off the main thread: the shrink + blur takes a few milliseconds on a full-size picture.
+    fun of(key: String?, source: Bitmap): Bitmap {
+        key?.let { k -> cache.get(k)?.let { return it } }
+        val soft = from(source)
+        if (key != null) cache.put(key, soft)
         return soft
     }
 

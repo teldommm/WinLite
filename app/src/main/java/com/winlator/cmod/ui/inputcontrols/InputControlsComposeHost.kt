@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.inputcontrols
 
+import com.winlator.cmod.ui.theme.tabularNumbers
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -324,7 +325,7 @@ private fun OpacityCard(initialPercent: Int, onOpacityChanged: (Int) -> Unit) {
     var opacity by remember(initialPercent) { mutableFloatStateOf(initialPercent.toFloat()) }
     SettingsCard(title = "Overlay Opacity") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text("${opacity.roundToInt()}%", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${opacity.roundToInt()}%", style = MaterialTheme.typography.titleMedium.tabularNumbers(), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Slider(
             value = opacity,

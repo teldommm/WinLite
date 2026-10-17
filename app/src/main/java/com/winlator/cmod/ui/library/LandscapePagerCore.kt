@@ -98,6 +98,19 @@ internal fun LandscapePagerCore(
         if (item.bannerPath == null) callbacks.onArtworkNeeded(item.shortcutPath, "banner")
     }
 
+    // The pager composes the neighbouring cards' covers, but nothing asked for their backdrops,
+    // so every swipe decoded the next banner only once it was already the current page. Warm the
+    // next and previous ones in advance.
+    LaunchedEffect(pager.currentPage, items) {
+        val page = pager.currentPage
+        withContext(Dispatchers.IO) {
+            for (neighbour in intArrayOf(page + 1, page - 1, page + 2)) {
+                val next = items.getOrNull(neighbour) ?: continue
+                warmBackdrop(next.bannerPath, next.coverPath ?: next.generatedCoverPath, next.coverPath != null && next.coverIsUser)
+            }
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         ArtBackdrop(
             item.bannerPath,

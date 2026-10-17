@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.theme.tabularNumbers
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.content.Intent
@@ -396,7 +397,7 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("$usedPercent%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                                Text("$usedPercent%", style = MaterialTheme.typography.headlineSmall.tabularNumbers(), fontWeight = FontWeight.SemiBold)
                                 Text("storage", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }

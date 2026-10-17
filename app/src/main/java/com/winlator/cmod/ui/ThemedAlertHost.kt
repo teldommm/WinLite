@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.WinZMotion
 import androidx.activity.compose.BackHandler
 
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
@@ -394,8 +395,8 @@ object ThemedAlertHost {
                     BackHandler(enabled = visibleState.targetState) { dismiss() }
                     AnimatedVisibility(
                         visibleState = visibleState,
-                        enter = fadeIn(tween(180)),
-                        exit = fadeOut(tween(150))
+                        enter = WinZMotion.dialogScrimEnter(),
+                        exit = WinZMotion.dialogScrimExit()
                     ) {
                         Box(
                             modifier = Modifier
@@ -410,8 +411,8 @@ object ThemedAlertHost {
                         ) {
                             AnimatedVisibility(
                                 visibleState = visibleState,
-                                enter = fadeIn(tween(200)) + scaleIn(initialScale = 0.9f, animationSpec = tween(200)),
-                                exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.9f, animationSpec = tween(150))
+                                enter = WinZMotion.dialogCardEnter(),
+                                exit = WinZMotion.dialogCardExit()
                             ) {
                                 ThemedDialogSurface(modifier = Modifier.clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {}) {
                                     content(dismiss)

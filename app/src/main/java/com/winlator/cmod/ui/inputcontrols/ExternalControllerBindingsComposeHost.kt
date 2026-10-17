@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.inputcontrols
 
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.content.Context
 import androidx.compose.animation.core.Animatable
@@ -172,7 +173,7 @@ private fun ExternalControllerBindingsScreen(
                     LaunchedEffect(state.activation) {
                         if (state.activeKeyCode == item.keyCode) {
                             flash.snapTo(0.4f)
-                            flash.animateTo(0f, tween(200))
+                            flash.animateTo(0f, WinZMotion.standard(WinZMotion.DurationM))
                         } else {
                             flash.snapTo(0f)
                         }

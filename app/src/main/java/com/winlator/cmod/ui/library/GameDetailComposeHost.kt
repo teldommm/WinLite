@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.ui.theme.tabularNumbers
+import androidx.compose.material3.LocalTextStyle
 import android.graphics.Bitmap
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -144,8 +146,8 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
         ),
         DetailActionItem(Icons.Outlined.DeleteOutline, "Remove", "Remove", callbacks::onRemove, destructive = true)
     )
-    if (landscape) LandscapeDetail(title, subtitle, artwork, coverOnly, coverIsUser, favorite, stats, items, callbacks, toggle)
-    else PortraitDetail(title, subtitle, artwork, coverOnly, coverIsUser, fallback, favorite, stats, items, callbacks, toggle)
+    if (landscape) LandscapeDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, favorite, stats, items, callbacks, toggle)
+    else PortraitDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, fallback, favorite, stats, items, callbacks, toggle)
 }
 
 // Landscape game page: the picture stays open, the controls sit in the corners.
@@ -156,9 +158,9 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
 // Two soft scrims (top for the title, bottom for the panel) replace the old heavy left-to-right
 // darkening, so most of the picture keeps its own colours.
 @Composable
-private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, coverOnly: Boolean, coverIsUser: Boolean, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
+private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        DetailArtwork(artwork, coverOnly, coverIsUser, landscape = true)
+        DetailArtwork(artwork, artworkKey, coverOnly, coverIsUser, landscape = true)
         Box(
             Modifier.align(Alignment.TopStart).fillMaxWidth().height(132.dp)
                 .background(Brush.verticalGradient(listOf(Color.Black.copy(.66f), Color.Transparent)))
@@ -342,7 +344,7 @@ private fun usesAsBackground(artwork: Bitmap, coverOnly: Boolean, coverIsUser: B
 //    (In landscape the user's own cover is a poster drawn above the scrims: see DetailPoster.)
 //  - the user's own cover keeps its own proportions instead of being cropped to 2:3.
 @Composable
-private fun DetailArtwork(artwork: Bitmap?, coverOnly: Boolean, coverIsUser: Boolean, landscape: Boolean, bottomReserve: Dp = 112.dp) {
+private fun DetailArtwork(artwork: Bitmap?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, landscape: Boolean, bottomReserve: Dp = 112.dp) {
     if (artwork == null) return
     val image = artwork.asImageBitmap()
     val ratio = artwork.width.toFloat() / artwork.height.toFloat()
@@ -351,13 +353,22 @@ private fun DetailArtwork(artwork: Bitmap?, coverOnly: Boolean, coverIsUser: Boo
         if (usesAsBackground(artwork, coverOnly, coverIsUser)) {
             Image(image, null, Modifier.fillMaxSize().kenBurns(), contentScale = ContentScale.Crop)
         } else {
-            val soft = remember(artwork) { SoftArt.from(artwork) }
-            Image(
-                soft.asImageBitmap(),
-                null,
-                Modifier.fillMaxSize().kenBurns(amplitude = 0.12f, periodMs = 26_000, pan = 0.9f),
-                contentScale = ContentScale.Crop
-            )
+            // The soft wash used to be made right here in composition (a shrink + blur of the
+            // full-size picture on the main thread, during the page's entrance). It is shared with
+            // the Library's backdrops through SoftArt's cache (same key), so it is usually ready;
+            // otherwise it is made off the main thread and drawn once done.
+            val soft by produceState(SoftArt.peek(artworkKey), artwork, artworkKey) {
+                if (value == null) value = withContext(Dispatchers.Default) { SoftArt.of(artworkKey, artwork) }
+            }
+            soft?.let { wash ->
+                val washImage = remember(wash) { wash.asImageBitmap() }
+                Image(
+                    washImage,
+                    null,
+                    Modifier.fillMaxSize().kenBurns(amplitude = 0.12f, periodMs = 26_000, pan = 0.9f),
+                    contentScale = ContentScale.Crop
+                )
+            }
             if (!landscape) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                     Image(
@@ -378,11 +389,11 @@ private fun DetailArtwork(artwork: Bitmap?, coverOnly: Boolean, coverIsUser: Boo
 }
 
 @Composable
-private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, coverOnly: Boolean, coverIsUser: Boolean, fallback: Bitmap?, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
+private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, fallback: Bitmap?, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Taller than the old 1.28 header: the stat chips sit under the title, over the picture.
         Box(Modifier.fillMaxWidth().aspectRatio(1.12f).background(MaterialTheme.colorScheme.surface)) {
-            if (artwork != null) DetailArtwork(artwork, coverOnly, coverIsUser, landscape = false, bottomReserve = 150.dp)
+            if (artwork != null) DetailArtwork(artwork, artworkKey, coverOnly, coverIsUser, landscape = false, bottomReserve = 150.dp)
             else if (fallback != null) IconTile(null, fallback, Modifier.fillMaxSize())
             // A little more scrim at the top than before: the two plates sit right on the picture.
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(.38f), Color.Transparent, Color.Black.copy(.88f)))))
@@ -531,7 +542,7 @@ private fun StatChip(entry: StatEntry, fill: Boolean) {
             Icon(entry.icon, null, Modifier.size(16.dp), tint = StatIconBlue)
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(entry.label.uppercase(), color = Color.White.copy(.62f), fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(entry.value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(entry.value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = LocalTextStyle.current.tabularNumbers())
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.tabularNumbers
 import android.app.Activity
 import android.view.View
 import android.view.ViewGroup
@@ -75,7 +76,7 @@ object ThemedDownloadProgressHost {
                                     )
                                     Text(
                                         "${progress.percent}%",
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.labelLarge.tabularNumbers(),
                                         fontWeight = FontWeight.Bold,
                                         color = controlAccentColor()
                                     )

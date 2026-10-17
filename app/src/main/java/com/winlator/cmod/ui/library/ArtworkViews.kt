@@ -1,5 +1,10 @@
 package com.winlator.cmod.ui.library
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Immutable
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -66,6 +71,38 @@ internal fun isWideImage(path: String?): Boolean {
     return wide
 }
 
+// What a backdrop shows: a sharp picture (banner / the user's own wide background) or the soft
+// colour wash of a cover.
+@Immutable
+private data class BackdropArt(val bitmap: Bitmap, val sharp: Boolean)
+
+// Cache-only lookup for the first frame (main thread: file stats only, no decode).
+private fun peekBackdrop(bannerPath: String?, coverPath: String?, coverIsUser: Boolean): BackdropArt? {
+    val coverKey = LibraryImageCache.keyFor(coverPath)
+    val wide = coverIsUser && coverKey != null && wideCache[coverKey] == true
+    val sharpPath = bannerPath ?: if (wide) coverPath else null
+    if (sharpPath != null) {
+        return LibraryImageCache.peek(LibraryImageCache.keyFor(sharpPath))?.let { BackdropArt(it, sharp = true) }
+    }
+    if (coverPath != null) return SoftArt.peek(coverKey)?.let { BackdropArt(it, sharp = false) }
+    return null
+}
+
+// Full lookup with decoding. Off the main thread.
+private fun loadBackdrop(bannerPath: String?, coverPath: String?, coverIsUser: Boolean): BackdropArt? {
+    val wide = coverIsUser && isWideImage(coverPath)
+    val sharpPath = bannerPath ?: if (wide) coverPath else null
+    if (sharpPath != null) return LibraryImageCache.load(sharpPath)?.let { BackdropArt(it, sharp = true) }
+    if (coverPath != null) return SoftArt.load(coverPath)?.let { BackdropArt(it, sharp = false) }
+    return null
+}
+
+// Decodes (and caches) what ArtBackdrop would show for these pictures, so moving to that game
+// finds its backdrop ready. Off the main thread.
+internal fun warmBackdrop(bannerPath: String?, coverPath: String?, coverIsUser: Boolean) {
+    loadBackdrop(bannerPath, coverPath, coverIsUser)
+}
+
 // Full-bleed background, by where the picture came from:
 //  - a banner (downloaded, or the user's own background): sharp, slowly breathing;
 //  - the user's own cover: shown as picked. A wide one is the background itself (sharp); a portrait
@@ -74,44 +111,30 @@ internal fun isWideImage(path: String?): Boolean {
 //  - a downloaded portrait cover or the offline placeholder: the soft colour wash made from it
 //    (see SoftArt), drifting a little more.
 // Draws nothing when the game has no artwork at all.
+//
+// When the pictures change (the pager moved to another game, a banner finished downloading) the
+// current backdrop stays up until the new one is decoded, then it is replaced. It used to be
+// dropped at once, so every swipe to a game whose backdrop wasn't cached yet showed a frame of
+// bare background before the new picture.
 @Composable
 internal fun ArtBackdrop(bannerPath: String?, coverPath: String?, coverIsUser: Boolean, modifier: Modifier = Modifier) {
-    val wideKey = remember(coverPath) { LibraryImageCache.keyFor(coverPath) }
-    val wide by produceState(
-        coverIsUser && wideKey != null && wideCache[wideKey] == true,
-        coverPath,
-        coverIsUser
-    ) {
-        value = coverIsUser && withContext(Dispatchers.IO) { isWideImage(coverPath) }
+    var art by remember { mutableStateOf(peekBackdrop(bannerPath, coverPath, coverIsUser)) }
+    LaunchedEffect(bannerPath, coverPath, coverIsUser) {
+        peekBackdrop(bannerPath, coverPath, coverIsUser)?.let { art = it; return@LaunchedEffect }
+        art = withContext(Dispatchers.IO) { loadBackdrop(bannerPath, coverPath, coverIsUser) }
     }
-    val sharpPath = bannerPath ?: if (wide) coverPath else null
-
-    if (sharpPath != null) {
-        val key = remember(sharpPath) { LibraryImageCache.keyFor(sharpPath) }
-        val sharp by produceState<Bitmap?>(LibraryImageCache.peek(key), key) {
-            value = withContext(Dispatchers.IO) { LibraryImageCache.load(sharpPath) }
-        }
-        val art = sharp
-        if (art != null) {
-            Box(modifier.clipToBounds()) {
-                Image(art.asImageBitmap(), null, Modifier.fillMaxSize().kenBurns(), contentScale = ContentScale.Crop)
-            }
-        }
-    } else if (coverPath != null) {
-        val key = remember(coverPath) { LibraryImageCache.keyFor(coverPath) }
-        val soft by produceState<Bitmap?>(SoftArt.peek(key), key) {
-            value = withContext(Dispatchers.IO) { SoftArt.load(coverPath) }
-        }
-        val art = soft
-        if (art != null) {
-            Box(modifier.clipToBounds()) {
-                Image(
-                    art.asImageBitmap(),
-                    null,
-                    Modifier.fillMaxSize().kenBurns(amplitude = 0.12f, periodMs = 26_000, pan = 0.9f),
-                    contentScale = ContentScale.Crop
-                )
-            }
+    val shown = art ?: return
+    // keyed by the picture: a new picture is a new layer (and starts its own Ken Burns loop).
+    key(shown) {
+        Box(modifier.clipToBounds()) {
+            val image = remember(shown.bitmap) { shown.bitmap.asImageBitmap() }
+            Image(
+                image,
+                null,
+                if (shown.sharp) Modifier.fillMaxSize().kenBurns()
+                else Modifier.fillMaxSize().kenBurns(amplitude = 0.12f, periodMs = 26_000, pan = 0.9f),
+                contentScale = ContentScale.Crop
+            )
         }
     }
 }

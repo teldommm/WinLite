@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.library
 
+import androidx.compose.runtime.mutableStateOf
 import android.content.Intent
 import android.os.Environment
 import android.widget.Toast
@@ -32,18 +33,40 @@ import com.winlator.cmod.steamgrid.ArtworkRepository
 // Game detail as a MainShell detail entry (replaces GameDetailFragment). Same actions; the
 // runtime subtitle (which syncs ContentsManager — disk work) is now resolved off the main thread
 // instead of blocking the screen's creation.
+//
+// The Shortcut comes from the Library (preloaded: already in memory) whenever the page is opened
+// from a tile. Only otherwise (reopened on a new path after a container switch) is it looked up
+// on disk - off the main thread now: it used to scan every container's shortcuts right here in
+// composition, freezing the first frame of the page's entrance for as long as that took.
 @Composable
-fun GameDetailRoute(shortcutPath: String, onClose: () -> Unit, onLibraryChanged: () -> Unit) {
+fun GameDetailRoute(shortcutPath: String, preloaded: Shortcut? = null, onClose: () -> Unit, onLibraryChanged: () -> Unit) {
     val activity = LocalContext.current.findActivity() as AppCompatActivity
-    val shortcut = remember(shortcutPath) {
-        ContainerManager(activity).loadShortcuts().firstOrNull { it?.file?.path == shortcutPath }
+    var missing by remember(shortcutPath) { mutableStateOf(false) }
+    val shortcut by produceState(preloaded?.takeIf { it.file?.path == shortcutPath }, shortcutPath) {
+        if (value != null) return@produceState
+        val found = withContext(Dispatchers.IO) {
+            ContainerManager(activity).loadShortcuts().firstOrNull { it?.file?.path == shortcutPath }
+        }
+        if (found == null) missing = true else value = found
     }
-    if (shortcut == null) {
+    if (missing) {
         // Shortcut vanished (deleted elsewhere) — nothing to show.
         LaunchedEffect(Unit) { onClose() }
         return
     }
+    // Still loading (only without a preloaded Shortcut): the page's plain background meanwhile.
+    val loaded = shortcut ?: return
+    GameDetailLoaded(shortcutPath, loaded, activity, onClose, onLibraryChanged)
+}
 
+@Composable
+private fun GameDetailLoaded(
+    shortcutPath: String,
+    shortcut: Shortcut,
+    activity: AppCompatActivity,
+    onClose: () -> Unit,
+    onLibraryChanged: () -> Unit
+) {
     val baseName = remember(shortcut) { FileUtils.getBasename(shortcut.file.path) }
 
     // Bumped whenever the screen comes back to the front (after a game, after the launcher's

@@ -619,7 +619,7 @@ public class LibraryScreenController {
 
     private void openGameDetails(Shortcut shortcut) {
         if (activity instanceof MainActivity) {
-            ((MainActivity) activity).openGameDetail(shortcut.file.getPath());
+            ((MainActivity) activity).openGameDetail(shortcut.file.getPath(), shortcut);
         }
     }
 

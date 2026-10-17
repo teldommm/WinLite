@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.shell
 
+import com.winlator.cmod.container.Shortcut
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
@@ -35,7 +36,13 @@ import com.winlator.cmod.ui.settings.ContainersSettingsRoute
 //    fragments used;
 //  - system back pops the top entry (MainShell's BackHandler).
 sealed class ShellDetail {
-    data class GameDetail(val shortcutPath: String) : ShellDetail()
+    // preloaded: the Shortcut the Library already has in memory for this game, so the page can
+    // draw its first frame without reading every container's shortcuts from disk (it used to, on
+    // the main thread, in composition - during its own entrance animation). Null = load it.
+    data class GameDetail @JvmOverloads constructor(
+        val shortcutPath: String,
+        val preloaded: Shortcut? = null
+    ) : ShellDetail()
     object Containers : ShellDetail()
     data class ContainerEditor(val editContainerId: Int?) : ShellDetail()
     object ComponentManager : ShellDetail()
@@ -100,6 +107,7 @@ private fun DetailContent(controller: MainShellController, detail: ShellDetail, 
     when (detail) {
         is ShellDetail.GameDetail -> GameDetailRoute(
             shortcutPath = detail.shortcutPath,
+            preloaded = detail.preloaded,
             onClose = close,
             onLibraryChanged = { controller.requestRefresh(com.winlator.cmod.R.id.main_menu_shortcuts) }
         )

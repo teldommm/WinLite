@@ -272,7 +272,12 @@ public class MainActivity extends AppCompatActivity {
 
     // Detail screens (drawn by MainShell above the tabs; system back pops them).
     public void openGameDetail(String shortcutPath) {
-        if (mainShell != null) mainShell.pushDetail(new ShellDetail.GameDetail(shortcutPath));
+        openGameDetail(shortcutPath, null);
+    }
+
+    // preloaded: the Library's in-memory Shortcut for this game (lets the page skip a disk scan).
+    public void openGameDetail(String shortcutPath, com.winlator.cmod.container.Shortcut preloaded) {
+        if (mainShell != null) mainShell.pushDetail(new ShellDetail.GameDetail(shortcutPath, preloaded));
     }
 
     public void openContainersSettings() {

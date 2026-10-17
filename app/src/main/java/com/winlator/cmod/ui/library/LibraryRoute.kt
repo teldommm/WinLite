@@ -48,9 +48,13 @@ fun LibraryRoute(shownSerial: Int, active: Boolean, detailOpen: Boolean = false)
     }
 
     // MainShell keeps every tab composed (faded out, or covered by a detail screen), so artwork
-    // may only move while this tab is the visible one and nothing sits on top of it.
+    // may only move while this tab is the visible one and nothing sits on top of it. Otherwise it
+    // is paused - frozen on its frame, not reset (a reset snapped visibly under the fading-in page).
     val motionEnabled = rememberArtworkMotionEnabled()
-    CompositionLocalProvider(LocalArtworkMotion provides (motionEnabled && active && !detailOpen)) {
+    CompositionLocalProvider(
+        LocalArtworkMotion provides motionEnabled,
+        LocalArtworkMotionPaused provides (!active || detailOpen)
+    ) {
         LibraryContent(controller.libraryController, controller.callbacks)
     }
 }

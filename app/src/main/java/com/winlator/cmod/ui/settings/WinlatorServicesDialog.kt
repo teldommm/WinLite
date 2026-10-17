@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.theme.WinZMotion
 import androidx.activity.compose.BackHandler
 
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
@@ -126,8 +127,8 @@ object WinlatorServicesDialog {
                     }
                     AnimatedVisibility(
                         visibleState = visibleState,
-                        enter = fadeIn(tween(180)),
-                        exit = fadeOut(tween(150))
+                        enter = WinZMotion.dialogScrimEnter(),
+                        exit = WinZMotion.dialogScrimExit()
                     ) {
                         Box(
                             modifier = Modifier
@@ -138,8 +139,8 @@ object WinlatorServicesDialog {
                         ) {
                             AnimatedVisibility(
                                 visibleState = visibleState,
-                                enter = fadeIn(tween(200)) + scaleIn(initialScale = 0.9f, animationSpec = tween(200)),
-                                exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.9f, animationSpec = tween(150))
+                                enter = WinZMotion.dialogCardEnter(),
+                                exit = WinZMotion.dialogCardExit()
                             ) {
                                 // Swallow taps inside the card so they don't reach the dismiss scrim.
                                 ThemedDialogSurface(

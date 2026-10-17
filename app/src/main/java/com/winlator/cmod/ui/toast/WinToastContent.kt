@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.toast
 
+import com.winlator.cmod.ui.theme.WinZMotion
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -40,8 +41,8 @@ internal fun WinToastContent(
     WinZOverlayTheme {
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 4 },
-            exit = fadeOut(tween(160)) + slideOutVertically(tween(180)) { it / 4 },
+            enter = fadeIn(WinZMotion.enter(WinZMotion.DurationM)) + slideInVertically(WinZMotion.enter(WinZMotion.DurationM)) { it / 4 },
+            exit = fadeOut(WinZMotion.exit(WinZMotion.DurationS)) + slideOutVertically(WinZMotion.exit(WinZMotion.DurationS)) { it / 4 },
         ) {
             // Same pill as WinLite (14dp corners, 360dp max width, 20dp icon), but the fill,
             // text and hairline come from the active Winlator theme instead of a hardcoded

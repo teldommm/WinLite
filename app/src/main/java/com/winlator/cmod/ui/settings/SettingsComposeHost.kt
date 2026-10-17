@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.settings
 
+import androidx.compose.material3.LocalTextStyle
+import com.winlator.cmod.ui.theme.tabularNumbers
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -420,7 +422,7 @@ private fun SpeedRow(title: String, value: Int, onChanged: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, modifier = Modifier.weight(1f))
-            Text("${draft.roundToInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${draft.roundToInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant, style = LocalTextStyle.current.tabularNumbers())
         }
         Slider(
             value = draft,

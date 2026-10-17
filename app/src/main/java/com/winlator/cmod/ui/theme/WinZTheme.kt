@@ -55,8 +55,14 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.em
+import kotlin.math.exp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -345,25 +351,49 @@ internal fun winlatorColorScheme(theme: WinlatorThemeType): ColorScheme = when (
     WinlatorThemeType.AMOLED -> AmoledColors
 }
 
+// The app's typeface: Inter (SIL Open Font License, see LICENSE-Inter-OFL.txt), bundled so the
+// UI looks the same on every phone instead of whatever the ROM's default sans-serif is.
+// res/font/inter_variable.ttf is Inter 4 as one variable font: the weight axis 400-700 (the four
+// weights the app uses), optical size fixed at the text setting, Latin + Cyrillic + common
+// punctuation/symbols only (321 KB). Characters outside that (CJK game titles, emoji) fall back
+// to the system fonts as before.
+@OptIn(ExperimentalTextApi::class)
+private val WinZFontFamily = FontFamily(
+    Font(R.font.inter_variable, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    Font(R.font.inter_variable, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+    Font(R.font.inter_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+    Font(R.font.inter_variable, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700)))
+)
+
+// Inter's own size-dependent tracking ("dynamic metrics", rsms.me/inter/dynmetrics): a little
+// tighter as the text grows (about -0.1sp at 14sp, -0.4sp at 22sp, -1sp at 52sp), ~0 at 12sp.
+// In em, not sp: many Texts override only fontSize (nav labels at 11sp, chips at 9sp); an absolute
+// sp value from the base style would then be far too tight on the smaller text.
+private fun interTracking(sizeSp: Float): TextUnit =
+    (-0.0223f + 0.185f * exp(-0.1745f * sizeSp)).em
+
+// Numbers that update in place (playtime, sizes, percentages, counters): tabular figures, so the
+// digits keep their width and the text doesn't wobble as the value changes.
+fun TextStyle.tabularNumbers(): TextStyle = this.copy(fontFeatureSettings = "tnum")
+
+// Every style uses the bundled family with Inter's tracking. (Styles left undefined used to fall
+// back to Material3's defaults, with a different family object and extra letter-spacing.)
 private val WinlatorTypography = Typography(
-    displaySmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 38.sp, lineHeight = 44.sp, letterSpacing = (-0.6).sp),
-    headlineLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 34.sp, lineHeight = 40.sp),
-    headlineMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, lineHeight = 34.sp),
-    titleLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 22.sp, lineHeight = 28.sp),
-    titleMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, lineHeight = 23.sp),
-    bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 23.sp),
-    bodyMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp),
-    labelLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp),
-    // The styles below used to be undefined here, so they silently fell back to Material3's
-    // defaults (different font family object, extra letter-spacing up to 0.5sp) and read
-    // slightly off next to the rest of the text. Same family/zero tracking as everything above.
-    displayLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 52.sp, lineHeight = 58.sp, letterSpacing = (-0.8).sp),
-    displayMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 44.sp, lineHeight = 50.sp, letterSpacing = (-0.7).sp),
-    headlineSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 24.sp, lineHeight = 30.sp),
-    titleSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
-    bodySmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 17.sp),
-    labelMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 13.sp, lineHeight = 18.sp),
-    labelSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 15.sp)
+    displayLarge = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 52.sp, lineHeight = 58.sp, letterSpacing = interTracking(52f)),
+    displayMedium = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 44.sp, lineHeight = 50.sp, letterSpacing = interTracking(44f)),
+    displaySmall = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 38.sp, lineHeight = 44.sp, letterSpacing = interTracking(38f)),
+    headlineLarge = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 34.sp, lineHeight = 40.sp, letterSpacing = interTracking(34f)),
+    headlineMedium = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = interTracking(28f)),
+    headlineSmall = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 24.sp, lineHeight = 30.sp, letterSpacing = interTracking(24f)),
+    titleLarge = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.Medium, fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = interTracking(22f)),
+    titleMedium = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, lineHeight = 23.sp, letterSpacing = interTracking(17f)),
+    titleSmall = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = interTracking(14f)),
+    bodyLarge = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 23.sp, letterSpacing = interTracking(16f)),
+    bodyMedium = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = interTracking(14f)),
+    bodySmall = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 17.sp, letterSpacing = interTracking(12f)),
+    labelLarge = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp, letterSpacing = interTracking(15f)),
+    labelMedium = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.Medium, fontSize = 13.sp, lineHeight = 18.sp, letterSpacing = interTracking(13f)),
+    labelSmall = TextStyle(fontFamily = WinZFontFamily, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 15.sp, letterSpacing = interTracking(11f))
 )
 
 // The app's only corner radii. Every screen uses these instead of ad-hoc

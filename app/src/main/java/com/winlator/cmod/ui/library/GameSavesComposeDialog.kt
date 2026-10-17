@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.ui.theme.WinZMotion
 import androidx.activity.compose.BackHandler
 
 import android.app.Activity
@@ -122,8 +123,8 @@ object GameSavesComposeDialog {
                     BackHandler(enabled = visibleState.targetState) { dismiss() }
                     AnimatedVisibility(
                         visibleState = visibleState,
-                        enter = fadeIn(tween(180)),
-                        exit = fadeOut(tween(150))
+                        enter = WinZMotion.dialogScrimEnter(),
+                        exit = WinZMotion.dialogScrimExit()
                     ) {
                         Box(
                             modifier = Modifier
@@ -134,8 +135,8 @@ object GameSavesComposeDialog {
                         ) {
                             AnimatedVisibility(
                                 visibleState = visibleState,
-                                enter = fadeIn(tween(200)) + scaleIn(initialScale = 0.9f, animationSpec = tween(200)),
-                                exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.9f, animationSpec = tween(150))
+                                enter = WinZMotion.dialogCardEnter(),
+                                exit = WinZMotion.dialogCardExit()
                             ) {
                                 // Swallow taps inside the card so they don't reach the dismiss scrim.
                                 ThemedDialogSurface(
