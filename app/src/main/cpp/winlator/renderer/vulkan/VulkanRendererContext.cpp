@@ -1451,10 +1451,12 @@ int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
     return std::min(wait, 2 * period);
 }
 
-void VulkanRendererContext::notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs) {
+void VulkanRendererContext::notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs,
+                                                   int64_t startNs) {
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
     if (period <= 0 || presents == 0) return;
-    presentSlotEndNs_ = std::max(presentSlotEndNs_, steadyNowNs()) + (int64_t)presents * period;
+    presentSlotEndNs_ = std::max(presentSlotEndNs_, startNs > 0 ? startNs : steadyNowNs()) +
+                        (int64_t)presents * period;
     // Presents held for a desired time occupy the display until that refresh is over.
     // (desired = intended presentation - half a refresh; the frame stays one refresh.)
     // The model counts in queue deadlines; desired times are presentation times (deadline +
@@ -1853,6 +1855,25 @@ void VulkanRendererContext::renderFrame() {
         curW=cursorTexW; curH=cursorTexH;
     }
 
+    // --- Frame gen: the cursor in every present. Every present of a source frame used to be
+    // recorded and submitted back to back, so all of them - spread over the whole source
+    // interval by their desired times - drew the cursor where it was when the group started:
+    // with frame generation the cursor moved at the GUEST rate (30 FPS x4 = a 30 Hz cursor),
+    // while without it cursor motion is drawn every refresh. With a visible cursor each later
+    // present is now recorded shortly before its own refresh, with the pointer read then.
+    // Only with a visible cursor (games with a hidden one are untouched) and once the chain's
+    // cost is known, so the margin before each refresh is a measured one.
+    {
+        const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+        const int64_t nowNs = steadyNowNs();
+        const bool clockFresh = vsyncDeadlineNs_.load(std::memory_order_relaxed) != 0 &&
+            nowNs - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
+        fgJitThisFrame_ = compositeActive() && !fgPassthrough_ && fgPlan_.generations > 0 &&
+            curVis && cursorImg != VK_NULL_HANDLE && cursorDS != VK_NULL_HANDLE &&
+            cursorOverlayRenderPass != VK_NULL_HANDLE &&
+            (fgChainMsPerGen_ > 0.0f || fgJitFirstMs_ > 0.0f) && period > 0 && clockFresh;
+    }
+
     recordCmdBuf(cmdBufs[cmdSlot(0)],imgIdx,frameDraws,
         frameAhbTransitions,framePreUpload,framePostUpload,
         curUpload,hasCurUpload,
@@ -1873,10 +1894,26 @@ void VulkanRendererContext::renderFrame() {
     vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
     uint32_t presented = 0;
     bool fenceSubmitted = false;
+    int64_t groupStartNs = 0;
+    bool jit = fgJitThisFrame_;
+    int64_t jitReachableNs = 0;   // first queue deadline the group can make (back-to-back case)
     // Generated frames belong between N-1 and N, so they go out first and the
     // real frame is presented last.
     for (uint32_t k = 0; k < fgPlan_.presents; k++) {
         VkCommandBuffer cb = cmdBufs[cmdSlot(k)];
+        if (k > 0 && jit) {
+            // Record this present just ahead of the refresh it is for, then draw the cursor
+            // where the pointer is now. Waits only end early for a stop, a lost surface or a
+            // swapchain change; the remaining presents then go out at once.
+            const int64_t wake = fgPresentRecordTimeNs(k, desiredPresent, jitReachableNs);
+            const int64_t nowNs = steadyNowNs();
+            if (wake > nowNs && wake - nowNs < 100000000LL && !waitRenderUntil(wake)) jit = false;
+            cursorOverlay_.ptrX = (short)pointerX.load();
+            cursorOverlay_.ptrY = (short)pointerY.load();
+            // Hidden meanwhile: stop drawing it. (Shown meanwhile waits for the next source
+            // frame, which also uploads a changed cursor image.)
+            if (!cursorVisible.load()) cursorOverlay_.draw = false;
+        }
         if (k > 0) {
             VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             if (vk_.BeginCommandBuffer(cb,&bi)!=VK_SUCCESS) { fbResized.store(true); break; }
@@ -1938,6 +1975,16 @@ void VulkanRendererContext::renderFrame() {
             swapchainRetryPending.store(true);
             return;
         }
+        if (k == 0) {
+            groupStartNs = steadyNowNs();
+            if (jit) {
+                const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+                const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
+                const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+                jitReachableNs = deadline + (int64_t)std::ceil(
+                    (double)(groupStartNs + lead - deadline) / (double)period) * period;
+            }
+        }
         if (k == 0 && (!pendingAHB.empty() || !pendingTex.empty())) {
             std::lock_guard<std::mutex> lk(renderMutex);
             for (const auto& p:pendingAHB) {
@@ -1988,7 +2035,10 @@ void VulkanRendererContext::renderFrame() {
     }
     trackPresentedRate(presented);
     if (presented > 0) lastPresentNs_ = steadyNowNs();
-    notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0);
+    // From the first submit: presents recorded just in time went out over the source interval,
+    // but they were queued for display from the start of the group.
+    notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0,
+                           groupStartNs);
     if (compositeActive()) fgSlotCredit_ = std::max(0.0, fgSlotCredit_ - (double)presented);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
 }
@@ -2198,14 +2248,34 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
     bool staged = false;
 
     if (fps > 0) {
-        const int64_t spacing  = 1000000000LL / fps;
+        int64_t spacing  = 1000000000LL / fps;
         const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
         const bool clockFresh  = deadline != 0 &&
             now - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
-        // Hold-to-slot only when it means something: a live vsync clock and a limit below the
-        // refresh rate. Frame generation too: its group of presents starts at the slot.
+        // Hold-to-slot needs a live vsync clock. Frame generation too: its group of presents
+        // starts at the slot.
         const bool fg   = fgArmed_.load(std::memory_order_relaxed);
-        const bool grid = clockFresh && period > 0 && spacing > period + period / 20;
+        bool grid = clockFresh && period > 0 && spacing > period + period / 20;
+        // A limit at the refresh rate (within 5 %: 60 on 60 Hz, 120 on 120 Hz - what the cadence
+        // display mode picks when the limit is the panel's own rate) used to fall through to the
+        // plain release cadence below: frames shown at once and queued in FIFO behind the
+        // previous one, two buffers handed out with no regard for the display. On the grid with
+        // one slot per refresh the frame is held to its slot and the buffer goes back just in
+        // time for the next one. Depth stays at 2: at this ratio a game near its frame budget
+        // misses whenever it tries depth 1, and each try costs repeated frames - nearly all of
+        // the latency gain comes from slot holding and timed release, not from depth 1.
+        // Not with frame generation: at one present per refresh there is no slot to fill.
+        const bool atRefresh = !grid && !fg && clockFresh && period > 0 &&
+                               std::llabs(spacing - period) <= period / 20;
+        if (atRefresh) { grid = true; spacing = period; }
+        if (atRefresh != pc.atRefresh) {
+            pc.atRefresh = atRefresh;
+            // Leaving or entering the pinned depth: the controller starts over.
+            pc.pipelineDepth = atRefresh ? 2 : 1;
+            pc.lateHistory = 0; pc.depthOneSinceNs = 0; pc.depthTwoHoldNs = 5000000000LL;
+            RLOG("frame pacing: limit %d %s the refresh rate grid", fps,
+                 atRefresh ? "on" : "off");
+        }
         if (grid) {
             // Composite this long before the slot's queue deadline (GPU blit + submit; with
             // frame generation also the chain up to the first generated frame).
@@ -2242,7 +2312,9 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
 
             // One frame in flight while that makes its slots; two for a while after misses.
             const int misses = __builtin_popcount(pc.lateHistory & 0x3FFFFFFFu);   // last 30
-            if (pc.pipelineDepth == 1 && misses >= 2) {
+            if (pc.atRefresh) {
+                pc.pipelineDepth = 2;   // pinned, see above
+            } else if (pc.pipelineDepth == 1 && misses >= 2) {
                 // Missing again within 3 s of the last try at depth 1: it does not fit yet,
                 // stay overlapped longer before the next try (up to a minute).
                 pc.depthTwoHoldNs = (pc.depthOneSinceNs != 0 && now - pc.depthOneSinceNs < 3000000000LL)
@@ -2281,6 +2353,7 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
         pc.idealSlotNs = 0;
         pc.lastReleaseNs = 0;
         pc.pipelineDepth = 1; pc.lateHistory = 0;
+        pc.atRefresh = false;
     }
 
     if (staged) {
@@ -2431,6 +2504,46 @@ void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[],
         // out as soon as it is ready.
         if (anchored || k > 0) desired[k] = first + refreshes * period - period / 2;
     }
+}
+
+int64_t VulkanRendererContext::fgPresentRecordTimeNs(uint32_t k, const int64_t desired[],
+                                                     int64_t reachableNs) const {
+    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
+    if (period <= 0) return 0;
+    // The queue deadline of the refresh present k is for - the earliest it can be shown, so
+    // recording against it is never late on account of the estimate: a present held longer
+    // (FIFO backlog) only shows a slightly older cursor, as every present did before.
+    int64_t latch;
+    if (desired[k] > 0) {
+        // Desired times are presentation times, half a refresh early (fgPresentTimes).
+        const int64_t offset = vsyncPresentOffsetNs_.load(std::memory_order_relaxed);
+        if (offset <= 0) return 0;
+        latch = desired[k] + period / 2 - offset;
+    } else if (reachableNs > 0) {
+        latch = reachableNs + (int64_t)k * period;   // back to back: consecutive refreshes
+    } else {
+        return 0;
+    }
+    // GPU time this present still needs before its deadline: one generation (compute + copy +
+    // cursor pass) or, for the real frame, the copy and the cursor pass. With the compositor's
+    // usual queue-deadline lead on top, as every composite gets, and half again of the cost
+    // for frame-to-frame variance.
+    const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+    const float genMs = fgChainMsPerGen_ > 0.0f ? fgChainMsPerGen_ : fgJitFirstMs_;
+    const bool generated = k < fgPlan_.generations;
+    const int64_t work = generated ? (int64_t)(genMs * 1.5f * 1.0e6f) : 1000000LL;
+    return latch - lead - work - 1000000LL;
+}
+
+bool VulkanRendererContext::waitRenderUntil(int64_t wakeNs) {
+    // Same clock as steadyNowNs(). Woken by every update; only a stop, a lost surface or a
+    // swapchain change ends the wait early (returns false).
+    const std::chrono::steady_clock::time_point until{
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::nanoseconds(wakeNs))};
+    std::unique_lock<std::mutex> lk(dirtyMutex);
+    return !dirtyCV.wait_until(lk, until, [this] {
+        return !isRunning.load() || surfaceDetached.load() || fbResized.load();
+    });
 }
 
 void VulkanRendererContext::onVsync(int64_t frameTimeNs, int64_t deadlineNs, int64_t presentNs) {

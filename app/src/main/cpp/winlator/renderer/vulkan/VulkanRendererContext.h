@@ -654,7 +654,9 @@ public:
     int64_t lastPresentNs_ = 0;
     int64_t pacingWaitNs(bool content) const;
     // lastDesiredNs: desired presentation time of the last present (display timing), 0 = none.
-    void    notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs = 0);
+    // startNs: when the group was queued (its first submit), 0 = now.
+    void    notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs = 0,
+                                   int64_t startNs = 0);
 
     // Limiter state. Atomics are written from Java threads; the rest is renderMutex.
     std::atomic<int>     fpsLimit_{0};
@@ -675,6 +677,20 @@ public:
     // anchorSlotNs: the queue deadline of the display slot this source frame was held for
     // (limiter grid), 0 = none - then the first present goes out as soon as it is ready.
     void fgPresentTimes(uint32_t presents, int64_t desired[], int64_t anchorSlotNs) const;
+
+    // --- Frame generation: cursor recorded per present ------------------------------------
+    // With a visible cursor, presents after the first are recorded just ahead of their own
+    // refresh (see renderFrame), so each draws the pointer where it is then.
+    bool  fgJitThisFrame_ = false;   // render thread: this source frame records just in time
+    // Cost of the shared passes + the first generation (what the first present waits for),
+    // measured on just-in-time frames, whose later generations run spread out. 0 = unknown.
+    float fgJitFirstMs_   = 0.0f;
+    bool  fgQueryJit_[MAX_FRAMES_IN_FLIGHT] = {};
+    // When to record present k (CLOCK_MONOTONIC ns), 0 = at once. reachableNs: first queue
+    // deadline the group could make, for presents without a desired time.
+    int64_t fgPresentRecordTimeNs(uint32_t k, const int64_t desired[], int64_t reachableNs) const;
+    // Sleeps until wakeNs; false if cut short by a stop, a lost surface or a swapchain change.
+    bool    waitRenderUntil(int64_t wakeNs);
 
     // --- Frame generation on the limiter grid ------------------------------------------------
     // With an FPS limit, frame generation's source frames are held for their display slot like
@@ -708,6 +724,8 @@ public:
         int64_t depthTwoHoldNs   = 5000000000LL;
         int64_t depthOneSinceNs  = 0;
         int64_t lastPresentNs    = 0;
+        // The limit equals the refresh rate: one slot per refresh, depth pinned at 2.
+        bool    atRefresh        = false;
         void resetCadence() { idealSlotNs = 0; lastReleaseNs = 0; }
     };
     std::unordered_map<int64_t, Pacer> pacers_;   // by content, under renderMutex

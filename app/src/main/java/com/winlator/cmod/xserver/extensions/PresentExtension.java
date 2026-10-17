@@ -296,6 +296,12 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         short yOff = inputStream.readShort();
         inputStream.skip(8);
         int idleFence = inputStream.readInt();
+        inputStream.readInt();   // options: COPY is all this server does, ASYNC changes nothing here
+        inputStream.skip(4);
+        // The vsync count the client wants the frame for. Mesa's X11 WSI sends 0 in MAILBOX and
+        // IMMEDIATE, and in FIFO waits for each CompleteNotify, then asks for the next vsync
+        // (last completed MSC + 1). Completing at once made FIFO run unthrottled, like MAILBOX.
+        long targetMsc = inputStream.readLong();
         inputStream.skip(client.getRemainingRequestLength());
 
         final Window window = client.xServer.windowManager.getWindow(windowId);
@@ -334,6 +340,13 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         // present_wait) then samples input right after this one is shown. Never before an
         // earlier present's completion, so they stay in order.
         long completeAt = plan[3];
+        // A requested vsync is honoured too (FIFO): complete at that vsync, as an X server that
+        // copies at vblank does. The frame itself is already shown; this only paces the client.
+        final long minMsc = targetMsc > 0 ? targetMsc : 0;
+        if (minMsc > 0) {
+            long targetAt = vsyncTimeOf(minMsc, nowNs);
+            if (targetAt > completeAt) completeAt = targetAt;
+        }
         final WindowPacing pacingState = wp;
         synchronized (limiterLock) {
             if (wp.lastCompleteAtNs > nowNs && wp.lastCompleteAtNs > completeAt)
@@ -341,10 +354,10 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             wp.lastCompleteAtNs = completeAt;
         }
         if (completeAt - nowNs > 200_000L) {
-            limiterExecutor().schedule(() -> sendComplete(window, pacingState, serial),
+            limiterExecutor().schedule(() -> sendComplete(window, pacingState, serial, minMsc),
                     completeAt - nowNs, TimeUnit.NANOSECONDS);
         } else {
-            sendComplete(window, wp, serial);
+            sendComplete(window, wp, serial, minMsc);
         }
 
         synchronized (limiterLock) {
@@ -355,10 +368,33 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         for (Presented p : releaseNow) deliverIdle(p, 0);
     }
 
-    private void sendComplete(Window window, WindowPacing wp, int serial) {
+    /** Furthest ahead a requested vsync is waited for; beyond this the request is not one. */
+    private static final long MAX_TARGET_WAIT_NS = 250_000_000L;
+
+    /**
+     * When vsync {@code msc} happens (CLOCK_MONOTONIC ns), 0 when it already has or the
+     * request is implausibly far ahead (a client's own MSC base, a stale count).
+     */
+    private long vsyncTimeOf(long msc, long nowNs) {
+        com.winlator.cmod.widget.XServerRendererView view = xServer.getXServerView();
+        long[] vsync = new long[3];
+        long curMsc, ustNs, periodNs;
+        if (view != null && view.getVsync(nowNs, vsync) && vsync[2] > 0) {
+            curMsc = vsync[0]; ustNs = vsync[1]; periodNs = vsync[2];
+        } else {
+            curMsc = nowNs / FAKE_INTERVAL_NS; ustNs = curMsc * FAKE_INTERVAL_NS; periodNs = FAKE_INTERVAL_NS;
+        }
+        if (msc <= curMsc) return 0;
+        long ahead = msc - curMsc;
+        if (ahead > MAX_TARGET_WAIT_NS / periodNs + 1) return 0;
+        long at = ustNs + ahead * periodNs;
+        return at - nowNs > MAX_TARGET_WAIT_NS ? 0 : at;
+    }
+
+    private void sendComplete(Window window, WindowPacing wp, int serial, long minMsc) {
         final long nowNs = System.nanoTime();
         com.winlator.cmod.widget.XServerRendererView view = xServer.getXServerView();
-        long[] vsync = new long[2];
+        long[] vsync = new long[3];
         long msc, ustNs;
         if (view != null && view.getVsync(nowNs, vsync)) {
             // The display's own vsync count and time (Choreographer), not a made-up 60 Hz clock.
@@ -367,6 +403,14 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         } else {
             msc = nowNs / FAKE_INTERVAL_NS;
             ustNs = msc * FAKE_INTERVAL_NS;
+        }
+        // Completed for the vsync that was asked for. A timer a hair early would otherwise
+        // report the previous count, and FIFO would ask for the same vsync again and complete
+        // at once: two frames in one refresh.
+        if (minMsc > msc && minMsc - msc <= 2) {
+            long periodNs = vsync[2] > 0 ? vsync[2] : FAKE_INTERVAL_NS;
+            ustNs += (minMsc - msc) * periodNs;
+            msc = minMsc;
         }
         synchronized (limiterLock) {
             // MSC must never go backwards for a window (clock switch, surface re-creation):

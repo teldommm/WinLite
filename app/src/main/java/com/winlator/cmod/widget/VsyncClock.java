@@ -86,7 +86,8 @@ final class VsyncClock {
 
     /**
      * The vsync count and time (CLOCK_MONOTONIC ns) of the latest vsync at {@code nowNs}:
-     * out[0] = msc, out[1] = ust in ns. Returns false before the first vsync.
+     * out[0] = msc, out[1] = ust in ns, out[2] = measured period in ns (when the array has room).
+     * Returns false before the first vsync.
      *
      * The count follows time, not callbacks: a vsync Choreographer did not deliver (busy looper,
      * surface gone, clock stopped) still counts, extrapolated with the measured period. So the
@@ -104,6 +105,7 @@ final class VsyncClock {
         }
         out[0] = msc;
         out[1] = ust;
+        if (out.length > 2) out[2] = s.periodNs;
         return true;
     }
 

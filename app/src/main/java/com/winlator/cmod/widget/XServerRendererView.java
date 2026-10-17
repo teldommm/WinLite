@@ -53,7 +53,8 @@ public abstract class XServerRendererView extends SurfaceView {
         pixmap.updateDirect();
     }
     // The display's vsync count and time (CLOCK_MONOTONIC ns) at nowNs for Present's MSC/UST:
-    // out[0] = msc, out[1] = ust ns. false = no display clock (the caller falls back to 60 Hz).
+    // out[0] = msc, out[1] = ust ns, out[2] = period ns if the array is long enough.
+    // false = no display clock (the caller falls back to 60 Hz).
     public boolean getVsync(long nowNs, long[] out) { return false; }
     // Whether the renderer's GPU work may still be reading this guest buffer (a composite that
     // sampled it has not finished). The X server holds it back from the guest until then.

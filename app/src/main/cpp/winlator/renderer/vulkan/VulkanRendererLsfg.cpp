@@ -197,6 +197,18 @@ void VulkanRendererContext::readFgQueryResult() {
                                                VK_QUERY_RESULT_64_BIT);
     if (r != VK_SUCCESS || ts[1] <= ts[0]) return;
     const double ms = (double)(ts[1] - ts[0]) * (double)fgTimestampPeriodNs_ / 1.0e6;
+    if (fgQueryJit_[currentFrame]) {
+        // Shared passes + first generation only (just-in-time frame). Kept out of the
+        // per-generation figure the HUD shows; it is exactly the chain the limiter has to
+        // start early for, since the later generations are recorded when their turn comes.
+        fgJitFirstMs_ = fgJitFirstMs_ <= 0.0f ? (float)ms
+                                              : fgJitFirstMs_ + ((float)ms - fgJitFirstMs_) * 0.1f;
+        const int64_t total = (int64_t)(ms * 1.0e6);
+        const int64_t prev  = fgChainCostNs_.load(std::memory_order_relaxed);
+        fgChainCostNs_.store(prev <= 0 || total > prev ? total : prev + (total - prev) / 16,
+                             std::memory_order_relaxed);
+        return;
+    }
     const float perGen = (float)(ms / (double)std::max(1u, fgQueryGens_[currentFrame]));
     fgChainMsPerGen_ = fgChainMsPerGen_ < 0.0f
         ? perGen
@@ -246,10 +258,15 @@ void VulkanRendererContext::recordFrameGenGeneration(VkCommandBuffer cb, uint32_
 
         lsfgEngine_->generateInto(cb, g, (uint32_t)slot, dst.img, dst.storageView, w, h);
 
-        if (fgQueryPool_ != VK_NULL_HANDLE && g + 1 == fgPlan_.generations) {
+        // Recorded just in time, the later generations run spread over the source interval:
+        // a span up to the last one would measure the waits. The span then ends after the
+        // first generation (shared passes + one generation, what the first present needs).
+        const bool spanEnd = fgJitThisFrame_ ? g == 0 : g + 1 == fgPlan_.generations;
+        if (fgQueryPool_ != VK_NULL_HANDLE && spanEnd) {
             vk_.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, fgQueryPool_, currentFrame * 2 + 1);
             fgQueryPending_[currentFrame] = true;
-            fgQueryGens_[currentFrame]    = fgPlan_.generations;
+            fgQueryGens_[currentFrame]    = fgJitThisFrame_ ? 1u : fgPlan_.generations;
+            fgQueryJit_[currentFrame]     = fgJitThisFrame_;
         }
 
         // dst is left in GENERAL by the chain; move it and the target
@@ -492,6 +509,7 @@ void VulkanRendererContext::setFrameGenArmed(bool armed, int multiplier, int tar
 
     fgArmed_.store(armed, std::memory_order_relaxed);
     fgChainCostNs_.store(0, std::memory_order_relaxed);
+    fgJitFirstMs_ = 0.0f;   // render thread is between frames (frameMutex held exclusively)
     RLOG("lsfg-native: frame gen %s (multiplier=%d) - recreating swapchain",
          armed ? "ARMED" : "disarmed", multiplier);
     // The swapchain's usage flags and image count both depend on this, so it
