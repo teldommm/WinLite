@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.R
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -118,7 +119,7 @@ private fun GraphicsSidebarPanel(
             .fillMaxWidth()
             .padding(vertical = 4.dp)
     ) {
-        SidebarPanelTitle("Rendering")
+        SidebarPanelTitle(uiStr(R.string.ui_rendering))
 
         FpsLimiterCard(
             initialFps = state.fpsLimit,
@@ -128,7 +129,7 @@ private fun GraphicsSidebarPanel(
         SidebarGap()
         SidebarCard {
             SidebarInlineToggle(
-                label = "Super Resolution",
+                label = uiStr(R.string.ui_super_resolution),
                 checked = fsrEnabled,
                 onCheckedChange = {
                     fsrEnabled = it
@@ -142,7 +143,7 @@ private fun GraphicsSidebarPanel(
             if (fsrEnabled) {
                 Spacer(Modifier.height(8.dp))
                 SidebarDropdownField(
-                    caption = "Upscaler Mode",
+                    caption = uiStr(R.string.ui_upscaler_mode),
                     options = UPSCALER_DISPLAY_ORDER.map { UPSCALER_LABELS[it] },
                     selectedIndex = UPSCALER_DISPLAY_ORDER.indexOf(upscalerIndex).coerceAtLeast(0),
                     onSelect = {
@@ -156,7 +157,7 @@ private fun GraphicsSidebarPanel(
                 Spacer(Modifier.height(12.dp))
                 var sharpnessDraft by remember(sharpnessVisible) { mutableStateOf(sharpness.toFloat()) }
                 SidebarSlider(
-                    label = "Sharpness",
+                    label = uiStr(R.string.ui_sharpness),
                     valueText = "$sharpness%",
                     value = sharpnessDraft,
                     onValueChange = {
@@ -170,7 +171,7 @@ private fun GraphicsSidebarPanel(
             }
             Spacer(Modifier.height(if (sharpnessVisible) 4.dp else 12.dp))
             SidebarDropdownField(
-                caption = "Post Effect",
+                caption = uiStr(R.string.ui_post_effect),
                 options = POSTFX_LABELS,
                 selectedIndex = postFxIndex,
                 onSelect = {
@@ -189,7 +190,7 @@ private fun GraphicsSidebarPanel(
             SidebarSectionTitle("ReShade")
             Spacer(Modifier.height(10.dp))
             SidebarDropdownField(
-                caption = "Effect",
+                caption = uiStr(R.string.ui_effect),
                 options = RESHADE_EFFECTS,
                 selectedIndex = reshadeIndex,
                 onSelect = { index ->
@@ -213,7 +214,7 @@ private fun GraphicsSidebarPanel(
             if (reshadeIndex > 0) {
                 Spacer(Modifier.height(12.dp))
                 SidebarSlider(
-                    label = "Strength",
+                    label = uiStr(R.string.ui_strength),
                     valueText = "$reshadeStrength%",
                     value = reshadeStrength.toFloat(),
                     onValueChange = {
@@ -228,7 +229,7 @@ private fun GraphicsSidebarPanel(
         if (state.frameGenAvailable) {
             SidebarGap()
             SidebarCard {
-                SidebarSectionTitle("Frame Generation")
+                SidebarSectionTitle(uiStr(R.string.ui_frame_generation))
                 Spacer(Modifier.height(10.dp))
                 SidebarDropdownField(
                     caption = null,
@@ -256,7 +257,7 @@ private fun GraphicsSidebarPanel(
                     var flowScale by remember { mutableStateOf(state.frameGenFlowScale) }
                     var appliedFlowScale by remember { mutableStateOf(state.frameGenFlowScale) }
                     SidebarSlider(
-                        label = "Flow Scale",
+                        label = uiStr(R.string.ui_flow_scale),
                         valueText = "${(flowScale * 100).roundToInt()}%",
                         value = flowScale,
                         onValueChange = { flowScale = (it * 20f).roundToInt() / 20f },
@@ -295,7 +296,7 @@ private fun TargetFpsField(initialFps: Int, onFpsChanged: (Int) -> Unit) {
         value = text,
         onValueChange = { t -> text = t.filter(Char::isDigit).take(4) },
         singleLine = true,
-        label = { Text("Target FPS") },
+        label = { Text(uiStr(R.string.ui_target_fps)) },
         placeholder = { Text("e.g. 60") },
         suffix = { Text("FPS") },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
@@ -359,10 +360,10 @@ private fun FpsLimiterCard(initialFps: Int, onFpsChanged: (Int) -> Unit) {
 
     SidebarCard {
         SidebarSlider(
-            label = "FPS Limit",
+            label = uiStr(R.string.ui_fps_limit),
             valueText = when {
-                position <= 0 -> "Off"
-                position >= FPS_CUSTOM_POSITION -> "Custom"
+                position <= 0 -> uiStr(R.string.ui_off)
+                position >= FPS_CUSTOM_POSITION -> uiStr(R.string.ui_custom)
                 else -> "${position * FPS_STEP} FPS"
             },
             value = position.toFloat(),
@@ -385,7 +386,7 @@ private fun FpsLimiterCard(initialFps: Int, onFpsChanged: (Int) -> Unit) {
                 // 1 FPS, then 14, ... while typing "144", and save to disk each time.
                 onValueChange = { text -> customText = text.filter(Char::isDigit).take(4) },
                 singleLine = true,
-                label = { Text("Max FPS") },
+                label = { Text(uiStr(R.string.ui_max_fps)) },
                 placeholder = { Text("e.g. 144") },
                 suffix = { Text("FPS") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),

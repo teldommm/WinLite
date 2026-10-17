@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.onboarding
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,12 +53,12 @@ internal fun OnboardingThemeScreen(
         ) {
             Column(Modifier.weight(0.8f)) {
                 Text(
-                    "Choose your theme",
+                    uiStr(R.string.ui_choose_your_theme),
                     style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "Pick the look you prefer. You can change it later in Settings.",
+                    uiStr(R.string.ui_pick_the_look_you_prefer_you_can_change_i),
                     modifier = Modifier.padding(top = 8.dp),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -86,12 +88,12 @@ internal fun OnboardingThemeScreen(
         Spacer(Modifier.height(8.dp))
         Column(Modifier.widthIn(max = 620.dp)) {
             Text(
-                "Choose your theme",
+                uiStr(R.string.ui_choose_your_theme),
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Pick the look you prefer. You can change it later in Settings.",
+                uiStr(R.string.ui_pick_the_look_you_prefer_you_can_change_i),
                 modifier = Modifier.padding(top = 7.dp, bottom = 22.dp),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -121,7 +123,7 @@ private fun ThemeNavigationButtons(
                 colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface),
                 border = BorderStroke(1.dp, hairlineColor())
             ) {
-                Text("Back")
+                Text(uiStr(R.string.ui_back))
             }
         }
         Button(
@@ -129,7 +131,7 @@ private fun ThemeNavigationButtons(
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
         ) {
-            Text("Continue")
+            Text(uiStr(R.string.ui_continue))
         }
     }
 }

@@ -1,5 +1,8 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.R
+import androidx.compose.ui.res.stringResource
+import com.winlator.cmod.ui.theme.OnArtwork
 import android.graphics.Bitmap
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -165,8 +168,8 @@ internal fun LandscapePagerCore(
                                     .size(206.dp, 322.dp)
                                     .scale(cardScale),
                                 shape = WinZShapes.Large,
-                                color = Color.Black.copy(.30f),
-                                border = BorderStroke(if (selected) 2.dp else 1.dp, Color.White.copy(if (selected) .88f else .20f))
+                                color = OnArtwork.CardFill,
+                                border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) OnArtwork.CardBorderSelected else OnArtwork.CardBorder)
                             ) {
                                 val pageCover = candidate.coverPath ?: candidate.generatedCoverPath
                                 if (pageCover != null) {
@@ -184,23 +187,23 @@ internal fun LandscapePagerCore(
                 Spacer(Modifier.width(26.dp))
                 Column(Modifier.weight(.9f)) {
                     Text(item.name, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(environmentLabel, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodyMedium)
+                    Text(environmentLabel, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.size(13.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(
                             onClick = { callbacks.onOpen(item.shortcutPath) },
                             shape = WinZShapes.Small,
-                            color = Color.White.copy(.20f),
+                            color = OnArtwork.ButtonFill,
                             contentColor = Color.White,
-                            border = BorderStroke(1.dp, Color.White.copy(.22f))
-                        ) { Text("View details", Modifier.padding(horizontal = 21.dp, vertical = 11.dp)) }
+                            border = BorderStroke(1.dp, OnArtwork.ButtonBorder)
+                        ) { Text(stringResource(R.string.ui_view_details), Modifier.padding(horizontal = 21.dp, vertical = 11.dp)) }
                         Surface(
                             onClick = { callbacks.onRun(item.shortcutPath) },
                             modifier = Modifier.size(44.dp),
                             shape = CircleShape,
                             color = controlAccentColor(),
                             contentColor = Color.White
-                        ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Play") } }
+                        ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.ui_play)) } }
                         footerActions(item)
                     }
                 }

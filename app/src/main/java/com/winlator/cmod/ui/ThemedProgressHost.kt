@@ -1,5 +1,8 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.R
+import androidx.compose.ui.res.stringResource
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.tabularNumbers
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.view.View
@@ -48,7 +51,7 @@ object ThemedProgressHost {
     @JvmStatic
     fun show(activity: AppCompatActivity, title: String, onCancel: Runnable): View {
         val root = activity.findViewById<ViewGroup>(android.R.id.content)
-        val state = mutableStateOf(ProgressState(0, "Calculating..."))
+        val state = mutableStateOf(ProgressState(0, activity.getString(R.string.ui_calculating)))
         lateinit var composeView: ComposeView
         composeView = ComposeView(activity).apply {
             tag = state
@@ -58,7 +61,7 @@ object ThemedProgressHost {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.5f)),
+                            .background(DialogScrimColor),
                         contentAlignment = Alignment.Center
                     ) {
                         ThemedDialogSurface {
@@ -95,7 +98,7 @@ object ThemedProgressHost {
                                     },
                                     colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                                     border = BorderStroke(1.dp, hairlineColor())
-                                ) { Text("Cancel") }
+                                ) { Text(stringResource(R.string.cancel)) }
                             }
                         }
                     }

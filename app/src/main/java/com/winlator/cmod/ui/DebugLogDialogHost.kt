@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import androidx.activity.compose.BackHandler
 
 import android.app.Activity
@@ -97,7 +98,7 @@ object DebugLogDialogHost {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.6f))
+                            .background(DialogScrimColor)
                             .clickable(
                                 indication = null,
                                 interactionSource = remember { MutableInteractionSource() },
@@ -146,17 +147,17 @@ private fun DebugLogContent(state: DebugLogState, onClose: () -> Unit) {
                 modifier = Modifier.weight(1f)
             )
             IconButton(onClick = { state.clear() }) {
-                Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Outlined.DeleteOutline, contentDescription = stringResource(R.string.ui_clear_logs), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = { state.paused = !state.paused }) {
                 Icon(
                     if (state.paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
-                    contentDescription = null,
+                    contentDescription = if (state.paused) stringResource(R.string.ui_resume) else stringResource(R.string.ui_pause),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             IconButton(onClick = onClose) {
-                Icon(Icons.Outlined.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.ui_close), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Spacer(Modifier.height(8.dp))

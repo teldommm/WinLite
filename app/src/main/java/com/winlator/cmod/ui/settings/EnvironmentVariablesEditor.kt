@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import androidx.compose.foundation.BorderStroke
@@ -176,7 +178,7 @@ fun EnvironmentVariablesEditor(
                 color = MaterialTheme.colorScheme.surface
             ) {
                 Text(
-                    "No environment variables added.",
+                    uiStr(R.string.ui_no_environment_variables_added),
                     modifier = Modifier.padding(14.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -215,7 +217,7 @@ fun EnvironmentVariablesEditor(
         ) {
             Icon(Icons.Outlined.Add, null)
             Spacer(Modifier.width(7.dp))
-            Text("Add variable")
+            Text(uiStr(R.string.ui_add_variable))
         }
     }
 
@@ -265,7 +267,7 @@ private fun EnvironmentVariableRow(
                     CustomTag()
                 }
             }
-            IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, "Remove") }
+            IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, uiStr(R.string.remove)) }
         }
         EnvValueEditor(spec, row.value, onValue)
     }
@@ -278,7 +280,7 @@ private fun CustomTag() {
         color = controlAccentColor().copy(alpha = 0.16f)
     ) {
         Text(
-            "Custom",
+            uiStr(R.string.ui_custom),
             modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall,
             color = controlAccentColor()
@@ -294,29 +296,29 @@ private fun EnvValueEditor(spec: EnvVariableSpec, value: String, onValue: (Strin
             val off = spec.options.getOrElse(0) { "0" }
             val on = spec.options.getOrElse(1) { "1" }
             SettingToggle(
-                label = if (value == on) "Enabled" else "Disabled",
+                label = if (value == on) uiStr(R.string.ui_enabled) else uiStr(R.string.disabled),
                 checked = value == on,
                 onChanged = { onValue(if (it) on else off) }
             )
         }
         EnvValueKind.SELECT -> SettingChoice(
-            label = "Value",
+            label = uiStr(R.string.ui_value),
             selected = value.ifBlank { spec.options.firstOrNull().orEmpty() },
             entries = spec.options
         ) { onValue(it) }
         EnvValueKind.MULTI -> MultiEnvironmentChoice(spec.options, value, onValue)
-        EnvValueKind.NUMBER -> SettingText("Value", value) { onValue(it.filter(Char::isDigit)) }
-        EnvValueKind.TEXT -> SettingText("Value", value) { onValue(stripWhitespace(it)) }
+        EnvValueKind.NUMBER -> SettingText(uiStr(R.string.ui_value), value) { onValue(it.filter(Char::isDigit)) }
+        EnvValueKind.TEXT -> SettingText(uiStr(R.string.ui_value), value) { onValue(stripWhitespace(it)) }
     }
 }
 
 @Composable
 private fun MultiEnvironmentChoice(options: List<String>, value: String, onChanged: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val selectedText = value.ifBlank { "None" }
+    val selectedText = value.ifBlank { uiStr(R.string.ui_none) }
     Surface(onClick = { open = true }, color = androidx.compose.ui.graphics.Color.Transparent, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp)) {
-            Text("Value", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(uiStr(R.string.ui_value), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(selectedText, style = MaterialTheme.typography.bodyLarge)
         }
     }
@@ -327,7 +329,7 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
             }
         }
         ThemedDialog(onDismissRequest = { open = false }) {
-            ThemedDialogTitle("Select values")
+            ThemedDialogTitle(uiStr(R.string.ui_select_values))
             val accent = controlAccentColor()
             LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 420.dp)) {
                 items(options) { option ->
@@ -358,7 +360,7 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
                     onClick = { open = false },
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                     border = BorderStroke(1.dp, hairlineColor())
-                ) { Text("Cancel") }
+                ) { Text(uiStr(R.string.cancel)) }
                 Button(
                     onClick = {
                         // Keep the options' canonical order (not click order); values that aren't
@@ -368,7 +370,7 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
                         open = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color.White)
-                ) { Text("Done") }
+                ) { Text(uiStr(R.string.ui_done)) }
             }
         }
     }
@@ -402,27 +404,27 @@ private fun AddEnvironmentVariableDialog(
     val replacing = toAdd.count { it.name in existing }
 
     ThemedDialog(onDismissRequest = onDismiss) {
-        ThemedDialogTitle("Add environment variable")
+        ThemedDialogTitle(uiStr(R.string.ui_add_environment_variable))
         ModeSwitch(mode, presetEnabled = available.isNotEmpty()) { mode = it }
         Spacer(Modifier.height(10.dp))
         ThemedDialogScrollBody(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             when (mode) {
                 AddMode.PRESET -> {
-                    SettingChoice("Variable", presetName, available.map { it.name }) { presetName = it }
+                    SettingChoice(uiStr(R.string.ui_variable), presetName, available.map { it.name }) { presetName = it }
                     if (presetSpec != null) EnvValueEditor(presetSpec, presetValue) { presetValue = it }
                 }
                 AddMode.CUSTOM -> {
                     val customMessage: String? = when {
-                        custom.bulk -> "Pasted list: ${custom.entries.size} variable(s)" +
-                            if (custom.invalid.isNotEmpty()) ", ${custom.invalid.size} invalid will be skipped" else ""
-                        custom.invalid.isNotEmpty() -> "Use letters, digits and _, not starting with a digit"
-                        customSpec != null -> "Known variable: it will get its own editor"
+                        custom.bulk -> uiStr(R.string.ui_pasted_list_variable_s, custom.entries.size) +
+                            if (custom.invalid.isNotEmpty()) uiStr(R.string.ui_invalid_will_be_skipped, custom.invalid.size) else ""
+                        custom.invalid.isNotEmpty() -> uiStr(R.string.ui_use_letters_digits_and_not_starting_with)
+                        customSpec != null -> uiStr(R.string.ui_known_variable_it_will_get_its_own_editor)
                         else -> null
                     }
                     OutlinedTextField(
                         value = customName,
                         onValueChange = { customName = it },
-                        label = { Text("Name") },
+                        label = { Text(uiStr(R.string.ui_name)) },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                         maxLines = 4,
                         shape = WinZShapes.Small,
@@ -440,7 +442,7 @@ private fun AddEnvironmentVariableDialog(
                             OutlinedTextField(
                                 value = customValue,
                                 onValueChange = { customValue = stripWhitespace(it) },
-                                label = { Text("Value") },
+                                label = { Text(uiStr(R.string.ui_value)) },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                                 singleLine = true,
                                 shape = WinZShapes.Small,
@@ -464,8 +466,8 @@ private fun AddEnvironmentVariableDialog(
             }
             if (replacing > 0) {
                 Text(
-                    if (toAdd.size == 1) "Already added: its value will be replaced."
-                    else "$replacing already added: their values will be replaced.",
+                    if (toAdd.size == 1) uiStr(R.string.ui_already_added_its_value_will_be_replaced)
+                    else uiStr(R.string.ui_already_added_their_values_will_be_replac, replacing),
                     modifier = Modifier.padding(horizontal = 14.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -478,7 +480,7 @@ private fun AddEnvironmentVariableDialog(
                 onClick = onDismiss,
                 colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                 border = BorderStroke(1.dp, hairlineColor())
-            ) { Text("Cancel") }
+            ) { Text(uiStr(R.string.cancel)) }
             Button(
                 onClick = {
                     val finalEntries = toAdd.map { e ->
@@ -492,9 +494,9 @@ private fun AddEnvironmentVariableDialog(
             ) {
                 Text(
                     when {
-                        toAdd.size > 1 -> "Add ${toAdd.size}"
-                        replacing > 0 -> "Replace"
-                        else -> "Add"
+                        toAdd.size > 1 -> uiStr(R.string.ui_add, toAdd.size)
+                        replacing > 0 -> uiStr(R.string.ui_replace)
+                        else -> uiStr(R.string.ui_add_2)
                     }
                 )
             }
@@ -512,7 +514,7 @@ private fun ModeSwitch(mode: AddMode, presetEnabled: Boolean, onMode: (AddMode) 
         border = BorderStroke(1.dp, hairlineColor())
     ) {
         Row(Modifier.padding(3.dp)) {
-            listOf(AddMode.PRESET to "Preset", AddMode.CUSTOM to "Custom").forEach { (m, label) ->
+            listOf(AddMode.PRESET to uiStr(R.string.preset), AddMode.CUSTOM to uiStr(R.string.ui_custom)).forEach { (m, label) ->
                 val selected = m == mode
                 val enabled = m != AddMode.PRESET || presetEnabled
                 Surface(
@@ -524,7 +526,7 @@ private fun ModeSwitch(mode: AddMode, presetEnabled: Boolean, onMode: (AddMode) 
                 ) {
                     Box(Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                         Text(
-                            if (m == AddMode.PRESET && !presetEnabled) "$label (all added)" else label,
+                            if (m == AddMode.PRESET && !presetEnabled) uiStr(R.string.ui_all_added, label) else label,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                             color = when {
                                 selected -> Color.White

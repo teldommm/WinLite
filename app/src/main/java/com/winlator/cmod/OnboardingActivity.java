@@ -1,5 +1,6 @@
 package com.winlator.cmod;
 
+import com.winlator.cmod.ui.UiStrings;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
@@ -202,7 +203,7 @@ public class OnboardingActivity extends AppCompatActivity implements ComponentCa
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == REQUEST_STORAGE) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) continuePermissionFlow();
-            else WinToast.show(this, "Storage access is required to manage games.", Toast.LENGTH_LONG);
+            else WinToast.show(this, UiStrings.get(R.string.ui_storage_access_required), Toast.LENGTH_LONG);
         } else if (requestCode == REQUEST_NOTIFICATIONS) {
             finishOnboarding();
         }
@@ -225,14 +226,14 @@ public class OnboardingActivity extends AppCompatActivity implements ComponentCa
         String runtime = resolveSelectedRuntime();
         if (runtime == null) {
             finishing = false;
-            WinToast.show(this, "Install and select a Wine or Proton layer first.", Toast.LENGTH_LONG);
+            WinToast.show(this, UiStrings.get(R.string.ui_install_select_wine_first), Toast.LENGTH_LONG);
             return;
         }
 
         WineInfo wineInfo = WineInfo.fromIdentifier(this, contentsManager, runtime);
         if (wineInfo.path == null || wineInfo.path.isEmpty()) {
             finishing = false;
-            WinToast.show(this, "The selected Wine/Proton layer is no longer installed.", Toast.LENGTH_LONG);
+            WinToast.show(this, UiStrings.get(R.string.ui_the_selected_wine_proton_layer_is_no_long), Toast.LENGTH_LONG);
             return;
         }
 
@@ -260,14 +261,14 @@ public class OnboardingActivity extends AppCompatActivity implements ComponentCa
             manager.createContainerAsync(data, contentsManager, created -> {
                 if (created == null) {
                     finishing = false;
-                    WinToast.show(this, "Unable to create the first container.", Toast.LENGTH_LONG);
+                    WinToast.show(this, UiStrings.get(R.string.ui_unable_to_create_the_first_container), Toast.LENGTH_LONG);
                 } else {
                     enterMainApp();
                 }
             });
         } catch (Exception error) {
             finishing = false;
-            WinToast.show(this, "Unable to prepare the first container.", Toast.LENGTH_LONG);
+            WinToast.show(this, UiStrings.get(R.string.ui_unable_to_prepare_the_first_container), Toast.LENGTH_LONG);
         }
     }
 

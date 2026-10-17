@@ -1,5 +1,8 @@
 package com.winlator.cmod.ui.library
 
+import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.layout.offset
+import com.winlator.cmod.ui.theme.OnArtwork
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import android.graphics.Bitmap
@@ -145,7 +148,7 @@ internal fun LibraryRoot(
                 )
             },
             footerActions = { item ->
-                IconButton(onClick = { menu = item }) { Icon(Icons.Outlined.MoreVert, "More options", tint = Color.White) }
+                IconButton(onClick = { menu = item }) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.ui_more_options), tint = Color.White) }
             }
         )
         menu?.let { LibraryItemMenuCompat(it, cb) { menu = null } }
@@ -180,7 +183,7 @@ internal fun LibraryRoot(
             )
             Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(LIBRARY_CHIP_SPACING)) {
                 LibraryFilter.values().forEach { option ->
-                    LibraryFilterChip(option.name, option == filter) { filterName = option.name }
+                    LibraryFilterChip(libraryFilterLabel(option), option == filter) { filterName = option.name }
                 }
             }
         }
@@ -188,7 +191,7 @@ internal fun LibraryRoot(
             if (query.isNotBlank() || (filter != LibraryFilter.All && items.isNotEmpty())) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        if (query.isNotBlank()) "No games match your search" else "No games in this section",
+                        if (query.isNotBlank()) stringResource(R.string.ui_no_games_match_search) else stringResource(R.string.ui_no_games_in_section),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -214,7 +217,7 @@ internal fun LibraryRoot(
                                 Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Add, null, modifier = Modifier.size(34.dp)) }
                             }
                             Spacer(Modifier.height(16.dp))
-                            Text("Add games", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.ui_add_games), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -266,7 +269,7 @@ private fun LibraryLandscapeTop(
         Spacer(Modifier.height(7.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(LIBRARY_CHIP_SPACING)) {
             LibraryFilter.values().forEach { option ->
-                LibraryFilterChip(option.name, option == filter) { onFilter(option) }
+                LibraryFilterChip(libraryFilterLabel(option), option == filter) { onFilter(option) }
             }
         }
     }
@@ -294,7 +297,7 @@ internal fun LibraryLandscapeHeader(
                 .padding(end = (ShellChrome.LandscapeNavReserve - containerEndPadding).coerceAtLeast(0.dp)),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            LibraryTopIcon(Icons.AutoMirrored.Outlined.ArrowBack, false) {
+            LibraryTopIcon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ui_close_search), false) {
                 searchActive = false
                 onSearchQueryChanged("")
             }
@@ -303,16 +306,16 @@ internal fun LibraryLandscapeHeader(
     } else {
         // Home / Input Controls / Settings are MainShell's floating nav group now.
         LandscapeScreenHeader(
-            title = "Library",
+            title = stringResource(R.string.ui_library),
             onArtwork = onArtwork,
             startPadding = 0.dp,
             containerEndPadding = containerEndPadding
         ) {
-            LibraryTopIcon(Icons.Outlined.Search, false) { searchActive = true }
-            LibraryTopIcon(if (grid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView, false) {
+            LibraryTopIcon(Icons.Outlined.Search, stringResource(R.string.ui_search), false) { searchActive = true }
+            LibraryTopIcon(if (grid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView, if (grid) stringResource(R.string.ui_list_view) else stringResource(R.string.ui_grid_view), false) {
                 onGridViewChanged(!grid)
             }
-            LibraryTopIcon(Icons.Outlined.Add, false) { activity?.navigateToMainDestination(R.id.main_menu_file_manager) }
+            LibraryTopIcon(Icons.Outlined.Add, stringResource(R.string.ui_add_games), false) { activity?.navigateToMainDestination(R.id.main_menu_file_manager) }
             LibraryOrientationMenu(activity)
         }
     }
@@ -342,7 +345,7 @@ internal fun LibraryPortraitHeader(
             Modifier.fillMaxWidth().height(ShellChrome.PortraitHeaderHeight),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            LibraryTopIcon(Icons.AutoMirrored.Outlined.ArrowBack, false) {
+            LibraryTopIcon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ui_close_search), false) {
                 searchActive = false
                 onSearchQueryChanged("")
             }
@@ -350,16 +353,16 @@ internal fun LibraryPortraitHeader(
         }
     } else {
         Box(Modifier.fillMaxWidth().height(ShellChrome.PortraitHeaderHeight), contentAlignment = Alignment.CenterStart) {
-            PortraitMainHeader("Library")
+            PortraitMainHeader(stringResource(R.string.ui_library))
             Row(
                 modifier = Modifier.align(Alignment.CenterEnd),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                LibraryTopIcon(Icons.Outlined.Search, false) { searchActive = true }
-                LibraryTopIcon(if (grid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView, false) {
+                LibraryTopIcon(Icons.Outlined.Search, stringResource(R.string.ui_search), false) { searchActive = true }
+                LibraryTopIcon(if (grid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView, if (grid) stringResource(R.string.ui_list_view) else stringResource(R.string.ui_grid_view), false) {
                     onGridViewChanged(!grid)
                 }
-                LibraryTopIcon(Icons.Outlined.Add, false) { onOpenFileManager() }
+                LibraryTopIcon(Icons.Outlined.Add, stringResource(R.string.ui_add_games), false) { onOpenFileManager() }
                 LibraryOrientationMenu(activity)
             }
         }
@@ -370,7 +373,7 @@ internal fun LibraryPortraitHeader(
 private fun LibraryOrientationMenu(activity: MainActivity?) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        LibraryTopIcon(Icons.Outlined.MoreVert, false) { expanded = true }
+        LibraryTopIcon(Icons.Outlined.MoreVert, stringResource(R.string.ui_more_options), false) { expanded = true }
         LibraryOrientationDropdown(activity, expanded) { expanded = false }
     }
 }
@@ -391,15 +394,15 @@ private fun LibraryOrientationDropdown(activity: MainActivity?, expanded: Boolea
         shape = WinZShapes.Medium,
         containerColor = MaterialTheme.colorScheme.surface
     ) {
-        OrientationToggleMenuItem("Lock screen orientation", orientationState.first) {
+        OrientationToggleMenuItem(stringResource(R.string.ui_lock_orientation), orientationState.first) {
             activity?.toggleOrientationLock()
             orientationRevision++
         }
-        OrientationToggleMenuItem("Vertical mode", orientationState.second) {
+        OrientationToggleMenuItem(stringResource(R.string.ui_vertical_mode), orientationState.second) {
             activity?.toggleVerticalMode()
             orientationRevision++
         }
-        OrientationToggleMenuItem("Horizontal mode", orientationState.third) {
+        OrientationToggleMenuItem(stringResource(R.string.ui_horizontal_mode), orientationState.third) {
             activity?.toggleHorizontalMode()
             orientationRevision++
         }
@@ -423,7 +426,8 @@ private fun OrientationToggleMenuItem(label: String, checked: Boolean, onClick: 
 }
 
 @Composable
-private fun LibraryTopIcon(icon: ImageVector, selected: Boolean, click: () -> Unit) {
+// description: read by TalkBack (these buttons have no visible label).
+private fun LibraryTopIcon(icon: ImageVector, description: String, selected: Boolean, click: () -> Unit) {
     val background = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .12f) else Color.Transparent
     val content = if (selected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onBackground.copy(alpha = .68f)
@@ -433,7 +437,7 @@ private fun LibraryTopIcon(icon: ImageVector, selected: Boolean, click: () -> Un
         shape = WinZShapes.Medium,
         color = background,
         contentColor = content
-    ) { Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { Icon(icon, null, modifier = Modifier.size(23.dp)) } }
+    ) { Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { Icon(icon, description, modifier = Modifier.size(23.dp)) } }
 }
 
 // Fill of small controls that sit over the content: the selected All / Favorites / Recent chip and
@@ -445,6 +449,14 @@ private fun LibraryTopIcon(icon: ImageVector, selected: Boolean, click: () -> Un
 internal fun translucentControlFill(): Color {
     val light = MaterialTheme.colorScheme.background.luminance() > .65f
     return MaterialTheme.colorScheme.onSurface.copy(alpha = if (light) 0.06f else 0.10f)
+}
+
+// Shown text of a filter; the enum name stays the saved state (rememberSaveable).
+@Composable
+internal fun libraryFilterLabel(filter: LibraryFilter): String = when (filter) {
+    LibraryFilter.All -> stringResource(R.string.ui_filter_all)
+    LibraryFilter.Favorites -> stringResource(R.string.ui_filter_favorites)
+    LibraryFilter.Recent -> stringResource(R.string.ui_filter_recent)
 }
 
 @Composable
@@ -529,7 +541,7 @@ internal fun CoverArtworkCard(item: LibraryItem, cb: LibraryCallbacks) {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color.Black.copy(.92f)))))
             Column(Modifier.align(Alignment.BottomStart).padding(start = 14.dp, end = 50.dp, bottom = 13.dp)) {
                 Text(item.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(item.containerName, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodySmall)
+                Text(item.containerName, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodySmall)
             }
             Box(Modifier.align(Alignment.TopEnd)) { MenuButtonCompat(item, cb, true) }
             Box(Modifier.align(Alignment.BottomEnd).padding(9.dp)) { PlayCompat(item, cb, true) }
@@ -565,7 +577,7 @@ private fun PlayCompat(item: LibraryItem, cb: LibraryCallbacks, overlay: Boolean
         shape = CircleShape,
         color = controlAccentColor(),
         contentColor = Color.White
-    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Play") } }
+    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.ui_play)) } }
 }
 
 @Composable
@@ -580,7 +592,7 @@ private fun MenuButtonCompat(item: LibraryItem, cb: LibraryCallbacks, light: Boo
         else if (whiteTheme) MaterialTheme.colorScheme.onSurface
         else Color.White
     IconButton(onClick = { open = true }) {
-        Icon(Icons.Outlined.MoreVert, "More options", tint = tint)
+        Icon(Icons.Outlined.MoreVert, stringResource(R.string.ui_more_options), tint = tint)
     }
     if (open) LibraryItemMenuCompat(item, cb) { open = false }
 }
@@ -598,7 +610,7 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
         dragHandle = {
             Surface(
                 modifier = Modifier.padding(top = 10.dp, bottom = 8.dp).size(width = 36.dp, height = 4.dp),
-                shape = RoundedCornerShape(50),
+                shape = CircleShape,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .42f)
             ) {}
         }
@@ -624,7 +636,7 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
             androidx.compose.material3.HorizontalDivider(
                 color = dividerColor()
             )
-            val favoriteLabel = if (item.favorite) "Unfavorite" else "Favorite"
+            val favoriteLabel = if (item.favorite) stringResource(R.string.ui_unfavorite) else stringResource(R.string.ui_favorite)
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -638,11 +650,11 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_FAVORITE)
                 }
-                LibraryActionTileCompat(Icons.Outlined.Settings, "Configure", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.Settings, stringResource(R.string.ui_configure), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_SETTINGS)
                 }
-                LibraryActionTileCompat(Icons.Outlined.Photo, "Artwork", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.Photo, stringResource(R.string.ui_artwork), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_ICON)
                 }
@@ -651,22 +663,22 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                LibraryActionTileCompat(Icons.Outlined.Home, "Home screen", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.Home, stringResource(R.string.ui_home_screen), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_HOME)
                 }
-                LibraryActionTileCompat(Icons.Outlined.ContentCopy, "Clone", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.ContentCopy, stringResource(R.string.ui_clone), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_CLONE)
                 }
-                LibraryActionTileCompat(Icons.Outlined.FileUpload, "Export", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.FileUpload, stringResource(R.string.ui_export), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_EXPORT)
                 }
             }
             LibraryActionTileCompat(
                 Icons.Outlined.DeleteOutline,
-                "Remove from library",
+                stringResource(R.string.ui_remove_from_library),
                 Modifier.fillMaxWidth().padding(top = 8.dp),
                 destructive = true,
                 horizontal = landscape
@@ -753,7 +765,7 @@ private fun LibrarySearchField(query: String, onQueryChange: (String) -> Unit, m
                 Box(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                     if (query.isEmpty()) {
                         Text(
-                            "Search games",
+                            stringResource(R.string.ui_search_games),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1
@@ -762,15 +774,24 @@ private fun LibrarySearchField(query: String, onQueryChange: (String) -> Unit, m
                     innerTextField()
                 }
                 if (query.isNotEmpty()) {
-                    Icon(
-                        Icons.Outlined.Close,
-                        contentDescription = "Clear",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // The touch area is the field's full height and 36dp wide (it used to be just
+                    // the 20dp glyph). Shifted 8dp into the end padding so the cross stays exactly
+                    // where it was drawn before.
+                    Box(
                         modifier = Modifier
-                            .size(20.dp)
+                            .offset(x = 8.dp)
+                            .size(width = 36.dp, height = 44.dp)
                             .clip(WinZShapes.Small)
-                            .clickable { onQueryChange("") }
-                    )
+                            .clickable(onClickLabel = stringResource(R.string.ui_clear_search)) { onQueryChange("") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Outlined.Close,
+                            contentDescription = stringResource(R.string.ui_clear),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }

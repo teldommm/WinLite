@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.WinZMotion
 import androidx.activity.compose.BackHandler
 
@@ -101,7 +102,7 @@ object AboutDialogHost {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.5f))
+                                .background(DialogScrimColor)
                                 .clickable(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
@@ -206,7 +207,7 @@ private fun AboutDialogContent(onDismiss: () -> Unit) {
                 modifier = Modifier.align(Alignment.End),
                 colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                 border = BorderStroke(1.dp, hairlineColor())
-            ) { Text("Close") }
+            ) { Text(stringResource(R.string.ui_close)) }
         }
     }
 }

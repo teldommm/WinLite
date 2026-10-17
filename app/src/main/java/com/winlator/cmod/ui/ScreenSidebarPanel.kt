@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.R
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -44,17 +45,17 @@ private fun ScreenSidebarPanel(callbacks: ScreenPanelCallbacks) {
             .fillMaxWidth()
             .padding(vertical = 4.dp)
     ) {
-        SidebarPanelTitle("Display and Effects")
-        SidebarActionRow(label = "Picture in Picture", onClick = callbacks::onPipMode)
+        SidebarPanelTitle(uiStr(R.string.ui_display_and_effects))
+        SidebarActionRow(label = uiStr(R.string.ui_picture_in_picture), onClick = callbacks::onPipMode)
         SidebarGap()
-        SidebarActionRow(label = "Toggle Fullscreen", onClick = callbacks::onToggleFullscreen)
+        SidebarActionRow(label = uiStr(R.string.ui_toggle_fullscreen), onClick = callbacks::onToggleFullscreen)
         SidebarGap()
-        SidebarActionRow(label = "Magnifier", onClick = callbacks::onMagnifier)
+        SidebarActionRow(label = uiStr(R.string.ui_magnifier), onClick = callbacks::onMagnifier)
         SidebarGap()
         // Was a bordered row with an "ON" label — the only on/off control in the sidebar
         // that wasn't a Switch. Now uses the same Switch as every other toggle.
         SidebarToggleRow(
-            label = "Soft Stretch",
+            label = uiStr(R.string.ui_soft_stretch),
             checked = softStretchEnabled,
             onCheckedChange = {
                 softStretchEnabled = it

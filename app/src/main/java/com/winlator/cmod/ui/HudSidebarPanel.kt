@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.R
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
@@ -93,7 +94,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
         SidebarPanelTitle("HUD")
 
         SidebarToggleRow(
-            label = "Enable HUD",
+            label = uiStr(R.string.ui_enable_hud),
             checked = hudOn,
             onCheckedChange = {
                 hudOn = it
@@ -105,7 +106,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
             SidebarGap()
             SidebarCard {
                 SidebarDropdownField(
-                    caption = "Style",
+                    caption = uiStr(R.string.ui_style),
                     options = HUD_STYLE_LABELS,
                     selectedIndex = if (isModern) 1 else 0,
                     onSelect = { index ->
@@ -123,7 +124,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
         if (hudOn && isModern) {
             SidebarGap()
             SidebarCard {
-                SidebarSectionTitle("HUD Metrics")
+                SidebarSectionTitle(uiStr(R.string.ui_hud_metrics))
                 Spacer(Modifier.height(4.dp))
                 key(metricsGeneration) { HudMetricsGrid() }
             }
@@ -134,7 +135,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
             SidebarGap()
             SidebarCard {
                 SidebarSlider(
-                    label = "HUD Size",
+                    label = uiStr(R.string.ui_hud_size),
                     valueText = "${scale.roundToInt()}%",
                     value = scale,
                     onValueChange = {
@@ -146,7 +147,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
                 )
                 Spacer(Modifier.height(6.dp))
                 SidebarSlider(
-                    label = "HUD Opacity",
+                    label = uiStr(R.string.ui_hud_opacity),
                     valueText = "${alpha.roundToInt()}%",
                     value = alpha,
                     onValueChange = {
@@ -162,7 +163,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
             // both; for Modern also the top-left corner, horizontal layout, all metrics shown and
             // dual-cell correction off. Doesn't change whether the HUD is on.
             SidebarGap()
-            SidebarActionRow(label = "Reset HUD Layout") {
+            SidebarActionRow(label = uiStr(R.string.ui_reset_hud_layout)) {
                 callbacks.onResetHudLayout(isModern)
                 if (isModern) {
                     modernScale = HUD_DEFAULT_SCALE_PERCENT
@@ -177,7 +178,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
 
         if (state.showLogsRow) {
             SidebarGap()
-            SidebarActionRow(label = "Show Logs", onClick = callbacks::onShowLogs)
+            SidebarActionRow(label = uiStr(R.string.ui_show_logs), onClick = callbacks::onShowLogs)
         }
     }
 }
@@ -188,11 +189,11 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
 @Composable
 private fun HudMetricsGrid() {
     val context = LocalContext.current
-    MetricCheckboxRow(context, "FPS", WinlatorHUD.SHOW_FPS, "Renderer", WinlatorHUD.SHOW_RENDERER)
-    MetricCheckboxRow(context, "GPU Usage", WinlatorHUD.SHOW_GPU_USAGE, "GPU Name", WinlatorHUD.SHOW_GPU_NAME)
-    MetricCheckboxRow(context, "CPU Usage", WinlatorHUD.SHOW_CPU_USAGE, "CPU Temp", WinlatorHUD.SHOW_CPU_TEMP)
-    MetricCheckboxRow(context, "RAM", WinlatorHUD.SHOW_RAM, "Power", WinlatorHUD.SHOW_POWER)
-    MetricCheckboxRow(context, "Battery Temp", WinlatorHUD.SHOW_BATTERY_TEMP, "Charge State", WinlatorHUD.SHOW_CHARGE_STATE)
+    MetricCheckboxRow(context, "FPS", WinlatorHUD.SHOW_FPS, uiStr(R.string.ui_renderer), WinlatorHUD.SHOW_RENDERER)
+    MetricCheckboxRow(context, uiStr(R.string.ui_gpu_usage), WinlatorHUD.SHOW_GPU_USAGE, uiStr(R.string.ui_gpu_name), WinlatorHUD.SHOW_GPU_NAME)
+    MetricCheckboxRow(context, uiStr(R.string.ui_cpu_usage), WinlatorHUD.SHOW_CPU_USAGE, uiStr(R.string.ui_cpu_temp), WinlatorHUD.SHOW_CPU_TEMP)
+    MetricCheckboxRow(context, "RAM", WinlatorHUD.SHOW_RAM, uiStr(R.string.ui_power), WinlatorHUD.SHOW_POWER)
+    MetricCheckboxRow(context, uiStr(R.string.ui_battery_temp), WinlatorHUD.SHOW_BATTERY_TEMP, uiStr(R.string.ui_charge_state), WinlatorHUD.SHOW_CHARGE_STATE)
     Spacer(Modifier.height(6.dp))
     DualCellRow(context)
 }
@@ -247,7 +248,7 @@ private fun DualCellRow(context: Context) {
     val prefs = remember { context.getSharedPreferences(WinlatorHUD.PREFS, Context.MODE_PRIVATE) }
     var checked by remember { mutableStateOf(prefs.getBoolean(WinlatorHUD.KEY_DUAL_CELL, false)) }
     SidebarInlineToggle(
-        label = "Dual-cell correction",
+        label = uiStr(R.string.ui_dual_cell_correction),
         checked = checked,
         onCheckedChange = {
             checked = it

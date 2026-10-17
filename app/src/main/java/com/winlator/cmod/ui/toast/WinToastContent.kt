@@ -63,7 +63,7 @@ internal fun WinToastContent(
                         bitmap = icon.asImageBitmap(),
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)),
+                        modifier = Modifier.size(20.dp).clip(WinZShapes.ExtraSmall),
                     )
                 }
                 Text(

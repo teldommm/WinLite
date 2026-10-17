@@ -1,5 +1,8 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.R
+import androidx.compose.ui.res.stringResource
+import com.winlator.cmod.ui.theme.OnArtwork
 import com.winlator.cmod.ui.theme.tabularNumbers
 import androidx.compose.material3.LocalTextStyle
 import android.graphics.Bitmap
@@ -133,18 +136,18 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
         callbacks.onFavorite(favorite)
     }
     val items = listOf(
-        DetailActionItem(Icons.Outlined.Settings, "Configure", "Configure", callbacks::onConfigure),
-        DetailActionItem(Icons.Outlined.Dns, "Container", "Enter container", callbacks::onArguments),
-        DetailActionItem(Icons.Outlined.Backup, "Backup", "Backup", callbacks::onSaves),
+        DetailActionItem(Icons.Outlined.Settings, stringResource(R.string.ui_configure), stringResource(R.string.ui_configure), callbacks::onConfigure),
+        DetailActionItem(Icons.Outlined.Dns, stringResource(R.string.ui_container), stringResource(R.string.ui_enter_container), callbacks::onArguments),
+        DetailActionItem(Icons.Outlined.Backup, stringResource(R.string.ui_backup), stringResource(R.string.ui_backup), callbacks::onSaves),
         DetailActionItem(
             Icons.Outlined.Home,
-            if (homePinned) "Unpin" else "Home",
-            if (homePinned) "Remove from home screen" else "Add to home screen",
+            if (homePinned) stringResource(R.string.ui_unpin) else stringResource(R.string.ui_home),
+            if (homePinned) stringResource(R.string.ui_remove_from_home) else stringResource(R.string.ui_add_to_home),
             // The route asks "Remove ...?" with the app's standard confirm dialog before unpinning.
             if (homePinned) callbacks::onUnpinHome else callbacks::onPinHome,
             accent = homePinned
         ),
-        DetailActionItem(Icons.Outlined.DeleteOutline, "Remove", "Remove", callbacks::onRemove, destructive = true)
+        DetailActionItem(Icons.Outlined.DeleteOutline, stringResource(R.string.remove), stringResource(R.string.remove), callbacks::onRemove, destructive = true)
     )
     if (landscape) LandscapeDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, favorite, stats, items, callbacks, toggle)
     else PortraitDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, fallback, favorite, stats, items, callbacks, toggle)
@@ -197,7 +200,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
             ArtPlateButton(
                 onClick = callbacks::onBack,
                 modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 16.dp)
-            ) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", modifier = Modifier.size(24.dp)) }
+            ) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp)) }
 
             // 74dp = 18 margin + 44 plate + 12 gap, on both sides, so a long title never runs under a plate.
             Column(Modifier.align(Alignment.TopStart).padding(start = 74.dp, end = 74.dp, top = 15.dp)) {
@@ -205,7 +208,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                     title,
                     color = Color.White,
                     style = MaterialTheme.typography.headlineLarge.copy(
-                        shadow = Shadow(Color.Black.copy(.6f), Offset(0f, 2f), 6f)
+                        shadow = Shadow(OnArtwork.TextShadow, Offset(0f, 2f), 6f)
                     ),
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
@@ -213,9 +216,9 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                 )
                 Text(
                     subtitle,
-                    color = Color.White.copy(.78f),
+                    color = OnArtwork.TextSecondary,
                     style = MaterialTheme.typography.bodyLarge.copy(
-                        shadow = Shadow(Color.Black.copy(.6f), Offset(0f, 1f), 4f)
+                        shadow = Shadow(OnArtwork.TextShadow, Offset(0f, 1f), 4f)
                     )
                 )
             }
@@ -225,8 +228,8 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
             Surface(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 34.dp, bottom = 24.dp).width(panelWidth),
                 shape = WinZShapes.Large,
-                color = Color.Black.copy(.42f),
-                border = BorderStroke(1.dp, Color.White.copy(.16f))
+                color = OnArtwork.PanelFill,
+                border = BorderStroke(1.dp, OnArtwork.PlateBorder)
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (chipsInPanel) StatChips(stats, modifier = Modifier.fillMaxWidth())
@@ -238,7 +241,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                     ) {
                         Icon(Icons.Outlined.PlayArrow, null, modifier = Modifier.size(30.dp))
                         Spacer(Modifier.size(8.dp))
-                        Text("Play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.ui_play), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items.forEach { DetailIconAction(it, Modifier.weight(1f), compactCaptions) }
@@ -258,9 +261,9 @@ private fun ArtPlateButton(onClick: () -> Unit, modifier: Modifier, content: @Co
         onClick = onClick,
         modifier = modifier.size(44.dp),
         shape = WinZShapes.Medium,
-        color = Color.White.copy(alpha = 0.10f),
+        color = OnArtwork.PlateFill,
         contentColor = Color.White,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
+        border = BorderStroke(1.dp, OnArtwork.PlateBorder)
     ) { Box(contentAlignment = Alignment.Center) { content() } }
 }
 
@@ -270,7 +273,7 @@ private fun FavoriteButton(favorite: Boolean, onToggle: () -> Unit, modifier: Mo
     ArtPlateButton(onClick = onToggle, modifier = modifier) {
         Icon(
             if (favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-            if (favorite) "Remove from favorites" else "Add to favorites",
+            if (favorite) stringResource(R.string.ui_remove_from_favorites) else stringResource(R.string.ui_add_to_favorites),
             modifier = Modifier.size(24.dp),
             tint = if (favorite) controlAccentColor() else LocalContentColor.current
         )
@@ -289,9 +292,9 @@ private fun DetailIconAction(item: DetailActionItem, modifier: Modifier, compact
         onClick = item.onClick,
         modifier = modifier.height(70.dp),
         shape = WinZShapes.Medium,
-        color = Color.White.copy(alpha = 0.10f),
+        color = OnArtwork.PlateFill,
         contentColor = content,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
+        border = BorderStroke(1.dp, OnArtwork.PlateBorder)
     ) {
         Column(
             Modifier.fillMaxSize(),
@@ -400,11 +403,11 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, ar
             ArtPlateButton(
                 onClick = callbacks::onBack,
                 modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 14.dp)
-            ) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", modifier = Modifier.size(24.dp)) }
+            ) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp)) }
             FavoriteButton(favorite, toggleFavorite, Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 14.dp))
             Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(subtitle, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodyMedium)
+                Text(subtitle, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodyMedium)
                 if (stats.hasAny) {
                     Spacer(Modifier.height(6.dp))
                     StatChips(stats, modifier = Modifier.fillMaxWidth())
@@ -417,7 +420,7 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, ar
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = WinZShapes.Medium,
                 colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-            ) { Icon(Icons.Outlined.PlayArrow, null); Spacer(Modifier.size(8.dp)); Text("Play", fontWeight = FontWeight.Bold) }
+            ) { Icon(Icons.Outlined.PlayArrow, null); Spacer(Modifier.size(8.dp)); Text(stringResource(R.string.ui_play), fontWeight = FontWeight.Bold) }
             items.forEach { DetailAction(it, Modifier.fillMaxWidth()) }
             Spacer(Modifier.height(12.dp))
         }
@@ -446,8 +449,7 @@ private fun DetailAction(item: DetailActionItem, modifier: Modifier) {
 }
 
 // Playtime, plays, last launch and size, as dark glass chips (they always sit on the artwork) with
-// the same blue icons as WinNative's launch screen.
-private val StatIconBlue = Color(0xFF58A6FF)
+// the same blue icons as WinNative's launch screen (OnArtwork.InfoIcon).
 
 private class StatEntry(val icon: ImageVector, val label: String, val value: String)
 
@@ -457,12 +459,17 @@ private class StatEntry(val icon: ImageVector, val label: String, val value: Str
 //  3. else (a very narrow spot) two equal columns at full size, so the last chip sits in a tidy grid.
 @Composable
 private fun StatChips(stats: GameStats, modifier: Modifier = Modifier) {
-    val entries = remember(stats) {
+    // Labels resolved here: the remember block below is not a composable context.
+    val playtimeLabel = stringResource(R.string.ui_stat_playtime)
+    val playsLabel = stringResource(R.string.ui_stat_plays)
+    val lastPlayedLabel = stringResource(R.string.ui_stat_last_played)
+    val sizeLabel = stringResource(R.string.ui_stat_size)
+    val entries = remember(stats, playtimeLabel) {
         buildList {
-            if (stats.playtimeMillis > 0L) add(StatEntry(Icons.Outlined.Schedule, "Playtime", formatPlaytime(stats.playtimeMillis)))
-            if (stats.playCount > 0) add(StatEntry(Icons.Outlined.SportsEsports, "Plays", stats.playCount.toString()))
-            if (stats.lastPlayedMillis > 0L) add(StatEntry(Icons.Outlined.History, "Last played", formatLastPlayed(stats.lastPlayedMillis)))
-            stats.sizeText?.let { add(StatEntry(Icons.Outlined.Storage, "Size", it)) }
+            if (stats.playtimeMillis > 0L) add(StatEntry(Icons.Outlined.Schedule, playtimeLabel, formatPlaytime(stats.playtimeMillis)))
+            if (stats.playCount > 0) add(StatEntry(Icons.Outlined.SportsEsports, playsLabel, stats.playCount.toString()))
+            if (stats.lastPlayedMillis > 0L) add(StatEntry(Icons.Outlined.History, lastPlayedLabel, formatLastPlayed(stats.lastPlayedMillis)))
+            stats.sizeText?.let { add(StatEntry(Icons.Outlined.Storage, sizeLabel, it)) }
         }
     }
     if (entries.isEmpty()) return
@@ -531,18 +538,18 @@ private fun StatChip(entry: StatEntry, fill: Boolean) {
     Surface(
         modifier = if (fill) Modifier.fillMaxWidth() else Modifier,
         shape = WinZShapes.Small,
-        color = Color.Black.copy(.44f),
-        border = BorderStroke(1.dp, Color.White.copy(.12f))
+        color = OnArtwork.PanelFill,
+        border = BorderStroke(1.dp, OnArtwork.PlateBorder)
     ) {
         Row(
             (if (fill) Modifier.fillMaxWidth() else Modifier).padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            Icon(entry.icon, null, Modifier.size(16.dp), tint = StatIconBlue)
+            Icon(entry.icon, null, Modifier.size(16.dp), tint = OnArtwork.InfoIcon)
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text(entry.label.uppercase(), color = Color.White.copy(.62f), fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(entry.value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = LocalTextStyle.current.tabularNumbers())
+                Text(entry.label.uppercase(), color = OnArtwork.TextTertiary, style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 12.sp), fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(entry.value, color = OnArtwork.Text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall.tabularNumbers())
             }
         }
     }

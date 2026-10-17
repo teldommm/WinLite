@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.R
 import androidx.compose.runtime.mutableStateOf
 import android.content.Intent
 import android.os.Environment
@@ -164,9 +165,9 @@ private fun GameDetailLoaded(
             override fun onRemove() {
                 ThemedAlertHost.confirm(
                     activity,
-                    "Remove shortcut?",
-                    "Do you want to remove this shortcut? The game files stay on your device.",
-                    "Remove",
+                    activity.getString(R.string.ui_remove_shortcut_title),
+                    activity.getString(R.string.ui_remove_shortcut_message),
+                    activity.getString(R.string.remove),
                     {
                         if (shortcut.file.delete()) {
                             val base = shortcut.file.path.substringBeforeLast('.', "")
@@ -178,10 +179,10 @@ private fun GameDetailLoaded(
                             HomeShortcuts.unpin(activity, shortcut)
                             onLibraryChanged()
                             onClose()
-                            WinToast.show(activity, "Shortcut removed", Toast.LENGTH_SHORT)
+                            WinToast.show(activity, activity.getString(R.string.ui_shortcut_removed), Toast.LENGTH_SHORT)
                             SaveProfileCleanup.offerDelete(activity, shortcut)
                         } else {
-                            WinToast.show(activity, "Couldn't remove shortcut", Toast.LENGTH_LONG)
+                            WinToast.show(activity, activity.getString(R.string.ui_shortcut_remove_failed), Toast.LENGTH_LONG)
                         }
                     },
                     true
@@ -191,9 +192,9 @@ private fun GameDetailLoaded(
             override fun onPinHome() {
                 when (HomeShortcuts.pin(activity, shortcut)) {
                     HomeShortcuts.PinResult.Unsupported ->
-                        WinToast.show(activity, "Your launcher doesn't support pinned shortcuts", Toast.LENGTH_LONG)
+                        WinToast.show(activity, activity.getString(R.string.ui_pin_unsupported), Toast.LENGTH_LONG)
                     HomeShortcuts.PinResult.Restored -> {
-                        WinToast.show(activity, "Home screen shortcut restored", Toast.LENGTH_SHORT)
+                        WinToast.show(activity, activity.getString(R.string.ui_pin_restored), Toast.LENGTH_SHORT)
                         pinTick++
                     }
                     // The launcher shows its own prompt; the state is read again when we come back.
@@ -204,14 +205,14 @@ private fun GameDetailLoaded(
             override fun onUnpinHome() {
                 ThemedAlertHost.confirm(
                     activity,
-                    "Remove home screen shortcut?",
-                    "Do you want to remove this home screen shortcut? The game files stay on your device.",
-                    "Remove",
+                    activity.getString(R.string.ui_unpin_title),
+                    activity.getString(R.string.ui_unpin_message),
+                    activity.getString(R.string.remove),
                     {
                         if (HomeShortcuts.unpin(activity, shortcut)) {
-                            WinToast.show(activity, "Home screen shortcut removed", Toast.LENGTH_SHORT)
+                            WinToast.show(activity, activity.getString(R.string.ui_unpin_done), Toast.LENGTH_SHORT)
                         } else {
-                            WinToast.show(activity, "This game isn't on your home screen", Toast.LENGTH_SHORT)
+                            WinToast.show(activity, activity.getString(R.string.ui_unpin_not_pinned), Toast.LENGTH_SHORT)
                         }
                         pinTick++
                     },

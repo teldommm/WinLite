@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import android.app.Activity
 import android.view.View
 import android.view.ViewGroup
@@ -62,7 +63,7 @@ internal fun LoadingOverlayContent(message: String) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.5f)),
+            .background(DialogScrimColor),
         contentAlignment = Alignment.Center
     ) {
         ThemedDialogSurface {

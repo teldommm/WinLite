@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.onboarding
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -210,9 +212,9 @@ internal fun OnboardingComponentsScreen(
             LandscapeComponentsHeader(
                 managerMode = managerMode,
                 onBack = onBack,
-                title = if (managerMode) "Components" else "Choose components",
-                subtitle = if (managerMode) "Install and manage runtime versions."
-                else "Install a Wine or Proton layer before continuing.",
+                title = if (managerMode) uiStr(R.string.ui_components) else uiStr(R.string.ui_choose_components),
+                subtitle = if (managerMode) uiStr(R.string.ui_install_and_manage_runtime_versions)
+                else uiStr(R.string.ui_install_a_wine_or_proton_layer_before_con),
                 onBrowseLocal = { cb.onBrowseLocal() },
                 onOpenServers = { cb.onOpenServers() }
             )
@@ -245,8 +247,8 @@ internal fun OnboardingComponentsScreen(
                 if (!managerMode && !hasInstalledRuntime) item(key = "runtime-hint") {
                     // Right under the bundled runtime: it's the reason Continue is disabled.
                     Text(
-                        if (!ready.value) "Wait for $bundledRuntimeName to finish installing, or install another Wine/Proton version."
-                        else "Install at least one Wine or Proton version to continue.",
+                        if (!ready.value) uiStr(R.string.ui_wait_for_to_finish_installing_or_install, bundledRuntimeName)
+                        else uiStr(R.string.ui_install_at_least_one_wine_or_proton_versi),
                         Modifier.padding(horizontal = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -269,11 +271,11 @@ internal fun OnboardingComponentsScreen(
             ) {
                 item {
                     if (!managerMode) {
-                        Text("Choose components", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                        Text(uiStr(R.string.ui_choose_components), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                     }
                     Text(
-                        if (managerMode) "Install and manage runtime versions."
-                        else "Install as many versions as you want. At least one Wine or Proton is required.",
+                        if (managerMode) uiStr(R.string.ui_install_and_manage_runtime_versions)
+                        else uiStr(R.string.ui_install_as_many_versions_as_you_want_at_l),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = LocalTextStyle.current.copy(
                             lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Proportional, LineHeightStyle.Trim.FirstLineTop)
@@ -315,8 +317,8 @@ internal fun OnboardingComponentsScreen(
                 if (!managerMode && !hasInstalledRuntime) {
                     item {
                         Text(
-                            if (!ready.value) "Continue unlocks when $bundledRuntimeName finishes installing or another Wine/Proton layer is installed."
-                            else "Install at least one Wine or Proton version to continue.",
+                            if (!ready.value) uiStr(R.string.ui_continue_unlocks_when_finishes_installing, bundledRuntimeName)
+                            else uiStr(R.string.ui_install_at_least_one_wine_or_proton_versi),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -331,7 +333,7 @@ internal fun OnboardingComponentsScreen(
                 next = onContinue,
                 landscape = landscape,
                 nextEnabled = hasInstalledRuntime,
-                nextLabel = "Continue"
+                nextLabel = uiStr(R.string.ui_continue)
             )
         }
     }
@@ -355,7 +357,7 @@ private fun ComponentList(
         else if (list.isEmpty()) item {
             Surface(Modifier.fillMaxWidth(), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surface) {
                 Text(
-                    "No components available in this category.",
+                    uiStr(R.string.ui_no_components_available_in_this_category),
                     Modifier.padding(16.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -385,8 +387,8 @@ private fun SourceSelector(compact: Boolean = false, servers: () -> Unit, local:
     ) {
         Row(Modifier.height(if (compact) 44.dp else 56.dp)) {
             val part = if (compact) Modifier else Modifier.weight(1f)
-            SourcePart(Icons.Outlined.Dns, "Winlator servers", true, servers, part)
-            SourcePart(Icons.Outlined.Folder, "Local package", false, local, part, accent = true)
+            SourcePart(Icons.Outlined.Dns, uiStr(R.string.ui_winlator_servers), true, servers, part)
+            SourcePart(Icons.Outlined.Folder, uiStr(R.string.ui_local_package), false, local, part, accent = true)
         }
     }
 }
@@ -435,7 +437,7 @@ private fun LandscapeComponentsHeader(
     ) {
         if (managerMode) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = uiStr(R.string.ui_back))
             }
             Spacer(Modifier.width(4.dp))
         }
@@ -511,11 +513,11 @@ private fun CoreComponentCard(
             Column(Modifier.weight(1f)) {
                 ScrollableName(bundledRuntimeName)
                 val status = when {
-                    busy -> "Working…"
-                    installed && inUse -> "Bundled • Installed • In use"
-                    installed -> "Bundled • Installed"
-                    !ready.value -> "Bundled • Installing ${progress.value}%"
-                    else -> "Bundled • Not installed"
+                    busy -> uiStr(R.string.ui_working)
+                    installed && inUse -> uiStr(R.string.ui_bundled_installed_in_use)
+                    installed -> uiStr(R.string.ui_bundled_installed)
+                    !ready.value -> uiStr(R.string.ui_bundled_installing, progress.value)
+                    else -> uiStr(R.string.ui_bundled_not_installed)
                 }
                 Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
@@ -526,7 +528,7 @@ private fun CoreComponentCard(
                     enabled = !locked && !inUse,
                     colors = ButtonDefaults.buttonColors(containerColor = destructiveColor(), contentColor = Color.White)
                 ) {
-                    Text(if (inUse) "In use" else "Delete")
+                    Text(if (inUse) uiStr(R.string.ui_in_use) else uiStr(R.string.ui_delete))
                 }
                 else -> Button(
                     onClick = onInstall,
@@ -535,7 +537,7 @@ private fun CoreComponentCard(
                 ) {
                     Icon(Icons.Outlined.Download, null)
                     Spacer(Modifier.width(5.dp))
-                    Text("Install")
+                    Text(uiStr(R.string.install))
                 }
             }
         }
@@ -602,8 +604,8 @@ private fun ComponentCard(
                     val status = when {
                         busy && installingProgress >= 0 ->
                             "${installingLabel ?: "Installing"} • ${installingProgress}%"
-                        busy -> installingLabel ?: "Working…"
-                        item.inUse -> "${item.type} • In use"
+                        busy -> installingLabel ?: uiStr(R.string.ui_working)
+                        item.inUse -> uiStr(R.string.ui_in_use_2, item.type)
                         else -> item.type
                     }
                     Text(
@@ -619,14 +621,14 @@ private fun ComponentCard(
                         enabled = !locked && !item.inUse,
                         colors = ButtonDefaults.buttonColors(containerColor = destructiveColor(), contentColor = Color.White)
                     ) {
-                        Text(if (item.inUse) "In use" else "Delete")
+                        Text(if (item.inUse) uiStr(R.string.ui_in_use) else uiStr(R.string.ui_delete))
                     }
                 } else if (!item.installed) {
                     Button(
                         onClick = { cb.onInstall(item.id) },
                         enabled = !locked,
                         colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-                    ) { Text("Download") }
+                    ) { Text(uiStr(R.string.ui_download_2)) }
                 } else Icon(Icons.Outlined.Check, null)
             }
             if (busy) {
@@ -657,10 +659,10 @@ private fun InstallProgressCard(label: String?, progress: Int) {
                 Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, null, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Component installation", fontWeight = FontWeight.SemiBold)
+                    Text(uiStr(R.string.ui_component_installation), fontWeight = FontWeight.SemiBold)
                     Text(
                         if (progress >= 0) "${label ?: "Installing"} • ${progress}%"
-                        else label ?: "Installing component…",
+                        else label ?: uiStr(R.string.ui_installing_component),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
@@ -688,7 +690,7 @@ private fun LoadingCard() {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
             Spacer(Modifier.width(12.dp))
-            Text("Loading component catalog…")
+            Text(uiStr(R.string.ui_loading_component_catalog))
         }
     }
 }
@@ -704,11 +706,11 @@ private fun ManagerTopBar(onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = uiStr(R.string.ui_back))
         }
         Spacer(Modifier.width(4.dp))
         Text(
-            "Components",
+            uiStr(R.string.ui_components),
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onBackground
         )
@@ -740,7 +742,7 @@ private fun ComponentsFooter(
                 shape = WinZShapes.Medium,
                 colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface),
                 border = BorderStroke(1.dp, hairlineColor())
-            ) { Text("Back") }
+            ) { Text(uiStr(R.string.ui_back)) }
             Button(
                 onClick = next,
                 enabled = nextEnabled,

@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -81,16 +83,16 @@ internal fun VulkanExtensionsDialog(
     val visible = remember(extensions, query) { extensions.filter { matchesExtensionQuery(it, query) } }
 
     ThemedDialog(onDismissRequest = onDismiss) {
-        ThemedDialogTitle("Vulkan Extensions")
+        ThemedDialogTitle(uiStr(R.string.ui_vulkan_extensions))
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
             modifier = Modifier.fillMaxWidth(),
             // Floating label (moves to the top border on focus), same as "Name" in Custom.
-            label = { Text("Name") },
+            label = { Text(uiStr(R.string.ui_name)) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "Clear search") }
+                    IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, uiStr(R.string.ui_clear_search)) }
                 }
             },
             singleLine = true,
@@ -99,8 +101,8 @@ internal fun VulkanExtensionsDialog(
             keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
         )
         Text(
-            if (query.isBlank()) "${enabled.count { it.value }} of ${extensions.size} enabled"
-            else "${visible.size} found",
+            if (query.isBlank()) uiStr(R.string.ui_of_enabled, enabled.count { it.value }, extensions.size)
+            else uiStr(R.string.ui_found, visible.size),
             modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -111,7 +113,7 @@ internal fun VulkanExtensionsDialog(
             if (visible.isEmpty()) {
                 item {
                     Text(
-                        "No extensions match \"${query.trim()}\"",
+                        uiStr(R.string.ui_no_extensions_match, query.trim()),
                         modifier = Modifier.padding(vertical = 16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -145,7 +147,7 @@ internal fun VulkanExtensionsDialog(
                 onClick = onDismiss,
                 colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                 border = BorderStroke(1.dp, hairlineColor())
-            ) { Text("Cancel") }
+            ) { Text(uiStr(R.string.cancel)) }
             Button(
                 onClick = {
                     val known = extensions.toSet()
@@ -154,7 +156,7 @@ internal fun VulkanExtensionsDialog(
                     onDone(disabledNow.joinToString(","))
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color.White)
-            ) { Text("Done") }
+            ) { Text(uiStr(R.string.ui_done)) }
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.winlator.cmod;
 
+import com.winlator.cmod.ui.UiStrings;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -93,7 +94,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
         profile = InputControlsManager.loadProfile(this, ControlsProfile.getProfileFile(this, getIntent().getIntExtra("profile_id", 0)));
         if (profile == null) {
             Log.e("ControlsEditor", "Profile not found for id=" + getIntent().getIntExtra("profile_id", 0));
-            WinToast.show(this, "No profile selected", Toast.LENGTH_SHORT);
+            WinToast.show(this, UiStrings.get(R.string.ui_no_profile_selected), Toast.LENGTH_SHORT);
             finish();
             return;
         }
@@ -130,7 +131,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
                     public void onAddElement() {
                         flushPendingTextSave();
                         if (!inputControlsView.addElement()) {
-                            WinToast.show(ControlsEditorActivity.this, "No profile selected", Toast.LENGTH_SHORT);
+                            WinToast.show(ControlsEditorActivity.this, UiStrings.get(R.string.ui_no_profile_selected), Toast.LENGTH_SHORT);
                         }
                     }
 
@@ -138,7 +139,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
                     public void onRemoveElement() {
                         flushPendingTextSave();
                         if (!inputControlsView.removeElement()) {
-                            WinToast.show(ControlsEditorActivity.this, "No control element selected", Toast.LENGTH_SHORT);
+                            WinToast.show(ControlsEditorActivity.this, UiStrings.get(R.string.ui_no_control_element_selected), Toast.LENGTH_SHORT);
                         }
                     }
 
@@ -146,7 +147,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
                     public void onDuplicateElement() {
                         flushPendingTextSave();
                         if (!inputControlsView.duplicateElement()) {
-                            WinToast.show(ControlsEditorActivity.this, "No control element selected", Toast.LENGTH_SHORT);
+                            WinToast.show(ControlsEditorActivity.this, UiStrings.get(R.string.ui_no_control_element_selected), Toast.LENGTH_SHORT);
                         }
                     }
 
@@ -162,7 +163,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
                         if (element != null) {
                             overlay.showSettings(buildElementSettingsModel(element));
                         } else {
-                            WinToast.show(ControlsEditorActivity.this, "No control element selected", Toast.LENGTH_SHORT);
+                            WinToast.show(ControlsEditorActivity.this, UiStrings.get(R.string.ui_no_control_element_selected), Toast.LENGTH_SHORT);
                         }
                     }
 
@@ -254,7 +255,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
         endEdit();
         ControlsProfile next = InputControlsManager.loadProfile(this, ControlsProfile.getProfileFile(this, profileId));
         if (next == null) {
-            WinToast.show(this, "Profile not found", Toast.LENGTH_SHORT);
+            WinToast.show(this, UiStrings.get(R.string.ui_profile_not_found), Toast.LENGTH_SHORT);
             return;
         }
         pendingIconElement = null;
@@ -878,7 +879,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
                 if (loaded == null) {
                     dest.delete();
                     Log.w("Icons", "Picked file is not a valid image or could not be decoded: " + uri);
-                    WinToast.show(this, "Unable to set icon", Toast.LENGTH_SHORT);
+                    WinToast.show(this, UiStrings.get(R.string.ui_unable_to_set_icon), Toast.LENGTH_SHORT);
                     pendingIconElement = null;
                     return;
                 }
@@ -906,7 +907,7 @@ public class ControlsEditorActivity extends AppCompatActivity {
                 Log.e("Icons", "Error saving picked icon: " + e.getMessage());
                 pendingIconElement = null;
                 pendingBuiltinOverrideId = -1;
-                WinToast.show(this, "Unable to set icon", Toast.LENGTH_SHORT);
+                WinToast.show(this, UiStrings.get(R.string.ui_unable_to_set_icon), Toast.LENGTH_SHORT);
             }
         }
     }

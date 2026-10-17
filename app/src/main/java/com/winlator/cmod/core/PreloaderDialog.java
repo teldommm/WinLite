@@ -15,6 +15,7 @@ import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.ContainerManager;
 import com.winlator.cmod.ui.PreloaderOverlayHost;
 import com.winlator.cmod.ui.PreloaderOverlayState;
+import com.winlator.cmod.ui.library.LibraryImageCache;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -71,7 +72,7 @@ public class PreloaderDialog {
         boolean hasBanner = hasUserBanner || isUsableImageFile(banner);
         File artwork = hasUserBanner ? userBanner
                 : (isUsableImageFile(banner) ? banner : getLaunchCoverFile());
-        if (isUsableImageFile(artwork)) artworkBitmap = decodeArtwork(artwork);
+        if (isUsableImageFile(artwork)) artworkBitmap = cachedOrDecodeArtwork(artwork);
 
         state.setMotion(ArtworkRepository.isMotionEnabled(activity));
         state.setArtwork(artworkBitmap);
@@ -242,6 +243,15 @@ public class PreloaderDialog {
         artworkBitmap = replacement;
         state.setMotion(ArtworkRepository.isMotionEnabled(activity));
         state.setArtwork(artworkBitmap);
+    }
+
+    // A game started from the Library usually has this exact picture decoded already (same
+    // process, LibraryImageCache, keyed by path + last-modified): use it instead of decoding the
+    // file again on the main thread in onCreate. Nothing here recycles bitmaps (see
+    // releaseArtwork), so sharing the cached one is safe. Otherwise decode as before.
+    private Bitmap cachedOrDecodeArtwork(File file) {
+        Bitmap cached = LibraryImageCache.peek(LibraryImageCache.keyFor(file.getAbsolutePath()));
+        return cached != null ? cached : decodeArtwork(file);
     }
 
     private Bitmap decodeArtwork(File file) {

@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.inputcontrols
 
+import com.winlator.cmod.ui.uiStr
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -174,25 +175,25 @@ internal class InputControlsScreenState(
     }
 
     override fun onAddProfile() {
-        ThemedAlertHost.prompt(activity, "Profile Name", "", "Add") { name ->
+        ThemedAlertHost.prompt(activity, uiStr(R.string.ui_profile_name), "", uiStr(R.string.ui_add_2)) { name ->
             val trimmed = name.trim()
             val manager = manager
             if (trimmed.isEmpty() || manager == null) return@prompt
             currentProfile = manager.createProfile(trimmed)
             rebuild()
-            WinToast.show(activity, "Profile \"$trimmed\" created", Toast.LENGTH_SHORT)
+            WinToast.show(activity, uiStr(R.string.ui_profile_created, trimmed), Toast.LENGTH_SHORT)
         }
     }
 
     override fun onEditProfile() {
         val profile = requireProfile() ?: return
-        ThemedAlertHost.prompt(activity, "Profile Name", profile.name, "Save") { name ->
+        ThemedAlertHost.prompt(activity, uiStr(R.string.ui_profile_name), profile.name, uiStr(R.string.ui_save)) { name ->
             val trimmed = name.trim()
             if (trimmed.isEmpty()) return@prompt
             profile.name = trimmed
             profile.save()
             rebuild()
-            WinToast.show(activity, "Profile renamed to \"$trimmed\"", Toast.LENGTH_SHORT)
+            WinToast.show(activity, uiStr(R.string.ui_profile_renamed_to, trimmed), Toast.LENGTH_SHORT)
         }
     }
 
@@ -200,14 +201,14 @@ internal class InputControlsScreenState(
         val profile = requireProfile() ?: return
         ThemedAlertHost.confirm(
             activity,
-            "Duplicate Profile?",
-            "Do you want to duplicate this profile?",
-            "Duplicate",
+            uiStr(R.string.ui_duplicate_profile_2),
+            uiStr(R.string.ui_do_you_want_to_duplicate_this_profile),
+            uiStr(R.string.duplicate),
             {
                 val manager = manager ?: return@confirm
                 currentProfile = manager.duplicateProfile(profile)
                 rebuild()
-                WinToast.show(activity, "Profile duplicated", Toast.LENGTH_SHORT)
+                WinToast.show(activity, uiStr(R.string.ui_profile_duplicated), Toast.LENGTH_SHORT)
             }
         )
     }
@@ -216,15 +217,15 @@ internal class InputControlsScreenState(
         val profile = requireProfile() ?: return
         ThemedAlertHost.confirm(
             activity,
-            "Remove Profile?",
-            "Do you want to remove this profile?",
-            "Remove",
+            uiStr(R.string.ui_remove_profile_2),
+            uiStr(R.string.ui_do_you_want_to_remove_this_profile),
+            uiStr(R.string.remove),
             {
                 val manager = manager ?: return@confirm
                 manager.removeProfile(profile)
                 currentProfile = null
                 rebuild()
-                WinToast.show(activity, "Profile \"${profile.name}\" removed", Toast.LENGTH_SHORT)
+                WinToast.show(activity, uiStr(R.string.ui_profile_removed, profile.name), Toast.LENGTH_SHORT)
             },
             true
         )
@@ -233,10 +234,10 @@ internal class InputControlsScreenState(
     override fun onImportProfile() {
         ThemedAlertHost.actions(
             activity,
-            "Import Profile",
+            uiStr(R.string.ui_import_profile),
             listOf(
-                ThemedAlertHost.ActionItem("Open Local Profile", { launchProfilePicker?.invoke() }),
-                ThemedAlertHost.ActionItem("Download Profiles", { downloadProfileList() })
+                ThemedAlertHost.ActionItem(uiStr(R.string.ui_open_local_profile), { launchProfilePicker?.invoke() }),
+                ThemedAlertHost.ActionItem(uiStr(R.string.ui_download_profiles), { downloadProfileList() })
             )
         )
     }
@@ -244,7 +245,7 @@ internal class InputControlsScreenState(
     override fun onExportProfile() {
         val profile = requireProfile() ?: return
         val exportedFile = manager?.exportProfile(profile) ?: return
-        WinToast.show(activity, "Profile exported to " + exportedFile.path, Toast.LENGTH_LONG)
+        WinToast.show(activity, uiStr(R.string.ui_profile_exported_to) + exportedFile.path, Toast.LENGTH_LONG)
     }
 
     override fun onOpenEditor() {
@@ -272,14 +273,14 @@ internal class InputControlsScreenState(
         val controller = visibleControllers.getOrNull(index) ?: return
         ThemedAlertHost.confirm(
             activity,
-            "Remove Controller?",
-            "Do you want to remove this controller?",
-            "Remove",
+            uiStr(R.string.ui_remove_controller_2),
+            uiStr(R.string.ui_do_you_want_to_remove_this_controller),
+            uiStr(R.string.remove),
             {
                 profile.removeController(controller)
                 profile.save()
                 rebuild()
-                WinToast.show(activity, "Controller removed", Toast.LENGTH_SHORT)
+                WinToast.show(activity, uiStr(R.string.ui_controller_removed), Toast.LENGTH_SHORT)
             },
             true
         )
@@ -292,9 +293,9 @@ internal class InputControlsScreenState(
         try {
             currentProfile = manager.importProfile(JSONObject(FileUtils.readString(activity, uri)))
             rebuild()
-            WinToast.show(activity, "Profile imported", Toast.LENGTH_SHORT)
+            WinToast.show(activity, uiStr(R.string.ui_profile_imported), Toast.LENGTH_SHORT)
         } catch (e: Exception) {
-            WinToast.show(activity, "Unable to import profile", Toast.LENGTH_SHORT)
+            WinToast.show(activity, uiStr(R.string.ui_unable_to_import_profile), Toast.LENGTH_SHORT)
         }
     }
 
@@ -304,17 +305,17 @@ internal class InputControlsScreenState(
             activity.runOnUiThread {
                 ThemedLoadingOverlayHost.dismiss(loadingOverlay)
                 if (content == null) {
-                    WinToast.show(activity, "Unable to load profile list", Toast.LENGTH_SHORT)
+                    WinToast.show(activity, uiStr(R.string.ui_unable_to_load_profile_list), Toast.LENGTH_SHORT)
                     return@runOnUiThread
                 }
                 val items = content.split("\n")
-                ThemedAlertHost.multiChoice(activity, "Import Profile", items, "Download", { positions ->
+                ThemedAlertHost.multiChoice(activity, uiStr(R.string.ui_import_profile), items, uiStr(R.string.ui_download_2), { positions ->
                     if (positions.isNotEmpty()) {
                         ThemedAlertHost.confirm(
                             activity,
-                            "Download Profiles?",
-                            "Do you want to download the selected profiles?",
-                            "Download",
+                            uiStr(R.string.ui_download_profiles_2),
+                            uiStr(R.string.ui_do_you_want_to_download_the_selected_prof),
+                            uiStr(R.string.ui_download_2),
                             { downloadSelectedProfiles(items, positions) }
                         )
                     }
@@ -345,14 +346,14 @@ internal class InputControlsScreenState(
                         val ok = imported.get()
                         val failed = positions.size - ok
                         when {
-                            ok == 0 -> WinToast.show(activity, "Unable to download profiles", Toast.LENGTH_LONG)
+                            ok == 0 -> WinToast.show(activity, uiStr(R.string.ui_unable_to_download_profiles), Toast.LENGTH_LONG)
                             failed > 0 -> WinToast.show(
                                 activity,
-                                "Downloaded $ok of ${positions.size} profiles ($failed failed)",
+                                uiStr(R.string.ui_downloaded_of_profiles_failed, ok, positions.size, failed),
                                 Toast.LENGTH_LONG
                             )
-                            ok == 1 -> WinToast.show(activity, "Profile downloaded", Toast.LENGTH_SHORT)
-                            else -> WinToast.show(activity, "$ok profiles downloaded", Toast.LENGTH_SHORT)
+                            ok == 1 -> WinToast.show(activity, uiStr(R.string.ui_profile_downloaded), Toast.LENGTH_SHORT)
+                            else -> WinToast.show(activity, uiStr(R.string.ui_profiles_downloaded, ok), Toast.LENGTH_SHORT)
                         }
                     }
                 }
@@ -362,7 +363,7 @@ internal class InputControlsScreenState(
 
     private fun requireProfile(): ControlsProfile? {
         val profile = currentProfile
-        if (profile == null) WinToast.show(activity, "No profile selected", Toast.LENGTH_SHORT)
+        if (profile == null) WinToast.show(activity, uiStr(R.string.ui_no_profile_selected), Toast.LENGTH_SHORT)
         return profile
     }
 }

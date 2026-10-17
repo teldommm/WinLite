@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.filemanager
 
+import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
@@ -169,9 +170,9 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (landscape) {
-            LandscapeScreenHeader("File Manager")
+            LandscapeScreenHeader(uiStr(R.string.ui_file_manager))
         } else {
-            PortraitMainHeader("File Manager")
+            PortraitMainHeader(uiStr(R.string.ui_file_manager))
         }
 
         Row(
@@ -181,7 +182,7 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = callbacks::onUpDir) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Up directory")
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, uiStr(R.string.ui_up_directory))
             }
             Spacer(Modifier.width(4.dp))
             Surface(
@@ -230,7 +231,7 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
         Box(Modifier.weight(1f)) {
             if (model.entries.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("This folder is empty", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(uiStr(R.string.ui_this_folder_is_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 LazyColumn(
@@ -256,7 +257,7 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
                     containerColor = controlAccentColor(),
                     contentColor = Color.White
                 ) {
-                    Icon(Icons.Outlined.ContentPaste, "Paste")
+                    Icon(Icons.Outlined.ContentPaste, uiStr(R.string.ui_paste))
                 }
             }
         }
@@ -362,33 +363,33 @@ private fun FileRow(entry: FileEntryUiModel, callbacks: FileManagerCallbacks) {
         ) {
             if (entry.isExecutable) {
                 DropdownMenuItem(
-                    text = { Text("Run / Open") },
+                    text = { Text(uiStr(R.string.ui_run_open)) },
                     leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
                     onClick = { menuExpanded = false; callbacks.onRunFile(entry.path) }
                 )
                 DropdownMenuItem(
-                    text = { Text("Add this game") },
+                    text = { Text(uiStr(R.string.ui_add_this_game)) },
                     leadingIcon = { Icon(Icons.Outlined.Add, null) },
                     onClick = { menuExpanded = false; callbacks.onAddGame(entry.path) }
                 )
             }
             DropdownMenuItem(
-                text = { Text("Copy") },
+                text = { Text(uiStr(R.string.ui_copy)) },
                 leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
                 onClick = { menuExpanded = false; callbacks.onCopyFile(entry.path) }
             )
             DropdownMenuItem(
-                text = { Text("Cut (Move)") },
+                text = { Text(uiStr(R.string.ui_cut_move)) },
                 leadingIcon = { Icon(Icons.Outlined.ContentCut, null) },
                 onClick = { menuExpanded = false; callbacks.onCutFile(entry.path) }
             )
             DropdownMenuItem(
-                text = { Text("Rename") },
+                text = { Text(uiStr(R.string.ui_rename)) },
                 leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                 onClick = { menuExpanded = false; callbacks.onRenameFile(entry.path) }
             )
             DropdownMenuItem(
-                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                text = { Text(uiStr(R.string.ui_delete), color = MaterialTheme.colorScheme.error) },
                 leadingIcon = {
                     Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
                 },

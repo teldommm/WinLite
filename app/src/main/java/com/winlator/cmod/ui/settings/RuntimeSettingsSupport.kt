@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import android.content.Context
@@ -369,7 +370,7 @@ internal suspend fun installAdrenoDriver(context: Context, option: DriverOption)
         } else if (option.installed) {
             InstallOutcome.ok(option.id)
         } else {
-            InstallOutcome.failed("${option.label} is not available")
+            InstallOutcome.failed(uiStr(R.string.ui_is_not_available, option.label))
         }
     }
 
@@ -405,9 +406,13 @@ internal fun normalizeResolution(value: String): String =
 private fun settingDisplayLabel(value: String): String =
     if (value == "Lanczos 2 (16-tap)") "Lanczos 2" else value
 
+// The screens pass these three labels in English on purpose: they also act as keys here
+// (settingChoiceEntries / settingChoiceSelected / the wallpaper preview). Only what is shown is
+// taken from resources; every other label arrives already localized.
 private fun settingFieldLabel(label: String): String = when (label) {
-    "Graphics Driver" -> "OpenGL Driver"
-    "Driver Version" -> "Vulkan Driver"
+    "Graphics Driver" -> uiStr(R.string.ui_opengl_driver)
+    "Driver Version" -> uiStr(R.string.ui_vulkan_driver)
+    "Desktop Background" -> uiStr(R.string.ui_desktop_background)
     else -> label
 }
 
@@ -461,14 +466,14 @@ private fun WallpaperPreview() {
         if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Wallpaper preview",
+                contentDescription = uiStr(R.string.ui_wallpaper_preview),
                 modifier = Modifier.fillMaxWidth().height(132.dp).clip(WinZShapes.Medium),
                 contentScale = ContentScale.Crop
             )
         } else {
             Image(
                 painter = painterResource(R.drawable.wallpaper),
-                contentDescription = "Wallpaper preview",
+                contentDescription = uiStr(R.string.ui_wallpaper_preview),
                 modifier = Modifier.fillMaxWidth().height(132.dp).clip(WinZShapes.Medium),
                 contentScale = ContentScale.Crop
             )
@@ -579,7 +584,7 @@ internal fun SettingWineRuntimeChoice(
                 Column(Modifier.weight(1f)) {
                     Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        selectedOption?.label ?: selectedId.ifBlank { "Choose a version" },
+                        selectedOption?.label ?: selectedId.ifBlank { uiStr(R.string.ui_choose_a_version) },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
@@ -609,7 +614,7 @@ internal fun SettingWineRuntimeChoice(
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
                             Text(
-                                if (option.installed) option.type else if (busy) "${option.type} • Downloading…" else "${option.type} • Download",
+                                if (option.installed) option.type else if (busy) uiStr(R.string.ui_downloading, option.type) else uiStr(R.string.ui_download, option.type),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -652,7 +657,7 @@ internal fun SettingInstallChoice(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(selected.ifBlank { "Choose a version" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                    Text(selected.ifBlank { uiStr(R.string.ui_choose_a_version) }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                 }
                 Icon(Icons.Outlined.KeyboardArrowDown, null)
             }
@@ -677,7 +682,7 @@ internal fun SettingInstallChoice(
                                 color = if (isSelected) accent else MaterialTheme.colorScheme.onSurface.copy(alpha = if (available) 1f else .52f),
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
-                            if (!available) Text(if (busy) "Downloading…" else "Download", style = MaterialTheme.typography.labelSmall)
+                            if (!available) Text(if (busy) uiStr(R.string.ui_downloading_2) else uiStr(R.string.ui_download_2), style = MaterialTheme.typography.labelSmall)
                         }
                     },
                     trailingIcon = {
@@ -747,7 +752,7 @@ internal fun SettingDriverChoice(
                                 color = if (isSelected) accent else MaterialTheme.colorScheme.onSurface.copy(alpha = if (option.installed) 1f else .52f),
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
-                            if (!option.installed) Text(if (busy) "Downloading…" else "Download", style = MaterialTheme.typography.labelSmall)
+                            if (!option.installed) Text(if (busy) uiStr(R.string.ui_downloading_2) else uiStr(R.string.ui_download_2), style = MaterialTheme.typography.labelSmall)
                         }
                     },
                     trailingIcon = {
@@ -848,7 +853,7 @@ internal fun ResolutionField(
         OutlinedTextField(
             value = width,
             onValueChange = { width = it.filter(Char::isDigit).take(4); push() },
-            label = { Text("Width") },
+            label = { Text(uiStr(R.string.ui_width)) },
             modifier = Modifier.weight(1f),
             singleLine = true,
             isError = !isValidResolutionPart(width),
@@ -863,7 +868,7 @@ internal fun ResolutionField(
         OutlinedTextField(
             value = height,
             onValueChange = { height = it.filter(Char::isDigit).take(4); push() },
-            label = { Text("Height") },
+            label = { Text(uiStr(R.string.ui_height)) },
             modifier = Modifier.weight(1f),
             singleLine = true,
             isError = !isValidResolutionPart(height),

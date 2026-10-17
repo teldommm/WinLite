@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.inputcontrols
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import android.graphics.Bitmap
@@ -136,7 +138,7 @@ data class ControlElementSettingsModel(
     val bindings: List<ControlElementBindingRow>
 )
 
-private val BINDING_SOURCE_TYPES = listOf("Keyboard", "Mouse", "Gamepad")
+private val BINDING_SOURCE_TYPES = listOf(uiStr(R.string.keyboard), uiStr(R.string.ui_mouse), uiStr(R.string.ui_gamepad))
 
 // Scale was 0..100%: it couldn't enlarge anything, 0% collapsed the element, and just
 // touching it clamped bundled profiles' 1.2 / 1.25 scales down to 1.0.
@@ -156,12 +158,12 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "Element Settings",
+            uiStr(R.string.ui_element_settings),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.weight(1f)
         )
         IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Outlined.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            Icon(Icons.Outlined.Close, contentDescription = uiStr(R.string.ui_close), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
         }
     }
     Spacer(Modifier.height(10.dp))
@@ -170,46 +172,46 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
             .weight(1f, fill = false)
             .verticalScroll(rememberScrollState())
     ) {
-        SidebarDropdownField("Type", model.typeOptions, model.typeIndex, cb::onTypeChanged)
+        SidebarDropdownField(uiStr(R.string.ui_type), model.typeOptions, model.typeIndex, cb::onTypeChanged)
         if (model.showShape) {
             Spacer(Modifier.height(10.dp))
-            SidebarDropdownField("Shape", model.shapeOptions, model.shapeIndex, cb::onShapeChanged)
+            SidebarDropdownField(uiStr(R.string.ui_shape), model.shapeOptions, model.shapeIndex, cb::onShapeChanged)
         }
         if (model.showRange) {
             Spacer(Modifier.height(10.dp))
-            SidebarDropdownField("Range", model.rangeOptions, model.rangeIndex, cb::onRangeChanged)
+            SidebarDropdownField(uiStr(R.string.ui_range), model.rangeOptions, model.rangeIndex, cb::onRangeChanged)
         }
 
         if (model.showOrientation) {
             Spacer(Modifier.height(14.dp))
-            SidebarCaption("Orientation")
+            SidebarCaption(uiStr(R.string.orientation))
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SegmentButton("Horizontal", !model.verticalOrientation, Modifier.weight(1f)) { cb.onOrientationChanged(false) }
-                SegmentButton("Vertical", model.verticalOrientation, Modifier.weight(1f)) { cb.onOrientationChanged(true) }
+                SegmentButton(uiStr(R.string.horizontal), !model.verticalOrientation, Modifier.weight(1f)) { cb.onOrientationChanged(false) }
+                SegmentButton(uiStr(R.string.vertical), model.verticalOrientation, Modifier.weight(1f)) { cb.onOrientationChanged(true) }
             }
         }
 
         if (model.showColumns) {
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { SidebarCaption("Columns") }
+                Box(Modifier.weight(1f)) { SidebarCaption(uiStr(R.string.ui_columns)) }
                 Stepper(model.columns, model.columnsMin, model.columnsMax, cb::onColumnsChanged)
             }
         }
 
         Spacer(Modifier.height(14.dp))
-        PercentSlider("Scale", model.scalePercent, SCALE_RANGE, cb::onScalePreview, cb::onScaleChanged)
+        PercentSlider(uiStr(R.string.ui_scale), model.scalePercent, SCALE_RANGE, cb::onScalePreview, cb::onScaleChanged)
         Spacer(Modifier.height(6.dp))
-        PercentSlider("Opacity", model.opacityPercent, 0f..100f, cb::onOpacityPreview, cb::onOpacityChanged)
+        PercentSlider(uiStr(R.string.ui_opacity), model.opacityPercent, 0f..100f, cb::onOpacityPreview, cb::onOpacityChanged)
 
         if (model.showDynamicStick) {
             Spacer(Modifier.height(6.dp))
-            SettingSwitchRow("Dynamic Stick", model.dynamicStick, cb::onDynamicStickChanged)
+            SettingSwitchRow(uiStr(R.string.ui_dynamic_stick), model.dynamicStick, cb::onDynamicStickChanged)
             if (model.dynamicStick) {
                 Spacer(Modifier.height(8.dp))
                 PercentSlider(
-                    "Zone Size",
+                    uiStr(R.string.ui_zone_size),
                     model.zoneScalePercent,
                     ZONE_SCALE_RANGE,
                     cb::onZoneScalePreview,
@@ -218,7 +220,7 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
                 )
                 Spacer(Modifier.height(6.dp))
                 PercentSlider(
-                    "Follow Speed",
+                    uiStr(R.string.ui_follow_speed),
                     model.followSpeedPercent,
                     0f..100f,
                     onPreview = {},
@@ -228,7 +230,7 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
         }
 
         Spacer(Modifier.height(10.dp))
-        SidebarCaption("Color")
+        SidebarCaption(uiStr(R.string.ui_color))
         Spacer(Modifier.height(8.dp))
         ColorSwatchGrid(model.colorOptions, model.selectedColor, cb::onColorSelected)
         Spacer(Modifier.height(10.dp))
@@ -236,27 +238,27 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
 
         if (model.showToggleSwitch) {
             Spacer(Modifier.height(10.dp))
-            SettingSwitchRow("Toggle Switch", model.toggleSwitch, cb::onToggleSwitchChanged)
+            SettingSwitchRow(uiStr(R.string.ui_toggle_switch), model.toggleSwitch, cb::onToggleSwitchChanged)
         }
         if (model.showMouseMoveMode) {
-            SettingSwitchRow("Relative Mouse Move", model.mouseMoveMode, cb::onMouseMoveModeChanged)
+            SettingSwitchRow(uiStr(R.string.ui_relative_mouse_move), model.mouseMoveMode, cb::onMouseMoveModeChanged)
         }
         if (model.showSwipeable) {
             if (!model.showToggleSwitch) Spacer(Modifier.height(10.dp))
-            SettingSwitchRow("Swipe Between Buttons", model.swipeable, cb::onSwipeableChanged)
+            SettingSwitchRow(uiStr(R.string.ui_swipe_between_buttons), model.swipeable, cb::onSwipeableChanged)
         }
 
         if (model.showTextAndIcon) {
             Spacer(Modifier.height(10.dp))
-            ThemedTextField("Custom Text", model.text, cb::onTextChanged)
+            ThemedTextField(uiStr(R.string.ui_custom_text), model.text, cb::onTextChanged)
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { SidebarCaption("Icon") }
+                Box(Modifier.weight(1f)) { SidebarCaption(uiStr(R.string.ui_icon)) }
                 if (model.hasCustomIcon) {
-                    SmallOutlineButton("Remove", destructive = true, onClick = cb::onRemoveIcon)
+                    SmallOutlineButton(uiStr(R.string.remove), destructive = true, onClick = cb::onRemoveIcon)
                     Spacer(Modifier.width(8.dp))
                 }
-                SmallOutlineButton("Browse\u2026", onClick = cb::onBrowseIcon)
+                SmallOutlineButton(uiStr(R.string.ui_browse_2026), onClick = cb::onBrowseIcon)
             }
             Spacer(Modifier.height(8.dp))
             IconRow(model.icons, cb)
@@ -264,7 +266,7 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
 
         if (model.bindings.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))
-            Text("Bindings", style = MaterialTheme.typography.titleMedium)
+            Text(uiStr(R.string.ui_bindings), style = MaterialTheme.typography.titleMedium)
             model.bindings.forEachIndexed { index, binding ->
                 Spacer(Modifier.height(10.dp))
                 BindingRow(
@@ -316,11 +318,11 @@ private fun Stepper(value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
     val disabled = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = { if (value > min) onChange(value - 1) }, enabled = value > min, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Outlined.Remove, "Fewer", tint = if (value > min) MaterialTheme.colorScheme.onSurface else disabled, modifier = Modifier.size(20.dp))
+            Icon(Icons.Outlined.Remove, uiStr(R.string.ui_fewer), tint = if (value > min) MaterialTheme.colorScheme.onSurface else disabled, modifier = Modifier.size(20.dp))
         }
         Text(value.toString(), style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
         IconButton(onClick = { if (value < max) onChange(value + 1) }, enabled = value < max, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Outlined.Add, "More", tint = if (value < max) MaterialTheme.colorScheme.onSurface else disabled, modifier = Modifier.size(20.dp))
+            Icon(Icons.Outlined.Add, uiStr(R.string.ui_more), tint = if (value < max) MaterialTheme.colorScheme.onSurface else disabled, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -425,7 +427,7 @@ internal fun HexColorField(color: Int, onColor: (Int) -> Unit) {
             },
             singleLine = true,
             prefix = { Text("#", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            placeholder = { Text("Default") },
+            placeholder = { Text(uiStr(R.string.ui_default)) },
             textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false, imeAction = ImeAction.Done),
             shape = MaterialTheme.shapes.small,

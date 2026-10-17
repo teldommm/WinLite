@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.R
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.winlator.cmod.container.SaveProfiles
@@ -21,14 +22,14 @@ object SaveProfileCleanup {
                 if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
                 ThemedAlertHost.confirm(
                     activity,
-                    "Delete saves too?",
-                    "${shortcut.name} keeps its saves in ${SaveProfiles.displayPath(dir)}. If you keep them, the game picks them up again when it is added back. Delete them as well?",
-                    "Delete",
+                    activity.getString(R.string.ui_delete_saves_title),
+                    activity.getString(R.string.ui_delete_saves_message, shortcut.name, SaveProfiles.displayPath(dir)),
+                    activity.getString(R.string.ui_delete),
                     Runnable {
                         Thread {
                             val ok = SaveProfiles.deleteProfile(shortcut)
                             activity.runOnUiThread {
-                                WinToast.show(activity, if (ok) "Saves deleted" else "Couldn't delete saves", Toast.LENGTH_SHORT)
+                                WinToast.show(activity, if (ok) activity.getString(R.string.ui_saves_deleted) else activity.getString(R.string.ui_saves_delete_failed), Toast.LENGTH_SHORT)
                             }
                         }.start()
                     },

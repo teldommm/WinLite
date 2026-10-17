@@ -1,5 +1,6 @@
 package com.winlator.cmod.box64;
 
+import com.winlator.cmod.ui.UiStrings;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -247,9 +248,9 @@ public abstract class Box64PresetManager {
             }
         }
         if (presetFile != null && presetFile.exists())
-            WinToast.show(context, "Preset " + presetFile.getName() + " exported successfully at " + presetFile.getParentFile().getPath(), Toast.LENGTH_LONG);
+            WinToast.show(context, UiStrings.get(R.string.ui_preset_exported, presetFile.getName(), presetFile.getParentFile().getPath()), Toast.LENGTH_LONG);
         else
-            WinToast.show(context, "Failed to export preset", Toast.LENGTH_SHORT);
+            WinToast.show(context, UiStrings.get(R.string.ui_failed_export_preset), Toast.LENGTH_SHORT);
     }
 
     public static boolean importPreset(String prefix, Context context, InputStream stream) {

@@ -92,16 +92,16 @@ private fun TaskManagerPanel(state: TaskManagerPanelState, callbacks: TaskManage
             .fillMaxWidth()
             .padding(vertical = 4.dp)
     ) {
-        SidebarPanelTitle("Task Manager")
+        SidebarPanelTitle(uiStr(R.string.ui_task_manager))
 
         Row(Modifier.fillMaxWidth().height(66.dp)) {
             MetricCard(modifier = Modifier.weight(0.7f), title = "CPU", value = state.cpuLabel)
             Spacer(Modifier.width(10.dp))
-            MetricCard(modifier = Modifier.weight(1.3f), title = "Memory", value = state.memoryLabel)
+            MetricCard(modifier = Modifier.weight(1.3f), title = uiStr(R.string.memory), value = state.memoryLabel)
         }
 
         Spacer(Modifier.height(14.dp))
-        SidebarSectionTitle("Processes: ${state.processes.size}")
+        SidebarSectionTitle(uiStr(R.string.ui_processes, state.processes.size))
         Spacer(Modifier.height(8.dp))
 
         if (state.processes.isEmpty()) {
@@ -126,7 +126,7 @@ private fun TaskManagerPanel(state: TaskManagerPanelState, callbacks: TaskManage
             }
         }
 
-        SidebarActionRow(label = "+ New Task", accent = true, onClick = callbacks::onNewTask)
+        SidebarActionRow(label = uiStr(R.string.ui_new_task), accent = true, onClick = callbacks::onNewTask)
     }
 }
 
@@ -214,7 +214,7 @@ private fun ProcessRow(row: ProcessRowData, callbacks: TaskManagerCallbacks) {
             IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {
                 Icon(
                     painter = painterResource(id = R.drawable.ui_ic_more),
-                    contentDescription = "More options",
+                    contentDescription = uiStr(R.string.ui_more_options),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

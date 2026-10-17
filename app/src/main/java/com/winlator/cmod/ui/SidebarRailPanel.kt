@@ -300,7 +300,7 @@ private fun RailSessionButton(state: SidebarRailState, callbacks: SidebarRailCal
     val onTap = {
         if (currentState.exitMode) callbacks.onExit() else callbacks.onPauseToggle()
     }
-    val pauseLabel = if (paused) "Resume" else "Pause"
+    val pauseLabel = if (paused) uiStr(R.string.ui_resume) else uiStr(R.string.ui_pause)
     val shape = cellShape(cell)
 
     Box(
@@ -347,10 +347,10 @@ private fun RailSessionButton(state: SidebarRailState, callbacks: SidebarRailCal
             }
             .semantics {
                 role = Role.Button
-                contentDescription = if (exitMode) "Exit" else pauseLabel
+                contentDescription = if (exitMode) uiStr(R.string.exit) else pauseLabel
                 customActions = listOf(
                     CustomAccessibilityAction(pauseLabel) { callbacks.onPauseToggle(); true },
-                    CustomAccessibilityAction("Exit") { callbacks.onExit(); true }
+                    CustomAccessibilityAction(uiStr(R.string.exit)) { callbacks.onExit(); true }
                 )
             },
         contentAlignment = Alignment.Center

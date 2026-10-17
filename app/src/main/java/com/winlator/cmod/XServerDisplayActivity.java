@@ -1,5 +1,6 @@
 package com.winlator.cmod;
 
+import com.winlator.cmod.ui.UiStrings;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -1030,7 +1031,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean prepareContainerOverlay() {
         if (ContainerOverlay.prepare(this, contentsManager, container)) return true;
         runOnUiThread(() -> {
-            Toast.makeText(this, "This container cannot be started: delete and recreate it (old full prefix), or the overlay library / base prefix is missing.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, UiStrings.get(R.string.ui_container_cannot_start), Toast.LENGTH_LONG).show();
             exit();
         });
         return false;
@@ -1564,7 +1565,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                             getString(R.string.do_you_want_to_end_this_process), getString(R.string.ok),
                             () -> {
                                 winHandler.killProcess(name);
-                                WinToast.show(XServerDisplayActivity.this, "Ending " + name, Toast.LENGTH_SHORT);
+                                WinToast.show(XServerDisplayActivity.this, UiStrings.get(R.string.ui_ending_process, name), Toast.LENGTH_SHORT);
                             }, true);
                 }
 
@@ -1594,7 +1595,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                                 for (int position : positions) mask |= (1 << position);
                                 winHandler.setProcessAffinity(pid, mask);
                                 if (taskManagerSidebar != null) taskManagerSidebar.updateNow();
-                                WinToast.show(XServerDisplayActivity.this, "Affinity updated for " + name, Toast.LENGTH_SHORT);
+                                WinToast.show(XServerDisplayActivity.this, UiStrings.get(R.string.ui_affinity_updated_for, name), Toast.LENGTH_SHORT);
                             }, initiallyChecked);
                 }
             });
@@ -1715,7 +1716,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 } else {
                     FrameRating.resetSavedLayout(XServerDisplayActivity.this);
                 }
-                WinToast.show(XServerDisplayActivity.this, "HUD layout reset", Toast.LENGTH_SHORT);
+                WinToast.show(XServerDisplayActivity.this, UiStrings.get(R.string.ui_hud_layout_reset), Toast.LENGTH_SHORT);
             }
 
             @Override
@@ -2884,7 +2885,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void installDirectAudio() {
         if (!DirectAudioDriver.INSTANCE.isSelected(audioDriver)) return;
         if (!DirectAudioDriver.INSTANCE.install(this, imageFs, wineInfo)) {
-            runOnUiThread(() -> WinToast.show(this, "DirectAudio: failed to install the driver", Toast.LENGTH_LONG));
+            runOnUiThread(() -> WinToast.show(this, UiStrings.get(R.string.ui_directaudio_install_failed), Toast.LENGTH_LONG));
         }
     }
 

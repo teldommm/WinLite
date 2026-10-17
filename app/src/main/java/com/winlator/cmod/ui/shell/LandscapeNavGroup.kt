@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.shell
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -50,13 +51,13 @@ internal fun LandscapeNavGroup(selected: Int, onNavigate: (Int) -> Unit, modifie
         border = BorderStroke(1.dp, hairlineColor())
     ) {
         Row(Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            NavCell(Icons.Outlined.Home, "Library", selected == R.id.main_menu_shortcuts) {
+            NavCell(Icons.Outlined.Home, stringResource(R.string.ui_library), selected == R.id.main_menu_shortcuts) {
                 onNavigate(R.id.main_menu_shortcuts)
             }
-            NavCell(Icons.Outlined.SportsEsports, "Input Controls", selected == R.id.main_menu_input_controls) {
+            NavCell(Icons.Outlined.SportsEsports, stringResource(R.string.ui_input_controls), selected == R.id.main_menu_input_controls) {
                 onNavigate(R.id.main_menu_input_controls)
             }
-            NavCell(Icons.Outlined.Settings, "Settings", selected == R.id.main_menu_settings) {
+            NavCell(Icons.Outlined.Settings, stringResource(R.string.settings), selected == R.id.main_menu_settings) {
                 onNavigate(R.id.main_menu_settings)
             }
         }

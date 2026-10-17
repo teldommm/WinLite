@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.theme
 
+import com.winlator.cmod.ui.uiStr
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.HorizontalDivider
@@ -74,12 +76,16 @@ import com.winlator.cmod.R
 
 enum class WinlatorThemeType(
     val id: String,
-    val displayName: String,
-    val description: String
+    @StringRes private val nameRes: Int,
+    @StringRes private val descriptionRes: Int
 ) {
-    WHITE("white", "White", "Bright surfaces with dark text"),
-    BLACK("black", "Dark", "Balanced dark theme · Default"),
-    AMOLED("amoled", "AMOLED", "Pure black background for OLED displays");
+    WHITE("white", R.string.ui_theme_white, R.string.ui_theme_white_desc),
+    BLACK("black", R.string.ui_theme_dark, R.string.ui_theme_dark_desc),
+    AMOLED("amoled", R.string.ui_theme_amoled, R.string.ui_theme_amoled_desc);
+
+    // Resolved when shown (resource ids in the enum, not text: enum entries are created once).
+    val displayName: String get() = uiStr(nameRes)
+    val description: String get() = uiStr(descriptionRes)
 
     companion object {
         fun fromId(id: String?): WinlatorThemeType = values().firstOrNull { it.id == id } ?: BLACK

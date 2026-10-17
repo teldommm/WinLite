@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.container
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -71,12 +73,12 @@ private data class LandscapeSection(val id: String, val title: String, val subti
 private fun LandscapeContainerOverview(model: ContainerOverviewModel, callbacks: ContainerOverviewCallbacks) {
     val sections = remember(model) {
         listOf(
-            LandscapeSection(ContainerOverviewComposeHost.SECTION_SYSTEM, "System", "Wine ${model.wineVersion}", Icons.Outlined.Settings),
-            LandscapeSection(ContainerOverviewComposeHost.SECTION_VIDEO, "Video", "${model.renderer}  •  ${model.screenSize}", Icons.Outlined.DesktopWindows),
-            LandscapeSection(ContainerOverviewComposeHost.SECTION_AUDIO, "Audio", model.audioDriver, Icons.Outlined.VolumeUp),
-            LandscapeSection(ContainerOverviewComposeHost.SECTION_COMPATIBILITY, "Compatibility", model.emulator, Icons.Outlined.VerifiedUser),
-            LandscapeSection(ContainerOverviewComposeHost.SECTION_STORAGE, "Storage", "", Icons.Outlined.Folder),
-            LandscapeSection(ContainerOverviewComposeHost.SECTION_ADVANCED, "Advanced", "", Icons.Outlined.Tune)
+            LandscapeSection(ContainerOverviewComposeHost.SECTION_SYSTEM, uiStr(R.string.system), uiStr(R.string.ui_wine, model.wineVersion), Icons.Outlined.Settings),
+            LandscapeSection(ContainerOverviewComposeHost.SECTION_VIDEO, uiStr(R.string.ui_video), "${model.renderer}  •  ${model.screenSize}", Icons.Outlined.DesktopWindows),
+            LandscapeSection(ContainerOverviewComposeHost.SECTION_AUDIO, uiStr(R.string.ui_audio), model.audioDriver, Icons.Outlined.VolumeUp),
+            LandscapeSection(ContainerOverviewComposeHost.SECTION_COMPATIBILITY, uiStr(R.string.compatibility), model.emulator, Icons.Outlined.VerifiedUser),
+            LandscapeSection(ContainerOverviewComposeHost.SECTION_STORAGE, uiStr(R.string.storage), "", Icons.Outlined.Folder),
+            LandscapeSection(ContainerOverviewComposeHost.SECTION_ADVANCED, uiStr(R.string.advanced), "", Icons.Outlined.Tune)
         )
     }
     var selected by remember { mutableStateOf(ContainerOverviewComposeHost.SECTION_SYSTEM) }
@@ -92,7 +94,7 @@ private fun LandscapeContainerOverview(model: ContainerOverviewModel, callbacks:
                         .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()).height(48.dp),
                     shape = WinZShapes.Medium,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
-                ) { Text("Launch Environment", fontWeight = FontWeight.SemiBold) }
+                ) { Text(uiStr(R.string.ui_launch_environment), fontWeight = FontWeight.SemiBold) }
             }
         }
     ) { padding ->
@@ -107,7 +109,7 @@ private fun LandscapeContainerOverview(model: ContainerOverviewModel, callbacks:
             ) {
                 Column(Modifier.fillMaxSize().padding(12.dp)) {
                     Text(model.containerName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("Wine ${model.wineVersion}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(uiStr(R.string.ui_wine, model.wineVersion), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(12.dp))
                     sections.forEach { item -> LandscapeSectionRow(item, selected == item.id) { selected = item.id } }
                 }

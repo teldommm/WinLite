@@ -100,7 +100,7 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
             .fillMaxWidth()
             .padding(vertical = 4.dp)
     ) {
-        SidebarPanelTitle("Controls")
+        SidebarPanelTitle(uiStr(R.string.ui_controls))
 
         SidebarCard {
             ProfileRow(
@@ -119,7 +119,7 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
                     mutableStateOf(state.controlsOpacityPercent.coerceIn(10, 100).toFloat())
                 }
                 SidebarSlider(
-                    label = "Controls Opacity",
+                    label = uiStr(R.string.ui_controls_opacity),
                     valueText = "${opacityDraft.roundToInt()}%",
                     value = opacityDraft,
                     onValueChange = {
@@ -166,8 +166,8 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
         SidebarGap()
         SidebarCard {
             SidebarDropdownField(
-                caption = "Touch Mode",
-                options = listOf("Trackpad", "Touchscreen", "Off"),
+                caption = uiStr(R.string.ui_touch_mode),
+                options = listOf(uiStr(R.string.ui_trackpad), uiStr(R.string.ui_touchscreen), uiStr(R.string.ui_off)),
                 selectedIndex = touchMode.coerceIn(0, 2),
                 onSelect = { index ->
                     touchMode = index
@@ -179,7 +179,7 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
                 mutableStateOf(state.cursorSpeedPercent.coerceIn(10, 200).toFloat())
             }
             SidebarSlider(
-                label = "Cursor Speed",
+                label = uiStr(R.string.cursor_speed),
                 valueText = "${cursorSpeedDraft.roundToInt()}%",
                 value = cursorSpeedDraft,
                 onValueChange = {
@@ -192,12 +192,12 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
         }
 
         SidebarGap()
-        SidebarActionRow(label = "Show Keyboard", onClick = callbacks::onShowKeyboard)
+        SidebarActionRow(label = uiStr(R.string.ui_show_keyboard), onClick = callbacks::onShowKeyboard)
         SidebarGap()
-        SidebarActionRow(label = "Vibration", onClick = callbacks::onVibration)
+        SidebarActionRow(label = uiStr(R.string.vibration), onClick = callbacks::onVibration)
         SidebarGap()
         SidebarToggleRow(
-            label = "Relative Mouse",
+            label = uiStr(R.string.ui_relative_mouse),
             checked = relativeMouse,
             onCheckedChange = {
                 relativeMouse = it
@@ -211,7 +211,7 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
         if (touchMode != 2) {
             SidebarGap()
             SidebarToggleRow(
-                label = "Tap to Click",
+                label = uiStr(R.string.ui_tap_to_click),
                 checked = tapToClick,
                 onCheckedChange = {
                     tapToClick = it
@@ -236,7 +236,7 @@ private fun ProfileRow(
     val selectedIndex = if (selectedProfileId < 0) 0
         else profiles.indexOfFirst { it.id == selectedProfileId }.let { if (it < 0) 0 else it + 1 }
 
-    SidebarCaption("Controls Profile")
+    SidebarCaption(uiStr(R.string.ui_controls_profile))
     Spacer(Modifier.height(6.dp))
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -253,7 +253,7 @@ private fun ProfileRow(
         IconButton(onClick = onEditClick) {
             Icon(
                 imageVector = Icons.Outlined.Settings,
-                contentDescription = "Edit profiles",
+                contentDescription = uiStr(R.string.ui_edit_profiles),
                 tint = controlAccentColor()
             )
         }

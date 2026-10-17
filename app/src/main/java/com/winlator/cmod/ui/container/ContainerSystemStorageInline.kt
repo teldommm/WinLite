@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.container
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import android.graphics.Color as AndroidColor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -86,7 +88,7 @@ internal fun ContainerSystemInline(containerId: Int, callbacks: ContainerInlineC
         }.getOrDefault("disable").lowercase(Locale.ENGLISH))
     }
     var wallpaperLabel by remember {
-        mutableStateOf(if (WineThemeManager.getUserWallpaperFile(context).isFile) "Custom image" else "Default image")
+        mutableStateOf(if (WineThemeManager.getUserWallpaperFile(context).isFile) uiStr(R.string.ui_custom_image) else uiStr(R.string.ui_default_image))
     }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) runCatching {
@@ -95,51 +97,51 @@ internal fun ContainerSystemInline(containerId: Int, callbacks: ContainerInlineC
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(target).use { output -> input.copyTo(output) }
             }
-            wallpaperLabel = "Custom image"
+            wallpaperLabel = uiStr(R.string.ui_custom_image)
             backgroundType = "Image"
         }
     }
 
     SSPanel {
-        SSReadOnly("Wine", container.getWineVersion())
+        SSReadOnly(uiStr(R.string.ui_wine_2), container.getWineVersion())
         SSDivider()
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
-            label = { Text("Container name") },
+            label = { Text(uiStr(R.string.ui_container_name)) },
             singleLine = true,
             shape = WinZShapes.Small
         )
         SSDivider()
-        SSChoice("HUD", arrayOf("Off", "Classic", "Modern")[hudMode.coerceIn(0, 2)], arrayOf("Off", "Classic", "Modern")) {
-            hudMode = arrayOf("Off", "Classic", "Modern").indexOf(it).coerceAtLeast(0)
+        SSChoice("HUD", arrayOf(uiStr(R.string.ui_off), uiStr(R.string.ui_classic), uiStr(R.string.ui_modern))[hudMode.coerceIn(0, 2)], arrayOf(uiStr(R.string.ui_off), uiStr(R.string.ui_classic), uiStr(R.string.ui_modern))) {
+            hudMode = arrayOf(uiStr(R.string.ui_off), uiStr(R.string.ui_classic), uiStr(R.string.ui_modern)).indexOf(it).coerceAtLeast(0)
         }
         SSDivider()
-        SSChoice("Theme", desktopTheme, arrayOf("Light", "Dark")) { desktopTheme = it }
+        SSChoice(uiStr(R.string.ui_theme), desktopTheme, arrayOf("Light", "Dark")) { desktopTheme = it }
         SSDivider()
-        SSChoice("Background", backgroundType, arrayOf("Image", "Color")) { backgroundType = it }
+        SSChoice(uiStr(R.string.ui_background), backgroundType, arrayOf("Image", "Color")) { backgroundType = it }
         if (backgroundType == "Image") {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(wallpaperLabel, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onClick = { imagePicker.launch("image/*") }) { Text("Choose image") }
+                OutlinedButton(onClick = { imagePicker.launch("image/*") }) { Text(uiStr(R.string.ui_choose_image)) }
             }
         } else {
             OutlinedTextField(
                 value = backgroundColor,
                 onValueChange = { backgroundColor = it.take(7) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
-                label = { Text("Background color") },
+                label = { Text(uiStr(R.string.ui_background_color)) },
                 singleLine = true,
                 shape = WinZShapes.Small
             )
         }
         SSDivider()
         SSChoice(
-            "Mouse Warp Override",
+            uiStr(R.string.ui_mouse_warp_override),
             mouseWarp.replaceFirstChar { it.uppercase() },
             arrayOf("Disable", "Enable", "Force")
         ) { mouseWarp = it.lowercase(Locale.ENGLISH) }
@@ -185,7 +187,7 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
 
     SSPanel(indented = false) {
         Text(
-            "Drives",
+            uiStr(R.string.drives),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
@@ -198,7 +200,7 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
             ) {
                 Column(Modifier.width(68.dp)) {
                     Text(
-                        "Letter",
+                        uiStr(R.string.ui_letter),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 2.dp, bottom = 3.dp)
@@ -209,7 +211,7 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
                     value = drive.path,
                     onValueChange = { drives[index] = drive.copy(path = it) },
                     modifier = Modifier.weight(1f),
-                    label = { Text("Target Path") },
+                    label = { Text(uiStr(R.string.ui_target_path)) },
                     singleLine = true,
                     shape = WinZShapes.Small
                 )
@@ -217,12 +219,12 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
                     onClick = { browseIndex = index; picker.launch(null) },
                     modifier = Modifier.size(42.dp),
                     contentPadding = PaddingValues(0.dp)
-                ) { Icon(Icons.Outlined.Folder, "Browse") }
+                ) { Icon(Icons.Outlined.Folder, uiStr(R.string.browse)) }
                 OutlinedButton(
                     onClick = { if (index in drives.indices) drives.removeAt(index) },
                     modifier = Modifier.size(42.dp),
                     contentPadding = PaddingValues(0.dp)
-                ) { Icon(Icons.Outlined.Delete, "Delete") }
+                ) { Icon(Icons.Outlined.Delete, uiStr(R.string.ui_delete)) }
             }
         }
         OutlinedButton(
@@ -231,7 +233,7 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
                 drives.add(InlineDrive(letters.firstOrNull { it !in used } ?: "E:", "/storage/emulated/0"))
             },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp)
-        ) { Text("Add") }
+        ) { Text(uiStr(R.string.ui_add_2)) }
         SSSave {
             val serialized = drives.filter { it.path.isNotBlank() }.joinToString("") {
                 "${it.letter.removeSuffix(":")}:${it.path}"
@@ -343,7 +345,7 @@ private fun SSSave(onClick: () -> Unit) {
     Button(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-    ) { Text("Save", fontWeight = FontWeight.SemiBold) }
+    ) { Text(uiStr(R.string.ui_save), fontWeight = FontWeight.SemiBold) }
 }
 
 @Composable

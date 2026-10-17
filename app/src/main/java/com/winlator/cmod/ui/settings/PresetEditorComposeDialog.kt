@@ -1,5 +1,8 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.WinZMotion
 import androidx.activity.compose.BackHandler
 
@@ -134,7 +137,7 @@ object PresetEditorComposeDialog {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.5f))
+                                .background(DialogScrimColor)
                                 .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { dismiss() },
                             contentAlignment = Alignment.Center
                         ) {
@@ -196,7 +199,7 @@ private fun ColumnScope.PresetEditorScreen(
     Text(title, style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
     if (!compact) {
         Text(
-            if (readOnly) "Bundled preset · read only" else "Edit the preset name and environment variables",
+            if (readOnly) uiStr(R.string.ui_bundled_preset_read_only) else uiStr(R.string.ui_edit_the_preset_name_and_environment_vari),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp)
@@ -209,11 +212,11 @@ private fun ColumnScope.PresetEditorScreen(
         onValueChange = { name = it },
         enabled = !readOnly,
         singleLine = true,
-        label = { Text("Preset") },
+        label = { Text(uiStr(R.string.preset)) },
         modifier = Modifier.fillMaxWidth()
     )
     Text(
-        "Environment variables",
+        uiStr(R.string.ui_environment_variables),
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = if (compact) 8.dp else 18.dp, bottom = if (compact) 4.dp else 7.dp)
@@ -254,7 +257,7 @@ private fun ColumnScope.PresetEditorScreen(
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
             border = BorderStroke(1.dp, hairlineColor())
-        ) { Text("Cancel") }
+        ) { Text(uiStr(R.string.cancel)) }
         Button(
             onClick = {
                 val cleanName = name.trim().replace(Regex("[,|]+"), "")
@@ -263,12 +266,12 @@ private fun ColumnScope.PresetEditorScreen(
             enabled = !readOnly && name.isNotBlank(),
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-        ) { Text("Save") }
+        ) { Text(uiStr(R.string.ui_save)) }
     }
 
     helpText?.let { message ->
         ThemedDialog(onDismissRequest = { helpText = null }) {
-            ThemedDialogTitle("Help")
+            ThemedDialogTitle(uiStr(R.string.ui_help))
             ThemedDialogScrollBody {
                 Text(message, style = MaterialTheme.typography.bodyMedium)
             }
@@ -321,7 +324,7 @@ private fun PresetVariableRow(
                 IconButton(onClick = onHelp, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.AutoMirrored.Outlined.HelpOutline,
-                        contentDescription = "Help",
+                        contentDescription = uiStr(R.string.ui_help),
                         modifier = Modifier.size(20.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )

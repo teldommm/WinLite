@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -63,13 +64,13 @@ internal fun PortraitBottomNavigation(
         border = BorderStroke(1.dp, hairlineColor())
     ) {
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            PortraitNavItem(Icons.Outlined.Home, "Library", selected == R.id.main_menu_shortcuts) {
+            PortraitNavItem(Icons.Outlined.Home, stringResource(R.string.ui_library), selected == R.id.main_menu_shortcuts) {
                 onNavigate(R.id.main_menu_shortcuts)
             }
-            PortraitNavItem(Icons.Outlined.SportsEsports, "Input Controls", selected == R.id.main_menu_input_controls) {
+            PortraitNavItem(Icons.Outlined.SportsEsports, stringResource(R.string.ui_input_controls), selected == R.id.main_menu_input_controls) {
                 onNavigate(R.id.main_menu_input_controls)
             }
-            PortraitNavItem(Icons.Outlined.Settings, "Settings", selected == R.id.main_menu_settings) {
+            PortraitNavItem(Icons.Outlined.Settings, stringResource(R.string.settings), selected == R.id.main_menu_settings) {
                 onNavigate(R.id.main_menu_settings)
             }
         }
@@ -123,7 +124,7 @@ private fun RowScope.PortraitNavItem(icon: ImageVector, label: String, selected:
         Text(
             label,
             color = tint,
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1
         )

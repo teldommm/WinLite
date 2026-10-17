@@ -1,5 +1,6 @@
 package com.winlator.cmod;
 
+import com.winlator.cmod.ui.UiStrings;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
@@ -261,7 +262,7 @@ public class ComponentCatalogController {
                 if (composeController != null) composeController.setInstallBusy(null, false);
                 refreshBundledRuntimeState();
                 syncComposeCatalog();
-                if (!installed && host.isAlive()) WinToast.show(host.context(), "Unable to install " + bundledName + ".", Toast.LENGTH_LONG);
+                if (!installed && host.isAlive()) WinToast.show(host.context(), UiStrings.get(R.string.ui_unable_to_install_dot, bundledName), Toast.LENGTH_LONG);
                 else if (installed) toastDone(bundledName + " installed");
             });
         });

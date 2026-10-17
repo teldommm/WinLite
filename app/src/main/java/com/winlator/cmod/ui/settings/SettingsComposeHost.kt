@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.uiStr
 import androidx.compose.material3.LocalTextStyle
 import com.winlator.cmod.ui.theme.tabularNumbers
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
@@ -167,9 +168,9 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (landscape) {
-            LandscapeScreenHeader("Settings")
+            LandscapeScreenHeader(uiStr(R.string.settings))
         } else {
-            PortraitMainHeader("Settings")
+            PortraitMainHeader(uiStr(R.string.settings))
         }
         LazyColumn(
             modifier = Modifier.fillMaxWidth().weight(1f),
@@ -187,16 +188,16 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
 
             item("environment-title") { SectionTitle("ENVIRONMENTS") }
             item("containers") {
-                NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows environments", callbacks::onOpenContainers)
+                NavigationRow(Icons.Outlined.Dns, uiStr(R.string.ui_containers), uiStr(R.string.ui_create_and_manage_windows_environments), callbacks::onOpenContainers)
             }
             item("components") {
-                NavigationRow(Icons.Outlined.Apps, "Components", "Wine, Proton, DXVK, VKD3D and runtimes", callbacks::onOpenComponents)
+                NavigationRow(Icons.Outlined.Apps, uiStr(R.string.ui_components), uiStr(R.string.ui_wine_proton_dxvk_vkd3d_and_runtimes), callbacks::onOpenComponents)
             }
             item("lossless-dll") {
                 NavigationRow(
                     Icons.Outlined.FolderOpen,
-                    "Import Lossless.dll",
-                    if (model.losslessDllAvailable) "Lossless.dll imported - LSFG Native ready" else "Required for LSFG Native",
+                    uiStr(R.string.ui_import_lossless_dll),
+                    if (model.losslessDllAvailable) uiStr(R.string.ui_lossless_dll_imported_lsfg_native_ready) else uiStr(R.string.ui_required_for_lsfg_native),
                     callbacks::onImportLosslessDll
                 )
             }
@@ -231,32 +232,32 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
                 SoundFontCard(model.soundFonts, callbacks::onInstallSoundFont, callbacks::onRemoveSoundFont)
             }
 
-            item("paths-title") { SectionTitle("PATH SETTINGS") }
-            item("winlator-path") { NavigationRow(Icons.Outlined.Storage, "Winlator Path", model.winlatorPath, callbacks::onChooseWinlatorPath) }
-            item("shortcut-path") { NavigationRow(Icons.Outlined.FolderOpen, "Shortcut Export Path", model.shortcutPath, callbacks::onChooseShortcutPath) }
+            item("paths-title") { SectionTitle(uiStr(R.string.ui_path_settings)) }
+            item("winlator-path") { NavigationRow(Icons.Outlined.Storage, uiStr(R.string.ui_winlator_path), model.winlatorPath, callbacks::onChooseWinlatorPath) }
+            item("shortcut-path") { NavigationRow(Icons.Outlined.FolderOpen, uiStr(R.string.ui_shortcut_export_path), model.shortcutPath, callbacks::onChooseShortcutPath) }
 
-            item("cover-art-title") { SectionTitle("COVER ART") }
+            item("cover-art-title") { SectionTitle(uiStr(R.string.ui_cover_art)) }
             item("cover-art") {
                 // One card, like LOGS: the key toggle (with its field while on), then the two switches.
                 GroupCard {
-                    ToggleRow("Custom artwork sources", model.customArtworkSources) { callbacks.onBooleanChanged("enable_custom_api_key", it) }
+                    ToggleRow(uiStr(R.string.ui_custom_artwork_sources), model.customArtworkSources) { callbacks.onBooleanChanged("enable_custom_api_key", it) }
                     if (model.customArtworkSources) {
                         GroupDivider()
                         ArtworkSourcesEditor(model, callbacks)
                     }
                     GroupDivider()
-                    ToggleRow("Auto-download artwork from the internet", model.autoDownloadArtwork) { callbacks.onBooleanChanged("auto_download_artwork", it) }
+                    ToggleRow(uiStr(R.string.ui_auto_download_artwork_from_the_internet), model.autoDownloadArtwork) { callbacks.onBooleanChanged("auto_download_artwork", it) }
                     GroupDivider()
-                    ToggleRow("Animated artwork", model.animatedArtwork) { callbacks.onBooleanChanged("animated_artwork", it) }
+                    ToggleRow(uiStr(R.string.ui_animated_artwork), model.animatedArtwork) { callbacks.onBooleanChanged("animated_artwork", it) }
                 }
             }
 
             item("xserver-title") { SectionTitle(stringResource(R.string.xserver)) }
             item("xserver") {
                 GroupCard {
-                    SpeedRow("Cursor speed", model.cursorSpeedPercent, callbacks::onCursorSpeedChanged)
+                    SpeedRow(uiStr(R.string.ui_cursor_speed), model.cursorSpeedPercent, callbacks::onCursorSpeedChanged)
                     GroupDivider()
-                    ToggleRow("Capture External Pointer", model.cursorLock) { callbacks.onBooleanChanged("cursor_lock", it) }
+                    ToggleRow(uiStr(R.string.ui_capture_external_pointer), model.cursorLock) { callbacks.onBooleanChanged("cursor_lock", it) }
                     GroupDivider()
                     ToggleRow(stringResource(R.string.use_dri3_extension), model.useDri3) { callbacks.onBooleanChanged("use_dri3", it) }
                 }
@@ -275,7 +276,7 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
                         )
                     }
                     GroupDivider()
-                    ToggleRow("Enable Winlator logs", model.winlatorLogs) { callbacks.onBooleanChanged("enable_winlator_logs", it) }
+                    ToggleRow(uiStr(R.string.ui_enable_winlator_logs), model.winlatorLogs) { callbacks.onBooleanChanged("enable_winlator_logs", it) }
                     GroupDivider()
                     ToggleRow(stringResource(R.string.enable_box64_logs), model.box64Logs) { callbacks.onBooleanChanged("enable_box64_logs", it) }
                 }
@@ -303,7 +304,7 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
 
             item("about-title") { SectionTitle("ABOUT") }
             item("about") {
-                NavigationRow(Icons.Outlined.Info, "About", null) { activity?.showAboutDialog() }
+                NavigationRow(Icons.Outlined.Info, uiStr(R.string.ui_about), null) { activity?.showAboutDialog() }
             }
         }
     }
@@ -470,7 +471,7 @@ private fun PresetChoiceRow(
         }
         Box {
             IconButton(onClick = { actionsOpen = true }) {
-                Icon(Icons.Outlined.MoreVert, "Preset actions")
+                Icon(Icons.Outlined.MoreVert, uiStr(R.string.ui_preset_actions))
             }
             DropdownMenu(
                 expanded = actionsOpen,
@@ -479,7 +480,7 @@ private fun PresetChoiceRow(
                 containerColor = MaterialTheme.colorScheme.surface
             ) {
                 DropdownMenuItem(
-                    text = { Text("Create new") },
+                    text = { Text(uiStr(R.string.ui_create_new)) },
                     leadingIcon = { Icon(Icons.Outlined.Add, null) },
                     onClick = {
                         actionsOpen = false
@@ -488,7 +489,7 @@ private fun PresetChoiceRow(
                 )
                 if (selectedId.isNotBlank()) {
                     DropdownMenuItem(
-                        text = { Text("Clone") },
+                        text = { Text(uiStr(R.string.ui_clone)) },
                         leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
                         onClick = {
                             actionsOpen = false
@@ -496,7 +497,7 @@ private fun PresetChoiceRow(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Edit") },
+                        text = { Text(uiStr(R.string.ui_edit)) },
                         leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                         onClick = {
                             actionsOpen = false
@@ -504,7 +505,7 @@ private fun PresetChoiceRow(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        text = { Text(uiStr(R.string.ui_delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
                         onClick = {
                             actionsOpen = false
@@ -532,7 +533,7 @@ private fun PresetChoiceRow(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
                 )
                 Text(
-                    "Choose an option",
+                    uiStr(R.string.ui_choose_an_option),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 8.dp).padding(bottom = 10.dp)
@@ -584,9 +585,9 @@ private fun WineDebugChannelsRow(
         selectedValue.split(',').map { it.trim() }.filter { it.isNotEmpty() }
     }
     val summary = when {
-        selectedChannels.isEmpty() -> "No channels selected"
+        selectedChannels.isEmpty() -> uiStr(R.string.ui_no_channels_selected)
         selectedChannels.size <= 3 -> selectedChannels.joinToString(", ")
-        else -> selectedChannels.take(3).joinToString(", ") + " +${selectedChannels.size - 3}"
+        else -> selectedChannels.take(3).joinToString(", ") + uiStr(R.string.ui, selectedChannels.size - 3)
     }
 
     Row(
@@ -597,7 +598,7 @@ private fun WineDebugChannelsRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Wine debug channels", style = MaterialTheme.typography.bodyLarge)
+            Text(uiStr(R.string.ui_wine_debug_channels), style = MaterialTheme.typography.bodyLarge)
             Text(
                 summary,
                 style = MaterialTheme.typography.bodySmall,
@@ -640,13 +641,13 @@ private fun WineDebugChannelsDialog(
     }
 
     ThemedDialog(onDismissRequest = onDismiss) {
-        ThemedDialogTitle("Wine debug channels")
+        ThemedDialogTitle(uiStr(R.string.ui_wine_debug_channels))
         val accent = controlAccentColor()
         Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                label = { Text("Search channels") },
+                label = { Text(uiStr(R.string.ui_search_channels)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -683,11 +684,11 @@ private fun WineDebugChannelsDialog(
                 onClick = onDismiss,
                 colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                 border = BorderStroke(1.dp, hairlineColor())
-            ) { Text("Cancel") }
+            ) { Text(uiStr(R.string.cancel)) }
             Button(
                 onClick = { onApply(allOptions.filter { it in selected }.joinToString(",")) },
                 colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = androidx.compose.ui.graphics.Color.White)
-            ) { Text("Apply") }
+            ) { Text(uiStr(R.string.ui_apply)) }
         }
     }
 }
@@ -700,7 +701,7 @@ private fun SoundFontCard(choices: List<SettingChoice>, onInstall: () -> Unit, o
                 Icon(Icons.Outlined.MusicNote, null)
                 Spacer(Modifier.width(10.dp))
                 Text(choice.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                IconButton(onClick = { onRemove(choice.name) }) { Icon(Icons.Outlined.DeleteOutline, null) }
+                IconButton(onClick = { onRemove(choice.name) }) { Icon(Icons.Outlined.DeleteOutline, uiStr(R.string.ui_remove, choice.name)) }
             }
             if (index != choices.lastIndex) GroupDivider()
         }
@@ -711,7 +712,7 @@ private fun SoundFontCard(choices: List<SettingChoice>, onInstall: () -> Unit, o
         ) {
             Icon(Icons.Outlined.Add, null)
             Spacer(Modifier.width(7.dp))
-            Text("Install SoundFont")
+            Text(uiStr(R.string.ui_install_soundfont))
         }
     }
 }
@@ -744,15 +745,15 @@ private fun ArtworkSourcesEditor(model: SettingsModel, callbacks: SettingsCallba
     DisposableEffect(Unit) { onDispose { commitLatest.value() } }
 
     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ArtworkField("SteamGridDB API key", apiKey, { apiKey = it }, ImeAction.Next, ::commit)
-        ArtworkField("SteamGridDB API URL", steamGridUrl, { steamGridUrl = it }, ImeAction.Next, ::commit)
+        ArtworkField(uiStr(R.string.ui_steamgriddb_api_key), apiKey, { apiKey = it }, ImeAction.Next, ::commit)
+        ArtworkField(uiStr(R.string.ui_steamgriddb_api_url), steamGridUrl, { steamGridUrl = it }, ImeAction.Next, ::commit)
         ArtworkField(
-            "TheGamesDB search URL", gamesSearch, { gamesSearch = it }, ImeAction.Next, ::commit,
-            error = if (searchInvalid) "Must contain ${RemoteSources.QUERY_PLACEHOLDER}" else null
+            uiStr(R.string.ui_thegamesdb_search_url), gamesSearch, { gamesSearch = it }, ImeAction.Next, ::commit,
+            error = if (searchInvalid) uiStr(R.string.ui_must_contain, RemoteSources.QUERY_PLACEHOLDER) else null
         )
-        ArtworkField("TheGamesDB images URL", gamesCdn, { gamesCdn = it }, ImeAction.Done, ::commit)
+        ArtworkField(uiStr(R.string.ui_thegamesdb_images_url), gamesCdn, { gamesCdn = it }, ImeAction.Done, ::commit)
         Text(
-            "Turn the switch off to go back to the defaults",
+            uiStr(R.string.ui_turn_the_switch_off_to_go_back_to_the_def),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.inputcontrols
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.WinZMotion
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
@@ -435,7 +437,7 @@ private fun EditorToolbar(
                         .padding(start = 2.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Outlined.DragIndicator, contentDescription = "Move toolbar", tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Outlined.DragIndicator, contentDescription = uiStr(R.string.ui_move_toolbar), tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
                     Column {
                         Text(
@@ -456,7 +458,7 @@ private fun EditorToolbar(
                     }
                     Icon(
                         Icons.Outlined.ExpandMore,
-                        contentDescription = "Switch profile",
+                        contentDescription = uiStr(R.string.ui_switch_profile),
                         tint = if (profileMenuOpen) controlAccentColor() else colors.onSurfaceVariant,
                         modifier = Modifier.padding(start = 2.dp).size(18.dp)
                     )
@@ -468,20 +470,20 @@ private fun EditorToolbar(
                 }
             }
             ToolbarDivider()
-            ToolbarButton(Icons.Outlined.Add, "Add element", iconSize = 24.dp, onClick = onAdd)
-            ToolbarButton(Icons.Outlined.Delete, "Remove element", iconSize = 22.dp, enabled = hasSelection, onClick = onRemove)
-            ToolbarButton(Icons.Outlined.ContentCopy, "Duplicate element", iconSize = 20.dp, enabled = hasSelection, onClick = onDuplicate)
-            ToolbarButton(Icons.AutoMirrored.Outlined.Undo, "Undo", iconSize = 23.dp, enabled = undoAvailable, onClick = onUndo)
+            ToolbarButton(Icons.Outlined.Add, uiStr(R.string.ui_add_element), iconSize = 24.dp, onClick = onAdd)
+            ToolbarButton(Icons.Outlined.Delete, uiStr(R.string.ui_remove_element), iconSize = 22.dp, enabled = hasSelection, onClick = onRemove)
+            ToolbarButton(Icons.Outlined.ContentCopy, uiStr(R.string.ui_duplicate_element), iconSize = 20.dp, enabled = hasSelection, onClick = onDuplicate)
+            ToolbarButton(Icons.AutoMirrored.Outlined.Undo, uiStr(R.string.ui_undo), iconSize = 23.dp, enabled = undoAvailable, onClick = onUndo)
             ToolbarDivider()
-            ToolbarButton(Icons.Outlined.Tune, "Element settings", iconSize = 21.dp, enabled = hasSelection || settingsOpen, active = settingsOpen, onClick = onSettings)
+            ToolbarButton(Icons.Outlined.Tune, uiStr(R.string.ui_element_settings_2), iconSize = 21.dp, enabled = hasSelection || settingsOpen, active = settingsOpen, onClick = onSettings)
 
             var schemeOpen by remember { mutableStateOf(false) }
             Box {
-                ToolbarButton(Icons.Outlined.Palette, "Scheme color", iconSize = 20.dp, active = schemeOpen) { schemeOpen = true }
+                ToolbarButton(Icons.Outlined.Palette, uiStr(R.string.ui_scheme_color), iconSize = 20.dp, active = schemeOpen) { schemeOpen = true }
                 SidebarMenu(expanded = schemeOpen, onDismissRequest = { schemeOpen = false }) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
                         Text(
-                            "Scheme Color",
+                            uiStr(R.string.ui_scheme_color_2),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
                             color = colors.onSurface

@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.library
 
+import androidx.compose.ui.res.stringResource
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.WinZMotion
 import androidx.activity.compose.BackHandler
 
@@ -129,7 +131,7 @@ object GameSavesComposeDialog {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.5f))
+                                .background(DialogScrimColor)
                                 .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { dismiss() },
                             contentAlignment = Alignment.Center
                         ) {
@@ -174,9 +176,9 @@ internal fun confirmGameSavesRestore(context: Context, gameName: String, backupN
     }
     ThemedAlertHost.confirm(
         activity,
-        "Restore saves?",
-        "The backup from $backupName replaces the current save files of $gameName. The current saves are kept as a before-restore backup.",
-        "Restore",
+        activity.getString(R.string.ui_restore_saves_title),
+        activity.getString(R.string.ui_restore_saves_message, backupName, gameName),
+        activity.getString(R.string.ui_restore),
         Runnable { onConfirm() },
         true
     )
@@ -211,13 +213,13 @@ private fun ColumnScope.GameSavesPanel(
     fun rescan() {
         if (busy) return
         setBusy(true)
-        message = "Scanning common save locations…"
+        message = activity.getString(R.string.ui_scanning_saves)
         scope.launch {
             roots = withContext(Dispatchers.IO) { GameSaveManager.rediscoverSaveRoots(shortcut) }
             message = if (roots.isEmpty()) {
-                "No per-game folder detected. A manual backup will fall back to the whole Wine profile."
+                activity.getString(R.string.ui_no_save_folder_detected)
             } else {
-                "Detected ${roots.size} save location${if (roots.size == 1) "" else "s"}."
+                activity.resources.getQuantityString(R.plurals.ui_detected_save_locations, roots.size, roots.size)
             }
             setBusy(false)
         }
@@ -226,31 +228,31 @@ private fun ColumnScope.GameSavesPanel(
     fun backupNow() {
         if (busy) return
         setBusy(true)
-        message = "Backing up saves…"
+        message = activity.getString(R.string.ui_backing_up)
         scope.launch {
             val result = withContext(Dispatchers.IO) { GameSaveManager.backup(shortcut, false) }
             latest = GameSaveManager.getLatestBackup(shortcut)
             message = when {
                 result.ok && result.wholeProfile ->
-                    "Backup complete: ${result.fileCount} files. No per-game folder was detected, so the Wine profile was used."
-                result.ok -> "Backup complete: ${result.fileCount} files."
-                else -> "Backup failed: ${result.error ?: "unknown error"}"
+                    activity.getString(R.string.ui_backup_complete_profile, result.fileCount)
+                result.ok -> activity.getString(R.string.ui_backup_complete, result.fileCount)
+                else -> activity.getString(R.string.ui_backup_failed, result.error ?: activity.getString(R.string.ui_unknown_error))
             }
             setBusy(false)
         }
     }
 
     fun restoreFrom(archive: File) {
-        confirmGameSavesRestore(activity, shortcut.name, backupTitle(archive)) {
+        confirmGameSavesRestore(activity, shortcut.name, backupTitle(activity, archive)) {
             setBusy(true)
-            message = "Restoring backup…"
+            message = activity.getString(R.string.ui_restoring)
             scope.launch {
                 val result = withContext(Dispatchers.IO) { GameSaveManager.restore(shortcut, archive) }
                 latest = GameSaveManager.getLatestBackup(shortcut)
                 message = if (result.ok) {
-                    "Restored ${result.fileCount} files. The previous saves were kept as a before-restore backup."
+                    activity.getString(R.string.ui_restored, result.fileCount)
                 } else {
-                    "Restore failed: ${result.error ?: "unknown error"}"
+                    activity.getString(R.string.ui_restore_failed, result.error ?: activity.getString(R.string.ui_unknown_error))
                 }
                 setBusy(false)
             }
@@ -263,7 +265,7 @@ private fun ColumnScope.GameSavesPanel(
         scope.launch {
             val backups = withContext(Dispatchers.IO) { GameSaveManager.listBackups(shortcut) }
             if (backups.isEmpty()) {
-                message = "No backup yet."
+                message = activity.getString(R.string.ui_no_backup_yet_dot)
                 return@launch
             }
             val host = activity as? AppCompatActivity
@@ -273,8 +275,8 @@ private fun ColumnScope.GameSavesPanel(
             }
             ThemedAlertHost.actions(
                 host,
-                "Restore which backup?",
-                backups.map { file -> ThemedAlertHost.ActionItem(backupTitle(file), Runnable { restoreFrom(file) }) }
+                activity.getString(R.string.ui_restore_which),
+                backups.map { file -> ThemedAlertHost.ActionItem(backupTitle(activity, file), Runnable { restoreFrom(file) }) }
             )
         }
     }
@@ -286,7 +288,7 @@ private fun ColumnScope.GameSavesPanel(
         loading = false
     }
 
-    Text("Backup", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+    Text(stringResource(R.string.ui_backup), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
     Text(
         shortcut.name,
         style = MaterialTheme.typography.bodySmall,
@@ -308,39 +310,40 @@ private fun ColumnScope.GameSavesPanel(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (!profilesEnabled) {
-                SavesLabel("Save folder")
+                SavesLabel(stringResource(R.string.ui_save_folder))
                 Text(
-                    "In the container. Set Save profile in Configure → General to keep them in Winlator/saves.",
+                    stringResource(R.string.ui_save_folder_in_container),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 HorizontalDivider(color = dividerColor())
             }
             if (profilesEnabled) {
-                SavesLabel("Save folder")
+                val sharedSuffix = stringResource(R.string.ui_shared_suffix)
+                SavesLabel(stringResource(R.string.ui_save_folder))
                 Text(
-                    profileDir?.let { SaveProfiles.displayPath(it) + if (profileShared) " (shared)" else "" }
-                        ?: "Created on the first launch",
+                    profileDir?.let { SaveProfiles.displayPath(it) + if (profileShared) sharedSuffix else "" }
+                        ?: stringResource(R.string.ui_created_on_first_launch),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 SavesOutlinedButton(
-                    "Open save folder",
+                    stringResource(R.string.ui_open_save_folder),
                     Modifier.fillMaxWidth(),
                     enabled = !busy && profileDir != null,
                     icon = Icons.Outlined.FolderOpen
                 ) { openProfileFolder() }
                 HorizontalDivider(color = dividerColor())
             }
-            SavesLabel("Backup folder")
+            SavesLabel(stringResource(R.string.ui_backup_folder))
             Text(
                 "Winlator/backups/${GameSaveManager.getGameDir(shortcut).name}/",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            SavesLabel("Latest backup")
+            SavesLabel(stringResource(R.string.ui_latest_backup))
             Text(
-                latest?.let(::backupLabel) ?: "No backup yet",
+                latest?.let { backupLabel(activity, it) } ?: stringResource(R.string.ui_no_backup_yet),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -359,9 +362,9 @@ private fun ColumnScope.GameSavesPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                    Text("Automatic backup", style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.ui_automatic_backup), style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "When the game exits, only if the save files changed. Keeps the last ${GameSaveManager.AUTO_KEEP}.",
+                        stringResource(R.string.ui_automatic_backup_summary, GameSaveManager.AUTO_KEEP),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -375,23 +378,23 @@ private fun ColumnScope.GameSavesPanel(
             }
 
             HorizontalDivider(color = dividerColor())
-            SavesLabel("Save locations")
+            SavesLabel(stringResource(R.string.ui_save_locations))
             when {
                 ownProfile -> Text(
-                    "Everything in the game's save folder (caches, logs and crash dumps left out).",
+                    stringResource(R.string.ui_save_locations_own),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 loading -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = controlAccentColor())
                     Text(
-                        "  Detecting…",
+                        "  " + stringResource(R.string.ui_detecting),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 roots.isEmpty() -> Text(
-                    "No specific folder detected yet.",
+                    stringResource(R.string.ui_no_specific_folder),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -400,7 +403,7 @@ private fun ColumnScope.GameSavesPanel(
                 }
             }
             if (!ownProfile) {
-                SavesOutlinedButton("Rescan save locations", Modifier.fillMaxWidth(), enabled = !busy && !loading, icon = Icons.Outlined.Refresh) { rescan() }
+                SavesOutlinedButton(stringResource(R.string.ui_rescan_save_locations), Modifier.fillMaxWidth(), enabled = !busy && !loading, icon = Icons.Outlined.Refresh) { rescan() }
             }
 
             message?.let {
@@ -423,14 +426,14 @@ private fun ColumnScope.GameSavesPanel(
         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        SavesOutlinedButton("Close", Modifier.weight(1f), enabled = !busy) { onClose() }
-        SavesOutlinedButton("Restore", Modifier.weight(1f), enabled = !busy && latest != null) { restoreNow() }
+        SavesOutlinedButton(stringResource(R.string.ui_close), Modifier.weight(1f), enabled = !busy) { onClose() }
+        SavesOutlinedButton(stringResource(R.string.ui_restore), Modifier.weight(1f), enabled = !busy && latest != null) { restoreNow() }
         Button(
             onClick = { backupNow() },
             modifier = Modifier.weight(1f),
             enabled = !busy && !loading,
             colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-        ) { Text("Back up") }
+        ) { Text(stringResource(R.string.ui_back_up)) }
     }
 }
 
@@ -466,15 +469,15 @@ private fun SavesOutlinedButton(
     }
 }
 
-private fun backupLabel(file: File): String = backupTitle(file)
+private fun backupLabel(context: Context, file: File): String = backupTitle(context, file)
 
 // "Automatic • 06 Oct 2026, 14:30" (kind from the file name, time from the file).
-private fun backupTitle(file: File): String {
+private fun backupTitle(context: Context, file: File): String {
     val date = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(file.lastModified()))
     val kind = when (GameSaveManager.kindOf(file)) {
-        GameSaveManager.KIND_AUTO -> "Automatic"
-        GameSaveManager.KIND_BEFORE_RESTORE -> "Before restore"
-        else -> "Manual"
+        GameSaveManager.KIND_AUTO -> context.getString(R.string.ui_backup_kind_automatic)
+        GameSaveManager.KIND_BEFORE_RESTORE -> context.getString(R.string.ui_backup_kind_before_restore)
+        else -> context.getString(R.string.ui_backup_kind_manual)
     }
     return "$kind • $date"
 }

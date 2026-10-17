@@ -2,6 +2,7 @@
 
 package com.winlator.cmod.ui.shortcut
 
+import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.contentdialog.DXVKConfig
 import com.winlator.cmod.directaudio.DirectAudioDriver
 import com.winlator.cmod.ssbs.ForceSsbs
@@ -176,6 +177,18 @@ private val execArgumentPresetsV2 = listOf(
 )
 
 private data class ShortcutCategoryItemV2(val label: String, val icon: ImageVector)
+
+// The category labels are also the editor's page keys ("General" -> ...), so they stay English in
+// code; only the name shown in the side list comes from resources.
+private fun shortcutCategoryLabel(category: String): String = when (category) {
+    "General" -> uiStr(R.string.ui_cat_general)
+    "Video" -> uiStr(R.string.ui_cat_video)
+    "Compatibility" -> uiStr(R.string.ui_cat_compatibility)
+    "Input" -> uiStr(R.string.ui_cat_input)
+    "Environment" -> uiStr(R.string.ui_cat_environment)
+    "Advanced" -> uiStr(R.string.ui_cat_advanced)
+    else -> category
+}
 
 private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     val container: Container = shortcut.container
@@ -525,7 +538,7 @@ internal fun ShortcutEditorV2(
     val fexPresets = remember { FEXCorePresetManager.getPresets(context).associate { it.id to it.name } }
     val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associate { it.id to it.name } }
     val profiles = remember {
-        linkedMapOf("0" to "None").apply {
+        linkedMapOf("0" to uiStr(R.string.ui_none)).apply {
             InputControlsManager(context).getProfiles(true).forEach { put(it.id.toString(), it.name) }
         }
     }
@@ -551,11 +564,11 @@ internal fun ShortcutEditorV2(
             val outcome = installRuntimeComponent(context, type, version)
             val installed = outcome.id
             state.installing = state.installing - key
-            if (installed == null) WinToast.show(context, outcome.failureText("Unable to install $version"), Toast.LENGTH_SHORT, dialogView)
+            if (installed == null) WinToast.show(context, outcome.failureText(uiStr(R.string.ui_unable_to_install, version)), Toast.LENGTH_SHORT, dialogView)
             else {
                 done(installed)
                 state.revision++
-                WinToast.show(context, "$version installed", Toast.LENGTH_SHORT, dialogView)
+                WinToast.show(context, uiStr(R.string.ui_installed, version), Toast.LENGTH_SHORT, dialogView)
             }
         }
     }
@@ -568,12 +581,12 @@ internal fun ShortcutEditorV2(
             val outcome = installAdrenoDriver(context, option)
             val installed = outcome.id
             state.installing = state.installing - key
-            if (installed == null) WinToast.show(context, outcome.failureText("Unable to install ${option.label}"), Toast.LENGTH_SHORT, dialogView)
+            if (installed == null) WinToast.show(context, outcome.failureText(uiStr(R.string.ui_unable_to_install, option.label)), Toast.LENGTH_SHORT, dialogView)
             else {
                 state.driverVersion = installed
                 state.graphics("version", installed)
                 state.revision++
-                WinToast.show(context, "${option.label} installed", Toast.LENGTH_SHORT, dialogView)
+                WinToast.show(context, uiStr(R.string.ui_installed, option.label), Toast.LENGTH_SHORT, dialogView)
             }
         }
     }
@@ -594,11 +607,11 @@ internal fun ShortcutEditorV2(
         close()
         when (rename) {
             is ShortcutRenameResult.Renamed ->
-                WinToast.show(context, "Renamed to \"${rename.newName}\"", Toast.LENGTH_SHORT)
+                WinToast.show(context, uiStr(R.string.ui_renamed_to, rename.newName), Toast.LENGTH_SHORT)
             ShortcutRenameResult.NameTaken ->
-                WinToast.show(context, "Couldn't rename: that name is already used", Toast.LENGTH_LONG)
+                WinToast.show(context, uiStr(R.string.ui_couldn_t_rename_that_name_is_already_used), Toast.LENGTH_LONG)
             ShortcutRenameResult.Failed ->
-                WinToast.show(context, "Couldn't rename the shortcut", Toast.LENGTH_LONG)
+                WinToast.show(context, uiStr(R.string.ui_couldn_t_rename_the_shortcut), Toast.LENGTH_LONG)
             ShortcutRenameResult.Unchanged -> Unit
         }
     }
@@ -614,18 +627,18 @@ internal fun ShortcutEditorV2(
         if (target.id == state.container.id) return
         state.flushEnvironmentSave()
         if (File(target.desktopDir, shortcut.file.name).exists()) {
-            WinToast.show(context, "${target.name} already has a shortcut named \"${shortcut.name}\"", Toast.LENGTH_LONG, dialogView)
+            WinToast.show(context, uiStr(R.string.ui_already_has_a_shortcut_named, target.name, shortcut.name), Toast.LENGTH_LONG, dialogView)
             return
         }
         val moved = shortcut.moveToContainer(target)
         if (moved == null) {
-            WinToast.show(context, "Couldn't move the shortcut to ${target.name}", Toast.LENGTH_LONG, dialogView)
+            WinToast.show(context, uiStr(R.string.ui_couldn_t_move_the_shortcut_to, target.name), Toast.LENGTH_LONG, dialogView)
             return
         }
         HomeShortcuts.updatePinned(context, Shortcut(target, moved))
         onShortcutsChanged()
         close()
-        WinToast.show(context, "Moved to ${target.name}", Toast.LENGTH_SHORT)
+        WinToast.show(context, uiStr(R.string.ui_moved_to, target.name), Toast.LENGTH_SHORT)
         onMoved?.invoke(moved.path)
     }
 
@@ -646,7 +659,7 @@ internal fun ShortcutEditorV2(
         topBar = {
             TopAppBar(
                 title = { Text(state.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = ::closeEditor) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, null) } },
+                navigationIcon = { IconButton(onClick = ::closeEditor) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, uiStr(R.string.ui_back)) } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     scrolledContainerColor = MaterialTheme.colorScheme.background
@@ -672,14 +685,14 @@ internal fun ShortcutEditorV2(
                     ) {
                         item {
                             Text(
-                                "Shortcut settings",
+                                uiStr(R.string.ui_shortcut_settings),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(8.dp)
                             )
                         }
                         items(categories) { item ->
-                            ShortcutNavItemV2(item.label, item.icon, category == item.label) { category = item.label }
+                            ShortcutNavItemV2(shortcutCategoryLabel(item.label), item.icon, category == item.label) { category = item.label }
                         }
                     }
                 }
@@ -706,7 +719,7 @@ internal fun ShortcutEditorV2(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(categories) { item ->
-                        ShortcutNavItemV2(item.label, item.icon, category == item.label) { category = item.label }
+                        ShortcutNavItemV2(shortcutCategoryLabel(item.label), item.icon, category == item.label) { category = item.label }
                     }
                 }
                 LazyColumn(
@@ -778,12 +791,12 @@ private fun ShortcutCategoryV2(
 ) {
     when (category) {
         "General" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SettingsCard { SettingText("Name", s.name) { s.name = it } }
+            SettingsCard { SettingText(uiStr(R.string.ui_name), s.name) { s.name = it } }
             SettingsCard {
                 val currentLabel = environmentLabel(s.container)
                 if (containers.size > 1) {
                     val labels = containers.associate { it.id to environmentLabel(it) }
-                    SettingChoice("Environment", currentLabel, labels.values.toList()) { selected ->
+                    SettingChoice(uiStr(R.string.ui_cat_environment), currentLabel, labels.values.toList()) { selected ->
                         labels.entries.firstOrNull { it.value == selected }?.key?.let(changeContainer)
                     }
                 } else {
@@ -792,7 +805,7 @@ private fun ShortcutCategoryV2(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Environment", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(uiStr(R.string.ui_cat_environment), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(currentLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                         }
                     }
@@ -800,11 +813,11 @@ private fun ShortcutCategoryV2(
                 SettingsDivider()
                 // Off: saves stay in the container. Own: Winlator/saves/<Game>. Shared: Winlator/saves/_Common.
                 val saveProfileLabels = linkedMapOf(
-                    SaveProfiles.MODE_OFF to "Off",
-                    SaveProfiles.MODE_OWN to "Own folder",
-                    SaveProfiles.MODE_SHARED to "Shared (_Common)"
+                    SaveProfiles.MODE_OFF to uiStr(R.string.ui_off),
+                    SaveProfiles.MODE_OWN to uiStr(R.string.ui_own_folder),
+                    SaveProfiles.MODE_SHARED to uiStr(R.string.ui_shared_common)
                 )
-                SettingChoice("Save profile", saveProfileLabels[s.saveProfileMode] ?: "Off", saveProfileLabels.values.toList()) { selected ->
+                SettingChoice(uiStr(R.string.ui_save_profile), saveProfileLabels[s.saveProfileMode] ?: uiStr(R.string.ui_off), saveProfileLabels.values.toList()) { selected ->
                     val mode = saveProfileLabels.entries.firstOrNull { it.value == selected }?.key ?: SaveProfiles.MODE_OFF
                     s.saveProfileMode = mode
                     SaveProfiles.setMode(s.shortcut, mode)
@@ -817,17 +830,17 @@ private fun ShortcutCategoryV2(
                 ) {
                     Icon(Icons.Outlined.PlayArrow, null)
                     Spacer(Modifier.size(7.dp))
-                    Text("Enter container")
+                    Text(uiStr(R.string.ui_enter_container))
                 }
             }
             SettingsCard {
                 val visibleAudioEntries = DirectAudioDriver.audioEntriesFor(audioEntries, s.container.getWineVersion())
-                SettingChoice("Audio Driver", visibleAudioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio, visibleAudioEntries) {
+                SettingChoice(uiStr(R.string.ui_audio_driver), visibleAudioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio, visibleAudioEntries) {
                     s.audio = StringUtils.parseIdentifier(it); s.extra("audioDriver", s.audio)
                 }
                 if (DirectAudioDriver.isSelected(s.audio)) {
                     SettingsDivider()
-                    SettingToggle("Microphone", s.directAudioMic) {
+                    SettingToggle(uiStr(R.string.ui_microphone), s.directAudioMic) {
                         s.directAudioMic = it
                         s.extra(DirectAudioDriver.EXTRA_MIC, if (it) "1" else "0")
                         if (it) DirectAudioDriver.requestMicPermission(context)
@@ -836,14 +849,14 @@ private fun ShortcutCategoryV2(
                 if (s.audio == "oboe") {
                     SettingsDivider()
                     val latencyLabel = when (s.oboeProfile) {
-                        "ultra" -> "Low Latency"
-                        "stable" -> "Stable"
-                        else -> "Automatic"
+                        "ultra" -> uiStr(R.string.ui_low_latency)
+                        "stable" -> uiStr(R.string.ui_stable)
+                        else -> uiStr(R.string.ui_automatic)
                     }
-                    SettingChoice("Oboe latency", latencyLabel, listOf("Automatic", "Low Latency", "Stable")) {
+                    SettingChoice(uiStr(R.string.ui_oboe_latency), latencyLabel, listOf(uiStr(R.string.ui_automatic), uiStr(R.string.ui_low_latency), uiStr(R.string.ui_stable))) {
                         s.oboeProfile = when (it) {
-                            "Low Latency" -> "ultra"
-                            "Stable" -> "stable"
+                            uiStr(R.string.ui_low_latency) -> "ultra"
+                            uiStr(R.string.ui_stable) -> "stable"
                             else -> "low"
                         }
                         s.extra("oboeProfile", s.oboeProfile)
@@ -852,9 +865,9 @@ private fun ShortcutCategoryV2(
                     val apiLabel = when (s.oboeApi) {
                         "aaudio" -> "AAudio"
                         "opensles" -> "OpenSL ES"
-                        else -> "Automatic"
+                        else -> uiStr(R.string.ui_automatic)
                     }
-                    SettingChoice("Oboe backend", apiLabel, listOf("Automatic", "AAudio", "OpenSL ES")) {
+                    SettingChoice(uiStr(R.string.ui_oboe_backend), apiLabel, listOf(uiStr(R.string.ui_automatic), "AAudio", "OpenSL ES")) {
                         s.oboeApi = when (it) {
                             "AAudio" -> "aaudio"
                             "OpenSL ES" -> "opensles"
@@ -864,29 +877,29 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                SettingToggle("Fullscreen Stretched", s.fullscreen) {
+                SettingToggle(uiStr(R.string.ui_fullscreen_stretched), s.fullscreen) {
                     s.fullscreen = it; s.extra("fullscreenStretched", if (it) "1" else "0")
                 }
             }
             SettingsCard {
-                val hudEntries = listOf("Off", "Classic", "Modern")
-                SettingChoice("Winlator HUD", hudEntries.getOrElse(s.winlatorHudMode) { "Off" }, hudEntries) {
+                val hudEntries = listOf(uiStr(R.string.ui_off), uiStr(R.string.ui_classic), uiStr(R.string.ui_modern))
+                SettingChoice(uiStr(R.string.ui_winlator_hud), hudEntries.getOrElse(s.winlatorHudMode) { uiStr(R.string.ui_off) }, hudEntries) {
                     s.winlatorHudMode = hudEntries.indexOf(it).coerceAtLeast(0)
                     s.extra("hudMode", s.winlatorHudMode.toString())
                 }
                 SettingsDivider()
-                SettingToggle("DXVK HUD", s.dxvkHud) { s.updateDxvkHud(it) }
+                SettingToggle(uiStr(R.string.ui_dxvk_hud), s.dxvkHud) { s.updateDxvkHud(it) }
             }
             SettingsCard {
                 val locale = localeDisplayValue(s.lcAll)
-                SettingChoice("Locale (LC_ALL)", locale, localeEntries) {
+                SettingChoice(uiStr(R.string.ui_locale_lc_all), locale, localeEntries) {
                     s.lcAll = normalizeLocaleValue(it)
                     s.extra("lc_all", s.lcAll.ifBlank { null })
                 }
                 SettingsDivider()
-                val sound = s.midiSoundFont.ifBlank { "Disabled" }
-                SettingChoice("MIDI SoundFont", sound, soundFonts) {
-                    s.midiSoundFont = if (it == "Disabled") "" else it; s.extra("midiSoundFont", s.midiSoundFont)
+                val sound = s.midiSoundFont.ifBlank { uiStr(R.string.disabled) }
+                SettingChoice(uiStr(R.string.ui_midi_soundfont), sound, soundFonts) {
+                    s.midiSoundFont = if (it == uiStr(R.string.disabled)) "" else it; s.extra("midiSoundFont", s.midiSoundFont)
                 }
             }
         }
@@ -898,7 +911,7 @@ private fun ShortcutCategoryV2(
                 }
                 val screenChoice = if (customScreenSelected) "Custom"
                 else screenEntries.firstOrNull { normalizeResolution(it).equals(s.screen, true) } ?: "Custom"
-                SettingChoice("Screen Size", screenChoice, screenEntries) {
+                SettingChoice(uiStr(R.string.ui_screen_size), screenChoice, screenEntries) {
                     if (it.equals("Custom", true)) {
                         customScreenSelected = true
                     } else {
@@ -915,13 +928,13 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                SettingChoice("Renderer", s.renderer, listOf("Vulkan")) {
+                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan")) {
                     s.renderer = it
                     s.saveRenderer()
                 }
                 SettingsDivider()
                 SettingChoice(
-                    "Surface format",
+                    uiStr(R.string.ui_surface_format),
                     if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
                     listOf("RGBA", "BGRA")
                 ) {
@@ -929,13 +942,13 @@ private fun ShortcutCategoryV2(
                     s.saveRenderer()
                 }
                 SettingsDivider()
-                SettingChoice("Present Mode", s.presentMode, listOf("mailbox", "fifo")) {
+                SettingChoice(uiStr(R.string.ui_present_mode), s.presentMode, listOf("mailbox", "fifo")) {
                     s.presentMode = it
                     s.saveRenderer()
                 }
                 catalog?.let { c ->
                     SettingsDivider()
-                    SettingMappedChoice("Renderer Driver", s.rendererDriver, c.rendererDrivers) {
+                    SettingMappedChoice(uiStr(R.string.ui_renderer_driver), s.rendererDriver, c.rendererDrivers) {
                         s.rendererDriver = it
                         s.saveRenderer()
                     }
@@ -945,7 +958,7 @@ private fun ShortcutCategoryV2(
                 // Display order: SGSR HQ right after SGSR, NIS right after FSR.
                 val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
                 val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "Snapdragon Super Resolution HQ", "AMD FidelityFX Super Resolution", "NVIDIA Image Scaling (NIS)", "Lanczos 2 (16-tap)", "Color Boost")
-                SettingChoice("Texture Filter", filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
+                SettingChoice(uiStr(R.string.ui_texture_filter), filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
                     s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
                     s.saveRenderer()
                 }
@@ -956,7 +969,7 @@ private fun ShortcutCategoryV2(
                 }
                 SettingsDivider()
                 SettingChoice(
-                    "Vulkan Wrapper",
+                    uiStr(R.string.ui_vulkan_wrapper),
                     graphicsWrapperEntries.firstOrNull {
                         Container.normalizeGraphicsWrapper(StringUtils.parseIdentifier(it)).equals(s.graphicsWrapper, true)
                     } ?: s.graphicsWrapper,
@@ -980,42 +993,42 @@ private fun ShortcutCategoryV2(
                     SettingChoice("Rendering Mode", s.renderingMode, listOf("None", "Sysmem", "Gmem", "Autotuner Profiled")) { s.applyRenderingMode(it) }
                 }
                 SettingsDivider()
-                SettingChoice("Vulkan Version", s.vulkanVersion, listOf("1.1", "1.2", "1.3", "1.4")) { s.vulkanVersion = it; s.graphics("vulkanVersion", it) }
+                SettingChoice(uiStr(R.string.ui_vulkan_version), s.vulkanVersion, listOf("1.1", "1.2", "1.3", "1.4")) { s.vulkanVersion = it; s.graphics("vulkanVersion", it) }
                 SettingsDivider()
-                SettingChoice("GPU Name", s.gpuName, gpuNames) { s.gpuName = it; s.graphics("gpuName", it) }
+                SettingChoice(uiStr(R.string.ui_gpu_name), s.gpuName, gpuNames) { s.gpuName = it; s.graphics("gpuName", it) }
                 SettingsDivider()
-                SettingChoice("Max Device Memory", s.maxMemory, listOf("0", "512", "1024", "2048", "4096", "8192", "12288", "16384")) {
+                SettingChoice(uiStr(R.string.ui_max_device_memory), s.maxMemory, listOf("0", "512", "1024", "2048", "4096", "8192", "12288", "16384")) {
                     s.maxMemory = it; s.graphics("maxDeviceMemory", it)
                 }
                 SettingsDivider()
-                SettingChoice("Driver Present Mode", s.graphicsPresentMode, listOf("mailbox", "fifo", "immediate", "relaxed")) {
+                SettingChoice(uiStr(R.string.ui_driver_present_mode), s.graphicsPresentMode, listOf("mailbox", "fifo", "immediate", "relaxed")) {
                     s.graphicsPresentMode = it; s.graphics("presentMode", it)
                 }
                 SettingsDivider()
-                SettingToggle("Disable Present Wait", s.disablePresentWait) { s.disablePresentWait = it; s.graphics("disablePresentWait", if (it) "1" else "0") }
+                SettingToggle(uiStr(R.string.ui_disable_present_wait), s.disablePresentWait) { s.disablePresentWait = it; s.graphics("disablePresentWait", if (it) "1" else "0") }
                 SettingsDivider()
-                SettingChoice("Resource Type", s.resourceType, listOf("auto", "dmabuf", "ahb", "opaque")) { s.resourceType = it; s.graphics("resourceType", it) }
+                SettingChoice(uiStr(R.string.ui_resource_type), s.resourceType, listOf("auto", "dmabuf", "ahb", "opaque")) { s.resourceType = it; s.graphics("resourceType", it) }
                 SettingsDivider()
-                SettingChoice("BCN Emulation", s.bcn, listOf("none", "partial", "full", "auto")) { s.bcn = it; s.graphics("bcnEmulation", it) }
+                SettingChoice(uiStr(R.string.ui_bcn_emulation), s.bcn, listOf("none", "partial", "full", "auto")) { s.bcn = it; s.graphics("bcnEmulation", it) }
                 SettingsDivider()
-                SettingChoice("BCN Emulation Type", s.bcnType, listOf("software", "compute")) { s.bcnType = it; s.graphics("bcnEmulationType", it) }
+                SettingChoice(uiStr(R.string.ui_bcn_emulation_type), s.bcnType, listOf("software", "compute")) { s.bcnType = it; s.graphics("bcnEmulationType", it) }
                 SettingsDivider()
-                SettingToggle("BCN Emulation Cache", s.bcnCache) { s.bcnCache = it; s.graphics("bcnEmulationCache", if (it) "1" else "0") }
+                SettingToggle(uiStr(R.string.ui_bcn_emulation_cache), s.bcnCache) { s.bcnCache = it; s.graphics("bcnEmulationCache", if (it) "1" else "0") }
             }
         }
 
         "Compatibility" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard {
                 val shown = wrapperEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.wrapper, true) } ?: s.wrapper
-                SettingChoice("DX Wrapper", shown, wrapperEntries) { s.wrapper = StringUtils.parseIdentifier(it); s.extra("dxwrapper", s.wrapper) }
+                SettingChoice(uiStr(R.string.dxwrapper), shown, wrapperEntries) { s.wrapper = StringUtils.parseIdentifier(it); s.extra("dxwrapper", s.wrapper) }
                 if (s.wrapper.contains("dxvk", true)) {
                     catalog?.let { c ->
                         val dxvkCatalog = filterDxvkForVkd3d(c.dxvk, s.vkd3dVersion)
                         SettingsDivider()
-                        SettingInstallChoice("DXVK Version", s.dxvkVersion, dxvkCatalog, s.installing, "DXVK",
+                        SettingInstallChoice(uiStr(R.string.ui_dxvk_version), s.dxvkVersion, dxvkCatalog, s.installing, "DXVK",
                             { v -> installRuntime("DXVK", v) { installed -> s.selectDxvkVersion(installed) } }) { s.selectDxvkVersion(it) }
                         SettingsDivider()
-                        SettingInstallChoice("VKD3D Version", s.vkd3dVersion, c.vkd3d, s.installing, "VKD3D",
+                        SettingInstallChoice(uiStr(R.string.ui_vkd3d_version), s.vkd3dVersion, c.vkd3d, s.installing, "VKD3D",
                             { v -> installRuntime("VKD3D", v) { installed ->
                                 s.vkd3dVersion = installed
                                 s.wrapperValue("vkd3dVersion", installed)
@@ -1031,27 +1044,27 @@ private fun ShortcutCategoryV2(
                         }
                     }
                     SettingsDivider()
-                    SettingChoice("VKD3D Feature Level", s.vkd3dLevel, listOf("12_0", "12_1", "12_2", "11_1", "11_0", "10_1", "10_0", "9_3", "9_2", "9_1")) { s.vkd3dLevel = it; s.wrapperValue("vkd3dLevel", it) }
+                    SettingChoice(uiStr(R.string.ui_vkd3d_feature_level), s.vkd3dLevel, listOf("12_0", "12_1", "12_2", "11_1", "11_0", "10_1", "10_0", "9_3", "9_2", "9_1")) { s.vkd3dLevel = it; s.wrapperValue("vkd3dLevel", it) }
                     SettingsDivider()
-                    SettingText("Frame Rate", s.frameRate) { s.frameRate = it.filter(Char::isDigit).take(4); s.wrapperValue("framerate", s.frameRate.ifBlank { "0" }) }
+                    SettingText(uiStr(R.string.ui_frame_rate), s.frameRate) { s.frameRate = it.filter(Char::isDigit).take(4); s.wrapperValue("framerate", s.frameRate.ifBlank { "0" }) }
                     SettingsDivider()
-                    SettingToggle("DXVK Max Frame Latency", s.maxFrameLatency) { s.maxFrameLatency = it; s.wrapperValue("maxFrameLatency", if (it) "1" else "0") }
+                    SettingToggle(uiStr(R.string.ui_dxvk_max_frame_latency), s.maxFrameLatency) { s.maxFrameLatency = it; s.wrapperValue("maxFrameLatency", if (it) "1" else "0") }
                     SettingsDivider()
-                    SettingChoice("DXVK Anisotropic Filtering", DXVKConfig.ANISOTROPY_LABELS.getOrElse(DXVKConfig.ANISOTROPY_VALUES.indexOf(readConfig(s.wrapperConfig, "anisotropy", ','))) { DXVKConfig.ANISOTROPY_LABELS[0] }, DXVKConfig.ANISOTROPY_LABELS.toList()) {
+                    SettingChoice(uiStr(R.string.ui_dxvk_anisotropic_filtering), DXVKConfig.ANISOTROPY_LABELS.getOrElse(DXVKConfig.ANISOTROPY_VALUES.indexOf(readConfig(s.wrapperConfig, "anisotropy", ','))) { DXVKConfig.ANISOTROPY_LABELS[0] }, DXVKConfig.ANISOTROPY_LABELS.toList()) {
                         s.wrapperValue("anisotropy", DXVKConfig.ANISOTROPY_VALUES[DXVKConfig.ANISOTROPY_LABELS.indexOf(it).coerceAtLeast(0)])
                     }
                     SettingsDivider()
-                    SettingChoice("DXVK Texture Sharpness", DXVKConfig.LOD_BIAS_LABELS.getOrElse(DXVKConfig.LOD_BIAS_VALUES.indexOf(readConfig(s.wrapperConfig, "lodBias", ','))) { DXVKConfig.LOD_BIAS_LABELS[0] }, DXVKConfig.LOD_BIAS_LABELS.toList()) {
+                    SettingChoice(uiStr(R.string.ui_dxvk_texture_sharpness), DXVKConfig.LOD_BIAS_LABELS.getOrElse(DXVKConfig.LOD_BIAS_VALUES.indexOf(readConfig(s.wrapperConfig, "lodBias", ','))) { DXVKConfig.LOD_BIAS_LABELS[0] }, DXVKConfig.LOD_BIAS_LABELS.toList()) {
                         s.wrapperValue("lodBias", DXVKConfig.LOD_BIAS_VALUES[DXVKConfig.LOD_BIAS_LABELS.indexOf(it).coerceAtLeast(0)])
                     }
                     val asyncMode = dxvkAsyncMode(s.dxvkVersion)
                     if (asyncMode != DxvkAsyncMode.NONE) {
                         SettingsDivider()
-                        SettingToggle("Async", s.async) { s.async = it; s.wrapperValue("async", if (it) "1" else "0") }
+                        SettingToggle(uiStr(R.string.ui_async), s.async) { s.async = it; s.wrapperValue("async", if (it) "1" else "0") }
                     }
                     if (asyncMode == DxvkAsyncMode.GPL_ASYNC) {
                         SettingsDivider()
-                        SettingToggle("Async Cache", s.asyncCache) { s.asyncCache = it; s.wrapperValue("asyncCache", if (it) "1" else "0") }
+                        SettingToggle(uiStr(R.string.ui_async_cache), s.asyncCache) { s.asyncCache = it; s.wrapperValue("asyncCache", if (it) "1" else "0") }
                     }
                     SettingsDivider()
                     DDrawWrapperChoice(s.ddrawWrapper) { s.ddrawWrapper = it; s.wrapperValue("ddrawrapper", it) }
@@ -1059,32 +1072,32 @@ private fun ShortcutCategoryV2(
                     SettingsDivider()
                     SettingToggle("CSMT", s.csmt) { s.csmt = it; s.wrapperValue("csmt", if (it) "3" else "0") }
                     SettingsDivider()
-                    SettingToggle("Strict Shader Math", s.strictShaderMath) { s.strictShaderMath = it; s.wrapperValue("strict_shader_math", if (it) "1" else "0") }
+                    SettingToggle(uiStr(R.string.strict_shader_math), s.strictShaderMath) { s.strictShaderMath = it; s.wrapperValue("strict_shader_math", if (it) "1" else "0") }
                     SettingsDivider()
-                    SettingChoice("Offscreen Rendering Mode", s.offscreenMode, listOf("fbo", "backbuffer")) { s.offscreenMode = it; s.wrapperValue("OffscreenRenderingMode", it) }
+                    SettingChoice(uiStr(R.string.ui_offscreen_rendering_mode), s.offscreenMode, listOf("fbo", "backbuffer")) { s.offscreenMode = it; s.wrapperValue("OffscreenRenderingMode", it) }
                     SettingsDivider()
-                    SettingChoice("Wine Renderer", s.wineRenderer, listOf("vulkan", "gl")) { s.wineRenderer = it; s.wrapperValue("renderer", it) }
+                    SettingChoice(uiStr(R.string.ui_wine_renderer), s.wineRenderer, listOf("vulkan", "gl")) { s.wineRenderer = it; s.wrapperValue("renderer", it) }
                     SettingsDivider()
-                    SettingText("Video Memory", s.videoMemory) { s.videoMemory = it.filter(Char::isDigit).take(6); s.wrapperValue("videoMemorySize", s.videoMemory) }
+                    SettingText(uiStr(R.string.ui_video_memory), s.videoMemory) { s.videoMemory = it.filter(Char::isDigit).take(6); s.wrapperValue("videoMemorySize", s.videoMemory) }
                 }
             }
             SettingsCard {
                 if (s.arm64) {
-                    SettingChoice("32-bit Emulator", s.emulator, listOf("FEXCore", "WOWBox64")) {
+                    SettingChoice(uiStr(R.string.ui_32_bit_emulator), s.emulator, listOf("FEXCore", "WOWBox64")) {
                         s.emulator = it; s.extra("emulator", if (it == "FEXCore") "FEXCore" else "Box64")
                     }
                     catalog?.let { c ->
                         SettingsDivider()
-                        SettingInstallChoice("FEXCore Version", s.fexVersion, c.fex, s.installing, "FEXCore",
+                        SettingInstallChoice(uiStr(R.string.ui_fexcore_version), s.fexVersion, c.fex, s.installing, "FEXCore",
                             { v -> installRuntime("FEXCore", v) { installed -> s.fexVersion = installed; s.extra("fexcoreVersion", installed) } }) {
                             s.fexVersion = it; s.extra("fexcoreVersion", it)
                         }
                     }
                     SettingsDivider()
-                    SettingMappedChoice("FEXCore Preset", s.fexPreset, fexPresets) { s.fexPreset = it; s.extra("fexcorePreset", it) }
+                    SettingMappedChoice(uiStr(R.string.fexcore_preset), s.fexPreset, fexPresets) { s.fexPreset = it; s.extra("fexcorePreset", it) }
                     if (ForceSsbs.isSupportedWine(s.container.getWineVersion())) {
                         SettingsDivider()
-                        SettingToggle("Force SSBS", s.forceSsbs) { s.forceSsbs = it; s.extra("forceSsbs", if (it) "1" else "0") }
+                        SettingToggle(uiStr(R.string.ui_force_ssbs), s.forceSsbs) { s.forceSsbs = it; s.extra("forceSsbs", if (it) "1" else "0") }
                     }
                 }
                 if (!s.arm64 || s.emulator == "WOWBox64") {
@@ -1092,33 +1105,33 @@ private fun ShortcutCategoryV2(
                         val versionCatalog = if (s.arm64) c.wow else c.box
                         val type = if (s.arm64) "WOWBox64" else "Box64"
                         SettingsDivider()
-                        SettingInstallChoice("$type Version", s.boxVersion, versionCatalog, s.installing, type,
+                        SettingInstallChoice(uiStr(R.string.ui_version, type), s.boxVersion, versionCatalog, s.installing, type,
                             { v -> installRuntime(type, v) { installed -> s.boxVersion = installed; s.extra("box64Version", installed) } }) {
                             s.boxVersion = it; s.extra("box64Version", it)
                         }
                     }
                     SettingsDivider()
-                    SettingMappedChoice("Box64 Preset", s.boxPreset, boxPresets) { s.boxPreset = it; s.extra("box64Preset", it) }
+                    SettingMappedChoice(uiStr(R.string.box64_preset), s.boxPreset, boxPresets) { s.boxPreset = it; s.extra("box64Preset", it) }
                 }
             }
         }
 
         "Input" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard {
-                SettingMappedChoice("Controls Profile", s.controlsProfile, profiles) { s.controlsProfile = it; s.extra("controlsProfile", it.takeUnless { id -> id == "0" }) }
+                SettingMappedChoice(uiStr(R.string.ui_controls_profile), s.controlsProfile, profiles) { s.controlsProfile = it; s.extra("controlsProfile", it.takeUnless { id -> id == "0" }) }
                 SettingsDivider()
-                SettingToggle("Exclusive Input", s.exclusive) {
+                SettingToggle(uiStr(R.string.ui_exclusive_input), s.exclusive) {
                     s.exclusive = it
                     if (!it) { s.xinput = true; s.dinput = true } else if (s.xinput && s.dinput) s.dinput = false
                     s.saveInput()
                 }
                 SettingsDivider()
-                SettingToggle("Enable XInput", s.xinput, s.exclusive) { s.xinput = it; if (s.exclusive && it && s.dinput) s.dinput = false; s.saveInput() }
+                SettingToggle(uiStr(R.string.ui_enable_xinput), s.xinput, s.exclusive) { s.xinput = it; if (s.exclusive && it && s.dinput) s.dinput = false; s.saveInput() }
                 SettingsDivider()
-                SettingToggle("Enable DInput", s.dinput, s.exclusive) { s.dinput = it; if (s.exclusive && it && s.xinput) s.xinput = false; s.saveInput() }
+                SettingToggle(uiStr(R.string.ui_enable_dinput), s.dinput, s.exclusive) { s.dinput = it; if (s.exclusive && it && s.xinput) s.xinput = false; s.saveInput() }
                 SettingsDivider()
-                val touchModes = listOf("Trackpad", "Touchscreen", "Off")
-                SettingChoice("Touch Mode", touchModes[s.touchMode.coerceIn(0, 2)], touchModes) { selected ->
+                val touchModes = listOf(uiStr(R.string.ui_trackpad), uiStr(R.string.ui_touchscreen), uiStr(R.string.ui_off))
+                SettingChoice(uiStr(R.string.ui_touch_mode), touchModes[s.touchMode.coerceIn(0, 2)], touchModes) { selected ->
                     s.touchMode = touchModes.indexOf(selected).coerceAtLeast(0)
                     if (s.touchMode == 2) {
                         s.extra("disableMouse", "1")
@@ -1128,11 +1141,11 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                SettingToggle("Relative Mouse", s.relativeMouse) { s.relativeMouse = it; s.extra("enableRelativeMouse", if (it) "1" else null) }
+                SettingToggle(uiStr(R.string.ui_relative_mouse), s.relativeMouse) { s.relativeMouse = it; s.extra("enableRelativeMouse", if (it) "1" else null) }
                 // Touch-surface only, so hidden while Touch Mode is Off (value kept).
                 if (s.touchMode != 2) {
                     SettingsDivider()
-                    SettingToggle("Tap to Click", s.tapToClick) { s.tapToClick = it; s.extra("tapToClick", if (it) null else "0") }
+                    SettingToggle(uiStr(R.string.ui_tap_to_click), s.tapToClick) { s.tapToClick = it; s.extra("tapToClick", if (it) null else "0") }
                 }
             }
         }
@@ -1145,37 +1158,37 @@ private fun ShortcutCategoryV2(
                 TextButton(
                     onClick = { s.resetEnvironmentToContainer() },
                     modifier = Modifier.align(Alignment.End)
-                ) { Text("Reset to container variables") }
+                ) { Text(uiStr(R.string.ui_reset_to_container_variables)) }
             }
         }
 
         else -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard {
                 val startupEntries = listOf(
-                    "Load all services",
-                    "Load essential services",
-                    "Stop all services"
+                    uiStr(R.string.ui_load_all_services),
+                    uiStr(R.string.ui_load_essential_services),
+                    uiStr(R.string.ui_stop_all_services)
                 )
-                SettingChoice("Startup Selection", startupEntries[s.startup], startupEntries) {
+                SettingChoice(uiStr(R.string.ui_startup_selection), startupEntries[s.startup], startupEntries) {
                     s.startup = startupEntries.indexOf(it).coerceAtLeast(0); s.extra("startupSelection", s.startup.toString())
                 }
             }
             SettingsCard {
-                SettingToggle("Sync CPU Topology", s.syncCpu) { s.syncCpu = it; s.saveCpu() }
+                SettingToggle(uiStr(R.string.ui_sync_cpu_topology), s.syncCpu) { s.syncCpu = it; s.saveCpu() }
                 SettingsDivider()
-                CpuSelectorRow("Processor Affinity", s.cpu) { index, checked -> s.cpu[index] = checked; s.saveCpu() }
+                CpuSelectorRow(uiStr(R.string.processor_affinity), s.cpu) { index, checked -> s.cpu[index] = checked; s.saveCpu() }
             }
             SettingsCard {
-                SettingChoice("Sharpness Effect", s.sharpnessEffect, listOf("None", "CAS", "DLS")) {
+                SettingChoice(uiStr(R.string.ui_sharpness_effect), s.sharpnessEffect, listOf("None", "CAS", "DLS")) {
                     s.sharpnessEffect = it; s.extra("sharpnessEffect", it)
                 }
                 if (s.sharpnessEffect != "None") {
                     SettingsDivider()
-                    SharpnessSliderV2("Sharpness Level", s.sharpnessLevel) {
+                    SharpnessSliderV2(uiStr(R.string.ui_sharpness_level), s.sharpnessLevel) {
                         s.sharpnessLevel = it; s.extra("sharpnessLevel", it)
                     }
                     SettingsDivider()
-                    SharpnessSliderV2("Sharpness Denoise", s.sharpnessDenoise) {
+                    SharpnessSliderV2(uiStr(R.string.ui_sharpness_denoise), s.sharpnessDenoise) {
                         s.sharpnessDenoise = it; s.extra("sharpnessDenoise", it)
                     }
                 }
@@ -1185,7 +1198,7 @@ private fun ShortcutCategoryV2(
             }
             SettingsCard {
                 shortcutComponentRowsV2.forEachIndexed { index, (key, label) ->
-                    val entries = listOf("Builtin (Wine)", "Native (Windows)")
+                    val entries = listOf(uiStr(R.string.ui_builtin_wine), uiStr(R.string.ui_native_windows))
                     val selected = entries[(s.components[key] ?: 0).coerceIn(0, 1)]
                     SettingChoice(label, selected, entries) {
                         s.components[key] = entries.indexOf(it).coerceAtLeast(0); s.saveComponents()
@@ -1226,7 +1239,7 @@ private fun ExecArgumentsEditorV2(value: String, onChanged: (String) -> Unit) {
             OutlinedTextField(
                 value = value,
                 onValueChange = onChanged,
-                label = { Text("Exec Arguments") },
+                label = { Text(uiStr(R.string.ui_exec_arguments)) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 shape = WinZShapes.Small
@@ -1267,7 +1280,7 @@ private fun ExecArgumentsEditorV2(value: String, onChanged: (String) -> Unit) {
 private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blacklisted: String, onChanged: (String) -> Unit) {
     val extensions = remember(driver) { runCatching { GPUInformation.enumerateExtensions(driver, context).toList().sorted() }.getOrDefault(emptyList()) }
     if (extensions.isEmpty()) {
-        SettingText("Disabled Vulkan Extensions", blacklisted, 2) { onChanged(it.replace(" ", "")) }
+        SettingText(uiStr(R.string.ui_disabled_vulkan_extensions), blacklisted, 2) { onChanged(it.replace(" ", "")) }
         return
     }
     val disabled = parseExtensionBlacklist(blacklisted)
@@ -1279,8 +1292,8 @@ private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blackli
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp)) {
-            Text("Vulkan Extensions", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("$enabledCount of ${extensions.size} enabled", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+            Text(uiStr(R.string.ui_vulkan_extensions), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(uiStr(R.string.ui_of_enabled, enabledCount, extensions.size), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
         }
     }
     // Was ThemedAlertHost.multiChoice: that inserts its overlay into the hosting Activity's
@@ -1315,7 +1328,7 @@ private fun loadShortcutGpuNamesV2(context: Context): List<String> {
 }
 
 private fun loadShortcutSoundFontsV2(context: Context): List<String> {
-    val result = linkedSetOf("Disabled", MidiManager.DEFAULT_SF2_FILE)
+    val result = linkedSetOf(uiStr(R.string.disabled), MidiManager.DEFAULT_SF2_FILE)
     MidiManager.getSoundFontDir(context).listFiles()?.filter { it.isFile }?.sortedBy { it.name.lowercase() }?.forEach { result.add(it.name) }
     return result.toList()
 }

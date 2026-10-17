@@ -1,5 +1,8 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.WinZMotion
 import androidx.activity.compose.BackHandler
 
@@ -133,7 +136,7 @@ object WinlatorServicesDialog {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.5f))
+                                .background(DialogScrimColor)
                                 .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { dismiss() },
                             contentAlignment = Alignment.Center
                         ) {
@@ -155,7 +158,7 @@ object WinlatorServicesDialog {
                                         onCancel = dismiss,
                                         onSaved = {
                                             onSaved?.run()
-                                            WinToast.show(activity, "Winlator Services saved", Toast.LENGTH_SHORT)
+                                            WinToast.show(activity, uiStr(R.string.ui_winlator_services_saved), Toast.LENGTH_SHORT)
                                             dismiss()
                                         }
                                     )
@@ -194,9 +197,9 @@ private fun ColumnScope.ServicesScreen(
     var contentsUrl by remember { mutableStateOf(RemoteSources.contentsUrl(context)) }
     var inputControls by remember { mutableStateOf(RemoteSources.get(context, RemoteSources.KEY_INPUT_CONTROLS, RemoteSources.DEFAULT_INPUT_CONTROLS)) }
 
-    Text("Winlator servers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+    Text(uiStr(R.string.ui_winlator_servers), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
     Text(
-        "Choose where the app downloads components, drivers and controls from",
+        uiStr(R.string.ui_choose_where_the_app_downloads_components),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 2.dp)
@@ -213,12 +216,12 @@ private fun ColumnScope.ServicesScreen(
             modifier = Modifier.verticalScroll(rememberScrollState()).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            GroupLabel("Components")
-            ServiceField("Contents URL", contentsUrl, RemoteSources.DEFAULT_CONTENTS_URL) { contentsUrl = it }
+            GroupLabel(uiStr(R.string.ui_components))
+            ServiceField(uiStr(R.string.ui_contents_url), contentsUrl, RemoteSources.DEFAULT_CONTENTS_URL) { contentsUrl = it }
 
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
                 Text(
-                    "Driver repositories",
+                    uiStr(R.string.ui_driver_repositories),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Medium,
@@ -230,12 +233,12 @@ private fun ColumnScope.ServicesScreen(
                 }) {
                     Icon(Icons.Outlined.Refresh, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Default")
+                    Text(uiStr(R.string.ui_default))
                 }
             }
             if (repos.isEmpty()) {
                 Text(
-                    "No repositories: the driver list will be empty",
+                    uiStr(R.string.ui_no_repositories_the_driver_list_will_be_e),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -251,12 +254,12 @@ private fun ColumnScope.ServicesScreen(
             ) {
                 Icon(Icons.Outlined.Add, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Add repository")
+                Text(uiStr(R.string.ui_add_repository))
             }
 
             HorizontalDivider(color = dividerColor())
-            GroupLabel("Input controls")
-            ServiceField("Profiles folder URL", inputControls, RemoteSources.DEFAULT_INPUT_CONTROLS) { inputControls = it }
+            GroupLabel(uiStr(R.string.ui_input_controls_2))
+            ServiceField(uiStr(R.string.ui_profiles_folder_url), inputControls, RemoteSources.DEFAULT_INPUT_CONTROLS) { inputControls = it }
         }
     }
 
@@ -269,7 +272,7 @@ private fun ColumnScope.ServicesScreen(
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
             border = BorderStroke(1.dp, hairlineColor())
-        ) { Text("Cancel") }
+        ) { Text(uiStr(R.string.cancel)) }
         Button(
             onClick = {
                 RemoteSources.set(context, RemoteSources.KEY_CONTENTS_URL, contentsUrl, RemoteSources.DEFAULT_CONTENTS_URL)
@@ -280,7 +283,7 @@ private fun ColumnScope.ServicesScreen(
             },
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-        ) { Text("Save") }
+        ) { Text(uiStr(R.string.ui_save)) }
     }
 }
 
@@ -301,7 +304,7 @@ private fun AddRepoOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.5f))
+            .background(DialogScrimColor)
             .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onDismiss() },
         contentAlignment = Alignment.Center
     ) {
@@ -310,9 +313,9 @@ private fun AddRepoOverlay(
                 .heightIn(max = 620.dp)
                 .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { }
         ) {
-            Text("Add repository", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(uiStr(R.string.ui_add_repository), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
-                "A GitHub repository that publishes AdrenoTools drivers in its releases",
+                uiStr(R.string.ui_a_github_repository_that_publishes_adreno),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp)
@@ -328,8 +331,8 @@ private fun AddRepoOverlay(
                     onValueChange = { input = it },
                     singleLine = true,
                     isError = duplicate,
-                    label = { Text("owner/repo or GitHub releases API URL") },
-                    supportingText = if (duplicate) ({ Text("Already in the list") }) else null,
+                    label = { Text(uiStr(R.string.ui_owner_repo_or_github_releases_api_url)) },
+                    supportingText = if (duplicate) ({ Text(uiStr(R.string.ui_already_in_the_list)) }) else null,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -337,7 +340,7 @@ private fun AddRepoOverlay(
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    label = { Text("Name (optional)") },
+                    label = { Text(uiStr(R.string.ui_name_optional)) },
                     placeholder = if (api.isNotEmpty()) ({ Text(RemoteSources.suggestRepoName(api)) }) else null,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { if (canAdd) onAdd(name, input) }),
@@ -353,13 +356,13 @@ private fun AddRepoOverlay(
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                     border = BorderStroke(1.dp, hairlineColor())
-                ) { Text("Cancel") }
+                ) { Text(uiStr(R.string.cancel)) }
                 Button(
                     onClick = { onAdd(name, input) },
                     enabled = canAdd,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-                ) { Text("Add") }
+                ) { Text(uiStr(R.string.ui_add_2)) }
             }
         }
     }
@@ -395,7 +398,7 @@ private fun ServiceField(
         supportingText = when {
             error != null -> ({ Text(error) })
             differs && default.isNotEmpty() -> ({
-                Text("Default: $default", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(uiStr(R.string.ui_default_2, default), maxLines = 1, overflow = TextOverflow.Ellipsis)
             })
             else -> null
         },
@@ -403,7 +406,7 @@ private fun ServiceField(
             IconButton(onClick = { onChange(default) }) {
                 Icon(
                     if (default.isEmpty()) Icons.Outlined.Close else Icons.Outlined.Refresh,
-                    contentDescription = if (default.isEmpty()) "Clear" else "Restore default",
+                    contentDescription = if (default.isEmpty()) uiStr(R.string.ui_clear) else uiStr(R.string.ui_restore_default),
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -443,7 +446,7 @@ private fun RepoRow(repo: DriverRepo, onRemove: () -> Unit) {
             IconButton(onClick = onRemove) {
                 Icon(
                     Icons.Outlined.DeleteOutline,
-                    contentDescription = "Remove repository",
+                    contentDescription = uiStr(R.string.ui_remove_repository),
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )

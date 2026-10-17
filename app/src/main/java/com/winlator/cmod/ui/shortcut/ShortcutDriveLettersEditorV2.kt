@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.shortcut
 
+import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +58,7 @@ private val shortcutDriveLettersV2 = ('D'..'Z').map { it.toString() }
 @Composable
 internal fun DriveLettersEditorV2(
     initialDrives: String,
-    subtitle: String = "Changes apply to this container",
+    subtitle: String = uiStr(R.string.ui_changes_apply_to_this_container),
     onChanged: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -98,7 +100,7 @@ internal fun DriveLettersEditorV2(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Drive letters", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(uiStr(R.string.ui_drive_letters), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
@@ -110,13 +112,13 @@ internal fun DriveLettersEditorV2(
                 onClick = { if (nextLetter != null) entries.add(ShortcutDriveEntryV2(nextLetter, "")) },
                 enabled = nextLetter != null
             ) {
-                Icon(Icons.Outlined.Add, "Add drive")
+                Icon(Icons.Outlined.Add, uiStr(R.string.ui_add_drive))
             }
         }
 
         if (entries.isEmpty()) {
             Text(
-                "No custom drives",
+                uiStr(R.string.ui_no_custom_drives),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -205,11 +207,11 @@ private fun ShortcutDriveLetterRowV2(
             onValueChange = onPath,
             modifier = Modifier.weight(1f),
             singleLine = true,
-            label = { Text("Path") },
+            label = { Text(uiStr(R.string.ui_path)) },
             placeholder = { Text("/storage/emulated/0/...", maxLines = 1, overflow = TextOverflow.Ellipsis) },
             shape = WinZShapes.Small
         )
-        IconButton(onClick = onBrowse) { Icon(Icons.Outlined.FolderOpen, "Choose folder") }
-        IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, "Remove drive") }
+        IconButton(onClick = onBrowse) { Icon(Icons.Outlined.FolderOpen, uiStr(R.string.ui_choose_folder)) }
+        IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, uiStr(R.string.ui_remove_drive)) }
     }
 }

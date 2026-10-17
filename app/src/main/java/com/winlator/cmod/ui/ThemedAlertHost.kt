@@ -1,5 +1,8 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.R
+import androidx.compose.ui.res.stringResource
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.WinZMotion
 import androidx.activity.compose.BackHandler
 
@@ -102,7 +105,7 @@ object ThemedAlertHost {
                     onClick = dismiss,
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                     border = BorderStroke(1.dp, hairlineColor())
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.cancel)) }
                 Button(
                     onClick = { dismiss(); onConfirm.run() },
                     colors = ButtonDefaults.buttonColors(
@@ -121,7 +124,7 @@ object ThemedAlertHost {
                 Button(
                     onClick = dismiss,
                     colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-                ) { Text("OK") }
+                ) { Text(stringResource(R.string.ok)) }
             }
         }
     }
@@ -155,7 +158,7 @@ object ThemedAlertHost {
                     onClick = dismiss,
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                     border = BorderStroke(1.dp, hairlineColor())
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.cancel)) }
                 Button(
                     onClick = { dismiss(); onConfirm.accept(value) },
                     colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
@@ -193,7 +196,7 @@ object ThemedAlertHost {
                     onClick = dismiss,
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                     border = BorderStroke(1.dp, hairlineColor())
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.cancel)) }
                 Button(
                     onClick = { dismiss(); onConfirm.accept(value) },
                     colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
@@ -220,7 +223,7 @@ object ThemedAlertHost {
         title: String,
         message: String,
         options: List<Option>,
-        cancelLabel: String = "Cancel"
+        cancelLabel: String = activity.getString(R.string.cancel)
     ) {
         showOverlay(activity) { dismiss ->
             ThemedDialogTitle(title)
@@ -359,7 +362,7 @@ object ThemedAlertHost {
                     onClick = dismiss,
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                     border = BorderStroke(1.dp, hairlineColor())
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.cancel)) }
                 Button(
                     onClick = {
                         dismiss()
@@ -401,7 +404,7 @@ object ThemedAlertHost {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.5f))
+                                .background(DialogScrimColor)
                                 .clickable(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },

@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.OnArtwork
 import android.app.Activity
 import android.graphics.Bitmap
 import android.view.View
@@ -101,8 +102,8 @@ private fun LaunchScreen(state: PreloaderOverlayState) {
     val artwork = state.artwork
     val accent = controlAccentColor()
     val overArtwork = artwork != null
-    val titleColor = if (overArtwork) Color.White else MaterialTheme.colorScheme.onBackground
-    val statusColor = if (overArtwork) Color(0xD9FFFFFF) else MaterialTheme.colorScheme.onSurfaceVariant
+    val titleColor = if (overArtwork) OnArtwork.Text else MaterialTheme.colorScheme.onBackground
+    val statusColor = if (overArtwork) OnArtwork.LaunchStatus else MaterialTheme.colorScheme.onSurfaceVariant
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (artwork != null) {
@@ -122,7 +123,7 @@ private fun LaunchScreen(state: PreloaderOverlayState) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Brush.verticalGradient(listOf(Color(0x18000000), Color(0x52000000), Color(0xE6000000))))
+                    .background(Brush.verticalGradient(OnArtwork.LaunchScrim))
             )
         }
 
@@ -135,13 +136,13 @@ private fun LaunchScreen(state: PreloaderOverlayState) {
             Text(
                 state.title,
                 color = titleColor,
-                fontSize = 28.sp,
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(7.dp))
-            Text(state.message, color = statusColor, fontSize = 14.sp)
+            Text(state.message, color = statusColor, style = MaterialTheme.typography.bodyMedium)
         }
 
         LinearProgressIndicator(
