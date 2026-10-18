@@ -173,7 +173,7 @@ bool VulkanRendererContext::fgCapsOk() const {
 void VulkanRendererContext::ensureFgQueryPool() {
     if (fgQueryPool_ != VK_NULL_HANDLE || !fgTimestampsOk_ || !vk_.CreateQueryPool) return;
     VkQueryPoolCreateInfo qi{}; qi.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-    qi.queryType = VK_QUERY_TYPE_TIMESTAMP; qi.queryCount = MAX_FRAMES_IN_FLIGHT * 2;
+    qi.queryType = VK_QUERY_TYPE_TIMESTAMP; qi.queryCount = MAX_FRAMES_IN_FLIGHT * kFgQueriesPerSlot;
     if (vk_.CreateQueryPool(device, &qi, nullptr, &fgQueryPool_) != VK_SUCCESS) {
         fgQueryPool_ = VK_NULL_HANDLE;
         fgTimestampsOk_ = false;
@@ -191,42 +191,45 @@ void VulkanRendererContext::destroyFgQueryPool() {
 void VulkanRendererContext::readFgQueryResult() {
     if (fgQueryPool_ == VK_NULL_HANDLE || !fgQueryPending_[currentFrame]) return;
     fgQueryPending_[currentFrame] = false;      // one attempt per sample; a miss is dropped
-    uint64_t ts[2] = {0, 0};
-    const VkResult r = vk_.GetQueryPoolResults(device, fgQueryPool_, currentFrame * 2, 2,
+    // [0] before the shared passes, [1] after them, [2] after generation 0 (the first
+    // present's work). All in the first present's buffer: on just-in-time frames the later
+    // generations run spread over the source interval, and a span up to them would measure
+    // the waits.
+    uint64_t ts[kFgQueriesPerSlot] = {};
+    const VkResult r = vk_.GetQueryPoolResults(device, fgQueryPool_,
+                                               currentFrame * kFgQueriesPerSlot, kFgQueriesPerSlot,
                                                sizeof(ts), ts, sizeof(uint64_t),
                                                VK_QUERY_RESULT_64_BIT);
-    if (r != VK_SUCCESS || ts[1] <= ts[0]) return;
-    const double ms = (double)(ts[1] - ts[0]) * (double)fgTimestampPeriodNs_ / 1.0e6;
-    if (fgQueryJit_[currentFrame]) {
-        // Shared passes + first generation only (just-in-time frame). Kept out of the
-        // per-generation figure the HUD shows; it is exactly the chain the limiter has to
-        // start early for, since the later generations are recorded when their turn comes.
-        fgJitFirstMs_ = fgJitFirstMs_ <= 0.0f ? (float)ms
-                                              : fgJitFirstMs_ + ((float)ms - fgJitFirstMs_) * 0.1f;
-        const int64_t total = (int64_t)(ms * 1.0e6);
-        const int64_t prev  = fgChainCostNs_.load(std::memory_order_relaxed);
-        fgChainCostNs_.store(prev <= 0 || total > prev ? total : prev + (total - prev) / 16,
-                             std::memory_order_relaxed);
-        return;
-    }
-    const float perGen = (float)(ms / (double)std::max(1u, fgQueryGens_[currentFrame]));
+    if (r != VK_SUCCESS || ts[1] < ts[0] || ts[2] < ts[1] || ts[2] <= ts[0]) return;
+    const double toMs = (double)fgTimestampPeriodNs_ / 1.0e6;
+    const double sharedMs = (double)(ts[1] - ts[0]) * toMs;  // shared passes
+    const double genMs    = (double)(ts[2] - ts[1]) * toMs;  // one generation (all cost the same)
+    const double firstMs  = sharedMs + genMs;                // up to the first generated frame
+    const uint32_t gens = std::max(1u, fgQueryGens_[currentFrame]);
+    const double ms = sharedMs + genMs * (double)gens;       // the whole chain
+    const float perGen = (float)(ms / (double)gens);
     fgChainMsPerGen_ = fgChainMsPerGen_ < 0.0f
         ? perGen
         : fgChainMsPerGen_ + (perGen - fgChainMsPerGen_) * 0.1f;
-    // The whole chain of one source frame, for the limiter: a frame held for its display slot
-    // starts compositing this much earlier. Follows rises at once and falls slowly, so a
-    // heavier frame is covered right away and one light frame does not cut the margin.
+    // For the limiter: a frame held for its display slot starts compositing this much earlier.
+    // Only the chain up to generation 0 - the first present waits for nothing else; later
+    // generations are queued behind it and each has its own, later refresh. (The whole chain
+    // used to be reserved here, which released the guest's next buffer - and so sampled its
+    // input - earlier by the cost of the extra generations, at 3x and 4x.) Follows rises at
+    // once and falls slowly, so a heavier frame is covered right away and one light frame does
+    // not cut the margin.
     {
-        const int64_t total = (int64_t)(ms * 1.0e6);
+        const int64_t first = (int64_t)(firstMs * 1.0e6);
         const int64_t prev  = fgChainCostNs_.load(std::memory_order_relaxed);
-        fgChainCostNs_.store(prev <= 0 || total > prev ? total : prev + (total - prev) / 16,
+        fgChainCostNs_.store(prev <= 0 || first > prev ? first : prev + (first - prev) / 16,
                              std::memory_order_relaxed);
     }
     // Same cadence as the engine's own telemetry, so a log carries the cost
     // next to the rates it explains.
     if ((fgChainLogCount_++ % 120u) == 0u)
-        RLOG("lsfg-native: chain %.2f ms per generated frame (%.2f ms for %u, smoothed %.2f)",
-             perGen, (float)ms, fgQueryGens_[currentFrame], fgChainMsPerGen_);
+        RLOG("lsfg-native: chain %.2f ms per generated frame (%.2f ms for %u, first present "
+             "%.2f ms, smoothed %.2f)",
+             perGen, (float)ms, fgQueryGens_[currentFrame], (float)firstMs, fgChainMsPerGen_);
 }
 
 void VulkanRendererContext::recordFrameGenProcess(VkCommandBuffer cb) {
@@ -238,90 +241,103 @@ void VulkanRendererContext::recordFrameGenProcess(VkCommandBuffer cb) {
     const CompositeTarget& src = compositeTargets[compositeIndex];
     ensureFgQueryPool();
     if (fgQueryPool_ != VK_NULL_HANDLE && fgPlan_.generations > 0) {
-        vk_.CmdResetQueryPool(cb, fgQueryPool_, currentFrame * 2, 2);
-        vk_.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, fgQueryPool_, currentFrame * 2);
+        vk_.CmdResetQueryPool(cb, fgQueryPool_, currentFrame * kFgQueriesPerSlot, kFgQueriesPerSlot);
+        vk_.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, fgQueryPool_,
+                              currentFrame * kFgQueriesPerSlot);
     }
     // Take frame N as the chain's newest input and run everything that is
     // shared across generations (mipmaps -> alpha -> beta -> gamma -> delta).
     lsfgEngine_->process(cb, src.img, compositeW, compositeH, fgPlan_.generations);
+    if (fgQueryPool_ != VK_NULL_HANDLE && fgPlan_.generations > 0)
+        vk_.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, fgQueryPool_,
+                              currentFrame * kFgQueriesPerSlot + 1);
 }
 
 void VulkanRendererContext::recordFrameGenGeneration(VkCommandBuffer cb, uint32_t g) {
+    if (recordFrameGenCompute(cb, g)) recordFrameGenPresentCopy(cb, g);
+}
+
+bool VulkanRendererContext::recordFrameGenCompute(VkCommandBuffer cb, uint32_t g) {
+    if (!compositeActive() || compositeTargets.empty()) return false;
+    if (!lsfgEngine_) return false;
+    if (g >= fgPlan_.generations) return false;
+    const size_t slot = (compositeIndex + 1 + g) % compositeTargets.size();
+    const CompositeTarget& dst = compositeTargets[slot];
+    if (dst.img == VK_NULL_HANDLE || dst.storageView == VK_NULL_HANDLE) return false;
+
+    lsfgEngine_->generateInto(cb, g, (uint32_t)slot, dst.img, dst.storageView, compositeW, compositeH);
+
+    // The last span ends after generation 0's compute (before its copy, so a vblank wait on the
+    // swapchain image is not counted); every generation does the same work, so the rest of the
+    // chain follows from it (readFgQueryResult), on just-in-time frames too.
+    if (fgQueryPool_ != VK_NULL_HANDLE && g == 0) {
+        vk_.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, fgQueryPool_,
+                              currentFrame * kFgQueriesPerSlot + 2);
+        fgQueryPending_[currentFrame] = true;
+        fgQueryGens_[currentFrame]    = fgPlan_.generations;
+    }
+    return true;
+}
+
+void VulkanRendererContext::recordFrameGenPresentCopy(VkCommandBuffer cb, uint32_t g) {
     if (!compositeActive() || compositeTargets.empty()) return;
-    if (!lsfgEngine_) return;
     if (g >= fgPlan_.generations) return;
-    const uint32_t w = compositeW, h = compositeH;
-    {
-        const size_t slot = (compositeIndex + 1 + g) % compositeTargets.size();
-        const CompositeTarget& dst = compositeTargets[slot];
-        if (dst.img == VK_NULL_HANDLE || dst.storageView == VK_NULL_HANDLE) return;
+    const size_t slot = (compositeIndex + 1 + g) % compositeTargets.size();
+    const CompositeTarget& dst = compositeTargets[slot];
+    if (dst.img == VK_NULL_HANDLE || dst.storageView == VK_NULL_HANDLE) return;
 
-        lsfgEngine_->generateInto(cb, g, (uint32_t)slot, dst.img, dst.storageView, w, h);
+    // dst is left in GENERAL by the chain; move it and the target
+    // swapchain image into transfer layouts, copy, then hand the swapchain
+    // image to the presentation engine.
+    const uint32_t imgIdx = fgPlan_.imgIdx[g];
+    VkImageMemoryBarrier pre[2]{};
+    pre[0].sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    pre[0].oldLayout=VK_IMAGE_LAYOUT_GENERAL; pre[0].newLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    pre[0].srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; pre[0].dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+    pre[0].image=dst.img; pre[0].subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    pre[0].srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; pre[0].dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
 
-        // Recorded just in time, the later generations run spread over the source interval:
-        // a span up to the last one would measure the waits. The span then ends after the
-        // first generation (shared passes + one generation, what the first present needs).
-        const bool spanEnd = fgJitThisFrame_ ? g == 0 : g + 1 == fgPlan_.generations;
-        if (fgQueryPool_ != VK_NULL_HANDLE && spanEnd) {
-            vk_.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, fgQueryPool_, currentFrame * 2 + 1);
-            fgQueryPending_[currentFrame] = true;
-            fgQueryGens_[currentFrame]    = fgJitThisFrame_ ? 1u : fgPlan_.generations;
-            fgQueryJit_[currentFrame]     = fgJitThisFrame_;
-        }
+    pre[1].sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    pre[1].oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; pre[1].newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    pre[1].srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; pre[1].dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+    pre[1].image=swapchainImages[imgIdx]; pre[1].subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    pre[1].srcAccessMask=0; pre[1].dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
 
-        // dst is left in GENERAL by the chain; move it and the target
-        // swapchain image into transfer layouts, copy, then hand the swapchain
-        // image to the presentation engine.
-        const uint32_t imgIdx = fgPlan_.imgIdx[g];
-        VkImageMemoryBarrier pre[2]{};
-        pre[0].sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        pre[0].oldLayout=VK_IMAGE_LAYOUT_GENERAL; pre[0].newLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        pre[0].srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; pre[0].dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-        pre[0].image=dst.img; pre[0].subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-        pre[0].srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; pre[0].dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
+    vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,nullptr, 0,nullptr, 2,pre);
 
-        pre[1].sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        pre[1].oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; pre[1].newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        pre[1].srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; pre[1].dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-        pre[1].image=swapchainImages[imgIdx]; pre[1].subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-        pre[1].srcAccessMask=0; pre[1].dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+    recordCompositeToSwapchainTransfer(cb, dst.img, imgIdx);
 
-        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,nullptr, 0,nullptr, 2,pre);
+    // Restore the generation target first; the swapchain image's own final
+    // transition depends on whether the cursor overlay runs for it.
+    VkImageMemoryBarrier post[2]{};
+    post[0].sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    post[0].oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; post[0].newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    post[0].srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; post[0].dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+    post[0].image=swapchainImages[imgIdx]; post[0].subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    post[0].srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; post[0].dstAccessMask=0;
+    // Put the generation target back in GENERAL for the next dispatch.
+    post[1].sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    post[1].oldLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; post[1].newLayout=VK_IMAGE_LAYOUT_GENERAL;
+    post[1].srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; post[1].dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+    post[1].image=dst.img; post[1].subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    post[1].srcAccessMask=VK_ACCESS_TRANSFER_READ_BIT; post[1].dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT;
 
-        recordCompositeToSwapchainTransfer(cb, dst.img, imgIdx);
-
-        // Restore the generation target first; the swapchain image's own final
-        // transition depends on whether the cursor overlay runs for it.
-        VkImageMemoryBarrier post[2]{};
-        post[0].sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        post[0].oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; post[0].newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        post[0].srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; post[0].dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-        post[0].image=swapchainImages[imgIdx]; post[0].subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-        post[0].srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; post[0].dstAccessMask=0;
-        // Put the generation target back in GENERAL for the next dispatch.
-        post[1].sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        post[1].oldLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; post[1].newLayout=VK_IMAGE_LAYOUT_GENERAL;
-        post[1].srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; post[1].dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-        post[1].image=dst.img; post[1].subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-        post[1].srcAccessMask=VK_ACCESS_TRANSFER_READ_BIT; post[1].dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT;
-
-        if (cursorDrawnPerPresent() && cursorOverlay_.draw) {
-            // Only the generation target goes back to GENERAL here; the
-            // overlay pass takes the swapchain image to PRESENT_SRC.
-            vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,nullptr, 0,nullptr, 1,&post[1]);
-            recordCursorOverlay(cb, imgIdx);
-        } else {
-            vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT|VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                0, 0,nullptr, 0,nullptr, 2,post);
-        }
+    if (cursorDrawnPerPresent() && cursorOverlay_.draw) {
+        // Only the generation target goes back to GENERAL here; the
+        // overlay pass takes the swapchain image to PRESENT_SRC.
+        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,nullptr, 0,nullptr, 1,&post[1]);
+        recordCursorOverlay(cb, imgIdx);
+    } else {
+        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT|VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0,nullptr, 0,nullptr, 2,post);
     }
 }
 
 void VulkanRendererContext::setLsfgCachePath(const char* path) {
-    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    auto frameLock = lockFrameExclusive();
     std::lock_guard<std::mutex> lk(renderMutex);
     const std::string next = path ? path : "";
     // Only a genuinely NEW cache justifies throwing the engine away. This is
@@ -489,7 +505,7 @@ void VulkanRendererContext::trackPresentedRate(uint32_t presents) {
 }
 
 void VulkanRendererContext::setFrameGenArmed(bool armed, int multiplier, int targetRate) {
-    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    auto frameLock = lockFrameExclusive();
     const bool was = fgArmed_.load(std::memory_order_relaxed);
     const int  wasMult = fgMultiplier_.load(std::memory_order_relaxed);
     fgMultiplier_.store(multiplier, std::memory_order_relaxed);
@@ -509,7 +525,6 @@ void VulkanRendererContext::setFrameGenArmed(bool armed, int multiplier, int tar
 
     fgArmed_.store(armed, std::memory_order_relaxed);
     fgChainCostNs_.store(0, std::memory_order_relaxed);
-    fgJitFirstMs_ = 0.0f;   // render thread is between frames (frameMutex held exclusively)
     RLOG("lsfg-native: frame gen %s (multiplier=%d) - recreating swapchain",
          armed ? "ARMED" : "disarmed", multiplier);
     // The swapchain's usage flags and image count both depend on this, so it

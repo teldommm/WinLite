@@ -20,16 +20,11 @@ constexpr uint32_t DISPATCH_TILE_SHIFT = 6;
 
 }
 
-LsfgMipmaps::LsfgMipmaps(const Device& device, const LsfgShaders& shaders,
+LsfgMipmaps::LsfgMipmaps(const Device& device, const LsfgPass& pass_,
                          LsfgResources& resources, VkDescriptorPool descriptor_pool,
                          LsfgImagePair& frames_, float flow_scale)
-    : frames{&frames_} {
-    pass = LsfgPass(device, shaders, LSFG_SHADER_MIPMAPS,
-                    {{1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER},
-                     {1, VK_DESCRIPTOR_TYPE_SAMPLER},
-                     {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                     {LSFG_MIP_LEVELS, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    if (!pass.Valid()) return;
+    : frames{&frames_}, pass{&pass_} {
+    if (!pass->Valid()) return;
 
     const VkExtent2D input_extent = (*frames)[0].Extent();
     flow_extent = VkExtent2D{
@@ -47,7 +42,7 @@ LsfgMipmaps::LsfgMipmaps(const Device& device, const LsfgShaders& shaders,
     }
 
     const std::vector<VkDescriptorSet> sets = AllocateLsfgDescriptorSets(
-        device, descriptor_pool, pass.SetLayout(),
+        device, descriptor_pool, pass->SetLayout(),
         static_cast<uint32_t>(descriptor_sets.size()));
     if (sets.size() != descriptor_sets.size()) return;
 
@@ -72,7 +67,7 @@ void LsfgMipmaps::Dispatch(VkCommandBuffer cmdbuf, uint64_t frame_count) {
 
     LsfgBarriers(cmdbuf).WriteToRead((*frames)[slot]).ReadToWriteAll(out_images).Build();
 
-    pass.Bind(cmdbuf, descriptor_sets[slot]);
+    pass->Bind(cmdbuf, descriptor_sets[slot]);
     vkd.CmdDispatch(cmdbuf, GroupCount(flow_extent.width), GroupCount(flow_extent.height), 1);
 }
 

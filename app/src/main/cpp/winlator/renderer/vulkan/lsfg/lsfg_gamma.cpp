@@ -18,33 +18,11 @@ constexpr uint32_t DISPATCH_TILE_SHIFT = 3;
 
 }
 
-LsfgGamma::LsfgGamma(const Device& device, const LsfgShaders& shaders, LsfgResources& resources,
-                     VkDescriptorPool descriptor_pool, LsfgImageHistory& inputs_,
-                     LsfgImage& flow_input_, LsfgImage* previous_)
-    : inputs{&inputs_}, flow_input{&flow_input_}, previous{previous_} {
-    passes[0] = LsfgPass(device, shaders, LSFG_GAMMA_SHADERS[0],
-                         {{1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER},
-                          {2, VK_DESCRIPTOR_TYPE_SAMPLER},
-                          {5, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                          {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    passes[1] = LsfgPass(device, shaders, LSFG_GAMMA_SHADERS[1],
-                         {{1, VK_DESCRIPTOR_TYPE_SAMPLER},
-                          {3, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                          {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    passes[2] = LsfgPass(device, shaders, LSFG_GAMMA_SHADERS[2],
-                         {{1, VK_DESCRIPTOR_TYPE_SAMPLER},
-                          {2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                          {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    passes[3] = LsfgPass(device, shaders, LSFG_GAMMA_SHADERS[3],
-                         {{1, VK_DESCRIPTOR_TYPE_SAMPLER},
-                          {2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                          {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    passes[4] = LsfgPass(device, shaders, LSFG_GAMMA_SHADERS[4],
-                         {{1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER},
-                          {2, VK_DESCRIPTOR_TYPE_SAMPLER},
-                          {4, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                          {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    for (const auto& pass : passes) {
+LsfgGamma::LsfgGamma(const Device& device, const std::array<LsfgPass, LSFG_GAMMA_STAGES>& passes_,
+                     LsfgResources& resources, VkDescriptorPool descriptor_pool,
+                     LsfgImageHistory& inputs_, LsfgImage& flow_input_, LsfgImage* previous_)
+    : inputs{&inputs_}, flow_input{&flow_input_}, previous{previous_}, passes{&passes_} {
+    for (const auto& pass : *passes) {
         if (!pass.Valid()) return;
     }
 
@@ -63,10 +41,10 @@ LsfgGamma::LsfgGamma(const Device& device, const LsfgShaders& shaders, LsfgResou
     std::vector<VkDescriptorSetLayout> layouts;
     for (size_t slot = 0; slot < LSFG_GENERATION_SLOTS; ++slot) {
         for (size_t i = 0; i < LSFG_HISTORY_SLOTS; ++i) {
-            layouts.push_back(passes[0].SetLayout());
+            layouts.push_back((*passes)[0].SetLayout());
         }
         for (size_t i = 1; i < LSFG_GAMMA_STAGES; ++i) {
-            layouts.push_back(passes[i].SetLayout());
+            layouts.push_back((*passes)[i].SetLayout());
         }
     }
 
@@ -173,9 +151,9 @@ void LsfgGamma::DispatchStep(VkCommandBuffer cmdbuf, uint64_t frame_count, size_
     const size_t history = frame_count % LSFG_HISTORY_SLOTS;
 
     if (step == 0) {
-        passes[0].Bind(cmdbuf, pass.first_descriptor_sets[history]);
+        (*passes)[0].Bind(cmdbuf, pass.first_descriptor_sets[history]);
     } else {
-        passes[step].Bind(cmdbuf, pass.descriptor_sets[step - 1]);
+        (*passes)[step].Bind(cmdbuf, pass.descriptor_sets[step - 1]);
     }
     vkd.CmdDispatch(cmdbuf, GroupCount(extent.width), GroupCount(extent.height), 1);
 }

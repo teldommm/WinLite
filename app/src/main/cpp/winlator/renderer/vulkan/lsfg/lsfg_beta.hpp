@@ -17,8 +17,10 @@ constexpr size_t LSFG_BETA_OUTPUTS = 6;
 class LsfgBeta {
 public:
     LsfgBeta() = default;
-    LsfgBeta(const Device& device, const LsfgShaders& shaders, LsfgResources& resources,
-             VkDescriptorPool descriptor_pool, LsfgImageHistory& inputs);
+    // passes: the engine's beta pipelines (LsfgPasses), shared by every chain it builds.
+    LsfgBeta(const Device& device, const std::array<LsfgPass, LSFG_BETA_STAGES>& passes,
+             LsfgResources& resources, VkDescriptorPool descriptor_pool,
+             LsfgImageHistory& inputs);
 
     void Dispatch(VkCommandBuffer cmdbuf, uint64_t frame_count);
 
@@ -33,7 +35,7 @@ public:
 private:
     LsfgImageHistory* inputs{};
 
-    std::array<LsfgPass, LSFG_BETA_STAGES> passes;
+    const std::array<LsfgPass, LSFG_BETA_STAGES>* passes{};
     std::array<VkDescriptorSet, LSFG_HISTORY_SLOTS> first_descriptor_sets{};
     std::array<VkDescriptorSet, LSFG_BETA_STAGES - 1> descriptor_sets{};
 

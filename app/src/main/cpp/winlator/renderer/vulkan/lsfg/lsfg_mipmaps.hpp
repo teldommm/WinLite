@@ -14,7 +14,8 @@ class LsfgShaders;
 class LsfgMipmaps {
 public:
     LsfgMipmaps() = default;
-    LsfgMipmaps(const Device& device, const LsfgShaders& shaders, LsfgResources& resources,
+    // pass: the engine's mipmaps pipeline (LsfgPasses), shared by every chain it builds.
+    LsfgMipmaps(const Device& device, const LsfgPass& pass, LsfgResources& resources,
                 VkDescriptorPool descriptor_pool, LsfgImagePair& frames, float flow_scale);
 
     void Dispatch(VkCommandBuffer cmdbuf, uint64_t frame_count);
@@ -28,14 +29,14 @@ public:
     }
 
     [[nodiscard]] bool Valid() const {
-        return pass.Valid() && allocated && descriptor_sets[0] != VK_NULL_HANDLE &&
+        return pass != nullptr && pass->Valid() && allocated && descriptor_sets[0] != VK_NULL_HANDLE &&
                descriptor_sets[1] != VK_NULL_HANDLE;
     }
 
 private:
     LsfgImagePair* frames{};
 
-    LsfgPass pass;
+    const LsfgPass* pass{};
     std::array<VkDescriptorSet, 2> descriptor_sets{};
     bool allocated{false};
 

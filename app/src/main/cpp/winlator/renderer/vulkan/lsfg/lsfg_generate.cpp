@@ -36,17 +36,12 @@ VkImageMemoryBarrier MakeTargetBarrier(VkImage image, VkAccessFlags src_access,
 
 }
 
-LsfgGenerate::LsfgGenerate(const Device& device, const LsfgShaders& shaders,
+LsfgGenerate::LsfgGenerate(const Device& device, const LsfgPass& pass_,
                            LsfgResources& resources, VkDescriptorPool descriptor_pool,
                            LsfgImagePair& frames_, LsfgImage& motion_, LsfgImage& detail1_,
                            LsfgImage& detail2_)
-    : frames{&frames_}, motion{&motion_}, detail1{&detail1_}, detail2{&detail2_} {
-    pass = LsfgPass(device, shaders, LSFG_SHADER_GENERATE,
-                    {{1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER},
-                     {2, VK_DESCRIPTOR_TYPE_SAMPLER},
-                     {5, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    if (!pass.Valid()) return;
+    : frames{&frames_}, motion{&motion_}, detail1{&detail1_}, detail2{&detail2_}, pass{&pass_} {
+    if (!pass->Valid()) return;
 
     sampler = resources.GetSampler();
     edge_sampler =
@@ -56,7 +51,7 @@ LsfgGenerate::LsfgGenerate(const Device& device, const LsfgShaders& shaders,
     const uint32_t total =
         static_cast<uint32_t>(LSFG_GENERATION_SLOTS * LSFG_MAX_TARGETS * 2);
     const std::vector<VkDescriptorSet> sets =
-        AllocateLsfgDescriptorSets(device, descriptor_pool, pass.SetLayout(), total);
+        AllocateLsfgDescriptorSets(device, descriptor_pool, pass->SetLayout(), total);
     if (sets.size() != total) return;
 
     size_t next = 0;
@@ -114,7 +109,7 @@ void LsfgGenerate::Dispatch(VkCommandBuffer cmdbuf, uint64_t frame_count, size_t
         .DiscardToWrite(image)
         .Build();
 
-    pass.Bind(cmdbuf, entry.descriptor_sets[frame_count % entry.descriptor_sets.size()]);
+    pass->Bind(cmdbuf, entry.descriptor_sets[frame_count % entry.descriptor_sets.size()]);
     vkd.CmdDispatch(cmdbuf, GroupCount(extent.width), GroupCount(extent.height), 1);
 
     const VkImageMemoryBarrier after = MakeTargetBarrier(

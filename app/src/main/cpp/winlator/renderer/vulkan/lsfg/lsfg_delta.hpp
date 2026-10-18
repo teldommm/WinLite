@@ -17,9 +17,11 @@ constexpr size_t LSFG_DELTA_TEMPS = 3;
 class LsfgDelta {
 public:
     LsfgDelta() = default;
-    LsfgDelta(const Device& device, const LsfgShaders& shaders, LsfgResources& resources,
-              VkDescriptorPool descriptor_pool, LsfgImageHistory& inputs, LsfgImage& flow_input,
-              LsfgImage* previous_gamma, LsfgImage* previous1, LsfgImage* previous2);
+    // passes: the engine's delta pipelines (LsfgPasses), shared by every pyramid level.
+    LsfgDelta(const Device& device, const std::array<LsfgPass, LSFG_DELTA_STAGES>& passes,
+              LsfgResources& resources, VkDescriptorPool descriptor_pool,
+              LsfgImageHistory& inputs, LsfgImage& flow_input, LsfgImage* previous_gamma,
+              LsfgImage* previous1, LsfgImage* previous2);
 
     void Dispatch(VkCommandBuffer cmdbuf, uint64_t frame_count, size_t slot);
 
@@ -53,7 +55,7 @@ private:
     LsfgImage* previous1{};
     LsfgImage* previous2{};
 
-    std::array<LsfgPass, LSFG_DELTA_STAGES> passes;
+    const std::array<LsfgPass, LSFG_DELTA_STAGES>* passes{};
     std::array<Generation, LSFG_GENERATION_SLOTS> generations{};
 
     std::array<LsfgImage, LSFG_DELTA_TEMPS> temp1;

@@ -337,12 +337,17 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     if (hasCursorCopy) {
         VkImageMemoryBarrier b{};
         b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        // Every upload overwrites the whole image, so its old contents may be discarded - and
+        // UNDEFINED is the only old layout that is right for every upload: a freshly created
+        // cursor image (first upload, or after a size change) is not in SHADER_READ_ONLY yet.
+        // The execution dependency on the fragment stage still orders this after the frames
+        // that sampled the previous cursor (write-after-read needs no access mask).
+        b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.image = cursorImg;
         b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        b.srcAccessMask = 0;
         b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
@@ -528,8 +533,12 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         vk_.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         vk_.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout,
                                   0, 1, &cursorDS, 0, nullptr);
-        float cx = (float)std::max(0, (int)ptrX - curHotX);
-        float cy = (float)std::max(0, (int)ptrY - curHotY);
+        // The image goes at pointer - hot spot even when that is off the top or left edge, as
+        // the frame-gen overlay (recordCursorOverlay) and an X server draw it; clamping it to 0
+        // moved a cursor whose hot spot is not its corner (I-beam, crosshair) away from the
+        // pointer near those edges.
+        float cx = (float)((int)ptrX - curHotX);
+        float cy = (float)((int)ptrY - curHotY);
         WindowPushConstants pc{};
         pc.ndcX0 = (ox + cx * sx) / cw * 2.0f - 1.0f;
         pc.ndcY0 = (oy + cy * sy) / ch * 2.0f - 1.0f;

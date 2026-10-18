@@ -20,25 +20,11 @@ constexpr uint32_t OUTPUT_TILE_SHIFT = 5;
 
 }
 
-LsfgBeta::LsfgBeta(const Device& device, const LsfgShaders& shaders, LsfgResources& resources,
-                   VkDescriptorPool descriptor_pool, LsfgImageHistory& inputs_)
-    : inputs{&inputs_} {
-    passes[0] = LsfgPass(device, shaders, LSFG_BETA_SHADERS[0],
-                         {{1, VK_DESCRIPTOR_TYPE_SAMPLER},
-                          {6, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                          {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    for (size_t i = 1; i < LSFG_BETA_STAGES - 1; ++i) {
-        passes[i] = LsfgPass(device, shaders, LSFG_BETA_SHADERS[i],
-                             {{1, VK_DESCRIPTOR_TYPE_SAMPLER},
-                              {2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                              {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    }
-    passes[4] = LsfgPass(device, shaders, LSFG_BETA_SHADERS[4],
-                         {{1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER},
-                          {1, VK_DESCRIPTOR_TYPE_SAMPLER},
-                          {2, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE},
-                          {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}});
-    for (const auto& pass : passes) {
+LsfgBeta::LsfgBeta(const Device& device, const std::array<LsfgPass, LSFG_BETA_STAGES>& passes_,
+                   LsfgResources& resources, VkDescriptorPool descriptor_pool,
+                   LsfgImageHistory& inputs_)
+    : inputs{&inputs_}, passes{&passes_} {
+    for (const auto& pass : *passes) {
         if (!pass.Valid()) return;
     }
 
@@ -59,10 +45,10 @@ LsfgBeta::LsfgBeta(const Device& device, const LsfgShaders& shaders, LsfgResourc
 
     std::vector<VkDescriptorSetLayout> layouts;
     for (size_t i = 0; i < LSFG_HISTORY_SLOTS; ++i) {
-        layouts.push_back(passes[0].SetLayout());
+        layouts.push_back((*passes)[0].SetLayout());
     }
     for (size_t i = 1; i < LSFG_BETA_STAGES; ++i) {
-        layouts.push_back(passes[i].SetLayout());
+        layouts.push_back((*passes)[i].SetLayout());
     }
 
     const std::vector<VkDescriptorSet> sets =
@@ -124,23 +110,23 @@ void LsfgBeta::Dispatch(VkCommandBuffer cmdbuf, uint64_t frame_count) {
     }
     barriers.ReadToWriteAll(temp1).Build();
 
-    passes[0].Bind(cmdbuf, first_descriptor_sets[frame_count % LSFG_HISTORY_SLOTS]);
+    (*passes)[0].Bind(cmdbuf, first_descriptor_sets[frame_count % LSFG_HISTORY_SLOTS]);
     vkd.CmdDispatch(cmdbuf, groups_x, groups_y, 1);
 
     LsfgBarriers(cmdbuf).WriteToReadAll(temp1).ReadToWriteAll(temp2).Build();
-    passes[1].Bind(cmdbuf, descriptor_sets[0]);
+    (*passes)[1].Bind(cmdbuf, descriptor_sets[0]);
     vkd.CmdDispatch(cmdbuf, groups_x, groups_y, 1);
 
     LsfgBarriers(cmdbuf).WriteToReadAll(temp2).ReadToWriteAll(temp1).Build();
-    passes[2].Bind(cmdbuf, descriptor_sets[1]);
+    (*passes)[2].Bind(cmdbuf, descriptor_sets[1]);
     vkd.CmdDispatch(cmdbuf, groups_x, groups_y, 1);
 
     LsfgBarriers(cmdbuf).WriteToReadAll(temp1).ReadToWriteAll(temp2).Build();
-    passes[3].Bind(cmdbuf, descriptor_sets[2]);
+    (*passes)[3].Bind(cmdbuf, descriptor_sets[2]);
     vkd.CmdDispatch(cmdbuf, groups_x, groups_y, 1);
 
     LsfgBarriers(cmdbuf).WriteToReadAll(temp2).ReadToWriteAll(out_images).Build();
-    passes[4].Bind(cmdbuf, descriptor_sets[3]);
+    (*passes)[4].Bind(cmdbuf, descriptor_sets[3]);
     vkd.CmdDispatch(cmdbuf, GroupCount(extent.width, OUTPUT_TILE_SHIFT),
                   GroupCount(extent.height, OUTPUT_TILE_SHIFT), 1);
 }

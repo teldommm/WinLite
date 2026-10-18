@@ -574,18 +574,29 @@ public:
     // the chain's shared passes and generated frame 0; each later generated
     // frame and the real frame are recorded and submitted on their own, so a
     // finished frame reaches the presentation engine without waiting for the
-    // rest of the chain.
-    uint32_t cmdSlot(uint32_t k) const { return currentFrame * kMaxPresentsPerFrame + k; }
+    // rest of the chain. When the presents are recorded just in time, generations
+    // 1.. (at most kMaxPresentsPerFrame - 2 of them) get one more each for their
+    // compute (fgGenSlot), submitted one present ahead of their copy.
+    static constexpr uint32_t kCmdBufsPerFrame = kMaxPresentsPerFrame + (kMaxPresentsPerFrame - 2);
+    uint32_t cmdSlot(uint32_t k) const { return currentFrame * kCmdBufsPerFrame + k; }
+    uint32_t fgGenSlot(uint32_t g) const { return currentFrame * kCmdBufsPerFrame + kMaxPresentsPerFrame + (g - 1); }
     // Shared chain passes (the 24 shaders every generated frame depends on).
     void recordFrameGenProcess(VkCommandBuffer cb);
     // Generated frame g: synthesise into a spare composite target and copy it
-    // into the swapchain image reserved for it.
+    // into the swapchain image reserved for it (compute + copy, one buffer).
     void recordFrameGenGeneration(VkCommandBuffer cb, uint32_t g);
+    // The two halves of it. Compute: synthesise frame g into its own composite target
+    // (every generation has its own, so all of them can run before any is shown); false if
+    // there was nothing to do. Present copy: copy that target into the swapchain image
+    // reserved for g and draw the cursor where cursorOverlay_ says.
+    bool recordFrameGenCompute(VkCommandBuffer cb, uint32_t g);
+    void recordFrameGenPresentCopy(VkCommandBuffer cb, uint32_t g);
 
-    // Chain cost: a timestamp pair per frame slot, start before the shared
-    // passes, end after the last generation's compute (before its copy, so a
-    // vblank wait on the swapchain image is not counted). Read back after the
-    // slot's fence wait, one frame later.
+    // Chain cost: three timestamps per frame slot - before the shared passes, after them, and
+    // after generation 0's compute (before its copy, so a vblank wait on a swapchain image is not
+    // counted). All three are in the first present's buffer, so later generations recorded just
+    // in time never stretch a span. Read back after the slot's fence wait, one frame later.
+    static constexpr uint32_t kFgQueriesPerSlot = 3;
     VkQueryPool fgQueryPool_        = VK_NULL_HANDLE;
     bool        fgTimestampsOk_     = false;
     float       fgTimestampPeriodNs_ = 0.0f;
@@ -680,23 +691,30 @@ public:
 
     // --- Frame generation: cursor recorded per present ------------------------------------
     // With a visible cursor, presents after the first are recorded just ahead of their own
-    // refresh (see renderFrame), so each draws the pointer where it is then.
+    // refresh (see renderFrame), so each draws the pointer where it is then. Only the copy
+    // into the swapchain image and the cursor pass wait for that: generation g's compute is
+    // submitted right after present g - 1, a refresh or more before its copy, and nothing
+    // queued ahead of a copy is a later generation's.
     bool  fgJitThisFrame_ = false;   // render thread: this source frame records just in time
-    // Cost of the shared passes + the first generation (what the first present waits for),
-    // measured on just-in-time frames, whose later generations run spread out. 0 = unknown.
-    float fgJitFirstMs_   = 0.0f;
-    bool  fgQueryJit_[MAX_FRAMES_IN_FLIGHT] = {};
     // When to record present k (CLOCK_MONOTONIC ns), 0 = at once. reachableNs: first queue
     // deadline the group could make, for presents without a desired time.
     int64_t fgPresentRecordTimeNs(uint32_t k, const int64_t desired[], int64_t reachableNs) const;
-    // Sleeps until wakeNs; false if cut short by a stop, a lost surface or a swapchain change.
+    // Sleeps until wakeNs; false if cut short by a stop, a lost surface, a swapchain change,
+    // the next source frame (which must not wait behind this one's remaining presents) or a
+    // configuration change waiting for frameMutex (lockFrameExclusive).
     bool    waitRenderUntil(int64_t wakeNs);
+    // Whether the next frame-gen pass has a source frame now: a new guest frame, counted the
+    // way renderFrame counts it, or a frame held by the limiter whose time has come.
+    // Render thread only.
+    bool    fgNextSourceReady(int64_t nowNs) const;
 
     // --- Frame generation on the limiter grid ------------------------------------------------
     // With an FPS limit, frame generation's source frames are held for their display slot like
-    // any other limited frame; the composite is started early enough for the whole chain
-    // (fgChainCostNs_) and the group's presents carry desired times from that slot on.
-    std::atomic<int64_t> fgChainCostNs_{0};   // smoothed cost of one source frame's chain, 0 = unknown
+    // any other limited frame; the composite is started early enough for the chain up to the
+    // first generated frame (fgChainCostNs_) and the group's presents carry desired times from
+    // that slot on.
+    // Smoothed GPU cost of the shared passes + generation 0 - all the first present waits for.
+    std::atomic<int64_t> fgChainCostNs_{0};   // 0 = unknown
     int64_t fgLeadNs(int64_t baseLead, int64_t spacing) const;
     void    noteGuestFrameLocked(int64_t nowNs);   // a guest frame went on screen
     int64_t fgAnchorSlotNs_ = 0;              // render thread: slot of the frame just applied
@@ -735,9 +753,10 @@ public:
     void    applyDuePresentsLocked(int64_t nowNs);
     void    updateNextPendingDueLocked();
     std::atomic<bool> globalPriorityHigh_{false};
-    // Timeline semaphore the last submit of every frame signals with that frame's serial, so any
-    // thread can ask whether the GPU is done with a frame (vkGetSemaphoreCounterValue) without
-    // touching the render thread's fences. VK_NULL_HANDLE when the device has no timelines.
+    // Timeline semaphore the first submit of every frame signals with that frame's serial - the
+    // only submit that samples guest buffers (renderFrame) - so any thread can ask whether the
+    // GPU is done with a frame's guest buffers (vkGetSemaphoreCounterValue) without touching the
+    // render thread's fences. VK_NULL_HANDLE when the device has no timelines.
     VkSemaphore gpuTimeline_ = VK_NULL_HANDLE;
     // Whether the GPU may still be reading the guest buffer `srcId` (a frame that sampled it
     // has not finished). False when unknown (no timeline semaphore): callers then fall back
@@ -759,6 +778,21 @@ public:
         if (all) dirtyCV.notify_all(); else dirtyCV.notify_one();
     }
     std::shared_mutex frameMutex;
+    // Exclusive frame lock for configuration changes. The render thread holds frameMutex shared
+    // for a whole frame - with frame generation and a visible cursor that is most of a source
+    // interval, while it waits for each present's refresh - and the callers come in holding the
+    // app's view lock, with the X server's request thread and the UI thread queued behind it.
+    // So the render thread is told first: a waiting writer ends those waits and the remaining
+    // presents go out at once (see waitRenderUntil). libc++'s shared_mutex also stops new
+    // readers while a writer waits, so this keeps every other reader's wait short too.
+    std::unique_lock<std::shared_mutex> lockFrameExclusive() {
+        frameWriters_.fetch_add(1, std::memory_order_acq_rel);
+        wakeRender(true);
+        std::unique_lock<std::shared_mutex> lk(frameMutex);
+        frameWriters_.fetch_sub(1, std::memory_order_acq_rel);
+        return lk;
+    }
+    std::atomic<int> frameWriters_{0};   // threads waiting in lockFrameExclusive()
 
     VkRect2D          customScissor    = {{0,0},{0,0}};
     bool              hasCustomScissor = false;

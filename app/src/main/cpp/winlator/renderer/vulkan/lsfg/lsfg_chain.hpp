@@ -21,9 +21,34 @@ constexpr size_t LSFG_FIRST_DELTA_LEVEL = 4;
 constexpr size_t LSFG_LAST_DELTA_LEVEL = LSFG_MIP_LEVELS - 1;
 constexpr size_t LSFG_DELTA_INSTANCES = LSFG_LAST_DELTA_LEVEL + 1 - LSFG_FIRST_DELTA_LEVEL;
 
+// Every compute pipeline of the chain, one per stage (26 for the 25 shaders: gamma and delta
+// both use shader 280, each with its own layout object). None of them depends on the extent,
+// the format or the flow scale - images and descriptor sets do, and storage images are written
+// without a format - so the engine builds them once and every chain it builds, and every pyramid
+// level of a chain, binds the same ones. Built per chain and per level (gamma x7, delta x3) they
+// were 76 pipelines, compiled without a pipeline cache on every chain build: arming frame
+// generation, a flow scale change, a swapchain or surface change.
+class LsfgPasses {
+public:
+    LsfgPasses(const Device& device, const LsfgShaders& shaders);
+
+    LsfgPasses(const LsfgPasses&) = delete;
+    LsfgPasses& operator=(const LsfgPasses&) = delete;
+
+    [[nodiscard]] bool Valid() const;
+
+    LsfgPass mipmaps;
+    LsfgAlphaPasses alpha;
+    std::array<LsfgPass, LSFG_BETA_STAGES> beta;
+    std::array<LsfgPass, LSFG_GAMMA_STAGES> gamma;
+    std::array<LsfgPass, LSFG_DELTA_STAGES> delta;
+    LsfgPass generate;
+};
+
 class LsfgChain {
 public:
-    LsfgChain(const Device& device, const LsfgShaders& shaders, VkExtent2D extent, VkFormat format,
+    // passes must outlive the chain (the engine owns both and drops the chain first).
+    LsfgChain(const Device& device, const LsfgPasses& passes, VkExtent2D extent, VkFormat format,
               float flow_scale);
     ~LsfgChain();
 
@@ -69,7 +94,7 @@ private:
 
     LsfgImagePair frames;
     LsfgMipmaps mipmaps;
-    LsfgAlphaPasses alpha_passes;
+    const LsfgAlphaPasses* alpha_passes{};
     std::array<LsfgAlpha, LSFG_MIP_LEVELS> alpha;
     LsfgBeta beta;
     std::array<LsfgGamma, LSFG_MIP_LEVELS> gamma;

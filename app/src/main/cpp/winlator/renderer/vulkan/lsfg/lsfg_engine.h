@@ -14,6 +14,7 @@
 namespace lsfg {
 
 class LsfgShaders;
+class LsfgPasses;
 class LsfgChain;
 
 // Hard ceiling on generated frames per source frame (2x..4x -> 1..3).
@@ -33,8 +34,9 @@ public:
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
-    // Build the shader modules from a cache produced by lsfg_dll::buildCache.
-    // Returns false if the cache does not yield all 25 modules.
+    // Build the shader modules from a cache produced by lsfg_dll::buildCache, and the compute
+    // pipelines from them (LsfgPasses: built once here, shared by every chain).
+    // Returns false if the cache does not yield all 25 modules or a pipeline fails.
     bool init(VkDevice device, VkPhysicalDevice physicalDevice, const std::string& cachePath);
 
     bool valid() const { return shaders_ != nullptr && !unavailable_; }
@@ -72,9 +74,9 @@ public:
     void reset();
 
     // Drop the interpolation chain (all per-resolution images and descriptor
-    // sets) but keep the 25 compiled shader modules, so turning frame
-    // generation off frees its VRAM while turning it back on only rebuilds the
-    // chain, not the pipelines. The next prepare() rebuilds from scratch.
+    // sets) but keep the shader modules and the compiled pipelines, so turning
+    // frame generation off or changing the swapchain frees its VRAM while the
+    // next prepare() only allocates images and writes descriptor sets again.
     void releaseChain();
 
 private:
@@ -86,6 +88,8 @@ private:
     Device      device_{};
     std::string cachePath_;
     std::unique_ptr<LsfgShaders> shaders_;
+    // Declared before chain_: a chain binds these pipelines, so it goes first.
+    std::unique_ptr<LsfgPasses>  passes_;
     std::unique_ptr<LsfgChain>   chain_;
     LsfgPacer      pacer_;
     LsfgPlan    plan_{};

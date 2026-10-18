@@ -14,7 +14,8 @@ class LsfgShaders;
 class LsfgGenerate {
 public:
     LsfgGenerate() = default;
-    LsfgGenerate(const Device& device, const LsfgShaders& shaders, LsfgResources& resources,
+    // pass: the engine's generate pipeline (LsfgPasses), shared by every chain it builds.
+    LsfgGenerate(const Device& device, const LsfgPass& pass, LsfgResources& resources,
                  VkDescriptorPool descriptor_pool, LsfgImagePair& frames, LsfgImage& motion,
                  LsfgImage& detail1, LsfgImage& detail2);
 
@@ -26,7 +27,7 @@ public:
                   VkImage image, VkExtent2D extent);
 
     [[nodiscard]] bool Valid() const {
-        return pass.Valid() && allocated;
+        return pass != nullptr && pass->Valid() && allocated;
     }
 
 private:
@@ -47,7 +48,7 @@ private:
     VkSampler sampler{VK_NULL_HANDLE};
     VkSampler edge_sampler{VK_NULL_HANDLE};
 
-    LsfgPass pass;
+    const LsfgPass* pass{};
     std::array<Generation, LSFG_GENERATION_SLOTS> generations{};
     bool allocated{};
 };

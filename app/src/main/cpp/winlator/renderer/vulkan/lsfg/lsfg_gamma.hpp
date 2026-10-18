@@ -17,9 +17,10 @@ constexpr size_t LSFG_GAMMA_TEMPS = 3;
 class LsfgGamma {
 public:
     LsfgGamma() = default;
-    LsfgGamma(const Device& device, const LsfgShaders& shaders, LsfgResources& resources,
-              VkDescriptorPool descriptor_pool, LsfgImageHistory& inputs, LsfgImage& flow_input,
-              LsfgImage* previous);
+    // passes: the engine's gamma pipelines (LsfgPasses), shared by every pyramid level.
+    LsfgGamma(const Device& device, const std::array<LsfgPass, LSFG_GAMMA_STAGES>& passes,
+              LsfgResources& resources, VkDescriptorPool descriptor_pool,
+              LsfgImageHistory& inputs, LsfgImage& flow_input, LsfgImage* previous);
 
     void Dispatch(VkCommandBuffer cmdbuf, uint64_t frame_count, size_t slot);
 
@@ -46,7 +47,7 @@ private:
     LsfgImage* flow_input{};
     LsfgImage* previous{};
 
-    std::array<LsfgPass, LSFG_GAMMA_STAGES> passes;
+    const std::array<LsfgPass, LSFG_GAMMA_STAGES>* passes{};
     std::array<Generation, LSFG_GENERATION_SLOTS> generations{};
 
     std::array<LsfgImage, LSFG_GAMMA_TEMPS> temp1;

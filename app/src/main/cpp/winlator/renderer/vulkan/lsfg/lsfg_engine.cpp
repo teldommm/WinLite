@@ -91,6 +91,7 @@ Engine::Engine() = default;
 
 Engine::~Engine() {
     chain_.reset();
+    passes_.reset();
     shaders_.reset();
 }
 
@@ -108,6 +109,15 @@ bool Engine::init(VkDevice device, VkPhysicalDevice physicalDevice, const std::s
     shaders_ = std::make_unique<LsfgShaders>(device_, cachePath_);
     if (!shaders_->IsValid()) {
         LSFG_LOGW("shader cache at %s did not yield all modules", cachePath.c_str());
+        shaders_.reset();
+        return false;
+    }
+    // Every pipeline the chain binds, once per engine (they do not depend on the extent, the
+    // format or the flow scale); a chain rebuild then only allocates images and descriptors.
+    passes_ = std::make_unique<LsfgPasses>(device_, *shaders_);
+    if (!passes_->Valid()) {
+        LSFG_LOGW("frame generation pipelines could not be created");
+        passes_.reset();
         shaders_.reset();
         return false;
     }
@@ -157,14 +167,14 @@ bool Engine::needsRebuild(uint32_t width, uint32_t height, VkFormat format) cons
 }
 
 bool Engine::prepare(uint32_t width, uint32_t height, VkFormat format) {
-    if (unavailable_ || !shaders_) return false;
+    if (unavailable_ || !shaders_ || !passes_) return false;
     if (width == 0 || height == 0 || format == VK_FORMAT_UNDEFINED) return false;
     if (!needsRebuild(width, height, format)) return chain_ && chain_->Valid();
 
     const float scale = effectiveFlowScale(width);
 
     chain_.reset();
-    chain_ = std::make_unique<LsfgChain>(device_, *shaders_, VkExtent2D{width, height}, format,
+    chain_ = std::make_unique<LsfgChain>(device_, *passes_, VkExtent2D{width, height}, format,
                                          scale);
     if (!chain_->Valid()) {
         // A device that cannot build the chain reports unsupported once and

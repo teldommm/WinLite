@@ -7,6 +7,7 @@
 #include <cstring>
 #include <algorithm>
 #include <string>
+#include <vector>
 #include <android/log.h>
 #include "../../../adrenotools/include/adrenotools/driver.h"
 #include "VulkanRendererContext.h"
@@ -37,7 +38,7 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeConfigureFrameGen(
     if (lsfg::cacheVariant(pathStr, variant) != lsfg::DllStatus::Ok) variant = lsfg::Variant::None;
     std::string unsupported;
     {
-        std::unique_lock<std::shared_mutex> frameLock(ctx->frameMutex);
+        auto frameLock = ctx->lockFrameExclusive();
         if (!ctx->lsfgCaps_.supported(variant)) {
             lsfg::Caps probe = ctx->lsfgCaps_;
             lsfg::explain(probe, variant);
@@ -311,15 +312,18 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetRenderList(
     jlongArray jids, jintArray jxs, jintArray jys, jint count)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || count <= 0) return;
-
-    jlong* ids = (jlong*)env->GetPrimitiveArrayCritical(jids, nullptr);
-    jint*  xs  = (jint*) env->GetPrimitiveArrayCritical(jxs,  nullptr);
-    jint*  ys  = (jint*) env->GetPrimitiveArrayCritical(jys,  nullptr);
-    r->setRenderList(reinterpret_cast<const int64_t*>(ids), xs, ys, count);
-    env->ReleasePrimitiveArrayCritical(jys,  ys,  JNI_ABORT);
-    env->ReleasePrimitiveArrayCritical(jxs,  xs,  JNI_ABORT);
-    env->ReleasePrimitiveArrayCritical(jids, ids, JNI_ABORT);
+    if (!r || count <= 0 || !jids || !jxs || !jys) return;
+    // Copied out first: setRenderList() waits for renderMutex, and no JNI critical section may
+    // stay open across a wait (see nativeSyncChildOrder).
+    if (env->GetArrayLength(jids) < count || env->GetArrayLength(jxs) < count ||
+        env->GetArrayLength(jys) < count) return;
+    std::vector<int64_t> ids((size_t)count);
+    std::vector<jint> xs((size_t)count), ys((size_t)count);
+    env->GetLongArrayRegion(jids, 0, count, reinterpret_cast<jlong*>(ids.data()));
+    env->GetIntArrayRegion(jxs, 0, count, xs.data());
+    env->GetIntArrayRegion(jys, 0, count, ys.data());
+    if (env->ExceptionCheck()) return;
+    r->setRenderList(ids.data(), xs.data(), ys.data(), count);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -385,10 +389,16 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSyncChildOrder(
     JNIEnv* env, jobject, jlong handle, jlong parentId, jlongArray jorderedIds, jint count)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || count <= 0) return;
-    jlong* ids = (jlong*)env->GetPrimitiveArrayCritical(jorderedIds, nullptr);
-    r->syncChildOrder(parentId, reinterpret_cast<const int64_t*>(ids), count);
-    env->ReleasePrimitiveArrayCritical(jorderedIds, ids, JNI_ABORT);
+    if (!r || count <= 0 || !jorderedIds || env->GetArrayLength(jorderedIds) < count) return;
+    // Copied out first: syncChildOrder() waits for renderMutex, which the render thread and the
+    // configuration calls hold across fence waits and vkDeviceWaitIdle. A JNI critical section
+    // open across that wait blocks the garbage collector's thread flip (ART: ThreadFlipBegin
+    // waits for every critical section to close, and stops new ones from opening) - every
+    // allocating thread, the UI thread included, waits with it.
+    std::vector<int64_t> ids((size_t)count);
+    env->GetLongArrayRegion(jorderedIds, 0, count, reinterpret_cast<jlong*>(ids.data()));
+    if (env->ExceptionCheck()) return;
+    r->syncChildOrder(parentId, ids.data(), count);
 }
 
 extern "C" JNIEXPORT void JNICALL

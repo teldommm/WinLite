@@ -70,6 +70,8 @@ VulkanRendererContext::~VulkanRendererContext() {
     for (auto& retired : deleteQueue) destroyTexNow(retired);
     deleteQueue.clear();
     cleanupSwapchain(); cleanupCursorTex();
+    // cleanupSwapchain() keeps the frame-gen engine; its pipelines and modules go before the device.
+    lsfgEngine_.reset();
 
     vk_.DestroySampler(device, sampler, nullptr);
     vk_.DestroyDescriptorPool(device, winTexPool, nullptr);
@@ -90,6 +92,10 @@ VulkanRendererContext::~VulkanRendererContext() {
     vk_.DestroyRenderPass(device, renderPass, nullptr);
     vk_.DestroyDevice(device, nullptr);
     vk_.DestroySurfaceKHR(instance, surface, nullptr);
+    // The reference taken by nativeInit or reattachSurface (ANativeWindow_fromSurface). Only
+    // detachSurface() released it, so a renderer destroyed while attached - after a failed
+    // re-attach, Java re-creates it - kept the window's native Surface alive.
+    if (window) { ANativeWindow_release(window); window = nullptr; }
     if (validationMessenger != VK_NULL_HANDLE) {
         auto destroyMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
             gipa(instance, "vkDestroyDebugUtilsMessengerEXT"));
@@ -804,7 +810,7 @@ void VulkanRendererContext::createPostFXPipeline() {
 
 void VulkanRendererContext::setPostFXMode(int mode) {
     // Destroys a pipeline the render thread may be recording with: exclusive frame lock.
-    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    auto frameLock = lockFrameExclusive();
     RLOG("setPostFXMode: %d -> %d", postFXMode, mode);
     if (postFXMode == mode) return;
     postFXMode = mode;
@@ -876,8 +882,9 @@ void VulkanRendererContext::createCursorDS() {
 
 void VulkanRendererContext::createCmdBufs() {
     // One command buffer per pending present, per frame-in-flight slot: up to
-    // kMaxPresentsPerFrame buffers are needed when frame gen is armed.
-    cmdBufs.resize(MAX_FRAMES_IN_FLIGHT * kMaxPresentsPerFrame);
+    // kMaxPresentsPerFrame buffers are needed when frame gen is armed, plus one per later
+    // generation for its compute when the presents are recorded just in time (fgGenSlot).
+    cmdBufs.resize(MAX_FRAMES_IN_FLIGHT * kCmdBufsPerFrame);
     VkCommandBufferAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     ai.commandPool=cmdPool; ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandBufferCount=(uint32_t)cmdBufs.size();
     if (vk_.AllocateCommandBuffers(device,&ai,cmdBufs.data())!=VK_SUCCESS) throw std::runtime_error("cmdbuf");
@@ -909,8 +916,19 @@ void VulkanRendererContext::recreateSyncObjects() {
 
 void VulkanRendererContext::cleanupSwapchain() {
     vk_.DeviceWaitIdle(device);
-    lsfgEngine_.reset();
-    lsfgEngineTried_ = false;
+    // The interpolation chain is sized to the swapchain and its targets are destroyed below: it
+    // goes, and prepare() rebuilds it at the new size - images and descriptor sets only, the
+    // engine keeps the shader modules and the pipelines. The engine itself used to be thrown
+    // away here, so every surface change, rotation or frame-gen toggle re-read the shader cache
+    // and recompiled every pipeline on the render thread. (The pacer still starts over: prepare()
+    // resets it with every chain it builds.) Disarmed, the engine's frame state is cleared as
+    // when frame generation is switched off mid-frame. The destructor releases the engine.
+    if (lsfgEngine_) {
+        lsfgEngine_->releaseChain();
+        if (!fgArmed_.load(std::memory_order_relaxed)) lsfgEngine_->reset();
+    } else {
+        lsfgEngineTried_ = false;   // an engine that failed to start gets another attempt
+    }
     compositeArmed = false;
     destroyCompositeTargets();
     destroyFgQueryPool();
@@ -1861,8 +1879,12 @@ void VulkanRendererContext::renderFrame() {
     // with frame generation the cursor moved at the GUEST rate (30 FPS x4 = a 30 Hz cursor),
     // while without it cursor motion is drawn every refresh. With a visible cursor each later
     // present is now recorded shortly before its own refresh, with the pointer read then.
-    // Only with a visible cursor (games with a hidden one are untouched) and once the chain's
-    // cost is known, so the margin before each refresh is a measured one.
+    // Only the copy into the swapchain image and the cursor pass are recorded then: generation
+    // g's compute goes to the GPU right after present g - 1 (its own submit), a refresh or more
+    // ahead of its copy, so what waits for the refresh is a copy, not a generation. One present
+    // ahead and no further: a copy is ordered after everything submitted before it, and a later
+    // generation queued in front of it would hold it back.
+    // Only with a visible cursor (games with a hidden one are untouched).
     {
         const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
         const int64_t nowNs = steadyNowNs();
@@ -1870,9 +1892,12 @@ void VulkanRendererContext::renderFrame() {
             nowNs - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
         fgJitThisFrame_ = compositeActive() && !fgPassthrough_ && fgPlan_.generations > 0 &&
             curVis && cursorImg != VK_NULL_HANDLE && cursorDS != VK_NULL_HANDLE &&
-            cursorOverlayRenderPass != VK_NULL_HANDLE &&
-            (fgChainMsPerGen_ > 0.0f || fgJitFirstMs_ > 0.0f) && period > 0 && clockFresh;
+            cursorOverlayRenderPass != VK_NULL_HANDLE && period > 0 && clockFresh;
     }
+    // Generations 1.. computed one present ahead, each in its own submit right after present
+    // g - 1 (0 is in the first present's buffer). Bit g set: generation g's target holds its frame.
+    const bool gensAhead = fgJitThisFrame_ && fgPlan_.generations > 1;
+    uint32_t genReady = 0;
 
     recordCmdBuf(cmdBufs[cmdSlot(0)],imgIdx,frameDraws,
         frameAhbTransitions,framePreUpload,framePostUpload,
@@ -1897,17 +1922,32 @@ void VulkanRendererContext::renderFrame() {
     int64_t groupStartNs = 0;
     bool jit = fgJitThisFrame_;
     int64_t jitReachableNs = 0;   // first queue deadline the group can make (back-to-back case)
+    // Order a buffer after everything already submitted for this frame: the chain's shared
+    // passes and the earlier generations. Barriers span command buffers on one queue, so
+    // this is enough.
+    const auto orderAfterEarlierWork = [this](VkCommandBuffer buf) {
+        VkMemoryBarrier mb{}; mb.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        mb.srcAccessMask=VK_ACCESS_MEMORY_WRITE_BIT;
+        mb.dstAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
+        vk_.CmdPipelineBarrier(buf,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 1,&mb, 0,nullptr, 0,nullptr);
+    };
     // Generated frames belong between N-1 and N, so they go out first and the
     // real frame is presented last.
     for (uint32_t k = 0; k < fgPlan_.presents; k++) {
         VkCommandBuffer cb = cmdBufs[cmdSlot(k)];
-        if (k > 0 && jit) {
-            // Record this present just ahead of the refresh it is for, then draw the cursor
-            // where the pointer is now. Waits only end early for a stop, a lost surface or a
-            // swapchain change; the remaining presents then go out at once.
-            const int64_t wake = fgPresentRecordTimeNs(k, desiredPresent, jitReachableNs);
-            const int64_t nowNs = steadyNowNs();
-            if (wake > nowNs && wake - nowNs < 100000000LL && !waitRenderUntil(wake)) jit = false;
+        if (k > 0 && fgJitThisFrame_) {
+            if (jit) {
+                // Record this present just ahead of the refresh it is for. The wait ends early
+                // for a stop, a lost surface, a swapchain change or the next source frame
+                // (it must not wait behind these presents); the rest then go out at once.
+                const int64_t wake = fgPresentRecordTimeNs(k, desiredPresent, jitReachableNs);
+                const int64_t nowNs = steadyNowNs();
+                if (wake > nowNs && wake - nowNs < 100000000LL && !waitRenderUntil(wake)) jit = false;
+            }
+            // Draw the cursor where the pointer is now.
             cursorOverlay_.ptrX = (short)pointerX.load();
             cursorOverlay_.ptrY = (short)pointerY.load();
             // Hidden meanwhile: stop drawing it. (Shown meanwhile waits for the next source
@@ -1917,18 +1957,13 @@ void VulkanRendererContext::renderFrame() {
         if (k > 0) {
             VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             if (vk_.BeginCommandBuffer(cb,&bi)!=VK_SUCCESS) { fbResized.store(true); break; }
-            // Order this buffer after everything already submitted for this
-            // frame: the chain's shared passes and the earlier generations.
-            // Barriers span command buffers on one queue, so this is enough.
-            VkMemoryBarrier mb{}; mb.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            mb.srcAccessMask=VK_ACCESS_MEMORY_WRITE_BIT;
-            mb.dstAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
-            vk_.CmdPipelineBarrier(cb,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
-                0, 1,&mb, 0,nullptr, 0,nullptr);
-            if (k < fgPlan_.generations) recordFrameGenGeneration(cb, k);
-            else                          copyCompositeToSwapchain(cb, imgIdx);
+            orderAfterEarlierWork(cb);
+            if (k < fgPlan_.generations) {
+                // Computed a present ahead: only its copy (and the cursor) is recorded here.
+                if (gensAhead) { if (genReady & (1u << k)) recordFrameGenPresentCopy(cb, k); }
+                else recordFrameGenGeneration(cb, k);
+            }
+            else copyCompositeToSwapchain(cb, imgIdx);
             if (vk_.EndCommandBuffer(cb)!=VK_SUCCESS) {
                 RLOG_E("renderFrame: EndCommandBuffer failed for present %u/%u", k, fgPlan_.presents);
                 fbResized.store(true);
@@ -1942,12 +1977,16 @@ void VulkanRendererContext::renderFrame() {
         si.waitSemaphoreCount=1; si.pWaitSemaphores=&wSem; si.pWaitDstStageMask=&waitStage;
         si.commandBufferCount=1; si.pCommandBuffers=&cb;
         si.signalSemaphoreCount=1; si.pSignalSemaphores=&sSem;
-        // The frame's last submit also moves the GPU-progress timeline to this frame's serial:
+        // The frame's first submit also moves the GPU-progress timeline to this frame's serial:
         // once it is reached, every guest buffer this frame sampled can go back to the guest.
+        // The first is the only one that samples them (the windows are drawn there, into the
+        // swapchain image or the composite); generations and copies read the renderer's own
+        // images. On the last submit the guest's buffers were held until the whole group was
+        // out - with presents recorded just in time, most of the source interval.
         VkSemaphore signalSems[2] = {sSem, gpuTimeline_};
         uint64_t signalValues[2] = {0, (uint64_t)pendingFrameSerial};
         VkTimelineSemaphoreSubmitInfo timelineInfo{};
-        if (last && gpuTimeline_ != VK_NULL_HANDLE && pendingFrameSerial != 0) {
+        if (k == 0 && gpuTimeline_ != VK_NULL_HANDLE && pendingFrameSerial != 0) {
             timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
             timelineInfo.signalSemaphoreValueCount = 2;
             timelineInfo.pSignalSemaphoreValues = signalValues;
@@ -2018,6 +2057,31 @@ void VulkanRendererContext::renderFrame() {
             // signal into the next swapchain (recreateSyncObjects).
             fbResized.store(true);
             break;
+        }
+        if (gensAhead && k + 1 < fgPlan_.generations) {
+            // Generation k + 1 now, right behind this present: it has until its own copy - a
+            // refresh or more away - and that copy, recorded later, is ordered after it and
+            // after nothing later. No semaphores and no fence: the slot's fence rides on the last
+            // submit, which is ordered after this one.
+            const uint32_t g = k + 1;
+            VkCommandBuffer gb = cmdBufs[fgGenSlot(g)];
+            VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            if (vk_.ResetCommandBuffer(gb,0)!=VK_SUCCESS || vk_.BeginCommandBuffer(gb,&bi)!=VK_SUCCESS) {
+                fbResized.store(true);
+                break;
+            }
+            orderAfterEarlierWork(gb);
+            if (recordFrameGenCompute(gb, g)) genReady |= 1u << g;
+            VkSubmitInfo gsi{}; gsi.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            gsi.commandBufferCount=1; gsi.pCommandBuffers=&gb;
+            if (vk_.EndCommandBuffer(gb)!=VK_SUCCESS ||
+                vk_.QueueSubmit(graphicsQueue,1,&gsi,VK_NULL_HANDLE)!=VK_SUCCESS) {
+                // Nothing to copy for the remaining generated presents: end the frame here (the
+                // fence goes out below, behind everything submitted so far).
+                RLOG_E("renderFrame: frame-gen compute submit failed - dropping generated frames");
+                fbResized.store(true);
+                break;
+            }
         }
     }
     if (!fenceSubmitted) {
@@ -2394,8 +2458,9 @@ void VulkanRendererContext::noteGuestFrameLocked(int64_t nowNs) {
 }
 
 int64_t VulkanRendererContext::fgLeadNs(int64_t baseLead, int64_t spacing) const {
-    // The whole chain (shared passes + every generation) runs before the first present; a
-    // margin over its smoothed cost covers frame-to-frame variance. Unknown cost: a guess that
+    // The first present waits for the composite, the shared passes and generation 0 (one command
+    // buffer); the later generations are queued behind it and each has its own, later refresh.
+    // A margin over the smoothed cost covers frame-to-frame variance. Unknown cost: a guess that
     // fits mid-range GPUs at 1080p until the first timestamps are in.
     const int64_t cost = fgChainCostNs_.load(std::memory_order_relaxed);
     const int64_t chain = cost > 0 ? cost + cost / 4 + 1000000LL : 8000000LL;
@@ -2524,26 +2589,50 @@ int64_t VulkanRendererContext::fgPresentRecordTimeNs(uint32_t k, const int64_t d
     } else {
         return 0;
     }
-    // GPU time this present still needs before its deadline: one generation (compute + copy +
-    // cursor pass) or, for the real frame, the copy and the cursor pass. With the compositor's
-    // usual queue-deadline lead on top, as every composite gets, and half again of the cost
-    // for frame-to-frame variance.
+    // GPU time this present still needs before its deadline: the copy into the swapchain image
+    // and the cursor pass, generated and real frames alike (a generation went to the GPU right
+    // after the previous present, a refresh earlier). With the compositor's usual queue-deadline
+    // lead on top, as every composite gets, and a millisecond of slack.
     const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
-    const float genMs = fgChainMsPerGen_ > 0.0f ? fgChainMsPerGen_ : fgJitFirstMs_;
-    const bool generated = k < fgPlan_.generations;
-    const int64_t work = generated ? (int64_t)(genMs * 1.5f * 1.0e6f) : 1000000LL;
-    return latch - lead - work - 1000000LL;
+    constexpr int64_t kCopyWorkNs = 1000000LL;
+    return latch - lead - kCopyWorkNs - 1000000LL;
+}
+
+bool VulkanRendererContext::fgNextSourceReady(int64_t nowNs) const {
+    // A frame held by the limiter whose time has come (applyDuePresentsLocked's horizon).
+    const int64_t due = nextPendingDueNs_.load(std::memory_order_relaxed);
+    if (due != 0 && due <= nowNs + 250000LL) return true;
+    // A new guest frame, counted as renderFrame counts it: presents while the guest presents
+    // through X Present, content updates otherwise.
+    const int64_t lastPresentNs = guestPresentNs_.load(std::memory_order_relaxed);
+    const bool presentsDriving = lastPresentNs != 0 && nowNs - lastPresentNs < kPresentActiveNs;
+    return presentsDriving
+        ? guestPresentSerial_.load(std::memory_order_relaxed) > fgSeenPresentSerial_
+        : guestFrameSerial_.load(std::memory_order_relaxed) > fgSeenContentSerial_;
 }
 
 bool VulkanRendererContext::waitRenderUntil(int64_t wakeNs) {
-    // Same clock as steadyNowNs(). Woken by every update; only a stop, a lost surface or a
-    // swapchain change ends the wait early (returns false).
-    const std::chrono::steady_clock::time_point until{
-        std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::nanoseconds(wakeNs))};
+    // Same clock as steadyNowNs(). Woken by every update (wakeRender); ends early (returns
+    // false) for a stop, a lost surface, a swapchain change, or the next source frame: a new
+    // guest frame or a held one coming due. The thread is single: a group still waiting for
+    // its refreshes would otherwise hold the next source frame's composite and chain back,
+    // and with them the next group's first present. Also for a configuration change waiting
+    // for frameMutex (lockFrameExclusive): this frame holds it shared, and its caller holds
+    // the app's view lock with the X server and the UI thread behind it - a new guest frame
+    // cannot even reach the renderer meanwhile.
     std::unique_lock<std::mutex> lk(dirtyMutex);
-    return !dirtyCV.wait_until(lk, until, [this] {
-        return !isRunning.load() || surfaceDetached.load() || fbResized.load();
-    });
+    for (;;) {
+        if (!isRunning.load() || surfaceDetached.load() || fbResized.load()) return false;
+        if (frameWriters_.load(std::memory_order_acquire) > 0) return false;
+        const int64_t now = steadyNowNs();
+        if (fgNextSourceReady(now)) return false;
+        if (now >= wakeNs) return true;
+        // A held frame's due time is not announced by a wake: sleep no longer than that.
+        int64_t until = wakeNs;
+        const int64_t due = nextPendingDueNs_.load(std::memory_order_relaxed);
+        if (due != 0 && due - 250000LL < until) until = due - 250000LL;
+        dirtyCV.wait_for(lk, std::chrono::nanoseconds(std::max<int64_t>(until - now, 0)));
+    }
 }
 
 void VulkanRendererContext::onVsync(int64_t frameTimeNs, int64_t deadlineNs, int64_t presentNs) {
@@ -2835,7 +2924,7 @@ void VulkanRendererContext::setFilterMode(int mode) {
     // descriptor sets rewritten below are in use by the frame being recorded: run between
     // frames (frameMutex) and with the texture maps stable (renderMutex), the same order
     // renderFrame() takes them in.
-    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    auto frameLock = lockFrameExclusive();
     std::lock_guard<std::mutex> mapLock(renderMutex);
     auto modeName=[](int m){ return m==1?"NEAREST":m==2?"SGSR":m==3?"FSR1":"LINEAR"; };
     RLOG("setFilterMode: %d -> %d (%s->%s)", filterMode, mode, modeName(filterMode), modeName(mode));
@@ -2863,7 +2952,7 @@ void VulkanRendererContext::setFilterMode(int mode) {
 }
 
 void VulkanRendererContext::setStretchMode(int mode) {
-    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    auto frameLock = lockFrameExclusive();
     RLOG("setStretchMode: %d -> %d", stretchMode, mode);
     if (stretchMode == mode) return;
     stretchMode = mode;
@@ -2896,7 +2985,7 @@ void VulkanRendererContext::setSwapRB(bool enabled) {
     // Views and descriptor sets in use by the frame being recorded are replaced: same locking
     // as setFilterMode() (between frames, texture maps stable), and the GPU must be done with
     // the old views.
-    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    auto frameLock = lockFrameExclusive();
     std::lock_guard<std::mutex> mapLock(renderMutex);
     if (swapRB == enabled) return;
     swapRB = enabled;
@@ -2918,7 +3007,7 @@ void VulkanRendererContext::setSwapRB(bool enabled) {
 
 void VulkanRendererContext::setPresentMode(VkPresentModeKHR mode) {
     // availablePresentModes is rewritten by createSwapchain() on the render thread.
-    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    auto frameLock = lockFrameExclusive();
     bool supported = false;
     for (auto pm : availablePresentModes) if (pm == mode) { supported = true; break; }
     VkPresentModeKHR target = supported ? mode : VK_PRESENT_MODE_FIFO_KHR;

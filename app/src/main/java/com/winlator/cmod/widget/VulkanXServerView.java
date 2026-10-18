@@ -713,8 +713,15 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     private void countFrameForHud(Window window) {
         if (window.id == fpsWindowId) {
-            float frameGenRate = (nativeHandle != 0 && pendingLsfgMultiplier >= 2 && frameGenError.isEmpty())
-                    ? nativeGetFrameGenPresentedRate(nativeHandle) : 0f;
+            // Under the lock, like every other native call: nativeDestroy runs under it, and this
+            // used to read nativeHandle and call in without it - into a renderer that could be
+            // being deleted on another thread. The HUD updates below stay outside.
+            float frameGenRate = 0f;
+            if (pendingLsfgMultiplier >= 2 && frameGenError.isEmpty()) {
+                synchronized (lock) {
+                    if (nativeHandle != 0) frameGenRate = nativeGetFrameGenPresentedRate(nativeHandle);
+                }
+            }
             if (hudRef != null) {
                 hudRef.setFrameGenPresentedRate(frameGenRate);
                 hudRef.onFrame();
