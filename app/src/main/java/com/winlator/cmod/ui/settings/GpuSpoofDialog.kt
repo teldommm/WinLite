@@ -58,11 +58,7 @@ internal fun GpuSpoofSettingRow(
 ) {
     val spoof = remember(graphicsConfig) { GpuSpoof.fromConfig(graphicsConfig) }
     var showDialog by remember { mutableStateOf(false) }
-    val summary = when {
-        spoof.isEmpty -> uiStr(R.string.ui_off)
-        spoof.deviceName.isNotBlank() -> spoof.deviceName
-        else -> uiStr(R.string.ui_gpu_spoof_overridden, spoof.overriddenCount)
-    }
+    val summary = uiStr(if (spoof.isEmpty) R.string.ui_off else R.string.ui_gpu_spoof_on)
     Surface(
         onClick = { showDialog = true },
         color = Color.Transparent,
@@ -187,9 +183,8 @@ internal fun GpuSpoofDialog(
                 onClick = {
                     vendorId = ""; deviceId = ""; deviceName = ""
                     driverId = ""; driverName = ""; driverInfo = ""; driverVersion = ""
-                },
-                enabled = !current.isEmpty
-            ) { Text(uiStr(R.string.ui_gpu_spoof_reset), color = if (current.isEmpty) MaterialTheme.colorScheme.onSurfaceVariant else accent) }
+                }
+            ) { Text(uiStr(R.string.ui_gpu_spoof_reset), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Spacer(Modifier.weight(1f))
             OutlinedButton(
                 onClick = onDismiss,
