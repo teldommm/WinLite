@@ -175,6 +175,7 @@ private fun AboutDialogContent(onDismiss: () -> Unit) {
 
             Text(stringResource(R.string.credits_and_third_party_apps), fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
+            Text(linkText("WinLite by teldommm (", "Fork" to "https://github.com/teldommm/WinLite", ")"))
             Text(
                 linkText(
                     "Winlator Ludashi by StevenMX, pipetto-crypto (",

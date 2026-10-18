@@ -152,7 +152,7 @@ android {
         targetSdkVersion 28
 
         versionCode 20
-        versionName "1.2.5"
+        versionName "1.2.6"
 
         // External native build from Winlator
         externalNativeBuild {
