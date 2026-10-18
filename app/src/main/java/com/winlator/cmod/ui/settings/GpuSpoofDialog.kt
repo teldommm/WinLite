@@ -175,16 +175,19 @@ internal fun GpuSpoofDialog(
                 imeAction = ImeAction.Done,
                 modifier = Modifier.fillMaxWidth()
             ) { driverInfo = GpuSpoof.sanitizeText(it) }
+
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                TextButton(
+                    onClick = {
+                        vendorId = ""; deviceId = ""; deviceName = ""
+                        driverId = ""; driverName = ""; driverInfo = ""; driverVersion = ""
+                    }
+                ) { Text(uiStr(R.string.ui_gpu_spoof_reset), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
         }
 
         Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(
-                onClick = {
-                    vendorId = ""; deviceId = ""; deviceName = ""
-                    driverId = ""; driverName = ""; driverInfo = ""; driverVersion = ""
-                }
-            ) { Text(uiStr(R.string.ui_gpu_spoof_reset), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Spacer(Modifier.weight(1f))
             OutlinedButton(
                 onClick = onDismiss,
