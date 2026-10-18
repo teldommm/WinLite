@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.ui.theme.ThemedDialog
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
@@ -93,6 +94,9 @@ internal fun GpuSpoofSettingRow(
 }
 
 /**
+ * Placeholders show a Steam Deck (LCD, Van Gogh APU) on RADV: 1002:163f is also in wined3d's
+ * GPU table, so the IDs work for WineD3D too.
+ *
  * One field per WRAPPER_* spoof variable; an empty field keeps the real value. IDs take decimal
  * or 0x hex, the driver version a raw number or a dotted version. Done stays disabled while a
  * field is malformed.
@@ -117,18 +121,12 @@ internal fun GpuSpoofDialog(
     ThemedDialog(onDismissRequest = onDismiss) {
         ThemedDialogTitle(uiStr(R.string.ui_gpu_spoof))
         ThemedDialogScrollBody {
-            Text(
-                uiStr(R.string.ui_gpu_spoof_hint),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            SpoofSectionHeader(uiStr(R.string.ui_gpu_spoof_device))
+            SpoofSectionHeader(uiStr(R.string.ui_gpu_spoof_device), topPadding = 0.dp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SpoofField(
                     label = uiStr(R.string.ui_gpu_spoof_vendor_id),
                     value = vendorId,
-                    placeholder = "0x10de",
+                    placeholder = "0x1002",
                     isError = !GpuSpoof.isValidId(vendorId),
                     keyboardType = KeyboardType.Ascii,
                     modifier = Modifier.weight(1f)
@@ -136,7 +134,7 @@ internal fun GpuSpoofDialog(
                 SpoofField(
                     label = uiStr(R.string.ui_gpu_spoof_device_id),
                     value = deviceId,
-                    placeholder = "0x2684",
+                    placeholder = "0x163f",
                     isError = !GpuSpoof.isValidId(deviceId),
                     keyboardType = KeyboardType.Ascii,
                     modifier = Modifier.weight(1f)
@@ -145,21 +143,16 @@ internal fun GpuSpoofDialog(
             SpoofField(
                 label = uiStr(R.string.ui_gpu_spoof_device_name),
                 value = deviceName,
-                placeholder = "NVIDIA GeForce RTX 4090",
+                placeholder = "AMD Custom GPU 0405 (RADV VANGOGH)",
                 modifier = Modifier.fillMaxWidth()
             ) { deviceName = GpuSpoof.sanitizeText(it) }
 
             SpoofSectionHeader(uiStr(R.string.ui_gpu_spoof_driver))
-            Text(
-                uiStr(R.string.ui_gpu_spoof_driver_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SpoofField(
                     label = uiStr(R.string.ui_gpu_spoof_driver_id),
                     value = driverId,
-                    placeholder = "4",
+                    placeholder = "3",
                     isError = !GpuSpoof.isValidId(driverId),
                     keyboardType = KeyboardType.Ascii,
                     modifier = Modifier.weight(1f)
@@ -167,7 +160,7 @@ internal fun GpuSpoofDialog(
                 SpoofField(
                     label = uiStr(R.string.ui_gpu_spoof_driver_version),
                     value = driverVersion,
-                    placeholder = "560.94",
+                    placeholder = "24.3.0",
                     isError = !GpuSpoof.isValidDriverVersion(driverVersion),
                     keyboardType = KeyboardType.Ascii,
                     modifier = Modifier.weight(1f)
@@ -176,13 +169,13 @@ internal fun GpuSpoofDialog(
             SpoofField(
                 label = uiStr(R.string.ui_gpu_spoof_driver_name),
                 value = driverName,
-                placeholder = "NVIDIA",
+                placeholder = "radv",
                 modifier = Modifier.fillMaxWidth()
             ) { driverName = GpuSpoof.sanitizeText(it) }
             SpoofField(
                 label = uiStr(R.string.ui_gpu_spoof_driver_info),
                 value = driverInfo,
-                placeholder = "560.94",
+                placeholder = "Mesa 24.3.0",
                 imeAction = ImeAction.Done,
                 modifier = Modifier.fillMaxWidth()
             ) { driverInfo = GpuSpoof.sanitizeText(it) }
@@ -219,10 +212,10 @@ internal fun GpuSpoofDialog(
 }
 
 @Composable
-private fun SpoofSectionHeader(text: String) {
+private fun SpoofSectionHeader(text: String, topPadding: Dp = 14.dp) {
     Text(
         text,
-        modifier = Modifier.padding(top = 14.dp, bottom = 4.dp),
+        modifier = Modifier.padding(top = topPadding, bottom = 4.dp),
         style = MaterialTheme.typography.labelLarge,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onSurfaceVariant
