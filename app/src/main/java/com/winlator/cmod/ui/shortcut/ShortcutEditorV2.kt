@@ -106,6 +106,7 @@ import com.winlator.cmod.ui.settings.CpuSelectorRow
 import com.winlator.cmod.ui.settings.DriverOption
 import com.winlator.cmod.ui.settings.DxvkAsyncMode
 import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
+import com.winlator.cmod.ui.settings.GpuSpoofSettingRow
 import com.winlator.cmod.ui.settings.VulkanExtensionsDialog
 import com.winlator.cmod.ui.settings.parseExtensionBlacklist
 import com.winlator.cmod.ui.settings.DDrawWrapperChoice
@@ -224,7 +225,6 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var bcn by mutableStateOf(readConfig(graphicsConfig, "bcnEmulation", ';').ifBlank { "auto" })
     var bcnType by mutableStateOf(readConfig(graphicsConfig, "bcnEmulationType", ';').ifBlank { "compute" })
     var bcnCache by mutableStateOf(readConfig(graphicsConfig, "bcnEmulationCache", ';') == "1")
-    var gpuName by mutableStateOf(readConfig(graphicsConfig, "gpuName", ';').ifBlank { "Device" })
     var blacklistedExtensions by mutableStateOf(readConfig(graphicsConfig, "blacklistedExtensions", ';'))
 
     var audio by mutableStateOf(StringUtils.parseIdentifier(shortcut.getExtra("audioDriver", container.getAudioDriver())))
@@ -370,6 +370,13 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
 
     fun graphics(key: String, value: String) {
         graphicsConfig = writeConfig(graphicsConfig, key, value, ';')
+        shortcut.putExtra("graphicsDriverConfig", graphicsConfig)
+        save()
+    }
+
+    /** Replaces the whole graphicsDriverConfig (several keys at once, saved once). */
+    fun replaceGraphicsConfig(value: String) {
+        graphicsConfig = value
         shortcut.putExtra("graphicsDriverConfig", graphicsConfig)
         save()
     }
@@ -534,7 +541,6 @@ internal fun ShortcutEditorV2(
     val wrapperEntries = remember { context.resources.getStringArray(R.array.dxwrapper_entries).toList() }
     val localeEntries = remember { listOf("Default") + context.resources.getStringArray(R.array.some_lc_all).toList() }
     val soundFonts = remember { loadShortcutSoundFontsV2(context) }
-    val gpuNames = remember { loadShortcutGpuNamesV2(context) }
     val fexPresets = remember { FEXCorePresetManager.getPresets(context).associate { it.id to it.name } }
     val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associate { it.id to it.name } }
     val profiles = remember {
@@ -704,7 +710,7 @@ internal fun ShortcutEditorV2(
                     item(category) {
                         ShortcutCategoryV2(
                             category, state, catalog, screenEntries, graphicsEntries, graphicsWrapperEntries, audioEntries,
-                            wrapperEntries, localeEntries, soundFonts, gpuNames, fexPresets, boxPresets,
+                            wrapperEntries, localeEntries, soundFonts, fexPresets, boxPresets,
                             profiles, containers, ::environmentLabel, ::changeContainer, ::enterContainer,
                             ::installRuntime, ::installDriver, context
                         )
@@ -730,7 +736,7 @@ internal fun ShortcutEditorV2(
                     item(category) {
                         ShortcutCategoryV2(
                             category, state, catalog, screenEntries, graphicsEntries, graphicsWrapperEntries, audioEntries,
-                            wrapperEntries, localeEntries, soundFonts, gpuNames, fexPresets, boxPresets,
+                            wrapperEntries, localeEntries, soundFonts, fexPresets, boxPresets,
                             profiles, containers, ::environmentLabel, ::changeContainer, ::enterContainer,
                             ::installRuntime, ::installDriver, context
                         )
@@ -777,7 +783,6 @@ private fun ShortcutCategoryV2(
     wrapperEntries: List<String>,
     localeEntries: List<String>,
     soundFonts: List<String>,
-    gpuNames: List<String>,
     fexPresets: Map<String, String>,
     boxPresets: Map<String, String>,
     profiles: Map<String, String>,
@@ -995,7 +1000,7 @@ private fun ShortcutCategoryV2(
                 SettingsDivider()
                 SettingChoice(uiStr(R.string.ui_vulkan_version), s.vulkanVersion, listOf("1.1", "1.2", "1.3", "1.4")) { s.vulkanVersion = it; s.graphics("vulkanVersion", it) }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_gpu_name), s.gpuName, gpuNames) { s.gpuName = it; s.graphics("gpuName", it) }
+                GpuSpoofSettingRow(s.graphicsConfig) { s.replaceGraphicsConfig(it) }
                 SettingsDivider()
                 SettingChoice(uiStr(R.string.ui_max_device_memory), s.maxMemory, listOf("0", "512", "1024", "2048", "4096", "8192", "12288", "16384")) {
                     s.maxMemory = it; s.graphics("maxDeviceMemory", it)
@@ -1312,19 +1317,6 @@ private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blackli
             }
         )
     }
-}
-
-private fun loadShortcutGpuNamesV2(context: Context): List<String> {
-    val result = linkedSetOf("Device")
-    runCatching {
-        val data = FileUtils.readString(context, "gpu_cards.json")
-        val array = JSONArray(data)
-        for (index in 0 until array.length()) {
-            val name = array.optJSONObject(index)?.optString("name").orEmpty()
-            if (name.isNotBlank()) result.add(name)
-        }
-    }
-    return result.toList()
 }
 
 private fun loadShortcutSoundFontsV2(context: Context): List<String> {

@@ -63,6 +63,7 @@ import com.winlator.cmod.core.AppUtils;
 import com.winlator.cmod.core.DebugLogFile;
 import com.winlator.cmod.core.DefaultVersion;
 import com.winlator.cmod.core.EnvVars;
+import com.winlator.cmod.core.GpuSpoof;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.GameSaveManager;
@@ -2308,9 +2309,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     static String resolveGraphicsWrapperArchiveName(String graphicsWrapper) {
         // assets/graphics_driver/<name>.tzst; the name is also stored in the ImageFS variant marker.
-        if (Container.ADRENO_GRAPHICS_WRAPPER.equals(graphicsWrapper)) return "wrapper_adreno";
         if (Container.LEGACY_GRAPHICS_WRAPPER.equals(graphicsWrapper)) return "wrapper_legacy";
-        return "wrapper_default";
+        return "wrapper_wl";
     }
 
     private String getSelectedOpenGLDriver() {
@@ -2448,7 +2448,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 envVars.put("WRAPPER_NO_PATCH_OPCONSTCOMP", "1");
             }
         } else {
-            WineD3DConfig.setEnvVars(this, dxwrapperConfig, envVars);
+            WineD3DConfig.setEnvVars(this, dxwrapperConfig, graphicsDriverConfig, envVars);
         }
 
         boolean useDRI3 = preferences.getBoolean("use_dri3", true);
@@ -2498,12 +2498,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String blacklistedExtensions = graphicsDriverConfig.get("blacklistedExtensions");
         envVars.put("WRAPPER_EXTENSION_BLACKLIST", blacklistedExtensions);
 
-        String gpuName = graphicsDriverConfig.get("gpuName");
+        // GPU Spoof: WRAPPER_VENDOR_ID / DEVICE_ID / DEVICE_NAME / DRIVER_ID / DRIVER_NAME /
+        // DRIVER_INFO / DRIVER_VERSION, only for the fields the user filled in. Still skipped
+        // with DXVK 1.11.1-sarek, like the old GPU Name.
         String dxvkVersion = dxwrapperConfig.get("version");
-        if (!gpuName.equals("Device") && !dxvkVersion.equals("1.11.1-sarek")) {
-            envVars.put("WRAPPER_DEVICE_NAME", gpuName);
-            envVars.put("WRAPPER_DEVICE_ID", WineD3DConfig.getDeviceIdFromGPUName(this, gpuName));
-            envVars.put("WRAPPER_VENDOR_ID", WineD3DConfig.getVendorIdFromGPUName(this, gpuName));
+        if (!"1.11.1-sarek".equals(dxvkVersion)) {
+            GpuSpoof.applyEnv(graphicsDriverConfig, envVars);
         }
 
         String maxDeviceMemory = graphicsDriverConfig.get("maxDeviceMemory");

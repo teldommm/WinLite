@@ -90,6 +90,7 @@ import com.winlator.cmod.ui.settings.DDrawWrapperChoice
 import com.winlator.cmod.ui.settings.DriverOption
 import com.winlator.cmod.ui.settings.DxvkAsyncMode
 import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
+import com.winlator.cmod.ui.settings.GpuSpoofSettingRow
 import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingDriverChoice
 import com.winlator.cmod.ui.settings.SettingInstallChoice
@@ -206,7 +207,6 @@ private class ContainerEditorStateV2(
     var driverVersion by mutableStateOf(readConfig(graphicsConfig, "version", ';').ifBlank { preferredDriver })
     var blacklistedExtensions by mutableStateOf(readConfig(graphicsConfig, "blacklistedExtensions", ';'))
     var vulkanVersion by mutableStateOf(readConfig(graphicsConfig, "vulkanVersion", ';').ifBlank { "1.3" })
-    var gpuName by mutableStateOf(readConfig(graphicsConfig, "gpuName", ';').ifBlank { "Device" })
     var maxMemory by mutableStateOf(readConfig(graphicsConfig, "maxDeviceMemory", ';').ifBlank { "0" })
     var driverPresentMode by mutableStateOf(readConfig(graphicsConfig, "presentMode", ';').ifBlank { "mailbox" })
     var disablePresentWait by mutableStateOf(readConfig(graphicsConfig, "disablePresentWait", ';') == "1")
@@ -383,7 +383,6 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
     val audioEntries = remember { context.resources.getStringArray(R.array.audio_driver_entries).toList() }
     val localeEntries = remember { listOf("Default") + context.resources.getStringArray(R.array.some_lc_all).toList() }
     val soundFonts = remember(revision) { loadContainerSoundFontsV2(context) }
-    val gpuNames = remember { loadContainerGpuNamesV2(context) }
     val fexPresets = remember { FEXCorePresetManager.getPresets(context).associate { it.id to it.name } }
     val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associate { it.id to it.name } }
 
@@ -658,7 +657,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     item(category) {
                         ContainerCategoryV2(
                             category, state, runtimeChoices, arm64, screenEntries, graphicsEntries, graphicsWrapperEntries,
-                            wrapperEntries, audioEntries, localeEntries, soundFonts, gpuNames, fexPresets,
+                            wrapperEntries, audioEntries, localeEntries, soundFonts, fexPresets,
                             boxPresets, catalog, installing, ::installWine, ::installDriver, ::installRuntime
                         )
                     }
@@ -681,7 +680,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     item(category) {
                         ContainerCategoryV2(
                             category, state, runtimeChoices, arm64, screenEntries, graphicsEntries, graphicsWrapperEntries,
-                            wrapperEntries, audioEntries, localeEntries, soundFonts, gpuNames, fexPresets,
+                            wrapperEntries, audioEntries, localeEntries, soundFonts, fexPresets,
                             boxPresets, catalog, installing, ::installWine, ::installDriver, ::installRuntime
                         )
                     }
@@ -735,7 +734,6 @@ private fun ContainerCategoryV2(
     audioEntries: List<String>,
     localeEntries: List<String>,
     soundFonts: List<String>,
-    gpuNames: List<String>,
     fexPresets: Map<String, String>,
     boxPresets: Map<String, String>,
     catalog: SettingsCatalog?,
@@ -953,7 +951,7 @@ private fun ContainerCategoryV2(
                     s.vulkanVersion = it; s.graphics("vulkanVersion", it)
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_gpu_name), s.gpuName, gpuNames) { s.gpuName = it; s.graphics("gpuName", it) }
+                GpuSpoofSettingRow(s.graphicsConfig) { s.graphicsConfig = it }
                 SettingsDivider()
                 SettingChoice(uiStr(R.string.ui_max_device_memory), s.maxMemory, listOf("0", "512", "1024", "2048", "4096", "8192", "12288", "16384")) {
                     s.maxMemory = it; s.graphics("maxDeviceMemory", it)
@@ -1175,18 +1173,6 @@ private fun ContainerVulkanExtensionsV2(
             }
         )
     }
-}
-
-private fun loadContainerGpuNamesV2(context: Context): List<String> {
-    val result = linkedSetOf("Device")
-    runCatching {
-        val array = JSONArray(FileUtils.readString(context, "gpu_cards.json"))
-        for (index in 0 until array.length()) {
-            val name = array.optJSONObject(index)?.optString("name").orEmpty()
-            if (name.isNotBlank()) result.add(name)
-        }
-    }
-    return result.toList()
 }
 
 private fun loadContainerSoundFontsV2(context: Context): List<String> {

@@ -23,8 +23,7 @@
         <item>Wrapper</item>
     </string-array>
     <string-array name="graphics_wrapper_entries">
-        <item>Wrapper Default</item>
-        <item>Wrapper Adreno</item>
+        <item>Wrapper WL</item>
         <item>Wrapper Legacy</item>
     </string-array>
     <string-array name="wrapper_graphics_driver_version_entries">

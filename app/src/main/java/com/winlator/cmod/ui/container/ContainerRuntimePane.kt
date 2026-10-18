@@ -29,6 +29,7 @@ import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.StringUtils
 import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.ui.settings.DriverOption
+import com.winlator.cmod.ui.settings.GpuSpoofSettingRow
 import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingDriverChoice
 import com.winlator.cmod.ui.settings.SettingInstallChoice
@@ -88,7 +89,6 @@ internal fun ContainerRuntimePane(
     var bcnEmulation by remember { mutableStateOf(readConfig(graphicsConfig, "bcnEmulation", ';').ifBlank { "auto" }) }
     var bcnType by remember { mutableStateOf(readConfig(graphicsConfig, "bcnEmulationType", ';').ifBlank { "compute" }) }
     var bcnCache by remember { mutableStateOf(readConfig(graphicsConfig, "bcnEmulationCache", ';') == "1") }
-    var gpuName by remember { mutableStateOf(readConfig(graphicsConfig, "gpuName", ';').ifBlank { "Device" }) }
     var blacklistedExtensions by remember { mutableStateOf(readConfig(graphicsConfig, "blacklistedExtensions", ';')) }
 
     var presentMode by remember { mutableStateOf(container.getRendererPresentMode()) }
@@ -130,11 +130,13 @@ internal fun ContainerRuntimePane(
         value = loadSettingsCatalog(context, arm64, dxvkVersion, vkd3dVersion, fexVersion, boxVersion, driverVersion)
     }
 
-    fun saveGraphics(key: String, value: String) {
-        val updated = writeConfig(graphicsConfig, key, value, ';')
+    fun saveGraphicsConfig(updated: String) {
         graphicsConfig = updated
         container.setGraphicsDriverConfig(updated)
         container.saveData()
+    }
+    fun saveGraphics(key: String, value: String) {
+        saveGraphicsConfig(writeConfig(graphicsConfig, key, value, ';'))
     }
     fun saveWrapper(key: String, value: String) {
         val updated = writeConfig(wrapperConfig, key, value, ',')
@@ -251,7 +253,7 @@ internal fun ContainerRuntimePane(
                 SettingsDivider(); SettingChoice(uiStr(R.string.ui_bcn_emulation), bcnEmulation, listOf("none", "partial", "full", "auto")) { bcnEmulation = it; saveGraphics("bcnEmulation", it) }
                 SettingsDivider(); SettingChoice(uiStr(R.string.ui_bcn_emulation_type), bcnType, listOf("software", "compute")) { bcnType = it; saveGraphics("bcnEmulationType", it) }
                 SettingsDivider(); SettingToggle(uiStr(R.string.ui_bcn_emulation_cache), bcnCache) { bcnCache = it; saveGraphics("bcnEmulationCache", if (it) "1" else "0") }
-                SettingsDivider(); SettingText(uiStr(R.string.ui_gpu_name), gpuName) { gpuName = it; saveGraphics("gpuName", it) }
+                SettingsDivider(); GpuSpoofSettingRow(graphicsConfig) { saveGraphicsConfig(it) }
                 SettingsDivider(); SettingText(uiStr(R.string.ui_blacklisted_extensions), blacklistedExtensions, 2) { blacklistedExtensions = it; saveGraphics("blacklistedExtensions", it.replace(" ", "")) }
             }
         }

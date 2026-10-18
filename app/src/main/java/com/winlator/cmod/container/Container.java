@@ -58,9 +58,9 @@ public class Container {
     public static final String DEFAULT_AUDIO_DRIVER = "pulse-audio-gn";
     public static final String DEFAULT_EMULATOR = "FEXCore";
     public static final String DEFAULT_DXWRAPPER = "dxvk+vkd3d";
-    public static final String DEFAULT_DXWRAPPERCONFIG = "version=" + DefaultVersion.DXVK + ",framerate=0,maxFrameLatency=1,async=0,asyncCache=0" + ",vkd3dVersion=" + DefaultVersion.VKD3D + ",vkd3dLevel=12_1" + ",ddrawrapper=" + Container.DEFAULT_DDRAWRAPPER + ",csmt=3" + ",gpuName=NVIDIA GeForce GTX 480" + ",videoMemorySize=2048" + ",strict_shader_math=1" + ",OffscreenRenderingMode=fbo" + ",renderer=gl";
+    public static final String DEFAULT_DXWRAPPERCONFIG = "version=" + DefaultVersion.DXVK + ",framerate=0,maxFrameLatency=1,async=0,asyncCache=0" + ",vkd3dVersion=" + DefaultVersion.VKD3D + ",vkd3dLevel=12_1" + ",ddrawrapper=" + Container.DEFAULT_DDRAWRAPPER + ",csmt=3" + ",videoMemorySize=2048" + ",strict_shader_math=1" + ",OffscreenRenderingMode=fbo" + ",renderer=gl";
     public static final String DEFAULT_GRAPHICSDRIVERCONFIG =
-            "vulkanVersion=1.3" + ";version=" + ";blacklistedExtensions=" + ";maxDeviceMemory=0" + ";presentMode=mailbox" + ";disablePresentWait=0" + ";resourceType=auto" + ";bcnEmulation=auto" + ";bcnEmulationType=compute" + ";bcnEmulationCache=0" + ";gpuName=Device";
+            "vulkanVersion=1.3" + ";version=" + ";blacklistedExtensions=" + ";maxDeviceMemory=0" + ";presentMode=mailbox" + ";disablePresentWait=0" + ";resourceType=auto" + ";bcnEmulation=auto" + ";bcnEmulationType=compute" + ";bcnEmulationCache=0";
     public static final String DEFAULT_DDRAWRAPPER = "none";
     public static final String DEFAULT_WINCOMPONENTS = "direct3d=1,directsound=0,directmusic=0,directshow=0,directplay=0,xaudio=0,vcrun2010=1";
     public static final String FALLBACK_WINCOMPONENTS = "direct3d=1,directsound=1,directmusic=1,directshow=1,directplay=1,xaudio=1,vcrun2010=1";
@@ -184,17 +184,15 @@ public class Container {
     }
 
     // graphics_wrapper_entries -> StringUtils.parseIdentifier():
-    //   "Wrapper Default" -> "wrapper-default" (stored as "wrapper"),
-    //   "Wrapper Adreno"  -> "wrapper-adreno",
+    //   "Wrapper WL"     -> "wrapper-wl" (stored as "wrapper"; the default, mesa26 based wrapper,
+    //                       assets/graphics_driver/wrapper_wl.tzst),
     //   "Wrapper Legacy"  -> "wrapper-legacy" (assets/graphics_driver/wrapper_legacy.tzst).
-    // Anything else falls back to the default wrapper.
-    public static final String ADRENO_GRAPHICS_WRAPPER = "wrapper-adreno";
+    // Anything else, including the removed "wrapper-adreno", falls back to the default wrapper.
     public static final String LEGACY_GRAPHICS_WRAPPER = "wrapper-legacy";
 
     public static String normalizeGraphicsWrapper(String graphicsWrapper) {
         if (graphicsWrapper == null) return DEFAULT_GRAPHICS_WRAPPER;
         String id = graphicsWrapper.toLowerCase(java.util.Locale.ENGLISH);
-        if (ADRENO_GRAPHICS_WRAPPER.equals(id)) return ADRENO_GRAPHICS_WRAPPER;
         if (LEGACY_GRAPHICS_WRAPPER.equals(id)) return LEGACY_GRAPHICS_WRAPPER;
         return DEFAULT_GRAPHICS_WRAPPER;
     }
