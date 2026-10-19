@@ -433,7 +433,6 @@
     <string name="ui_gpu_spoof_driver_name">Driver name</string>
     <string name="ui_gpu_spoof_driver_info">Driver info</string>
     <string name="ui_gpu_spoof_driver_version">Driver version</string>
-    <string name="ui_gpu_spoof_reset">Reset</string>
     <string name="ui_blacklisted_extensions">Blacklisted Extensions</string>
     <string name="ui_dxvk_version">DXVK Version</string>
     <string name="ui_vkd3d_version">VKD3D Version</string>

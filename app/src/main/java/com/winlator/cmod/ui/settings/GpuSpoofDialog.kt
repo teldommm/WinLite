@@ -23,7 +23,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -90,9 +89,6 @@ internal fun GpuSpoofSettingRow(
 }
 
 /**
- * Placeholders show a Steam Deck (LCD, Van Gogh APU) on RADV: 1002:163f is also in wined3d's
- * GPU table, so the IDs work for WineD3D too.
- *
  * One field per WRAPPER_* spoof variable; an empty field keeps the real value. IDs take decimal
  * or 0x hex, the driver version a raw number or a dotted version. Done stays disabled while a
  * field is malformed.
@@ -122,7 +118,6 @@ internal fun GpuSpoofDialog(
                 SpoofField(
                     label = uiStr(R.string.ui_gpu_spoof_vendor_id),
                     value = vendorId,
-                    placeholder = "0x1002",
                     isError = !GpuSpoof.isValidId(vendorId),
                     keyboardType = KeyboardType.Ascii,
                     modifier = Modifier.weight(1f)
@@ -130,7 +125,6 @@ internal fun GpuSpoofDialog(
                 SpoofField(
                     label = uiStr(R.string.ui_gpu_spoof_device_id),
                     value = deviceId,
-                    placeholder = "0x163f",
                     isError = !GpuSpoof.isValidId(deviceId),
                     keyboardType = KeyboardType.Ascii,
                     modifier = Modifier.weight(1f)
@@ -139,7 +133,6 @@ internal fun GpuSpoofDialog(
             SpoofField(
                 label = uiStr(R.string.ui_gpu_spoof_device_name),
                 value = deviceName,
-                placeholder = "AMD Custom GPU 0405 (RADV VANGOGH)",
                 modifier = Modifier.fillMaxWidth()
             ) { deviceName = GpuSpoof.sanitizeText(it) }
 
@@ -148,7 +141,6 @@ internal fun GpuSpoofDialog(
                 SpoofField(
                     label = uiStr(R.string.ui_gpu_spoof_driver_id),
                     value = driverId,
-                    placeholder = "3",
                     isError = !GpuSpoof.isValidId(driverId),
                     keyboardType = KeyboardType.Ascii,
                     modifier = Modifier.weight(1f)
@@ -156,7 +148,6 @@ internal fun GpuSpoofDialog(
                 SpoofField(
                     label = uiStr(R.string.ui_gpu_spoof_driver_version),
                     value = driverVersion,
-                    placeholder = "24.3.0",
                     isError = !GpuSpoof.isValidDriverVersion(driverVersion),
                     keyboardType = KeyboardType.Ascii,
                     modifier = Modifier.weight(1f)
@@ -165,25 +156,15 @@ internal fun GpuSpoofDialog(
             SpoofField(
                 label = uiStr(R.string.ui_gpu_spoof_driver_name),
                 value = driverName,
-                placeholder = "radv",
                 modifier = Modifier.fillMaxWidth()
             ) { driverName = GpuSpoof.sanitizeText(it) }
             SpoofField(
                 label = uiStr(R.string.ui_gpu_spoof_driver_info),
                 value = driverInfo,
-                placeholder = "Mesa 24.3.0",
                 imeAction = ImeAction.Done,
                 modifier = Modifier.fillMaxWidth()
             ) { driverInfo = GpuSpoof.sanitizeText(it) }
 
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                TextButton(
-                    onClick = {
-                        vendorId = ""; deviceId = ""; deviceName = ""
-                        driverId = ""; driverName = ""; driverInfo = ""; driverVersion = ""
-                    }
-                ) { Text(uiStr(R.string.ui_gpu_spoof_reset), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -224,7 +205,6 @@ private fun SpoofSectionHeader(text: String, topPadding: Dp = 14.dp) {
 private fun SpoofField(
     label: String,
     value: String,
-    placeholder: String,
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     keyboardType: KeyboardType = KeyboardType.Text,
@@ -237,9 +217,6 @@ private fun SpoofField(
         onValueChange = onValueChange,
         modifier = modifier.padding(top = 4.dp),
         label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        placeholder = {
-            Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), maxLines = 1)
-        },
         isError = isError,
         singleLine = true,
         shape = WinZShapes.Small,
