@@ -1911,6 +1911,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (vkRenderer == null) return;
                 int[] effectModes = {0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
                 if (index <= 0 || index >= effectModes.length) {
+                    // ReShade's strength went into the shared sharpness; give the upscaler and
+                    // DLS theirs back, or they keep it until the slider is touched.
+                    vkRenderer.setSharpness(graphicsSharpnessPercent / 100f);
                     vkRenderer.setPostFXMode(0);
                     return;
                 }

@@ -113,6 +113,8 @@ struct VkTable {
     PFN_vkResetFences ResetFences;
     PFN_vkGetFenceStatus GetFenceStatus;
     PFN_vkGetSemaphoreCounterValue GetSemaphoreCounterValue;
+    PFN_vkWaitSemaphores WaitSemaphores;
+    PFN_vkSignalSemaphore SignalSemaphore;
 
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID GetAndroidHardwareBufferPropertiesANDROID;
 };
@@ -164,7 +166,8 @@ struct WindowPushConstantsPostFX  { float ndcX0, ndcY0, ndcX1, ndcY1;
                                     int   effectId;
                                     float sharpness;
                                     float resW, resH;
-                                    float _pad[4];
+                                    int   postFxId;   // effect 1..4 on top of ColorBoost
+                                    float _pad[3];
                                     float cosR = 1.f, sinR = 0.f; };
 
 static_assert(offsetof(WindowPushConstants,       cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
@@ -173,6 +176,7 @@ static_assert(offsetof(WindowPushConstantsStretch,cosR) == 48, "cosR offset must
 static_assert(offsetof(WindowPushConstantsFSR1,   cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
 static_assert(sizeof(WindowPushConstantsFSR1) == sizeof(WindowPushConstantsSGSR), "FSR1 push constants must fit the shared pipeline layout range");
 static_assert(offsetof(WindowPushConstantsPostFX, cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
+static_assert(offsetof(WindowPushConstantsPostFX, postFxId) == 32, "postFxId offset must match window_postfx.frag");
 
 class VulkanRendererContext {
 public:
@@ -184,7 +188,6 @@ public:
     void onSurfaceResized(int width, int height);
     void setTransform(float ox, float oy, float sx, float sy);
     void updatePointerPosition(short x, short y);
-    void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
     // contentId: the window content the texture belongs to. sourceId: the drawable the buffer
     // belongs to (the window content itself, or the DRI3 pixmap it presents). Both are
     // Drawable.uid values: unique for the process lifetime, never reused.
@@ -202,19 +205,20 @@ public:
     //   out[1] onScreenNs  - the previously presented buffer stays on screen until then: it
     //                        must not be given back before (0 = no constraint)
     //   out[2] depth       - buffers the guest may hold at once (0 = no limit)
+    //   out[3] completeNs  - when to send PresentCompleteNotify (0 = at once): the display slot
+    //                        while the guest keeps up with its slots
     // With an FPS limit and a vsync clock this is where the cadence is made:
     //  * the frame gets a display slot on the vsync grid, refresh/limit vsyncs after the last
     //    one (a fractional ratio alternates, e.g. 45 on 120 Hz -> 3,3,2), and is held until
     //    just before it, so every frame is shown for the same number of refreshes;
     //  * the guest gets a buffer as late as still lets the frame drawn into it make its slot
-    //    (measured guest frame time + margin): input is sampled as late as possible. It renders
-    //    one frame at a time (depth 1) while that fits; after repeated misses it may overlap two
-    //    for a while (depth 2), then tries one again;
+    //    (measured guest frame time + margin): input is sampled as late as possible;
+    //  * the guest may hold two buffers at once when it cycles through at least three (depth
+    //    2, the released one is drawn for the slot after next), else one (depth 1, the next
+    //    slot). Each release is timed for its own slot either way, so the depth costs no
+    //    latency; it only keeps a late frame from delaying the release of the next buffer;
     //  * never sooner than one limit interval after the previous release (the rate cap).
-    // Without a vsync clock, or with frame generation (which paces itself), the limit is a plain
-    // release cadence and frames are shown at once.
-    // out[0] release time, out[1] previous frame on screen until, out[2] depth (0 = no limit),
-    // out[3] when to send the present's CompleteNotify (0 = now).
+    // Without a vsync clock the limit is a plain release cadence and frames are shown at once.
     void presentFrame(int64_t contentId, int64_t sourceId, AHardwareBuffer* ahb,
                       int64_t guestFrameNs, int64_t out[4]);
     void setFpsLimit(int fps);
@@ -226,9 +230,7 @@ public:
     void releaseDrawable(int64_t id);
     void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY);
     void setCursorVisible(bool visible);
-    void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);
     void removeWindow(int64_t id);
-    void clearBackbuffer() {}
     void beginBatch() {}
     void endBatch() {}
     std::atomic<bool> surfaceDetached{false};
@@ -275,17 +277,10 @@ private:
         VkDeviceMemory       mem            = VK_NULL_HANDLE;
         VkImageView          view           = VK_NULL_HANDLE;
         VkDescriptorSet      ds             = VK_NULL_HANDLE;
-        VkBuffer             stg            = VK_NULL_HANDLE;
-        VkDeviceMemory       stgMem         = VK_NULL_HANDLE;
-        void*                mapped         = nullptr;
-        VkDeviceSize         cap            = 0;
         int                  w              = 0;
         int                  h              = 0;
-        bool                 dirty          = false;
-        bool                 isAHB          = false;
         bool                 needsTransition = false;
-        AHardwareBuffer*     ahb            = nullptr;
-        int64_t              srcId          = 0;   // isAHB: the SourceImport this borrows from
+        int64_t              srcId          = 0;   // window texture: the SourceImport it borrows from
         VkFormat             fmt            = VK_FORMAT_UNDEFINED;   // of img/view (view rebuilds)
     };
     // One Vulkan import per source drawable's AHardwareBuffer, shared by every window texture
@@ -309,10 +304,8 @@ private:
     struct DrawEntry {
         VkImage         img            = VK_NULL_HANDLE;
         VkDescriptorSet ds             = VK_NULL_HANDLE;
-        VkBuffer        upload         = VK_NULL_HANDLE;
         int             x=0, y=0, w=0, h=0;
         bool            needsTransition = false;
-        bool            isAHB          = false;
     };
 
     struct WinNode {
@@ -383,7 +376,9 @@ public:
 
     std::vector<DrawEntry>             frameDraws;
     std::vector<VkImageMemoryBarrier>  frameAhbTransitions;
-    std::vector<VkImageMemoryBarrier>  framePreUpload;
+    // VK_EXT_queue_family_foreign is enabled: guest buffers are acquired from and released to the
+    // foreign queue family on every frame that samples them (recordCmdBuf).
+    bool foreignQueueFamily_ = false;
     std::vector<VkImageMemoryBarrier>  framePostUpload;
 
     std::atomic<int>  pointerX{0}, pointerY{0};
@@ -441,7 +436,6 @@ public:
         VkImageView     view        = VK_NULL_HANDLE;  // colour attachment + sampled
         VkImageView     storageView = VK_NULL_HANDLE;  // compute writes (generate)
         VkFramebuffer   fb          = VK_NULL_HANDLE;
-        VkDescriptorSet ds          = VK_NULL_HANDLE;  // sampled, for later passes
     };
     // Hard ceiling: (max generations + 1) presentable frames per source frame,
     // times a queue depth of 2, capped so the footprint stays bounded.
@@ -560,9 +554,9 @@ public:
     // counting generated frames. The pacer's own "loop rate" cannot serve this
     // purpose: it is sampled once per SOURCE frame, so it always equals the
     // guest rate and contains no evidence that generation happened at all.
-    float    fgPresentedRate_   = 0.0f;
-    float    fgSourceRate_      = 0.0f;
-    uint32_t fgSourceAccum_     = 0;
+    // Written by the render thread; read by the HUD on the X server's thread (on every guest
+    // present), lock-free.
+    std::atomic<float> fgPresentedRate_{0.0f};
     uint32_t fgPresentAccum_    = 0;
     std::chrono::steady_clock::time_point fgRateWindowStart_{};
     bool     fgRateWindowOpen_  = false;
@@ -574,28 +568,18 @@ public:
     // the chain's shared passes and generated frame 0; each later generated
     // frame and the real frame are recorded and submitted on their own, so a
     // finished frame reaches the presentation engine without waiting for the
-    // rest of the chain. When the presents are recorded just in time, generations
-    // 1.. (at most kMaxPresentsPerFrame - 2 of them) get one more each for their
-    // compute (fgGenSlot), submitted one present ahead of their copy.
-    static constexpr uint32_t kCmdBufsPerFrame = kMaxPresentsPerFrame + (kMaxPresentsPerFrame - 2);
-    uint32_t cmdSlot(uint32_t k) const { return currentFrame * kCmdBufsPerFrame + k; }
-    uint32_t fgGenSlot(uint32_t g) const { return currentFrame * kCmdBufsPerFrame + kMaxPresentsPerFrame + (g - 1); }
+    // rest of the chain.
+    uint32_t cmdSlot(uint32_t k) const { return currentFrame * kMaxPresentsPerFrame + k; }
     // Shared chain passes (the 24 shaders every generated frame depends on).
     void recordFrameGenProcess(VkCommandBuffer cb);
-    // Generated frame g: synthesise into a spare composite target and copy it
-    // into the swapchain image reserved for it (compute + copy, one buffer).
+    // Generated frame g: synthesise into its own spare composite target, copy it into the
+    // swapchain image reserved for it and draw the cursor where cursorOverlay_ says.
     void recordFrameGenGeneration(VkCommandBuffer cb, uint32_t g);
-    // The two halves of it. Compute: synthesise frame g into its own composite target
-    // (every generation has its own, so all of them can run before any is shown); false if
-    // there was nothing to do. Present copy: copy that target into the swapchain image
-    // reserved for g and draw the cursor where cursorOverlay_ says.
-    bool recordFrameGenCompute(VkCommandBuffer cb, uint32_t g);
-    void recordFrameGenPresentCopy(VkCommandBuffer cb, uint32_t g);
 
     // Chain cost: three timestamps per frame slot - before the shared passes, after them, and
     // after generation 0's compute (before its copy, so a vblank wait on a swapchain image is not
-    // counted). All three are in the first present's buffer, so later generations recorded just
-    // in time never stretch a span. Read back after the slot's fence wait, one frame later.
+    // counted). All three are in the first present's buffer. Read back after the slot's fence
+    // wait, one frame later.
     static constexpr uint32_t kFgQueriesPerSlot = 3;
     VkQueryPool fgQueryPool_        = VK_NULL_HANDLE;
     bool        fgTimestampsOk_     = false;
@@ -616,7 +600,6 @@ public:
     void setLsfgCachePath(const char* path);
     void setFrameGenArmed(bool armed, int multiplier, int targetRate = 0);
     void setFrameGenTuning(float flowScale, float refreshHz);
-    void frameGenStats(float out[6]) const;
 
     VkRenderPass          renderPass  = VK_NULL_HANDLE;
     VkDescriptorSetLayout dsLayout    = VK_NULL_HANDLE;
@@ -665,9 +648,16 @@ public:
     int64_t lastPresentNs_ = 0;
     int64_t pacingWaitNs(bool content) const;
     // lastDesiredNs: desired presentation time of the last present (display timing), 0 = none.
-    // startNs: when the group was queued (its first submit), 0 = now.
-    void    notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs = 0,
-                                   int64_t startNs = 0);
+    void    notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs = 0);
+    // How long before a refresh's queue deadline a composite is started (GPU work + submit).
+    static int64_t queueLeadNs(int64_t periodNs) {
+        return std::clamp<int64_t>(periodNs * 2 / 5, 3000000LL, 8000000LL);
+    }
+    // The Choreographer clock has ticked recently (a stopped clock is not a grid to pace on).
+    bool vsyncClockFresh(int64_t nowNs) const {
+        return vsyncDeadlineNs_.load(std::memory_order_relaxed) != 0 &&
+               nowNs - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
+    }
 
     // Limiter state. Atomics are written from Java threads; the rest is renderMutex.
     std::atomic<int>     fpsLimit_{0};
@@ -689,25 +679,6 @@ public:
     // (limiter grid), 0 = none - then the first present goes out as soon as it is ready.
     void fgPresentTimes(uint32_t presents, int64_t desired[], int64_t anchorSlotNs) const;
 
-    // --- Frame generation: cursor recorded per present ------------------------------------
-    // With a visible cursor, presents after the first are recorded just ahead of their own
-    // refresh (see renderFrame), so each draws the pointer where it is then. Only the copy
-    // into the swapchain image and the cursor pass wait for that: generation g's compute is
-    // submitted right after present g - 1, a refresh or more before its copy, and nothing
-    // queued ahead of a copy is a later generation's.
-    bool  fgJitThisFrame_ = false;   // render thread: this source frame records just in time
-    // When to record present k (CLOCK_MONOTONIC ns), 0 = at once. reachableNs: first queue
-    // deadline the group could make, for presents without a desired time.
-    int64_t fgPresentRecordTimeNs(uint32_t k, const int64_t desired[], int64_t reachableNs) const;
-    // Sleeps until wakeNs; false if cut short by a stop, a lost surface, a swapchain change,
-    // the next source frame (which must not wait behind this one's remaining presents) or a
-    // configuration change waiting for frameMutex (lockFrameExclusive).
-    bool    waitRenderUntil(int64_t wakeNs);
-    // Whether the next frame-gen pass has a source frame now: a new guest frame, counted the
-    // way renderFrame counts it, or a frame held by the limiter whose time has come.
-    // Render thread only.
-    bool    fgNextSourceReady(int64_t nowNs) const;
-
     // --- Frame generation on the limiter grid ------------------------------------------------
     // With an FPS limit, frame generation's source frames are held for their display slot like
     // any other limited frame; the composite is started early enough for the chain up to the
@@ -718,32 +689,25 @@ public:
     int64_t fgLeadNs(int64_t baseLead, int64_t spacing) const;
     void    noteGuestFrameLocked(int64_t nowNs);   // a guest frame went on screen
     int64_t fgAnchorSlotNs_ = 0;              // render thread: slot of the frame just applied
-    // Display slots the generated frames may use (fractional, carried between source frames):
-    // presents above the panel's refresh only queue up in FIFO and add latency.
-    double  fgSlotCredit_ = 0.0;              // render thread
-    uint32_t fgCapLog_ = 0;
-    uint32_t fgPresentCap(uint32_t capacity, int64_t groupStartNs);
+    // Refreshes still taken by earlier presents when this group starts (FIFO tail, from the
+    // display queue model): the pacer leaves them out of this source frame's panel budget.
+    // groupStartNs: the group's slot (limiter grid), 0 = the next refresh it can make.
+    uint32_t fgQueuedRefreshes(int64_t groupStartNs) const;
     struct PendingPresent { int64_t srcId; int64_t dueNs; int64_t slotNs; };
     std::unordered_map<int64_t, std::deque<PendingPresent>> pendingPresents_;  // by content
     std::atomic<int64_t> nextPendingDueNs_{0};  // earliest dueNs, 0 = none
     // Limiter/pacing state of one presenting window (content). Two windows presenting at the
-    // same time (a launcher behind the game, a second swapchain) used to share one cadence,
-    // frame-time estimate and depth controller and disturbed each other.
+    // same time (a launcher behind the game, a second swapchain) used to share one cadence and
+    // frame-time estimate and disturbed each other.
     struct Pacer {
         int64_t idealSlotNs   = 0;    // unsnapped slot accumulator (keeps fractional ratios exact)
         int64_t lastReleaseNs = 0;
         double  guestFrameMeanNs = 0.0, guestFrameDevNs = 0.0;
         bool    guestFrameValid  = false;
-        int     pipelineDepth    = 1;      // guest buffers in flight under the limiter
-        uint32_t lateHistory     = 0;      // bit per recent frame: missed its slot
-        int64_t depthTwoUntilNs  = 0;
-        // How long depth 2 is kept after misses: doubles when the guest misses again soon after
-        // going back to 1 (a game that only just does not fit), back to 5 s once it settles.
-        int64_t depthTwoHoldNs   = 5000000000LL;
-        int64_t depthOneSinceNs  = 0;
         int64_t lastPresentNs    = 0;
-        // The limit equals the refresh rate: one slot per refresh, depth pinned at 2.
-        bool    atRefresh        = false;
+        // Buffers of the two presents before the current one: the guest cycles through three or
+        // more when all three differ (two may then be out at once), else through two.
+        int64_t recentSrc[2]     = {0, 0};
         void resetCadence() { idealSlotNs = 0; lastReleaseNs = 0; }
     };
     std::unordered_map<int64_t, Pacer> pacers_;   // by content, under renderMutex
@@ -762,6 +726,16 @@ public:
     // has not finished). False when unknown (no timeline semaphore): callers then fall back
     // to their own timing.
     bool sourceBusy(int64_t srcId);
+    // Blocking form, for the X server's hand-back of a busy buffer. begin is called like every
+    // native call (under the Java view lock, which nativeDestroy also holds) and returns the
+    // timeline value the buffer's last frame signals, or 0 if nothing is pending; a non-zero
+    // return counts a waiter, and the same thread must then call endSourceIdleWait - outside
+    // the Java lock, as it blocks (up to timeoutNs). The destructor wakes the waiters and waits
+    // for them to leave before the semaphore and the device go away.
+    uint64_t beginSourceIdleWait(int64_t srcId);
+    void     endSourceIdleWait(uint64_t serial, uint64_t timeoutNs);
+    std::atomic<int> idleWaiters_{0};
+    void releaseIdleWaiters();
 
     std::thread       renderThread;
     std::atomic<bool> isRunning{false};
@@ -778,21 +752,12 @@ public:
         if (all) dirtyCV.notify_all(); else dirtyCV.notify_one();
     }
     std::shared_mutex frameMutex;
-    // Exclusive frame lock for configuration changes. The render thread holds frameMutex shared
-    // for a whole frame - with frame generation and a visible cursor that is most of a source
-    // interval, while it waits for each present's refresh - and the callers come in holding the
-    // app's view lock, with the X server's request thread and the UI thread queued behind it.
-    // So the render thread is told first: a waiting writer ends those waits and the remaining
-    // presents go out at once (see waitRenderUntil). libc++'s shared_mutex also stops new
-    // readers while a writer waits, so this keeps every other reader's wait short too.
+    // Exclusive frame lock for configuration changes: waits for the frame being recorded (the
+    // render thread holds frameMutex shared for one frame) and keeps the next one from starting.
+    // Every setter that replaces something a frame records with takes it.
     std::unique_lock<std::shared_mutex> lockFrameExclusive() {
-        frameWriters_.fetch_add(1, std::memory_order_acq_rel);
-        wakeRender(true);
-        std::unique_lock<std::shared_mutex> lk(frameMutex);
-        frameWriters_.fetch_sub(1, std::memory_order_acq_rel);
-        return lk;
+        return std::unique_lock<std::shared_mutex>(frameMutex);
     }
-    std::atomic<int> frameWriters_{0};   // threads waiting in lockFrameExclusive()
 
     VkRect2D          customScissor    = {{0,0},{0,0}};
     bool              hasCustomScissor = false;
@@ -840,6 +805,9 @@ public:
     void createNisPipeline();
     void createStretchPipeline();
     void createPostFXPipeline();
+    void tryCreatePipeline(void (VulkanRendererContext::*create)(), const char* name);
+    bool upscalerActive() const;   // the selected upscaler is built and applies PostFX inline
+    void syncPostFXPipeline();
     void createFramebuffers();
     void createCmdPool();
     void createSampler();
@@ -858,14 +826,12 @@ public:
     }
     // Replaces wt.view by one with the current swizzle and points wt.ds at it. Device idle.
     bool  rebuildContentView(WinTex& wt);
-    bool  createWinTexResources(WinTex& wt, int w, int h);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
     void  destroyAllSourceImports();
     // renderMutex held for all of these.
     void  unrefSourceLocked(int64_t srcId);
     void  retireSourceLocked(std::unordered_map<int64_t, SourceImport>::iterator it);
     void  eraseContentLocked(int64_t contentId);
-    void  flushDeleteQueue();
     void  destroyTexNow(RetiredTex& retired);
     void  destroyWinTex(WinTex& wt);
     void  ensureCursorTex(short w, short h);
@@ -875,7 +841,6 @@ public:
     void recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         const std::vector<DrawEntry>& draws,
         std::vector<VkImageMemoryBarrier>& ahbTransitions,
-        std::vector<VkImageMemoryBarrier>& preUpload,
         std::vector<VkImageMemoryBarrier>& postUpload,
         VkBuffer cursorUpload, bool hasCursorUpload,
         float ox, float oy, float sx, float sy, float cw, float ch,

@@ -273,7 +273,7 @@ void LsfgPacer::TrackCost(Clock::time_point now, size_t ceiling) {
     last_cost_change = now;
 }
 
-LsfgPlan LsfgPacer::Plan(size_t capacity, uint64_t source_frames) {
+LsfgPlan LsfgPacer::Plan(size_t capacity, uint64_t source_frames, size_t queued) {
     const size_t ceiling = std::min(capacity, MaxGenerations());
     if (ceiling == 0) {
         Reset();
@@ -298,30 +298,47 @@ LsfgPlan LsfgPacer::Plan(size_t capacity, uint64_t source_frames) {
 
     TrackLoopRate(interval_seconds);
 
+    const bool fixed = config.target_rate == 0;
     float target_rate = static_cast<float>(config.target_rate);
     if (target_rate > 0.0f && config.refresh_rate > 0.0f) {
         target_rate = std::min(target_rate, config.refresh_rate);
     }
 
-    if (target_rate == 0.0f) {
-        // Fixed multiplier: the multiplier is the multiplier. WinNative clamps
-        // this to the panel's free slots and to its cost limiter; here that was
-        // decided against - above the refresh rate the surplus presents queue
-        // under FIFO and the renderer's short acquire timeout trims them.
-        output_credit = 0.0f;
-        limit = ceiling;
-        return LsfgPlan{limit, true};
-    }
+    // The most this source frame may get: what the renderer can hold, what the panel's
+    // refreshes during one source frame leave room for, and in adaptive mode what the GPU has
+    // been seen to keep up with. This is the only place the panel budget is counted (the
+    // renderer used to apply a second one of its own in front of this).
+    if (!fixed) TrackCost(now, ceiling);
+    const size_t headroom = HeadroomLimit();
+    size_t allowed = std::min(ceiling, headroom);
+    if (!fixed) allowed = std::min(allowed, cost_limit);
 
-    TrackCost(now, ceiling);
-    const size_t allowed = std::min(std::min(ceiling, HeadroomLimit()), cost_limit);
     const float pace_interval = SourceInterval() > 0.0f ? SourceInterval() : loop_interval;
-    const float desired_outputs = SnapWhole(pace_interval * target_rate, OUTPUT_SNAP_EPSILON);
+    float desired_outputs;
+    if (fixed) {
+        // Fixed multiplier: that many outputs per source frame while the panel has the
+        // refreshes for them, else as many as it has - a fractional ratio alternates through
+        // the credit (2x of 70 FPS on 120 Hz: 1, 2, 2, 1, ...). Presents above the refresh rate
+        // would only queue up in FIFO and add latency.
+        desired_outputs = static_cast<float>(MaxGenerations() + 1);
+        if (config.refresh_rate > 0.0f && pace_interval > 0.0f) {
+            desired_outputs = std::min(desired_outputs,
+                SnapWhole(pace_interval * config.refresh_rate, OUTPUT_SNAP_EPSILON));
+        }
+    } else {
+        desired_outputs = SnapWhole(pace_interval * target_rate, OUTPUT_SNAP_EPSILON);
+    }
     if (allowed == 0 || desired_outputs <= 1.0f) {
         output_credit = 0.0f;
         limit = 0;
         return {};
     }
+    // Refreshes earlier presents still occupy (FIFO tail, measured by the renderer) are not
+    // this frame's to fill: they come off the panel budget - not off the multiplier or the
+    // capacity, which a short tail does not touch while the panel has room to spare (2x of 30
+    // FPS on 120 Hz uses 2 of 4 refreshes). A transient cut: the plan stays warm and the excess
+    // credit is dropped below, so the frame after does not try to make it up.
+    allowed = std::min(allowed, headroom > queued ? headroom - queued : size_t{0});
 
     output_credit += desired_outputs;
     const size_t outputs =

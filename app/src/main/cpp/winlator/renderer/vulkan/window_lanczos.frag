@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // Separable Lanczos2 resampling (4x4 / 16 source texels).
 // Intended as a high-quality spatial texture filter between bilinear and heavier upscalers.
@@ -36,9 +37,11 @@ float lanczos2(float x) {
     return sinc(x) * sinc(x * 0.5);
 }
 
-vec4 loadSource(ivec2 p) {
-    ivec2 size = textureSize(texSampler, 0);
-    return texelFetch(texSampler, clamp(p, ivec2(0), size - ivec2(1)), 0);
+
+#include "postfx_common.glsl"
+
+void applyPostFX(inout vec3 rgb, vec2 uv) {
+    rgb = applyPostFXEffect(pc.effectId, rgb, uv, 1.0 / max(vec2(pc.srcW, pc.srcH), vec2(1.0)), pc.sharpness);
 }
 
 void main() {
@@ -47,20 +50,28 @@ void main() {
     ivec2 base = ivec2(floor(srcPos));
     vec2 fracPart = srcPos - floor(srcPos);
 
-    vec4 accum = vec4(0.0);
-    float totalWeight = 0.0;
-
-    for (int y = -1; y <= 2; ++y) {
-        float wy = lanczos2(float(y) - fracPart.y);
-        for (int x = -1; x <= 2; ++x) {
-            float wx = lanczos2(float(x) - fracPart.x);
-            float w = wx * wy;
-            accum += loadSource(base + ivec2(x, y)) * w;
-            totalWeight += w;
-        }
+    // The kernel is separable: 4 weights per axis, not one pair per tap (8 evaluations of
+    // lanczos2 instead of 20), and the edge clamp computed once.
+    vec4 wx, wy;
+    for (int i = 0; i < 4; ++i) {
+        wx[i] = lanczos2(float(i - 1) - fracPart.x);
+        wy[i] = lanczos2(float(i - 1) - fracPart.y);
     }
+    ivec2 maxTexel = textureSize(texSampler, 0) - ivec2(1);
 
-    vec4 color = accum / max(abs(totalWeight), 1e-6);
+    vec4 accum = vec4(0.0);
+    for (int y = 0; y < 4; ++y) {
+        vec4 row = vec4(0.0);
+        for (int x = 0; x < 4; ++x) {
+            ivec2 p = clamp(base + ivec2(x - 1, y - 1), ivec2(0), maxTexel);
+            row += texelFetch(texSampler, p, 0) * wx[x];
+        }
+        accum += row * wy[y];
+    }
+    float totalWeight = dot(wx, vec4(1.0)) * dot(wy, vec4(1.0));
+
+    vec4 color = clamp(accum / max(abs(totalWeight), 1e-6), 0.0, 1.0);
     if (pc.useTexAlpha == 0) color.a = 1.0;
-    outColor = clamp(color, 0.0, 1.0);
+    if (pc.effectId != 0) applyPostFX(color.rgb, fragTexCoord);
+    outColor = color;
 }

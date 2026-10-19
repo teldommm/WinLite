@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // =============================================================================
 //  NVIDIA Image Scaling (NIS) - NVScaler spatial upscaler + adaptive sharpen.
@@ -386,67 +387,10 @@ float addDirFilters(float p[6][6], float phase_x_frac, float phase_y_frac,
     return f;
 }
 
-vec3 applyDLS(vec3 center, vec2 uv, float sharp) {
-    vec2 texel  = vec2(pc.invSrcW, pc.invSrcH);
-    float SAT   = 1.0 + sharp * 0.20;
-    float CON   = 1.0 + sharp * 0.12;
-    float SHARP = sharp * 1.2;
-    vec3 c = clamp((center - 0.5) * CON + 0.5, 0.0, 1.0);
-    float gray = dot(c, vec3(0.299, 0.587, 0.114));
-    c = mix(vec3(gray), c, SAT);
-
-    vec3 blur = (texture(texSampler, uv + vec2( 0.0,    -texel.y)).rgb
-               + texture(texSampler, uv + vec2( 0.0,     texel.y)).rgb
-               + texture(texSampler, uv + vec2(-texel.x,  0.0   )).rgb
-               + texture(texSampler, uv + vec2( texel.x,  0.0   )).rgb) * 0.25;
-    return clamp(c + (center - blur) * SHARP, 0.0, 1.0);
-}
-
-vec3 applyCRT(vec3 center, vec2 uv) {
-
-    const float CA = 1.0025;
-    float r = texture(texSampler, (uv - 0.5) * CA + 0.5).r;
-    float b = texture(texSampler, (uv - 0.5) / CA + 0.5).b;
-    vec3 fc  = vec3(r, center.g, b);
-    float sx = abs(sin(uv.x * 1024.0) * 0.5 * 0.125);
-    float sy = abs(sin(uv.y * 1024.0) * 0.5 * 0.375);
-    return mix(fc, vec3(0.0), sx + sy);
-}
-
-vec3 applyHDR(vec3 center, vec2 uv) {
-    vec2 texel = vec2(pc.invSrcW, pc.invSrcH);
-    const float r1 = 0.793, r2 = 0.870;
-    vec3 b1 = vec3(0.0), b2 = vec3(0.0);
-    vec2 offs[8] = vec2[](
-        vec2( 1.5, -1.5), vec2(-1.5, -1.5), vec2( 1.5,  1.5), vec2(-1.5,  1.5),
-        vec2( 0.0, -2.5), vec2( 0.0,  2.5), vec2(-2.5,  0.0), vec2( 2.5,  0.0)
-    );
-    for (int i = 0; i < 8; i++) {
-        b1 += texture(texSampler, uv + offs[i] * r1 * texel).rgb;
-        b2 += texture(texSampler, uv + offs[i] * r2 * texel).rgb;
-    }
-    b1 *= 0.005; b2 *= 0.010;
-    vec3 hdr = (center + (b2 - b1)) * (r2 - r1);
-    return clamp(pow(abs(hdr + center), vec3(1.30)) + hdr, 0.0, 1.0);
-}
-
-vec3 applyNatural(vec3 c) {
-    mat3 toYIQ = mat3( 0.299,  0.596,  0.212,
-                       0.587, -0.275, -0.523,
-                       0.114, -0.321,  0.311);
-    mat3 toRGB = mat3( 1.0,         1.0,         1.0,
-                       0.95568806, -0.27158179, -1.10817732,
-                       0.61985809, -0.64687381,  1.70506455);
-    vec3 t = c * toYIQ;
-    t = vec3(pow(t.r, 1.12), t.g * 1.2, t.b * 1.2);
-    return clamp(t * toRGB, 0.0, 1.0);
-}
+#include "postfx_common.glsl"
 
 void applyPostFX(inout vec3 rgb, vec2 uv) {
-    if      (pc.effectId == 1) rgb = applyDLS    (rgb, uv, pc.sharpness);
-    else if (pc.effectId == 2) rgb = applyCRT    (rgb, uv);
-    else if (pc.effectId == 3) rgb = applyHDR    (rgb, uv);
-    else if (pc.effectId == 4) rgb = applyNatural(rgb);
+    rgb = applyPostFXEffect(pc.effectId, rgb, uv, vec2(pc.invSrcW, pc.invSrcH), pc.sharpness);
 }
 
 void main() {

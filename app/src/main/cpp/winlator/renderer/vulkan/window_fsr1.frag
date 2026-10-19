@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // WinZ FSR mode: single-pass edge-aware spatial reconstruction.
 // It deliberately follows the proven SGSR sampling/reconstruction path, but
@@ -39,6 +40,12 @@ vec2 weightY(float dx, float dy, float c, float std, float spatialFactor) {
     return vec2(w, w * c);
 }
 
+#include "postfx_common.glsl"
+
+void applyPostFX(inout vec3 rgb, vec2 uv) {
+    rgb = applyPostFXEffect(pc.effectId, rgb, uv, 1.0 / max(vec2(pc.srcW, pc.srcH), vec2(1.0)), pc.sharpness);
+}
+
 void main() {
     highp vec2 srcSize = max(vec2(pc.srcW, pc.srcH), vec2(1.0));
     highp vec2 step = 1.0 / srcSize;
@@ -62,7 +69,9 @@ void main() {
     // SGSR uses 12/255. FSR deliberately engages reconstruction earlier.
     const float EDGE_THRESHOLD = 8.0 / 255.0;
     if (edgeVote <= EDGE_THRESHOLD) {
-        outColor = vec4(center.rgb, (pc.useTexAlpha != 0) ? center.a : 1.0);
+        vec3 rgb = center.rgb;
+        if (pc.effectId != 0) applyPostFX(rgb, fragTexCoord);
+        outColor = vec4(rgb, (pc.useTexAlpha != 0) ? center.a : 1.0);
         return;
     }
 
@@ -116,5 +125,6 @@ void main() {
     float deltaY = clamp(finalY - centerG, -maxDelta, maxDelta);
 
     vec3 result = clamp(center.rgb + vec3(deltaY), 0.0, 1.0);
+    if (pc.effectId != 0) applyPostFX(result, fragTexCoord);
     outColor = vec4(result, (pc.useTexAlpha != 0) ? center.a : 1.0);
 }

@@ -207,24 +207,26 @@ bool Engine::prepare(uint32_t width, uint32_t height, VkFormat format) {
     return true;
 }
 
-uint32_t Engine::plan(uint32_t capacity, uint64_t sourceFrames) {
+uint32_t Engine::plan(uint32_t capacity, uint64_t sourceFrames, uint32_t queued) {
     if (unavailable_ || !chain_) return 0;
 
-    plan_ = pacer_.Plan(std::min<size_t>(capacity, kMaxGenerations), sourceFrames);
+    plan_ = pacer_.Plan(std::min<size_t>(capacity, kMaxGenerations), sourceFrames, queued);
 
     warm_ = plan_.warm && frameCount_ + 1 >= kRequiredFrames;
     warmStreak_ = warm_ ? warmStreak_ + 1 : 0;
     generating_ = warm_ && warmStreak_ >= kRecurrenceFrames && plan_.generations > 0;
 
-    // Adaptive pacing alternates frames with and without generations whenever
-    // target/source is below 2 (e.g. 45 fps -> 60). If the input ring and the
+    // The pacer alternates frames with and without generations whenever the
+    // outputs per source frame are fractional: adaptive below 2x (e.g. 45 fps
+    // -> 60), and a fixed multiplier that does not fit the panel (2x of 70 fps
+    // on 120 Hz), or a FIFO tail cutting a frame. If the input ring and the
     // shared chain only ran on generating frames, every generating frame that
     // follows a zero frame would find stale history: it was turned into a
     // priming frame (no output at all - at target/source <= 1.5 nothing was
     // ever generated), and the next one ran on a freshly reset alpha history,
     // i.e. motion estimated from two identical frames (a plain crossfade).
-    // So in adaptive mode, once warm, history is maintained on every frame.
-    keepHistory_ = adaptive() && warm_ && warmStreak_ >= kRecurrenceFrames;
+    // So once warm, history is maintained on every frame.
+    keepHistory_ = warm_ && warmStreak_ >= kRecurrenceFrames;
 
     // After arming or a pacing gap, fill the two-frame input ring before
     // interpolating so the first generated frame is never blended with stale history.
@@ -242,9 +244,9 @@ uint32_t Engine::plan(uint32_t capacity, uint64_t sourceFrames) {
         const LsfgPacerStats stats = pacer_.Stats();
         const float wanted = stats.source_rate * (float)(plan_.generations + 1);
         LSFG_LOGI("presented=%.1f fps (measured at the swapchain)", (double)presentedRate_);
-        LSFG_LOGI("pace gen=%zu max=%zu cost=%zu cap=%u guest=%.1f loop=%.1f refresh=%.1f "
-                  "target=%.0f slots=%.2f drawn=%llu needs=%.1fHz%s%s",
-                  plan_.generations, pacer_.MaxGenerations(), stats.cost_limit, capacity,
+        LSFG_LOGI("pace gen=%zu max=%zu cost=%zu cap=%u queued=%u guest=%.1f loop=%.1f "
+                  "refresh=%.1f target=%.0f slots=%.2f drawn=%llu needs=%.1fHz%s%s",
+                  plan_.generations, pacer_.MaxGenerations(), stats.cost_limit, capacity, queued,
                   (double)stats.source_rate, (double)stats.loop_rate, (double)stats.refresh_rate,
                   (double)stats.target_rate, (double)stats.slots,
                   (unsigned long long)stats.last_drawn, (double)wanted,
@@ -267,7 +269,7 @@ void Engine::process(VkCommandBuffer cmd, VkImage source, uint32_t width, uint32
     // generating_ covers the renderer cutting this frame's generations to zero
     // after plan() (a short acquire): the input ring still advances, so the
     // next frame does not have to spend a frame re-priming it.
-    // keepHistory_ covers adaptive frames the pacer planned no output for.
+    // keepHistory_ covers warm frames the pacer planned no output for.
     const bool needHistory = generations > 0 || primeHistory_ || generating_ || keepHistory_;
     if (needHistory) {
         copyPresentedFrame(cmd, source, chain_->Input(count), VkExtent2D{width, height});

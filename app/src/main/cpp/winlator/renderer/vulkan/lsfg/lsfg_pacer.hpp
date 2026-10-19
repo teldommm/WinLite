@@ -58,7 +58,9 @@ public:
 
     [[nodiscard]] size_t MaxGenerations() const;
 
-    [[nodiscard]] LsfgPlan Plan(size_t capacity, uint64_t source_frames);
+    // capacity: generations the renderer can hold (swapchain images, targets). queued:
+    // refreshes still taken by earlier presents when this frame's presents start.
+    [[nodiscard]] LsfgPlan Plan(size_t capacity, uint64_t source_frames, size_t queued = 0);
 
     [[nodiscard]] LsfgPacerStats Stats() const;
 

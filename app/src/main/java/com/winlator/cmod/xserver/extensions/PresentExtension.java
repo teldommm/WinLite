@@ -34,6 +34,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
@@ -50,6 +52,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     private XServer xServer;
     private final Object limiterLock = new Object();
     private ScheduledThreadPoolExecutor limiterExecutor;
+    private ExecutorService gpuIdleExecutor;
 
     /*
      * Buffer pacing. A guest (DXVK & co. through the X11 WSI) can only render into a pixmap the
@@ -66,10 +69,11 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
      */
     private static final long STALL_GUARD_NS = 200_000_000L;
     private static final long NO_TOKEN = Long.MIN_VALUE;
-    // A buffer the renderer's GPU work may still be reading is held back in steps of this, for
-    // at most GPU_BUSY_MAX_TRIES steps (a stalled renderer must not stall the guest for good).
-    private static final long GPU_BUSY_RETRY_NS = 500_000L;
-    private static final int GPU_BUSY_MAX_TRIES = 100;
+    // A buffer the renderer's GPU work may still be reading waits on its own thread until the
+    // GPU is done with it (the renderer's timeline semaphore), for at most this in all: a stalled
+    // renderer must not stall the guest for good.
+    private static final long GPU_BUSY_MAX_NS = 50_000_000L;
+    private static final long NO_DEADLINE = Long.MIN_VALUE;
 
     private static final class Presented {
         final Window window;
@@ -183,6 +187,24 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         }
     }
 
+    private ExecutorService gpuIdleExecutor() {
+        synchronized (limiterLock) {
+            if (gpuIdleExecutor == null) {
+                gpuIdleExecutor = Executors.newSingleThreadExecutor(runnable -> {
+                    // Its wake-up, like the limiter's, is a frame release.
+                    Thread thread = new Thread(() -> {
+                        android.os.Process.setThreadPriority(
+                                android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY);
+                        runnable.run();
+                    }, "PresentGpuIdle");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+            }
+            return gpuIdleExecutor;
+        }
+    }
+
     private ScheduledThreadPoolExecutor limiterExecutor() {
         synchronized (limiterLock) {
             if (limiterExecutor == null) {
@@ -211,7 +233,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         if (when - nowNs <= 200_000L) {
             now.add(p);
         } else {
-            limiterExecutor().schedule(() -> deliverIdle(p, 0), when - nowNs, TimeUnit.NANOSECONDS);
+            limiterExecutor().schedule(() -> deliverIdle(p, NO_DEADLINE), when - nowNs, TimeUnit.NANOSECONDS);
         }
     }
 
@@ -221,7 +243,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
      * (with no limit the previous buffer goes back the moment the next one is presented, while
      * the composite that showed it can still be running).
      */
-    private void deliverIdle(Presented p, int tries) {
+    private void deliverIdle(Presented p, long gpuDeadlineNs) {
         if (p.token != NO_TOKEN) {
             synchronized (limiterLock) {
                 WindowPacing wp = pacing.get(p.window.id);
@@ -230,11 +252,21 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
                 if (planned == null || planned != p.token) return;
             }
         }
-        com.winlator.cmod.widget.XServerRendererView view = xServer.getXServerView();
-        if (tries < GPU_BUSY_MAX_TRIES && view != null && view.isGuestBufferBusy(p.pixmap.drawable)) {
-            limiterExecutor().schedule(() -> deliverIdle(p, tries + 1),
-                    GPU_BUSY_RETRY_NS, TimeUnit.NANOSECONDS);
-            return;
+        final com.winlator.cmod.widget.XServerRendererView view = xServer.getXServerView();
+        if (view != null && view.isGuestBufferBusy(p.pixmap.drawable)) {
+            final long nowNs = System.nanoTime();
+            final long deadlineNs = gpuDeadlineNs != NO_DEADLINE ? gpuDeadlineNs : nowNs + GPU_BUSY_MAX_NS;
+            if (deadlineNs - nowNs > 0) {
+                // Block on the GPU on a thread of its own - not on this one, which delivers every
+                // window's planned hand-backs, nor on the X server thread that may have called
+                // this - then come back here: the plan may have changed meanwhile, and a newer
+                // composite may have sampled the buffer again.
+                gpuIdleExecutor().execute(() -> {
+                    view.waitGuestBufferIdle(p.pixmap.drawable, deadlineNs - System.nanoTime());
+                    limiterExecutor().execute(() -> deliverIdle(p, deadlineNs));
+                });
+                return;
+            }
         }
         sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
     }
@@ -269,7 +301,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
                 if (pacing.get(windowId) != wp || wp.held.size() <= wp.keep()) return;
                 releaseLocked(wp, wp.held.pollFirst(), 0, System.nanoTime(), now);
             }
-            for (Presented p : now) deliverIdle(p, 0);
+            for (Presented p : now) deliverIdle(p, NO_DEADLINE);
         }, STALL_GUARD_NS, TimeUnit.NANOSECONDS);
     }
 
@@ -335,10 +367,10 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
 
         presentToRenderer(client, window, pixmap, guestFrameNs, plan);
 
-        // Complete when the frame goes on screen (plan[3], its display slot), not when it is
-        // received: a guest that starts its next frame on completion (DXVK 2.3+ through
-        // present_wait) then samples input right after this one is shown. Never before an
-        // earlier present's completion, so they stay in order.
+        // Complete when the frame goes on screen (plan[3], its display slot, while the guest
+        // keeps up with its slots), not when it is received: a guest that starts its next frame
+        // on completion (DXVK 2.3+ through present_wait) then samples input right after this
+        // one is shown. Never before an earlier present's completion, so they stay in order.
         long completeAt = plan[3];
         // A requested vsync is honoured too (FIFO): complete at that vsync, as an X server that
         // copies at vblank does. The frame itself is already shown; this only paces the client.
@@ -365,7 +397,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             planReleasesLocked(wp, plan, nowNs, releaseNow);
             armStallGuardLocked(window.id, wp);
         }
-        for (Presented p : releaseNow) deliverIdle(p, 0);
+        for (Presented p : releaseNow) deliverIdle(p, NO_DEADLINE);
     }
 
     /** Furthest ahead a requested vsync is waited for; beyond this the request is not one. */

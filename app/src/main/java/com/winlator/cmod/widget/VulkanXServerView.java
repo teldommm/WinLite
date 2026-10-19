@@ -133,8 +133,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
      * a fence wait when the cursor changes size; frameMutex across a whole frame) holds up every
      * garbage collection - and every thread, the UI thread included - until it returns. The
      * methods that lock renderMutex or frameMutex are plain native calls. */
-    private native void nativeUpdateWindowContent(long handle, long id,
-        ByteBuffer pixels, short width, short height, short stride, int x, int y);
     private native void nativeUpdateWindowContentAHB(long handle, long contentId,
         long sourceId, long ahbPtr, short width, short height, int x, int y);
     @FastNative private native void nativeSetDisplayRefreshRate(long handle, float hz);
@@ -142,6 +140,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         long ahbPtr, long guestFrameNs, long[] plan);
     private native void nativeSetFpsLimit(long handle, int fps);
     private native boolean nativeSourceBusy(long handle, long sourceId);
+    private native long nativeBeginSourceIdleWait(long handle, long sourceId);
+    private native void nativeEndSourceIdleWait(long handle, long serial, long timeoutNs);
     @FastNative private native void nativeOnVsync(long handle, long frameTimeNs, long deadlineNs, long presentNs);
     private native void nativeReleaseDrawable(long handle, long drawableId);
     private native void nativeSetTransformAndScissor(long handle,
@@ -369,6 +369,19 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         synchronized (lock) {
             return nativeHandle != 0 && buffer != null && nativeSourceBusy(nativeHandle, did(buffer));
         }
+    }
+
+    @Override
+    public void waitGuestBufferIdle(Drawable buffer, long timeoutNs) {
+        final long handle, serial;
+        // The wait is registered under the lock nativeDestroy runs under, and happens outside it
+        // (it blocks): the native side keeps the device alive until a registered wait returns.
+        synchronized (lock) {
+            if (nativeHandle == 0 || buffer == null) return;
+            handle = nativeHandle;
+            serial = nativeBeginSourceIdleWait(handle, did(buffer));
+        }
+        if (serial != 0) nativeEndSourceIdleWait(handle, serial, timeoutNs);
     }
 
     @Override

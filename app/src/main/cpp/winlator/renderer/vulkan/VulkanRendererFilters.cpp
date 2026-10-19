@@ -259,7 +259,6 @@ void VulkanRendererContext::createNisPipeline() {
 void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     const std::vector<DrawEntry>& draws,
     std::vector<VkImageMemoryBarrier>& ahbTransitions,
-    std::vector<VkImageMemoryBarrier>& preUpload,
     std::vector<VkImageMemoryBarrier>& postUpload,
     VkBuffer cursorUpload, bool hasCursorUpload,
     float ox, float oy, float sx, float sy, float cw, float ch,
@@ -273,60 +272,44 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         throw std::runtime_error("begin cb");
 
     ahbTransitions.clear();
-    preUpload.clear();
     postUpload.clear();
 
+    // A guest buffer is written outside this device (the guest's driver, another API in another
+    // process). With VK_EXT_queue_family_foreign it is acquired from the foreign queue family on
+    // every frame that samples it and released back after the render pass, as Android's
+    // RenderEngine does with its AHB textures; without the acquire the driver does not have to
+    // make the producer's writes visible (or resolve the layout they left), and what the shader
+    // reads is undefined. The first acquire comes from UNDEFINED, as nothing is known about the
+    // image yet; later ones from the layout it was released in. A device without the extension
+    // keeps the one-time transition.
     for (auto& d : draws) {
         if (d.img == VK_NULL_HANDLE) continue;
-        if (d.isAHB && d.needsTransition) {
-            VkImageMemoryBarrier b{};
-            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (!foreignQueueFamily_ && !d.needsTransition) continue;
+        if (std::any_of(ahbTransitions.begin(), ahbTransitions.end(),
+                [&](const VkImageMemoryBarrier& o) { return o.image == d.img; }))
+            continue;   // the same buffer drawn twice: one acquire (and release) per frame
+        VkImageMemoryBarrier b{};
+        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        b.oldLayout = d.needsTransition ? VK_IMAGE_LAYOUT_UNDEFINED
+                                        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (foreignQueueFamily_) {
+            b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
+            b.dstQueueFamilyIndex = graphicsQueueFamilyIndex;
+        } else {
             b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b.image = d.img;
-            b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-            b.srcAccessMask = 0;
-            b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            ahbTransitions.push_back(b);
-        } else if (!d.isAHB && (d.needsTransition || d.upload != VK_NULL_HANDLE)) {
-            VkImageMemoryBarrier b{};
-            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b.image = d.img;
-            b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-            b.srcAccessMask = 0;
-            b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            preUpload.push_back(b);
-
-            b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            postUpload.push_back(b);
         }
+        b.image = d.img;
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        b.srcAccessMask = 0;
+        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        ahbTransitions.push_back(b);
     }
 
     if (!ahbTransitions.empty()) {
         vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr,
             (uint32_t)ahbTransitions.size(), ahbTransitions.data());
-    }
-    if (!preUpload.empty()) {
-        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-            (uint32_t)preUpload.size(), preUpload.data());
-    }
-
-    for (auto& d : draws) {
-        if (d.isAHB || d.upload == VK_NULL_HANDLE || d.img == VK_NULL_HANDLE) continue;
-        VkBufferImageCopy r{};
-        r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        r.imageExtent = {(uint32_t)d.w, (uint32_t)d.h, 1};
-        vk_.CmdCopyBufferToImage(cb, d.upload, d.img,
-                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r);
     }
 
     cursorOverlay_ = {curVis && cursorImg != VK_NULL_HANDLE && cursorDS != VK_NULL_HANDLE,
@@ -402,20 +385,9 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     const bool useSgsr = filterMode == 2 && sgsrPipeline != VK_NULL_HANDLE;
     const bool useFsr = filterMode == 3 && fsr1Pipeline != VK_NULL_HANDLE;
     const bool useLanczos = filterMode == 4 && lanczosPipeline != VK_NULL_HANDLE;
-    // Mode 6 = SGSR HQ (edge direction). Built lazily on first use; if the build ever fails the
-    // frame falls back to the plain blit instead of throwing out of the render loop every frame.
-    static bool sgsrHqFailed = false;
-    if (filterMode == 6 && sgsrHqPipeline == VK_NULL_HANDLE && !sgsrHqFailed) {
-        try { createSgsrHqPipeline(); }
-        catch (const std::exception&) { sgsrHqPipeline = VK_NULL_HANDLE; sgsrHqFailed = true; }
-    }
+    // Pipelines are built by setFilterMode; one that failed to build is null and the frame falls
+    // back to the plain blit.
     const bool useSgsrHq = filterMode == 6 && sgsrHqPipeline != VK_NULL_HANDLE;
-    // Mode 7 = NIS (NVIDIA Image Scaling). Same lazy-build / graceful-fallback scheme as SGSR HQ.
-    static bool nisFailed = false;
-    if (filterMode == 7 && nisPipeline == VK_NULL_HANDLE && !nisFailed) {
-        try { createNisPipeline(); }
-        catch (const std::exception&) { nisPipeline = VK_NULL_HANDLE; nisFailed = true; }
-    }
     const bool useNis = filterMode == 7 && nisPipeline != VK_NULL_HANDLE;
     const bool useColorBoost = filterMode == 5 && postfxPipeline != VK_NULL_HANDLE;
     const bool usePostFX = postFXMode > 0 && postfxPipeline != VK_NULL_HANDLE;
@@ -491,6 +463,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             pc.ndcX1 = (ox + (float)(d.x + d.w) * sx) / cw * 2.0f - 1.0f;
             pc.ndcY1 = (oy + (float)(d.y + d.h) * sy) / ch * 2.0f - 1.0f;
             pc.effectId = useColorBoost ? 21 : postFXMode;
+            pc.postFxId = useColorBoost ? postFXMode : 0;
             pc.sharpness = sharpness;
             pc.resW = (float)std::max(d.w, 1);
             pc.resH = (float)std::max(d.h, 1);
@@ -554,6 +527,21 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     }
 
     vk_.CmdEndRenderPass(cb);
+    if (foreignQueueFamily_ && !ahbTransitions.empty()) {
+        // Hand the guest buffers back to the foreign queue family, layout unchanged. Reads need
+        // no access mask; the fragment-stage dependency orders the release after the sampling.
+        for (auto& b : ahbTransitions) {
+            b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            b.srcQueueFamilyIndex = graphicsQueueFamilyIndex;
+            b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
+            b.srcAccessMask = 0;
+            b.dstAccessMask = 0;
+        }
+        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
+            (uint32_t)ahbTransitions.size(), ahbTransitions.data());
+    }
     if (compositeActive()) {
         recordFrameGenProcess(cb);
         if (fgPlan_.generations > 0) recordFrameGenGeneration(cb, 0);

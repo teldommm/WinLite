@@ -68,18 +68,18 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeFrameGenSupportsFp16(
 }
 
 // Measured presents/sec (real + generated), already smoothed by the renderer
-// itself (see VulkanRendererContext::trackPresentedRate). Shared-locked the
-// same way renderFrame() locks for rendering, so this never blocks or races
-// against a config change (setFrameGenArmed etc. take the exclusive lock).
+// itself (see VulkanRendererContext::trackPresentedRate). Called for the HUD on
+// every guest present, on the X server's thread: an atomic read, no frameMutex
+// (a shared lock does not exclude the render thread, which also holds it shared
+// while it writes the pacer state the old stats call read, and it made the X
+// thread wait behind any pending configuration change). The renderer's
+// lifetime is guarded by the Java side's lock.
 extern "C" JNIEXPORT jfloat JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetFrameGenPresentedRate(
     JNIEnv*, jobject, jlong handle) {
     auto* ctx = reinterpret_cast<VulkanRendererContext*>(handle);
     if (!ctx) return 0.0f;
-    std::shared_lock<std::shared_mutex> frameLock(ctx->frameMutex);
-    float stats[6];
-    ctx->frameGenStats(stats);
-    return stats[3];
+    return ctx->fgPresentedRate_.load(std::memory_order_relaxed);
 }
 
 static void* openAdrenotoolsDriver(const char* driverPath, const char* libraryName,
@@ -188,18 +188,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeDestroy(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContent(
-    JNIEnv* env, jobject, jlong handle, jlong id, jobject buf,
-    jshort w, jshort h, jshort stride, jint x, jint y)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || !buf) return;
-    void* px = env->GetDirectBufferAddress(buf);
-    if (px && env->GetDirectBufferCapacity(buf) >= (jlong)w * h * 4)
-        r->updateWindowContent(id, px, w, h, stride, x, y);
-}
-
-extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
     JNIEnv*, jobject, jlong handle, jlong contentId, jlong sourceId, jlong ahbPtr,
     jshort w, jshort h, jint x, jint y)
@@ -233,6 +221,22 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSourceBusy(
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     return (r && r->sourceBusy(sourceId)) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeBeginSourceIdleWait(
+    JNIEnv*, jobject, jlong handle, jlong sourceId)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return r ? (jlong)r->beginSourceIdleWait(sourceId) : 0;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeEndSourceIdleWait(
+    JNIEnv*, jobject, jlong handle, jlong serial, jlong timeoutNs)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r && serial != 0) r->endSourceIdleWait((uint64_t)serial, timeoutNs > 0 ? (uint64_t)timeoutNs : 0);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -304,26 +308,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateCursorImage(
     jlong required = (jlong)std::max((int)stride, (int)w) * h * 4;
     if (px && env->GetDirectBufferCapacity(buf) >= required)
         r->updateCursorImage(px, w, h, stride, hotX, hotY);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetRenderList(
-    JNIEnv* env, jobject, jlong handle,
-    jlongArray jids, jintArray jxs, jintArray jys, jint count)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || count <= 0 || !jids || !jxs || !jys) return;
-    // Copied out first: setRenderList() waits for renderMutex, and no JNI critical section may
-    // stay open across a wait (see nativeSyncChildOrder).
-    if (env->GetArrayLength(jids) < count || env->GetArrayLength(jxs) < count ||
-        env->GetArrayLength(jys) < count) return;
-    std::vector<int64_t> ids((size_t)count);
-    std::vector<jint> xs((size_t)count), ys((size_t)count);
-    env->GetLongArrayRegion(jids, 0, count, reinterpret_cast<jlong*>(ids.data()));
-    env->GetIntArrayRegion(jxs, 0, count, xs.data());
-    env->GetIntArrayRegion(jys, 0, count, ys.data());
-    if (env->ExceptionCheck()) return;
-    r->setRenderList(ids.data(), xs.data(), ys.data(), count);
 }
 
 extern "C" JNIEXPORT void JNICALL

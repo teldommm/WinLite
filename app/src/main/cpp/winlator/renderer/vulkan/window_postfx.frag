@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 layout(binding = 0) uniform sampler2D texSampler;
 
@@ -8,6 +9,7 @@ layout(push_constant) uniform PC {
     float sharpness;
     float resW;
     float resH;
+    int   postFxId;   // effect 1..4 applied on top of ColorBoost (effectId 21); 0 = none
 } pc;
 
 layout(location = 0) in  vec2 fragTexCoord;
@@ -94,61 +96,7 @@ vec3 sampleCatmullRom(vec2 uv) {
     return clamp(sum / max(weightSum, 1e-5), 0.0, 1.0);
 }
 
-// Legacy post effects ---------------------------------------------------------
-
-vec3 applyDLS(vec2 uv, float sharp) {
-    vec2 texel  = 1.0 / max(vec2(pc.resW, pc.resH), vec2(1.0));
-    float SAT   = 1.0 + sharp * 0.20;
-    float CON   = 1.0 + sharp * 0.12;
-    float SHARP = sharp * 1.2;
-    vec3 orig = texture(texSampler, uv).rgb;
-    vec3 c    = clamp((orig - 0.5) * CON + 0.5, 0.0, 1.0);
-    float gray = dot(c, vec3(0.299, 0.587, 0.114));
-    c = mix(vec3(gray), c, SAT);
-    vec3 blur = blurCross(uv, texel);
-    return clamp(c + (orig - blur) * SHARP, 0.0, 1.0);
-}
-
-vec3 applyCRT(vec2 uv) {
-    const float CA = 1.0025;
-    vec4 fc = texture(texSampler, uv);
-    fc.r = texture(texSampler, (uv - 0.5) * CA + 0.5).r;
-    fc.b = texture(texSampler, (uv - 0.5) / CA + 0.5).b;
-    float sx = abs(sin(uv.x * 1024.0) * 0.5 * 0.125);
-    float sy = abs(sin(uv.y * 1024.0) * 0.5 * 0.375);
-    return mix(fc.rgb, vec3(0.0), sx + sy);
-}
-
-vec3 applyHDR(vec2 uv) {
-    vec2 texel = 1.0 / max(vec2(pc.resW, pc.resH), vec2(1.0));
-    vec3 c     = texture(texSampler, uv).rgb;
-    const float r1 = 0.793, r2 = 0.870;
-    vec3 b1 = vec3(0.0), b2 = vec3(0.0);
-    vec2 offs[8] = vec2[](
-        vec2( 1.5, -1.5), vec2(-1.5, -1.5), vec2( 1.5,  1.5), vec2(-1.5,  1.5),
-        vec2( 0.0, -2.5), vec2( 0.0,  2.5), vec2(-2.5,  0.0), vec2( 2.5,  0.0)
-    );
-    for (int i = 0; i < 8; i++) {
-        b1 += texture(texSampler, uv + offs[i] * r1 * texel).rgb;
-        b2 += texture(texSampler, uv + offs[i] * r2 * texel).rgb;
-    }
-    b1 *= 0.005; b2 *= 0.010;
-    vec3 hdr = (c + (b2 - b1)) * (r2 - r1);
-    return clamp(pow(abs(hdr + c), vec3(1.30)) + hdr, 0.0, 1.0);
-}
-
-vec3 applyNatural(vec2 uv) {
-    mat3 toYIQ = mat3( 0.299,  0.596,  0.212,
-                       0.587, -0.275, -0.523,
-                       0.114, -0.321,  0.311);
-    mat3 toRGB = mat3( 1.0,         1.0,         1.0,
-                       0.95568806, -0.27158179, -1.10817732,
-                       0.61985809, -0.64687381,  1.70506455);
-    vec3 c = texture(texSampler, uv).rgb;
-    vec3 t = c * toYIQ;
-    t = vec3(pow(max(t.r, 0.0), 1.12), t.g * 1.2, t.b * 1.2);
-    return clamp(t * toRGB, 0.0, 1.0);
-}
+#include "postfx_common.glsl"
 
 vec3 applyVibrance(vec2 uv, float strength) {
     vec3 c = texture(texSampler, uv).rgb;
@@ -465,10 +413,9 @@ vec3 applyColorBoost(vec2 uv, float strength) {
 void main() {
     vec2 uv = fragTexCoord;
     vec3 rgb;
-    if      (pc.effectId == 1)  rgb = applyDLS                   (uv, pc.sharpness);
-    else if (pc.effectId == 2)  rgb = applyCRT                   (uv);
-    else if (pc.effectId == 3)  rgb = applyHDR                   (uv);
-    else if (pc.effectId == 4)  rgb = applyNatural               (uv);
+    vec2 texel = 1.0 / max(vec2(pc.resW, pc.resH), vec2(1.0));
+    if (pc.effectId >= 1 && pc.effectId <= 4)
+        rgb = applyPostFXEffect(pc.effectId, texture(texSampler, uv).rgb, uv, texel, pc.sharpness);
     else if (pc.effectId == 5)  rgb = applyVibrance              (uv, pc.sharpness);
     else if (pc.effectId == 6)  rgb = applyCurves                (uv, pc.sharpness);
     else if (pc.effectId == 7)  rgb = applyCASLite               (uv, pc.sharpness);
@@ -487,5 +434,8 @@ void main() {
     else if (pc.effectId == 20) rgb = applyAnimeEdge             (uv, pc.sharpness);
     else if (pc.effectId == 21) rgb = applyColorBoost            (uv, pc.sharpness);
     else                        rgb = texture(texSampler, uv).rgb;
+    // ColorBoost is picked as an upscaler, so the panel's PostFX effect rides on top of it the
+    // way it does on SGSR, FSR, Lanczos and NIS.
+    if (pc.effectId == 21) rgb = applyPostFXEffect(pc.postFxId, rgb, uv, texel, pc.sharpness);
     outColor = vec4(rgb, 1.0);
 }

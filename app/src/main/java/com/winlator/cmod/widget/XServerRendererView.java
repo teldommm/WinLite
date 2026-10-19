@@ -46,8 +46,8 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract void onPointerMove(short x, short y);
     // A guest frame was presented through the X Present extension (PresentPixmap). Renderers
     // show the pixmap in the window and count the present in one step, and fill in when the X
-    // server may hand buffers back (plan: release time, on-screen-until time, max buffers out;
-    // all 0 = at once). guestFrameNs: how long the guest took for this frame, -1 if unknown.
+    // server may hand buffers back and complete the present (plan: release time, on-screen-until
+    // time, max buffers out, completion time; all 0 = at once). guestFrameNs: how long the guest took for this frame, -1 if unknown.
     // The default only runs the pixmap's ordinary content-update path.
     public void onGuestPresent(Window window, Drawable pixmap, long guestFrameNs, long[] plan) {
         pixmap.updateDirect();
@@ -59,6 +59,9 @@ public abstract class XServerRendererView extends SurfaceView {
     // Whether the renderer's GPU work may still be reading this guest buffer (a composite that
     // sampled it has not finished). The X server holds it back from the guest until then.
     public boolean isGuestBufferBusy(Drawable buffer) { return false; }
+    // Blocks until the renderer's GPU work is done with this guest buffer, or timeoutNs passes;
+    // returns at once when nothing is pending. Never called with any X server lock held.
+    public void waitGuestBufferIdle(Drawable buffer, long timeoutNs) {}
     // Period of the 60 Hz time base the fallback MSC (and the real one's anchor) uses.
     public static final long FALLBACK_MSC_PERIOD_NS = 16_666_667L;
     public abstract void requestRender();

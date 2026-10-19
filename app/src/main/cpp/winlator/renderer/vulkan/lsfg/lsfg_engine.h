@@ -52,7 +52,8 @@ public:
     // How many frames to generate for this source frame. Returns 0 until the
     // history slots are valid and the rates have settled, so the first frames
     // after a start or a resize are never interpolated from garbage.
-    uint32_t plan(uint32_t capacity, uint64_t sourceFrames);
+    // queued: refreshes earlier presents still occupy (FIFO tail), left out of the budget.
+    uint32_t plan(uint32_t capacity, uint64_t sourceFrames, uint32_t queued = 0);
 
     // Take the just-composited frame as LSFG input and run the shared part of
     // the chain (everything except `generate`). `source` must be in GENERAL.
@@ -83,7 +84,6 @@ private:
     float effectiveFlowScale(uint32_t width) const;
 
     bool historyFresh() const { return haveCopied_ && lastCopiedCount_ + 1 == frameCount_; }
-    bool adaptive() const { return pacer_.Config().target_rate != 0; }
 
     Device      device_{};
     std::string cachePath_;
@@ -118,9 +118,10 @@ private:
     uint32_t warmStreak_{};
     bool     warm_{};
     bool     generating_{};
-    // Adaptive mode, warm and armed: the pacer may plan zero generations for
-    // some source frames (target < 2x source), so the input ring and the
-    // shared chain are kept running on every frame to keep history continuous.
+    // Warm and armed: the pacer may plan zero generations for some source
+    // frames (adaptive target < 2x source, a fixed multiplier above the panel's
+    // refreshes, a FIFO tail), so the input ring and the shared chain are kept
+    // running on every frame to keep history continuous.
     bool     keepHistory_{};
     bool     unavailable_{};
 };

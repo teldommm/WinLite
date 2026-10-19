@@ -107,17 +107,6 @@ bool VulkanRendererContext::ensureCompositeTargets(uint32_t w, uint32_t h, uint3
         fi.renderPass=compositeRenderPass; fi.attachmentCount=1; fi.pAttachments=att;
         fi.width=w; fi.height=h; fi.layers=1;
         if (vk_.CreateFramebuffer(device,&fi,nullptr,&t.fb)!=VK_SUCCESS) { destroyCompositeTargets(); return false; }
-
-        VkDescriptorSetAllocateInfo dsai{}; dsai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        dsai.descriptorPool=winTexPool; dsai.descriptorSetCount=1; dsai.pSetLayouts=&dsLayout;
-        if (vk_.AllocateDescriptorSets(device,&dsai,&t.ds)!=VK_SUCCESS) { t.ds=VK_NULL_HANDLE; destroyCompositeTargets(); return false; }
-        VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_GENERAL;
-        dii.imageView=t.view; dii.sampler=sampler;
-        VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        wr.dstSet=t.ds; wr.dstBinding=0;
-        wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr.descriptorCount=1;
-        wr.pImageInfo=&dii;
-        vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
     }
 
     compositeW = w; compositeH = h; compositeIndex = 0;
@@ -127,7 +116,6 @@ bool VulkanRendererContext::ensureCompositeTargets(uint32_t w, uint32_t h, uint3
 
 void VulkanRendererContext::destroyCompositeTargets() {
     for (CompositeTarget& t : compositeTargets) {
-        if (t.ds          !=VK_NULL_HANDLE){ vk_.FreeDescriptorSets(device,winTexPool,1,&t.ds); t.ds=VK_NULL_HANDLE; }
         if (t.fb          !=VK_NULL_HANDLE){ vk_.DestroyFramebuffer(device,t.fb,nullptr); t.fb=VK_NULL_HANDLE; }
         if (t.storageView !=VK_NULL_HANDLE){ vk_.DestroyImageView(device,t.storageView,nullptr); t.storageView=VK_NULL_HANDLE; }
         if (t.view        !=VK_NULL_HANDLE){ vk_.DestroyImageView(device,t.view,nullptr); t.view=VK_NULL_HANDLE; }
@@ -191,10 +179,9 @@ void VulkanRendererContext::destroyFgQueryPool() {
 void VulkanRendererContext::readFgQueryResult() {
     if (fgQueryPool_ == VK_NULL_HANDLE || !fgQueryPending_[currentFrame]) return;
     fgQueryPending_[currentFrame] = false;      // one attempt per sample; a miss is dropped
-    // [0] before the shared passes, [1] after them, [2] after generation 0 (the first
-    // present's work). All in the first present's buffer: on just-in-time frames the later
-    // generations run spread over the source interval, and a span up to them would measure
-    // the waits.
+    // [0] before the shared passes, [1] after them, [2] after generation 0's compute (the
+    // first present's work). All in the first present's buffer; a span up to a later
+    // generation would also measure the waits for its swapchain image.
     uint64_t ts[kFgQueriesPerSlot] = {};
     const VkResult r = vk_.GetQueryPoolResults(device, fgQueryPool_,
                                                currentFrame * kFgQueriesPerSlot, kFgQueriesPerSlot,
@@ -254,37 +241,24 @@ void VulkanRendererContext::recordFrameGenProcess(VkCommandBuffer cb) {
 }
 
 void VulkanRendererContext::recordFrameGenGeneration(VkCommandBuffer cb, uint32_t g) {
-    if (recordFrameGenCompute(cb, g)) recordFrameGenPresentCopy(cb, g);
-}
-
-bool VulkanRendererContext::recordFrameGenCompute(VkCommandBuffer cb, uint32_t g) {
-    if (!compositeActive() || compositeTargets.empty()) return false;
-    if (!lsfgEngine_) return false;
-    if (g >= fgPlan_.generations) return false;
+    if (!compositeActive() || compositeTargets.empty()) return;
+    if (!lsfgEngine_) return;
+    if (g >= fgPlan_.generations) return;
     const size_t slot = (compositeIndex + 1 + g) % compositeTargets.size();
     const CompositeTarget& dst = compositeTargets[slot];
-    if (dst.img == VK_NULL_HANDLE || dst.storageView == VK_NULL_HANDLE) return false;
+    if (dst.img == VK_NULL_HANDLE || dst.storageView == VK_NULL_HANDLE) return;
 
     lsfgEngine_->generateInto(cb, g, (uint32_t)slot, dst.img, dst.storageView, compositeW, compositeH);
 
     // The last span ends after generation 0's compute (before its copy, so a vblank wait on the
     // swapchain image is not counted); every generation does the same work, so the rest of the
-    // chain follows from it (readFgQueryResult), on just-in-time frames too.
+    // chain follows from it (readFgQueryResult).
     if (fgQueryPool_ != VK_NULL_HANDLE && g == 0) {
         vk_.CmdWriteTimestamp(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, fgQueryPool_,
                               currentFrame * kFgQueriesPerSlot + 2);
         fgQueryPending_[currentFrame] = true;
         fgQueryGens_[currentFrame]    = fgPlan_.generations;
     }
-    return true;
-}
-
-void VulkanRendererContext::recordFrameGenPresentCopy(VkCommandBuffer cb, uint32_t g) {
-    if (!compositeActive() || compositeTargets.empty()) return;
-    if (g >= fgPlan_.generations) return;
-    const size_t slot = (compositeIndex + 1 + g) % compositeTargets.size();
-    const CompositeTarget& dst = compositeTargets[slot];
-    if (dst.img == VK_NULL_HANDLE || dst.storageView == VK_NULL_HANDLE) return;
 
     // dst is left in GENERAL by the chain; move it and the target
     // swapchain image into transfer layouts, copy, then hand the swapchain
@@ -466,42 +440,24 @@ void VulkanRendererContext::recordCursorOverlay(VkCommandBuffer cb, uint32_t img
     vk_.CmdEndRenderPass(cb);
 }
 
-void VulkanRendererContext::frameGenStats(float out[6]) const {
-    out[0] = out[1] = out[2] = 0.0f;
-    out[4] = -1.0f;
-    // The presented rate is measured by the renderer itself, per present.
-    out[3] = fgPresentedRate_;
-    out[5] = fgChainMsPerGen_;
-    if (!lsfgEngine_) return;
-    out[0] = out[1] = (float)fgPlan_.generations;
-    out[2] = lsfgEngine_->sourceRate();
-}
-
 void VulkanRendererContext::trackPresentedRate(uint32_t presents) {
     const auto now = std::chrono::steady_clock::now();
     if (!fgRateWindowOpen_) {
         fgRateWindowStart_ = now;
         fgRateWindowOpen_  = true;
         fgPresentAccum_    = 0;
-        fgSourceAccum_     = 0;
     }
     fgPresentAccum_ += presents;
-    fgSourceAccum_++;
 
     const float elapsed = std::chrono::duration<float>(now - fgRateWindowStart_).count();
     if (elapsed < 0.5f) return;                    // half-second window
     const float rate = (float)fgPresentAccum_ / elapsed;
     // Same smoothing shape the pacer uses, so the two numbers are comparable.
-    fgPresentedRate_ = fgPresentedRate_ > 0.0f
-        ? fgPresentedRate_ + (rate - fgPresentedRate_) * 0.25f
-        : rate;
-    const float sourceRate = (float)fgSourceAccum_ / elapsed;
-    fgSourceRate_ = fgSourceRate_ > 0.0f
-        ? fgSourceRate_ + (sourceRate - fgSourceRate_) * 0.25f
-        : sourceRate;
+    const float prev = fgPresentedRate_.load(std::memory_order_relaxed);
+    fgPresentedRate_.store(prev > 0.0f ? prev + (rate - prev) * 0.25f : rate,
+                           std::memory_order_relaxed);
     fgRateWindowStart_ = now;
     fgPresentAccum_    = 0;
-    fgSourceAccum_     = 0;
 }
 
 void VulkanRendererContext::setFrameGenArmed(bool armed, int multiplier, int targetRate) {

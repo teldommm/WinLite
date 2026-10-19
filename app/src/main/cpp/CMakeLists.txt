@@ -112,7 +112,7 @@ add_custom_command(
     COMMAND glslangValidator -V --vn window_sgsr_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_frag.h
             ${VULKAN_RENDERER_DIR}/window_sgsr.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_sgsr.frag
+    DEPENDS ${VULKAN_RENDERER_DIR}/window_sgsr.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
     COMMENT "Compiling window_sgsr.frag -> window_sgsr_frag.h"
 )
 
@@ -121,7 +121,7 @@ add_custom_command(
     COMMAND glslangValidator -V --vn window_sgsr_hq_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_hq_frag.h
             ${VULKAN_RENDERER_DIR}/window_sgsr_hq.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_sgsr_hq.frag
+    DEPENDS ${VULKAN_RENDERER_DIR}/window_sgsr_hq.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
     COMMENT "Compiling window_sgsr_hq.frag -> window_sgsr_hq_frag.h"
 )
 
@@ -130,7 +130,7 @@ add_custom_command(
     COMMAND glslangValidator -V --vn window_nis_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_nis_frag.h
             ${VULKAN_RENDERER_DIR}/window_nis.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_nis.frag
+    DEPENDS ${VULKAN_RENDERER_DIR}/window_nis.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
     COMMENT "Compiling window_nis.frag -> window_nis_frag.h"
 )
 
@@ -139,7 +139,7 @@ add_custom_command(
     COMMAND glslangValidator -V --vn window_fsr1_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_fsr1_frag.h
             ${VULKAN_RENDERER_DIR}/window_fsr1.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_fsr1.frag
+    DEPENDS ${VULKAN_RENDERER_DIR}/window_fsr1.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
     COMMENT "Compiling single-pass FSR -> window_fsr1_frag.h"
 )
 
@@ -148,7 +148,7 @@ add_custom_command(
     COMMAND glslangValidator -V --vn window_lanczos_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_lanczos_frag.h
             ${VULKAN_RENDERER_DIR}/window_lanczos.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_lanczos.frag
+    DEPENDS ${VULKAN_RENDERER_DIR}/window_lanczos.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
     COMMENT "Compiling Lanczos 2 -> window_lanczos_frag.h"
 )
 
@@ -166,89 +166,9 @@ add_custom_command(
     COMMAND glslangValidator -V --vn window_postfx_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_postfx_frag.h
             ${VULKAN_RENDERER_DIR}/window_postfx.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_postfx.frag
+    DEPENDS ${VULKAN_RENDERER_DIR}/window_postfx.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
     COMMENT "Compiling window_postfx.frag -> window_postfx_frag.h"
 )
-
-set(VULKAN_CONTEXT_SOURCE ${VULKAN_RENDERER_DIR}/VulkanRendererContext.cpp)
-set(VULKAN_CONTEXT_LEGACY ${CMAKE_CURRENT_BINARY_DIR}/VulkanRendererContext_legacy.cpp)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${VULKAN_CONTEXT_SOURCE})
-file(READ ${VULKAN_CONTEXT_SOURCE} VULKAN_CONTEXT_TEXT)
-
-set(PIPELINE_OPT_INCLUDE_MARKER "#include <dlfcn.h>\n")
-string(FIND "${VULKAN_CONTEXT_TEXT}" "${PIPELINE_OPT_INCLUDE_MARKER}" PIPELINE_OPT_INCLUDE_POS)
-if(PIPELINE_OPT_INCLUDE_POS EQUAL -1)
-    message(FATAL_ERROR "VulkanRendererContext.cpp changed: pipeline-opt include marker not found")
-endif()
-string(REPLACE
-    "${PIPELINE_OPT_INCLUDE_MARKER}"
-    "#include <dlfcn.h>\n#include \"VulkanRendererPipelineOpt.h\"\n"
-    VULKAN_CONTEXT_TEXT
-    "${VULKAN_CONTEXT_TEXT}")
-
-set(PIPELINE_OPT_DESTROY_MARKER "    vk_.DeviceWaitIdle(device);\n    for (auto& [id, wt] : texMap) destroyWinTex(wt);")
-string(FIND "${VULKAN_CONTEXT_TEXT}" "${PIPELINE_OPT_DESTROY_MARKER}" PIPELINE_OPT_DESTROY_POS)
-if(PIPELINE_OPT_DESTROY_POS EQUAL -1)
-    message(FATAL_ERROR "VulkanRendererContext.cpp changed: pipeline-opt destroy marker not found")
-endif()
-string(REPLACE
-    "${PIPELINE_OPT_DESTROY_MARKER}"
-    "    vk_.DeviceWaitIdle(device);\n    VulkanRendererDestroyOpaquePipeline(this);\n    for (auto& [id, wt] : texMap) destroyWinTex(wt);"
-    VULKAN_CONTEXT_TEXT
-    "${VULKAN_CONTEXT_TEXT}")
-
-set(LANCZOS_DESTROY_MARKER "    if (fsr1Pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fsr1Pipeline, nullptr);\n")
-string(FIND "${VULKAN_CONTEXT_TEXT}" "${LANCZOS_DESTROY_MARKER}" LANCZOS_DESTROY_POS)
-if(LANCZOS_DESTROY_POS EQUAL -1)
-    message(FATAL_ERROR "VulkanRendererContext.cpp changed: Lanczos destroy marker not found")
-endif()
-string(REPLACE
-    "${LANCZOS_DESTROY_MARKER}"
-    "    if (fsr1Pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fsr1Pipeline, nullptr);\n    if (lanczosPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, lanczosPipeline, nullptr);\n    if (sgsrHqPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrHqPipeline, nullptr);\n    if (nisPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, nisPipeline, nullptr);\n"
-    VULKAN_CONTEXT_TEXT
-    "${VULKAN_CONTEXT_TEXT}")
-
-set(RECORD_CMD_MARKER "void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,")
-set(RENDER_LOOP_MARKER "\nvoid VulkanRendererContext::renderLoop() {")
-string(FIND "${VULKAN_CONTEXT_TEXT}" "${RECORD_CMD_MARKER}" RECORD_CMD_POS)
-string(FIND "${VULKAN_CONTEXT_TEXT}" "${RENDER_LOOP_MARKER}" RENDER_LOOP_POS)
-if(RECORD_CMD_POS EQUAL -1 OR RENDER_LOOP_POS EQUAL -1)
-    message(FATAL_ERROR "VulkanRendererContext.cpp changed: unable to isolate legacy recordCmdBuf")
-endif()
-string(REPLACE
-    "${RECORD_CMD_MARKER}"
-    "#if 0\n${RECORD_CMD_MARKER}"
-    VULKAN_CONTEXT_TEXT
-    "${VULKAN_CONTEXT_TEXT}")
-string(REPLACE
-    "${RENDER_LOOP_MARKER}"
-    "\n#endif\n${RENDER_LOOP_MARKER}"
-    VULKAN_CONTEXT_TEXT
-    "${VULKAN_CONTEXT_TEXT}")
-
-set(FILTER_CREATE_MARKER "    if (mode == 3 && fsr1Pipeline == VK_NULL_HANDLE) createFsr1Pipeline();\n")
-string(FIND "${VULKAN_CONTEXT_TEXT}" "${FILTER_CREATE_MARKER}" FILTER_CREATE_POS)
-if(FILTER_CREATE_POS EQUAL -1)
-    message(FATAL_ERROR "VulkanRendererContext.cpp changed: filter creation marker not found")
-endif()
-string(REPLACE
-    "${FILTER_CREATE_MARKER}"
-    "    if (mode == 3 && fsr1Pipeline == VK_NULL_HANDLE) createFsr1Pipeline();\n    if (mode == 4 && lanczosPipeline == VK_NULL_HANDLE) createLanczosPipeline();\n"
-    VULKAN_CONTEXT_TEXT
-    "${VULKAN_CONTEXT_TEXT}")
-
-string(REPLACE
-    "auto modeName=[](int m){ return m==1?\"NEAREST\":m==2?\"SGSR\":m==3?\"FSR1\":\"LINEAR\"; };"
-    "auto modeName=[](int m){ return m==1?\"NEAREST\":m==2?\"SGSR\":m==3?\"FSR\":m==4?\"LANCZOS2\":m==5?\"COLOR_BOOST\":m==6?\"SGSR_HQ\":m==7?\"NIS\":\"LINEAR\"; };"
-    VULKAN_CONTEXT_TEXT
-    "${VULKAN_CONTEXT_TEXT}")
-string(REPLACE
-    "filterMode, filterMode==3?\"FSR1\":filterMode==2?\"SGSR\":filterMode==1?\"NEAREST\":\"LINEAR\");"
-    "filterMode, filterMode==7?\"NIS\":filterMode==6?\"SGSR_HQ\":filterMode==5?\"COLOR_BOOST\":filterMode==4?\"LANCZOS2\":filterMode==3?\"FSR\":filterMode==2?\"SGSR\":filterMode==1?\"NEAREST\":\"LINEAR\");"
-    VULKAN_CONTEXT_TEXT
-    "${VULKAN_CONTEXT_TEXT}")
-
-file(WRITE ${VULKAN_CONTEXT_LEGACY} "${VULKAN_CONTEXT_TEXT}")
 
 include_directories(
         ${CMAKE_CURRENT_BINARY_DIR}
@@ -275,7 +195,7 @@ add_library(vulkan_renderer SHARED
         winlator/renderer/vulkan/lsfg/lsfg_shaders.cpp
         winlator/renderer/vulkan/lsfg/lsfg_vkd.cpp
 
-        ${VULKAN_CONTEXT_LEGACY}
+        winlator/renderer/vulkan/VulkanRendererContext.cpp
         winlator/renderer/vulkan/VulkanRendererFilters.cpp
         winlator/renderer/vulkan/VulkanRendererPipelineOpt.cpp
 

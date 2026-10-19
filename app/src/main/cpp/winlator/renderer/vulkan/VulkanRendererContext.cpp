@@ -11,6 +11,7 @@
 #include <chrono>
 #include <inttypes.h>
 #include <dlfcn.h>
+#include "VulkanRendererPipelineOpt.h"
 #include <cerrno>
 #include <sys/resource.h>
 #include <unistd.h>
@@ -61,8 +62,9 @@ VulkanRendererContext::~VulkanRendererContext() {
     if (renderThread.joinable()) renderThread.join();
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
-    for (auto& [id, wt] : texMap) destroyWinTex(wt);
-    texMap.clear();
+    releaseIdleWaiters();
+    VulkanRendererDestroyOpaquePipeline(this);
+    texMap.clear();   // window textures only borrow the imports' handles
     // Every import still holds an AHardwareBuffer reference of its own (this was never freed
     // before: cleanupAllAHBCache() had no caller).
     destroyAllSourceImports();
@@ -77,6 +79,9 @@ VulkanRendererContext::~VulkanRendererContext() {
     vk_.DestroyDescriptorPool(device, winTexPool, nullptr);
     if (sgsrPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrPipeline, nullptr);
     if (fsr1Pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fsr1Pipeline, nullptr);
+    if (lanczosPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, lanczosPipeline, nullptr);
+    if (sgsrHqPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrHqPipeline, nullptr);
+    if (nisPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, nisPipeline, nullptr);
     if (stretchPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, stretchPipeline, nullptr);
     if (postfxPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, postfxPipeline, nullptr);
     vk_.DestroyPipeline(device, pipeline, nullptr);
@@ -211,6 +216,10 @@ void VulkanRendererContext::loadDeviceDispatch() {
     vk_.GetSemaphoreCounterValue = (PFN_vkGetSemaphoreCounterValue)d("vkGetSemaphoreCounterValue");
     if (!vk_.GetSemaphoreCounterValue)
         vk_.GetSemaphoreCounterValue = (PFN_vkGetSemaphoreCounterValue)d("vkGetSemaphoreCounterValueKHR");
+    vk_.WaitSemaphores = (PFN_vkWaitSemaphores)d("vkWaitSemaphores");
+    if (!vk_.WaitSemaphores) vk_.WaitSemaphores = (PFN_vkWaitSemaphores)d("vkWaitSemaphoresKHR");
+    vk_.SignalSemaphore = (PFN_vkSignalSemaphore)d("vkSignalSemaphore");
+    if (!vk_.SignalSemaphore) vk_.SignalSemaphore = (PFN_vkSignalSemaphore)d("vkSignalSemaphoreKHR");
 
     vk_.GetAndroidHardwareBufferPropertiesANDROID =
         (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)d("vkGetAndroidHardwareBufferPropertiesANDROID");
@@ -383,6 +392,7 @@ void VulkanRendererContext::createLogicalDevice() {
     // The AHB extension depends on VK_EXT_queue_family_foreign, so it has to be enabled with it
     // whenever the device offers it. Unlike upstream (which refuses to start without it), a device
     // that doesn't advertise it keeps working exactly as before.
+    foreignQueueFamily_ = hasForeignQueue;
     if (hasForeignQueue) {
         extList.push_back(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
     } else {
@@ -518,7 +528,8 @@ void VulkanRendererContext::createLogicalDevice() {
     loadDeviceDispatch();
     vk_.GetDeviceQueue(device,graphicsQueueFamilyIndex,0,&graphicsQueue);
 
-    if (timelineEnabled && vk_.GetSemaphoreCounterValue) {
+    // The X server both polls it (sourceBusy) and blocks on it (endSourceIdleWait).
+    if (timelineEnabled && vk_.GetSemaphoreCounterValue && vk_.WaitSemaphores) {
         VkSemaphoreTypeCreateInfo ti{}; ti.sType=VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
         ti.semaphoreType=VK_SEMAPHORE_TYPE_TIMELINE; ti.initialValue=0;
         VkSemaphoreCreateInfo si{}; si.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO; si.pNext=&ti;
@@ -727,8 +738,9 @@ void VulkanRendererContext::createSgsrPipeline() {
     pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
     pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
     pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&sgsrPipeline)!=VK_SUCCESS) throw std::runtime_error("sgsr_pipeline");
+    const VkResult res=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&sgsrPipeline);
     vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
+    if (res!=VK_SUCCESS) { sgsrPipeline=VK_NULL_HANDLE; throw std::runtime_error("sgsr_pipeline"); }
     RLOG("createSgsrPipeline: done");
 }
 
@@ -752,8 +764,9 @@ void VulkanRendererContext::createFsr1Pipeline() {
     pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
     pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
     pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&fsr1Pipeline)!=VK_SUCCESS) throw std::runtime_error("fsr1_pipeline");
+    const VkResult res=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&fsr1Pipeline);
     vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
+    if (res!=VK_SUCCESS) { fsr1Pipeline=VK_NULL_HANDLE; throw std::runtime_error("fsr1_pipeline"); }
     RLOG("createFsr1Pipeline: done");
 }
 
@@ -777,8 +790,9 @@ void VulkanRendererContext::createStretchPipeline() {
     pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
     pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
     pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&stretchPipeline)!=VK_SUCCESS) throw std::runtime_error("stretch_pipeline");
+    const VkResult res=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&stretchPipeline);
     vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
+    if (res!=VK_SUCCESS) { stretchPipeline=VK_NULL_HANDLE; throw std::runtime_error("stretch_pipeline"); }
     RLOG("createStretchPipeline: done");
 }
 
@@ -803,9 +817,46 @@ void VulkanRendererContext::createPostFXPipeline() {
     pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
     pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
     pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&postfxPipeline)!=VK_SUCCESS) throw std::runtime_error("postfx_pipeline");
+    const VkResult res=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&postfxPipeline);
     vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
+    if (res!=VK_SUCCESS) { postfxPipeline=VK_NULL_HANDLE; throw std::runtime_error("postfx_pipeline"); }
     RLOG("createPostFXPipeline: done");
+}
+
+void VulkanRendererContext::tryCreatePipeline(void (VulkanRendererContext::*create)(), const char* name) {
+    // Pipelines are built from the UI setters, which are called straight from JNI: an exception
+    // escaping there aborts the process. A failed build leaves the handle null and recordCmdBuf
+    // falls back to the plain blit; the next switch to that mode tries again.
+    try { (this->*create)(); }
+    catch (const std::exception& e) {
+        RLOG_E("%s pipeline build failed (%s): drawing with the plain blit", name, e.what());
+    }
+}
+
+bool VulkanRendererContext::upscalerActive() const {
+    switch (filterMode) {
+    case 2: return sgsrPipeline != VK_NULL_HANDLE;
+    case 3: return fsr1Pipeline != VK_NULL_HANDLE;
+    case 4: return lanczosPipeline != VK_NULL_HANDLE;
+    case 6: return sgsrHqPipeline != VK_NULL_HANDLE;
+    case 7: return nisPipeline != VK_NULL_HANDLE;
+    default: return false;
+    }
+}
+
+void VulkanRendererContext::syncPostFXPipeline() {
+    // The upscalers are single pass and apply the PostFX effect inline, so the postfx pipeline
+    // is bound only for ColorBoost (mode 5) and for an effect on the plain blit. Keep it built
+    // exactly when a frame would bind it. Called with the frame lock held exclusively.
+    const bool needed = filterMode == 5 || (postFXMode > 0 && !upscalerActive());
+    if (needed && postfxPipeline == VK_NULL_HANDLE) {
+        tryCreatePipeline(&VulkanRendererContext::createPostFXPipeline, "postfx");
+    } else if (!needed && postfxPipeline != VK_NULL_HANDLE) {
+        vk_.DeviceWaitIdle(device);
+        vk_.DestroyPipeline(device, postfxPipeline, nullptr);
+        postfxPipeline = VK_NULL_HANDLE;
+        RLOG("postfx pipeline released");
+    }
 }
 
 void VulkanRendererContext::setPostFXMode(int mode) {
@@ -814,17 +865,7 @@ void VulkanRendererContext::setPostFXMode(int mode) {
     RLOG("setPostFXMode: %d -> %d", postFXMode, mode);
     if (postFXMode == mode) return;
     postFXMode = mode;
-    if (mode > 0) {
-        if (filterMode != 2 && filterMode != 3 && postfxPipeline == VK_NULL_HANDLE)
-            createPostFXPipeline();
-    } else {
-        if (filterMode != 5 && postfxPipeline != VK_NULL_HANDLE) {
-            vk_.DeviceWaitIdle(device);
-            vk_.DestroyPipeline(device, postfxPipeline, nullptr);
-            postfxPipeline = VK_NULL_HANDLE;
-            RLOG("setPostFXMode: postfxPipeline destruído");
-        }
-    }
+    syncPostFXPipeline();
     needsRender.store(true); wakeRender();
 }
 
@@ -863,7 +904,7 @@ void VulkanRendererContext::createSampler() {
 }
 
 void VulkanRendererContext::createWinTexPool() {
-    // One set per imported guest buffer, per CPU-filled texture and one for the cursor. 129 ran
+    // One set per imported guest buffer and one for the cursor. 129 ran
     // out with many windows plus swapchain images awaiting retirement, and every import past
     // that failed: a black window. Sets are small; the pool is created once.
     constexpr uint32_t kWinTexSets = 1024;
@@ -882,9 +923,8 @@ void VulkanRendererContext::createCursorDS() {
 
 void VulkanRendererContext::createCmdBufs() {
     // One command buffer per pending present, per frame-in-flight slot: up to
-    // kMaxPresentsPerFrame buffers are needed when frame gen is armed, plus one per later
-    // generation for its compute when the presents are recorded just in time (fgGenSlot).
-    cmdBufs.resize(MAX_FRAMES_IN_FLIGHT * kCmdBufsPerFrame);
+    // kMaxPresentsPerFrame buffers are needed when frame gen is armed.
+    cmdBufs.resize(MAX_FRAMES_IN_FLIGHT * kMaxPresentsPerFrame);
     VkCommandBufferAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     ai.commandPool=cmdPool; ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandBufferCount=(uint32_t)cmdBufs.size();
     if (vk_.AllocateCommandBuffers(device,&ai,cmdBufs.data())!=VK_SUCCESS) throw std::runtime_error("cmdbuf");
@@ -991,32 +1031,6 @@ void VulkanRendererContext::transition(VkCommandBuffer cb, VkImage img,
     vk_.CmdPipelineBarrier(cb,ss,dss,0,0,nullptr,0,nullptr,1,&b);
 }
 
-bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
-    VkImageCreateInfo ii{}; ii.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; ii.imageType=VK_IMAGE_TYPE_2D;
-    ii.extent={(uint32_t)w,(uint32_t)h,1}; ii.mipLevels=1; ii.arrayLayers=1; ii.format=VK_FORMAT_B8G8R8A8_UNORM;
-    ii.tiling=VK_IMAGE_TILING_OPTIMAL; ii.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
-    ii.usage=VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT; ii.samples=VK_SAMPLE_COUNT_1_BIT; ii.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
-    if (vk_.CreateImage(device,&ii,nullptr,&wt.img)!=VK_SUCCESS) return false;
-    VkMemoryRequirements req; vk_.GetImageMemoryRequirements(device,wt.img,&req);
-    VkMemoryAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ai.allocationSize=req.size; ai.memoryTypeIndex=findMemType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vk_.AllocateMemory(device,&ai,nullptr,&wt.mem)!=VK_SUCCESS){vk_.DestroyImage(device,wt.img,nullptr);wt.img=VK_NULL_HANDLE;return false;}
-    vk_.BindImageMemory(device,wt.img,wt.mem,0);
-    VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=VK_FORMAT_B8G8R8A8_UNORM; vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-    vi.components=contentSwizzle();
-    if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){destroyWinTex(wt);return false;}
-    VkDescriptorSetAllocateInfo dsai{}; dsai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO; dsai.descriptorPool=winTexPool; dsai.descriptorSetCount=1; dsai.pSetLayouts=&dsLayout;
-    if (vk_.AllocateDescriptorSets(device,&dsai,&wt.ds)!=VK_SUCCESS){destroyWinTex(wt);return false;}
-    VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; dii.imageView=wt.view; dii.sampler=sampler;
-    VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wr.dstSet=wt.ds; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr.descriptorCount=1; wr.pImageInfo=&dii;
-    vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
-    VkDeviceSize stgSz=(VkDeviceSize)w*h*4;
-    createBuffer(stgSz,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,wt.stg,wt.stgMem);
-    vk_.MapMemory(device,wt.stgMem,0,stgSz,0,&wt.mapped);
-    wt.cap=stgSz; wt.w=w; wt.h=h; wt.needsTransition=true; wt.fmt=VK_FORMAT_B8G8R8A8_UNORM;
-    return true;
-}
-
 bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) {
     if (!vk_.GetAndroidHardwareBufferPropertiesANDROID)
         return false;
@@ -1117,7 +1131,6 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
 
     wt.needsTransition=true;
-    wt.isAHB=true;
     wt.fmt=imageFormat;
     wt.w=(int)desc.width;
     wt.h=(int)desc.height;
@@ -1125,11 +1138,9 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
 }
 
 void VulkanRendererContext::destroyWinTex(WinTex& wt) {
-    if (wt.isAHB) { wt = {}; return; }
-    if (wt.img!=VK_NULL_HANDLE || wt.stg!=VK_NULL_HANDLE) {
-        WinTex deferred = wt;
-        deferred.isAHB = false;
-        deleteQueue.push_back({deferred, pendingFrameSerial ? pendingFrameSerial : submittedSerial, nullptr});
+    // Only for a texture this renderer owns (a half-built import); window textures borrow.
+    if (wt.img!=VK_NULL_HANDLE) {
+        deleteQueue.push_back({wt, pendingFrameSerial ? pendingFrameSerial : submittedSerial, nullptr});
         retirePending.store(true, std::memory_order_release);
     }
     wt={};
@@ -1177,192 +1188,6 @@ void VulkanRendererContext::ensureCursorStaging(VkDeviceSize sz, uint32_t slot) 
     }
     createBuffer(sz,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,cursorStg[slot],cursorStgM[slot]);
     vk_.MapMemory(device,cursorStgM[slot],0,sz,0,&cursorStgP[slot]); cursorStgC[slot]=sz;
-}
-
-void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
-    const std::vector<DrawEntry>& draws,
-    std::vector<VkImageMemoryBarrier>& ahbTransitions,
-    std::vector<VkImageMemoryBarrier>& preUpload,
-    std::vector<VkImageMemoryBarrier>& postUpload,
-    VkBuffer cursorUpload, bool hasCursorUpload,
-    float ox, float oy, float sx, float sy, float cw, float ch,
-    short ptrX, short ptrY, short curHotX, short curHotY,
-    short curW, short curH, bool curVis,
-    VkRect2D scissorRect)
-{
-    VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vk_.BeginCommandBuffer(cb,&bi)!=VK_SUCCESS) throw std::runtime_error("begin cb");
-
-    ahbTransitions.clear(); preUpload.clear(); postUpload.clear();
-
-    for (auto& d : draws) {
-        if (d.img==VK_NULL_HANDLE) continue;
-        if (d.isAHB && d.needsTransition) {
-            VkImageMemoryBarrier b{}; b.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-            b.image=d.img; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-            b.srcAccessMask=0; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-            ahbTransitions.push_back(b);
-        } else if (!d.isAHB && (d.needsTransition || d.upload!=VK_NULL_HANDLE)) {
-            VkImageMemoryBarrier b{}; b.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-            b.image=d.img; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-            b.srcAccessMask=0; b.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
-            preUpload.push_back(b);
-            b.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-            postUpload.push_back(b);
-        }
-    }
-
-    if (!ahbTransitions.empty())
-        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, (uint32_t)ahbTransitions.size(), ahbTransitions.data());
-    if (!preUpload.empty())
-        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, nullptr, 0, nullptr, (uint32_t)preUpload.size(), preUpload.data());
-
-    for (auto& d : draws) {
-        if (d.isAHB || d.upload==VK_NULL_HANDLE || d.img==VK_NULL_HANDLE) continue;
-        VkBufferImageCopy r{}; r.bufferOffset=0; r.bufferRowLength=0; r.bufferImageHeight=0;
-        r.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
-        r.imageExtent={(uint32_t)d.w,(uint32_t)d.h,1};
-        vk_.CmdCopyBufferToImage(cb, d.upload, d.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r);
-    }
-
-    bool cursorDrawn = curVis && cursorImg!=VK_NULL_HANDLE && cursorDS!=VK_NULL_HANDLE;
-    bool hasCursorCopy = hasCursorUpload && cursorImg!=VK_NULL_HANDLE && cursorUpload!=VK_NULL_HANDLE;
-    if (hasCursorCopy) {
-        VkImageMemoryBarrier b{}; b.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        // Every cursor upload overwrites the complete image, including its first use.
-        b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-        b.image=cursorImg; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-        b.srcAccessMask=VK_ACCESS_SHADER_READ_BIT; b.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
-        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &b);
-        VkBufferImageCopy r{}; r.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
-        r.imageExtent={(uint32_t)curW,(uint32_t)curH,1};
-        vk_.CmdCopyBufferToImage(cb, cursorUpload, cursorImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r);
-        b.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        b.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-        postUpload.push_back(b);
-    }
-
-    if (!postUpload.empty())
-        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, (uint32_t)postUpload.size(), postUpload.data());
-
-    VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpi.renderPass=renderPass; rpi.framebuffer=swapchainFBs[imgIdx]; rpi.renderArea={{0,0},swapchainExt};
-    VkClearValue clr={{{0.f,0.f,0.f,1.f}}}; rpi.clearValueCount=1; rpi.pClearValues=&clr;
-
-    vk_.CmdBeginRenderPass(cb, &rpi, VK_SUBPASS_CONTENTS_INLINE);
-    VkViewport vp{0,0,(float)swapchainExt.width,(float)swapchainExt.height,0,1};
-    vk_.CmdSetViewport(cb, 0, 1, &vp);
-
-    {
-        int32_t  ox2 = std::max(0, scissorRect.offset.x);
-        int32_t  oy2 = std::max(0, scissorRect.offset.y);
-        uint32_t maxW = (swapchainExt.width  > (uint32_t)ox2) ? swapchainExt.width  - (uint32_t)ox2 : 0u;
-        uint32_t maxH = (swapchainExt.height > (uint32_t)oy2) ? swapchainExt.height - (uint32_t)oy2 : 0u;
-        VkRect2D sc{{ox2, oy2},
-                    {std::min(scissorRect.extent.width,  maxW),
-                     std::min(scissorRect.extent.height, maxH)}};
-        vk_.CmdSetScissor(cb, 0, 1, &sc);
-    }
-
-    float rotCosR, rotSinR;
-    getPreRotationCosSin(rotCosR, rotSinR);
-
-    bool useSgsr    = (filterMode == 2) && (sgsrPipeline    != VK_NULL_HANDLE);
-    bool useFsr1    = (filterMode == 3) && (fsr1Pipeline    != VK_NULL_HANDLE);
-    bool usePostFX  = (postFXMode  > 0) && (postfxPipeline  != VK_NULL_HANDLE);
-    bool useStretch = (stretchMode == 1) && (stretchPipeline != VK_NULL_HANDLE);
-
-    VkPipeline activePipeline = useSgsr   ? sgsrPipeline
-                              : useFsr1   ? fsr1Pipeline
-                              : usePostFX ? postfxPipeline
-                              : useStretch? stretchPipeline
-                              : pipeline;
-    vk_.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
-    for (auto& d : draws) {
-        if (d.ds==VK_NULL_HANDLE) continue;
-        vk_.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout, 0, 1, &d.ds, 0, nullptr);
-        if (useSgsr) {
-            WindowPushConstantsSGSR pc{};
-            if (useStretch) { pc.ndcX0 = -1.f; pc.ndcX1 = 1.f; }
-            else { pc.ndcX0=(ox+(float)d.x*sx)/cw*2.f-1.f; pc.ndcX1=(ox+(float)(d.x+d.w)*sx)/cw*2.f-1.f; }
-            pc.ndcY0=(oy+(float)d.y*sy)/ch*2.f-1.f;
-            pc.ndcY1=(oy+(float)(d.y+d.h)*sy)/ch*2.f-1.f;
-            pc.useTexAlpha = 0;
-            float sw = (float)std::max(d.w, 1); float sh = (float)std::max(d.h, 1);
-            pc.invSrcW = 1.0f / sw; pc.invSrcH = 1.0f / sh;
-            pc.srcW = sw; pc.srcH = sh;
-            pc.effectId = postFXMode; pc.resW = 0.0f; pc.sharpness = sharpness;
-            pc.cosR = rotCosR; pc.sinR = rotSinR;
-            vk_.CmdPushConstants(cb, pipeLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-        } else if (useFsr1) {
-            WindowPushConstantsFSR1 pc{};
-            if (useStretch) { pc.ndcX0 = -1.f; pc.ndcX1 = 1.f; }
-            else { pc.ndcX0=(ox+(float)d.x*sx)/cw*2.f-1.f; pc.ndcX1=(ox+(float)(d.x+d.w)*sx)/cw*2.f-1.f; }
-            pc.ndcY0=(oy+(float)d.y*sy)/ch*2.f-1.f;
-            pc.ndcY1=(oy+(float)(d.y+d.h)*sy)/ch*2.f-1.f;
-            pc.useTexAlpha = 0;
-            pc.srcW = (float)std::max(d.w, 1); pc.srcH = (float)std::max(d.h, 1);
-            pc.outW = std::max(1.0f, fabsf(pc.ndcX1-pc.ndcX0)*0.5f*(float)swapchainExt.width);
-            pc.outH = std::max(1.0f, fabsf(pc.ndcY1-pc.ndcY0)*0.5f*(float)swapchainExt.height);
-            pc.effectId = postFXMode; pc.sharpness = sharpness;
-            pc.cosR = rotCosR; pc.sinR = rotSinR;
-            vk_.CmdPushConstants(cb, pipeLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-        } else if (usePostFX) {
-            WindowPushConstantsPostFX pc{};
-            pc.ndcX0=(ox+(float)d.x*sx)/cw*2.f-1.f; pc.ndcY0=(oy+(float)d.y*sy)/ch*2.f-1.f;
-            pc.ndcX1=(ox+(float)(d.x+d.w)*sx)/cw*2.f-1.f; pc.ndcY1=(oy+(float)(d.y+d.h)*sy)/ch*2.f-1.f;
-            pc.effectId=postFXMode; pc.sharpness=sharpness;
-            pc.resW=(float)std::max(d.w,1); pc.resH=(float)std::max(d.h,1);
-            pc.cosR = rotCosR; pc.sinR = rotSinR;
-            vk_.CmdPushConstants(cb, pipeLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-        } else if (useStretch) {
-            WindowPushConstantsStretch pc{};
-            pc.ndcX0=-1.f; pc.ndcX1=1.f;
-            pc.ndcY0=(oy+(float)d.y*sy)/ch*2.f-1.f; pc.ndcY1=(oy+(float)(d.y+d.h)*sy)/ch*2.f-1.f;
-            pc.useTexAlpha=0; pc.strength=stretchStrength; pc.profile=stretchProfile;
-            pc.cosR = rotCosR; pc.sinR = rotSinR;
-            vk_.CmdPushConstants(cb, pipeLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-        } else {
-            WindowPushConstants pc{};
-            pc.ndcX0=(ox+(float)d.x*sx)/cw*2.f-1.f; pc.ndcY0=(oy+(float)d.y*sy)/ch*2.f-1.f;
-            pc.ndcX1=(ox+(float)(d.x+d.w)*sx)/cw*2.f-1.f; pc.ndcY1=(oy+(float)(d.y+d.h)*sy)/ch*2.f-1.f;
-            pc.useTexAlpha=0;
-            pc.cosR = rotCosR; pc.sinR = rotSinR;
-            vk_.CmdPushConstants(cb, pipeLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-        }
-        vk_.CmdDraw(cb, 4, 1, 0, 0);
-    }
-
-    if (cursorDrawn) {
-        if (useSgsr || useFsr1 || useStretch || usePostFX) vk_.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        vk_.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout, 0, 1, &cursorDS, 0, nullptr);
-        float cx=(float)((int)ptrX-curHotX), cy=(float)((int)ptrY-curHotY);
-        WindowPushConstants cpc{};
-        cpc.ndcX0=(ox+cx*sx)/cw*2.f-1.f; cpc.ndcY0=(oy+cy*sy)/ch*2.f-1.f;
-        cpc.ndcX1=(ox+(cx+curW)*sx)/cw*2.f-1.f; cpc.ndcY1=(oy+(cy+curH)*sy)/ch*2.f-1.f;
-        cpc.useTexAlpha=1;
-        cpc.cosR = rotCosR; cpc.sinR = rotSinR;
-        vk_.CmdPushConstants(cb, pipeLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(cpc), &cpc);
-        vk_.CmdDraw(cb, 4, 1, 0, 0);
-    }
-    vk_.CmdEndRenderPass(cb);
-
-    VkResult endStatus = vk_.EndCommandBuffer(cb);
-    if (endStatus!=VK_SUCCESS) {
-        RLOG_E("recordCmdBuf: EndCommandBuffer failed with status=%d (swapRB=%d draws=%zu imgIdx=%u)",
-            (int)endStatus, (int)swapRB, draws.size(), imgIdx);
-        throw std::runtime_error("end cb");
-    }
 }
 
 void VulkanRendererContext::renderLoop() {
@@ -1445,14 +1270,12 @@ int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
     if (!swapchainFifo_.load(std::memory_order_relaxed)) {
         if (content || period <= 0 || lastPresentNs_ == 0) return 0;
         const int64_t now = steadyNowNs();
-        const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
-        const bool clockFresh = deadline != 0 &&
-            now - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
-        if (!clockFresh) return lastPresentNs_ + period - now;
+        if (!vsyncClockFresh(now)) return lastPresentNs_ + period - now;
         // With the vsync clock: composite just before the first queue deadline after the last
         // present (the same lead the limiter uses), so the frame that reaches the display
         // carries the newest pointer position - no later than an unpaced composite would.
-        const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+        const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
+        const int64_t lead = queueLeadNs(period);
         const int64_t next = deadline + (int64_t)std::floor((double)(lastPresentNs_ + lead - deadline)
                                                            / (double)period + 1.0) * period;
         return next - lead - now;
@@ -1469,12 +1292,10 @@ int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
     return std::min(wait, 2 * period);
 }
 
-void VulkanRendererContext::notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs,
-                                                   int64_t startNs) {
+void VulkanRendererContext::notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs) {
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
     if (period <= 0 || presents == 0) return;
-    presentSlotEndNs_ = std::max(presentSlotEndNs_, startNs > 0 ? startNs : steadyNowNs()) +
-                        (int64_t)presents * period;
+    presentSlotEndNs_ = std::max(presentSlotEndNs_, steadyNowNs()) + (int64_t)presents * period;
     // Presents held for a desired time occupy the display until that refresh is over.
     // (desired = intended presentation - half a refresh; the frame stays one refresh.)
     // The model counts in queue deadlines; desired times are presentation times (deadline +
@@ -1485,35 +1306,19 @@ void VulkanRendererContext::notePresentedForPacing(uint32_t presents, int64_t la
     }
 }
 
-uint32_t VulkanRendererContext::fgPresentCap(uint32_t capacity, int64_t groupStartNs) {
+uint32_t VulkanRendererContext::fgQueuedRefreshes(int64_t groupStartNs) const {
+    // Only the FIFO tail is measured here. How many refreshes one source frame may fill (the
+    // panel budget, fractional ratios carried as credit) is the pacer's: two credit schemes in a
+    // row alternated out of phase, and a zero from this side reached the pacer as capacity 0,
+    // which resets its rate history and the engine's warm-up.
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-    if (period <= 0) return capacity;
+    if (period <= 0) return 0;
     const int64_t now = steadyNowNs();
     // Where this group starts: its slot (limiter grid), else the next refresh it can make.
-    const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
-    const int64_t start = groupStartNs > now ? groupStartNs : now + lead;
+    const int64_t start = groupStartNs > now ? groupStartNs : now + queueLeadNs(period);
     // Refreshes still taken by earlier presents at that point: they go first in FIFO.
     const int64_t backlog = presentSlotEndNs_ - start;
-    const int64_t queued = backlog > period / 2 ? (backlog + period / 2) / period : 0;
-    // Refreshes one source frame lasts, carried as credit so a fractional ratio (70 FPS on
-    // 120 Hz = 1.71) alternates instead of always rounding one way. Unknown source rate: no
-    // limit from it, only from the backlog.
-    const int64_t interval = fgSourceIntervalNs();
-    double slots;
-    if (interval > 0) {
-        const double perFrame = (double)interval / (double)period;
-        fgSlotCredit_ = std::min(fgSlotCredit_ + perFrame, perFrame + 1.0);
-        slots = std::floor(fgSlotCredit_ + 0.05);
-    } else {
-        fgSlotCredit_ = 0.0;
-        slots = (double)(capacity + 1);
-    }
-    const int64_t presents = (int64_t)slots - queued;   // the real frame always goes
-    const uint32_t cap = presents <= 1 ? 0u : (uint32_t)std::min<int64_t>(presents - 1, capacity);
-    if (cap < capacity && (fgCapLog_++ % 240u) == 0u)
-        RLOG("lsfg-native: present cap %u of %u (slots %.2f, queued %lld)",
-             cap, capacity, slots, (long long)queued);
-    return cap;
+    return backlog > period / 2 ? (uint32_t)std::min<int64_t>((backlog + period / 2) / period, 8) : 0u;
 }
 
 void VulkanRendererContext::setDisplayRefreshRate(float hz) {
@@ -1523,22 +1328,12 @@ void VulkanRendererContext::setDisplayRefreshRate(float hz) {
     wakeRender();
 }
 
-void VulkanRendererContext::flushDeleteQueue() {
-    std::lock_guard<std::mutex> lk(renderMutex);
-    if (deleteQueue.empty()) return;
-    vk_.DeviceWaitIdle(device);
-    for (auto& retired:deleteQueue) destroyTexNow(retired);
-    deleteQueue.clear();
-    retirePending.store(false, std::memory_order_release);
-}
-
 void VulkanRendererContext::destroyTexNow(RetiredTex& retired) {
     WinTex& wt=retired.wt;
     if (wt.ds  !=VK_NULL_HANDLE) vk_.FreeDescriptorSets(device,winTexPool,1,&wt.ds);
     if (wt.view!=VK_NULL_HANDLE) vk_.DestroyImageView(device,wt.view,nullptr);
     if (wt.img !=VK_NULL_HANDLE) vk_.DestroyImage(device,wt.img,nullptr);
     if (wt.mem !=VK_NULL_HANDLE) vk_.FreeMemory(device,wt.mem,nullptr);
-    if (wt.stg !=VK_NULL_HANDLE){vk_.DestroyBuffer(device,wt.stg,nullptr);vk_.FreeMemory(device,wt.stgMem,nullptr);}
     if (retired.ahb) AHardwareBuffer_release(retired.ahb);
 }
 
@@ -1703,12 +1498,14 @@ void VulkanRendererContext::renderFrame() {
         if (lsfgEngine_->needsRebuild(compositeW, compositeH, swapchainFmt))
             vk_.DeviceWaitIdle(device);
         if (lsfgEngine_->prepare(compositeW, compositeH, swapchainFmt)) {
-            lsfgEngine_->setPresentedRate(fgPresentedRate_);
+            lsfgEngine_->setPresentedRate(fgPresentedRate_.load(std::memory_order_relaxed));
             // The pacer gets GUEST frames, not compositor passes: with
             // presents counted, one pass may carry 0..n of them.
             fgSourceFrames_ += fgNewSourceFrames;
-            const uint32_t cap = fgPresentCap(capacity, fgAnchorSlotNs_);
-            fgPlan_.generations = lsfgEngine_->plan(cap, fgSourceFrames_);
+            // capacity: what the swapchain and the targets can hold; the pacer fits the group
+            // into the panel's refreshes, less those earlier presents still occupy.
+            fgPlan_.generations = lsfgEngine_->plan(capacity, fgSourceFrames_,
+                                                    fgQueuedRefreshes(fgAnchorSlotNs_));
         }
     }
     fgPlan_.presents = fgPlan_.generations + 1;
@@ -1799,9 +1596,7 @@ void VulkanRendererContext::renderFrame() {
     VkRect2D effectiveScissor{{0,0},swapchainExt};
     // First-use transitions are only marked done once the submit that carries them succeeded.
     struct PendingAHBTransition { int64_t srcId; VkImage image; };
-    struct PendingTexTransition { int64_t id; VkImage image; };
     std::vector<PendingAHBTransition> pendingAHB;
-    std::vector<PendingTexTransition> pendingTex;
 
     {
         std::lock_guard<std::mutex> lk(renderMutex);
@@ -1831,26 +1626,16 @@ void VulkanRendererContext::renderFrame() {
             if (it==texMap.end()) continue;
             WinTex& wt=it->second;
             if (wt.ds==VK_NULL_HANDLE) continue;
-            DrawEntry de{wt.img,wt.ds,VK_NULL_HANDLE,re.x,re.y,wt.w,wt.h};
-            de.isAHB=wt.isAHB;
-            if (wt.isAHB) {
-                auto sit=srcImports.find(wt.srcId);
-                if (sit!=srcImports.end()) sit->second.lastSerial = pendingFrameSerial;
-                if (sit!=srcImports.end() && sit->second.wt.img==wt.img &&
-                    sit->second.wt.needsTransition &&
-                    std::none_of(pendingAHB.begin(),pendingAHB.end(),
-                        [&](const PendingAHBTransition& p){return p.image==wt.img;})) {
-                    de.needsTransition=true;
-                    pendingAHB.push_back({wt.srcId,wt.img});
-                }
-            } else if (wt.needsTransition &&
-                std::none_of(pendingTex.begin(),pendingTex.end(),
-                    [&](const PendingTexTransition& p){return p.image==wt.img;})) {
+            DrawEntry de{wt.img,wt.ds,re.x,re.y,wt.w,wt.h};
+            auto sit=srcImports.find(wt.srcId);
+            if (sit!=srcImports.end()) sit->second.lastSerial = pendingFrameSerial;
+            if (sit!=srcImports.end() && sit->second.wt.img==wt.img &&
+                sit->second.wt.needsTransition &&
+                std::none_of(pendingAHB.begin(),pendingAHB.end(),
+                    [&](const PendingAHBTransition& p){return p.image==wt.img;})) {
                 de.needsTransition=true;
-                pendingTex.push_back({re.id,wt.img});
+                pendingAHB.push_back({wt.srcId,wt.img});
             }
-            if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE) { de.upload=wt.stg; wt.dirty=false; }
-            else if (wt.isAHB) { wt.dirty=false; }
             frameDraws.push_back(de);
         }
 
@@ -1873,34 +1658,13 @@ void VulkanRendererContext::renderFrame() {
         curW=cursorTexW; curH=cursorTexH;
     }
 
-    // --- Frame gen: the cursor in every present. Every present of a source frame used to be
-    // recorded and submitted back to back, so all of them - spread over the whole source
-    // interval by their desired times - drew the cursor where it was when the group started:
-    // with frame generation the cursor moved at the GUEST rate (30 FPS x4 = a 30 Hz cursor),
-    // while without it cursor motion is drawn every refresh. With a visible cursor each later
-    // present is now recorded shortly before its own refresh, with the pointer read then.
-    // Only the copy into the swapchain image and the cursor pass are recorded then: generation
-    // g's compute goes to the GPU right after present g - 1 (its own submit), a refresh or more
-    // ahead of its copy, so what waits for the refresh is a copy, not a generation. One present
-    // ahead and no further: a copy is ordered after everything submitted before it, and a later
-    // generation queued in front of it would hold it back.
-    // Only with a visible cursor (games with a hidden one are untouched).
-    {
-        const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-        const int64_t nowNs = steadyNowNs();
-        const bool clockFresh = vsyncDeadlineNs_.load(std::memory_order_relaxed) != 0 &&
-            nowNs - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
-        fgJitThisFrame_ = compositeActive() && !fgPassthrough_ && fgPlan_.generations > 0 &&
-            curVis && cursorImg != VK_NULL_HANDLE && cursorDS != VK_NULL_HANDLE &&
-            cursorOverlayRenderPass != VK_NULL_HANDLE && period > 0 && clockFresh;
-    }
-    // Generations 1.. computed one present ahead, each in its own submit right after present
-    // g - 1 (0 is in the first present's buffer). Bit g set: generation g's target holds its frame.
-    const bool gensAhead = fgJitThisFrame_ && fgPlan_.generations > 1;
-    uint32_t genReady = 0;
-
+    // Frame gen: every present of the group is recorded and submitted back to back, so all of
+    // them draw the cursor where it was when the group started - with frame generation the
+    // cursor moves at the guest rate. (Recording each present just before its refresh only to
+    // move the cursor kept the render thread - and frameMutex - busy for most of the source
+    // interval and needed its own wake-up and lock hand-off machinery.)
     recordCmdBuf(cmdBufs[cmdSlot(0)],imgIdx,frameDraws,
-        frameAhbTransitions,framePreUpload,framePostUpload,
+        frameAhbTransitions,framePostUpload,
         curUpload,hasCurUpload,
         ox,oy,sx,sy,cw,ch,ptrX,ptrY,curHotX,curHotY,curW,curH,curVis,
         effectiveScissor);
@@ -1919,51 +1683,25 @@ void VulkanRendererContext::renderFrame() {
     vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
     uint32_t presented = 0;
     bool fenceSubmitted = false;
-    int64_t groupStartNs = 0;
-    bool jit = fgJitThisFrame_;
-    int64_t jitReachableNs = 0;   // first queue deadline the group can make (back-to-back case)
-    // Order a buffer after everything already submitted for this frame: the chain's shared
-    // passes and the earlier generations. Barriers span command buffers on one queue, so
-    // this is enough.
-    const auto orderAfterEarlierWork = [this](VkCommandBuffer buf) {
-        VkMemoryBarrier mb{}; mb.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        mb.srcAccessMask=VK_ACCESS_MEMORY_WRITE_BIT;
-        mb.dstAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
-        vk_.CmdPipelineBarrier(buf,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 1,&mb, 0,nullptr, 0,nullptr);
-    };
     // Generated frames belong between N-1 and N, so they go out first and the
     // real frame is presented last.
     for (uint32_t k = 0; k < fgPlan_.presents; k++) {
         VkCommandBuffer cb = cmdBufs[cmdSlot(k)];
-        if (k > 0 && fgJitThisFrame_) {
-            if (jit) {
-                // Record this present just ahead of the refresh it is for. The wait ends early
-                // for a stop, a lost surface, a swapchain change or the next source frame
-                // (it must not wait behind these presents); the rest then go out at once.
-                const int64_t wake = fgPresentRecordTimeNs(k, desiredPresent, jitReachableNs);
-                const int64_t nowNs = steadyNowNs();
-                if (wake > nowNs && wake - nowNs < 100000000LL && !waitRenderUntil(wake)) jit = false;
-            }
-            // Draw the cursor where the pointer is now.
-            cursorOverlay_.ptrX = (short)pointerX.load();
-            cursorOverlay_.ptrY = (short)pointerY.load();
-            // Hidden meanwhile: stop drawing it. (Shown meanwhile waits for the next source
-            // frame, which also uploads a changed cursor image.)
-            if (!cursorVisible.load()) cursorOverlay_.draw = false;
-        }
         if (k > 0) {
             VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             if (vk_.BeginCommandBuffer(cb,&bi)!=VK_SUCCESS) { fbResized.store(true); break; }
-            orderAfterEarlierWork(cb);
-            if (k < fgPlan_.generations) {
-                // Computed a present ahead: only its copy (and the cursor) is recorded here.
-                if (gensAhead) { if (genReady & (1u << k)) recordFrameGenPresentCopy(cb, k); }
-                else recordFrameGenGeneration(cb, k);
-            }
-            else copyCompositeToSwapchain(cb, imgIdx);
+            // Order this buffer after everything already submitted for this frame: the chain's
+            // shared passes and the earlier generations. Barriers span command buffers on one
+            // queue, so this is enough.
+            VkMemoryBarrier mb{}; mb.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            mb.srcAccessMask=VK_ACCESS_MEMORY_WRITE_BIT;
+            mb.dstAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
+            vk_.CmdPipelineBarrier(cb,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, 1,&mb, 0,nullptr, 0,nullptr);
+            if (k < fgPlan_.generations) recordFrameGenGeneration(cb, k);
+            else                          copyCompositeToSwapchain(cb, imgIdx);
             if (vk_.EndCommandBuffer(cb)!=VK_SUCCESS) {
                 RLOG_E("renderFrame: EndCommandBuffer failed for present %u/%u", k, fgPlan_.presents);
                 fbResized.store(true);
@@ -1981,8 +1719,7 @@ void VulkanRendererContext::renderFrame() {
         // once it is reached, every guest buffer this frame sampled can go back to the guest.
         // The first is the only one that samples them (the windows are drawn there, into the
         // swapchain image or the composite); generations and copies read the renderer's own
-        // images. On the last submit the guest's buffers were held until the whole group was
-        // out - with presents recorded just in time, most of the source interval.
+        // images, so the guest's buffers need not wait for the whole group.
         VkSemaphore signalSems[2] = {sSem, gpuTimeline_};
         uint64_t signalValues[2] = {0, (uint64_t)pendingFrameSerial};
         VkTimelineSemaphoreSubmitInfo timelineInfo{};
@@ -2014,27 +1751,12 @@ void VulkanRendererContext::renderFrame() {
             swapchainRetryPending.store(true);
             return;
         }
-        if (k == 0) {
-            groupStartNs = steadyNowNs();
-            if (jit) {
-                const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-                const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
-                const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
-                jitReachableNs = deadline + (int64_t)std::ceil(
-                    (double)(groupStartNs + lead - deadline) / (double)period) * period;
-            }
-        }
-        if (k == 0 && (!pendingAHB.empty() || !pendingTex.empty())) {
+        if (k == 0 && !pendingAHB.empty()) {
             std::lock_guard<std::mutex> lk(renderMutex);
             for (const auto& p:pendingAHB) {
                 auto it=srcImports.find(p.srcId);
                 if (it!=srcImports.end() && it->second.wt.img==p.image)
                     it->second.wt.needsTransition=false;
-            }
-            for (const auto& p:pendingTex) {
-                auto it=texMap.find(p.id);
-                if (it!=texMap.end() && it->second.img==p.image)
-                    it->second.needsTransition=false;
             }
         }
         fenceSubmitted = last;
@@ -2058,31 +1780,6 @@ void VulkanRendererContext::renderFrame() {
             fbResized.store(true);
             break;
         }
-        if (gensAhead && k + 1 < fgPlan_.generations) {
-            // Generation k + 1 now, right behind this present: it has until its own copy - a
-            // refresh or more away - and that copy, recorded later, is ordered after it and
-            // after nothing later. No semaphores and no fence: the slot's fence rides on the last
-            // submit, which is ordered after this one.
-            const uint32_t g = k + 1;
-            VkCommandBuffer gb = cmdBufs[fgGenSlot(g)];
-            VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-            if (vk_.ResetCommandBuffer(gb,0)!=VK_SUCCESS || vk_.BeginCommandBuffer(gb,&bi)!=VK_SUCCESS) {
-                fbResized.store(true);
-                break;
-            }
-            orderAfterEarlierWork(gb);
-            if (recordFrameGenCompute(gb, g)) genReady |= 1u << g;
-            VkSubmitInfo gsi{}; gsi.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
-            gsi.commandBufferCount=1; gsi.pCommandBuffers=&gb;
-            if (vk_.EndCommandBuffer(gb)!=VK_SUCCESS ||
-                vk_.QueueSubmit(graphicsQueue,1,&gsi,VK_NULL_HANDLE)!=VK_SUCCESS) {
-                // Nothing to copy for the remaining generated presents: end the frame here (the
-                // fence goes out below, behind everything submitted so far).
-                RLOG_E("renderFrame: frame-gen compute submit failed - dropping generated frames");
-                fbResized.store(true);
-                break;
-            }
-        }
     }
     if (!fenceSubmitted) {
         // Left early before the last submit: an empty submit carrying the
@@ -2099,11 +1796,7 @@ void VulkanRendererContext::renderFrame() {
     }
     trackPresentedRate(presented);
     if (presented > 0) lastPresentNs_ = steadyNowNs();
-    // From the first submit: presents recorded just in time went out over the source interval,
-    // but they were queued for display from the start of the group.
-    notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0,
-                           groupStartNs);
-    if (compositeActive()) fgSlotCredit_ = std::max(0.0, fgSlotCredit_ - (double)presented);
+    notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
 }
 
@@ -2191,35 +1884,6 @@ void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short 
     isCursorImageDirty.store(true); needsRender.store(true); wakeRender();
 }
 
-void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, short h, short stride, int, int) {
-    if (!px||w<=0||h<=0) return;
-    void* mapped=nullptr;
-    {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        WinTex& wt=texMap[id];
-        if (wt.isAHB) wt={}; // The cached AHB owns the borrowed image.
-        if (wt.img==VK_NULL_HANDLE || wt.w!=w || wt.h!=h) {
-            if (wt.img!=VK_NULL_HANDLE) destroyWinTex(wt);
-            if (!createWinTexResources(wt,w,h)) { texMap.erase(id); return; }
-        }
-        mapped=wt.mapped;
-    }
-    if (!mapped) return;
-    const size_t dstPitch=(size_t)w*4;
-    const int32_t srcStride=stride>0?stride:w;
-    uint32_t* src2=static_cast<uint32_t*>(px);
-    uint8_t*  dst2=static_cast<uint8_t*>(mapped);
-    for (int row=0;row<h;++row)
-        memcpy(dst2+(size_t)row*dstPitch, &src2[(size_t)row*srcStride], (size_t)w*4);
-    {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        auto it=texMap.find(id);
-        if (it!=texMap.end()) it->second.dirty=true;
-    }
-    guestFrameSerial_.fetch_add(1, std::memory_order_relaxed);
-    needsRender.store(true); wakeRender();
-}
-
 bool VulkanRendererContext::acquireSourceLocked(int64_t srcId, AHardwareBuffer* ahb) {
     auto sit = srcImports.find(srcId);
     if (sit != srcImports.end() && (sit->second.released || sit->second.ahb != ahb)) {
@@ -2253,12 +1917,11 @@ void VulkanRendererContext::showSourceLocked(int64_t contentId, int64_t srcId) {
     if (sit == srcImports.end()) return;
     SourceImport& src = sit->second;
     WinTex& wt = texMap[contentId];
-    const int64_t previousSrc = wt.isAHB ? wt.srcId : 0;
-    if (!wt.isAHB && wt.img!=VK_NULL_HANDLE) destroyWinTex(wt);
+    const int64_t previousSrc = wt.srcId;   // 0 for a new entry
     if (previousSrc != srcId) src.users++;
     wt = WinTex{};
     wt.img  = src.wt.img; wt.mem  = src.wt.mem; wt.view = src.wt.view; wt.ds = src.wt.ds;
-    wt.isAHB = true; wt.ahb = src.ahb; wt.srcId = srcId; wt.w = src.wt.w; wt.h = src.wt.h;
+    wt.srcId = srcId; wt.w = src.wt.w; wt.h = src.wt.h;
     wt.needsTransition = false; // The first-use layout belongs to the import.
     // After the new reference is taken: the old source may be a released pixmap that this
     // window was the last one showing.
@@ -2307,6 +1970,16 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
         pc.guestFrameValid = true;
     }
 
+    // How many buffers the guest cycles through: two may be out at once only if it has at least
+    // three (one stays here as the newest frame). A constant 2 would time a two-buffer guest's
+    // only free buffer for the slot after next - every frame late, half the rate.
+    int distinct = 1;
+    if (pc.recentSrc[0] != 0 && pc.recentSrc[0] != srcId) distinct++;
+    if (pc.recentSrc[1] != 0 && pc.recentSrc[1] != srcId && pc.recentSrc[1] != pc.recentSrc[0]) distinct++;
+    pc.recentSrc[1] = pc.recentSrc[0];
+    pc.recentSrc[0] = srcId;
+    const int depth = distinct >= 3 ? 2 : 1;
+
     const int     fps    = fpsLimit_.load(std::memory_order_relaxed);
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
     bool staged = false;
@@ -2314,36 +1987,24 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
     if (fps > 0) {
         int64_t spacing  = 1000000000LL / fps;
         const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
-        const bool clockFresh  = deadline != 0 &&
-            now - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
+        const bool clockFresh  = vsyncClockFresh(now);
         // Hold-to-slot needs a live vsync clock. Frame generation too: its group of presents
         // starts at the slot.
         const bool fg   = fgArmed_.load(std::memory_order_relaxed);
         bool grid = clockFresh && period > 0 && spacing > period + period / 20;
-        // A limit at the refresh rate (within 5 %: 60 on 60 Hz, 120 on 120 Hz - what the cadence
-        // display mode picks when the limit is the panel's own rate) used to fall through to the
-        // plain release cadence below: frames shown at once and queued in FIFO behind the
-        // previous one, two buffers handed out with no regard for the display. On the grid with
-        // one slot per refresh the frame is held to its slot and the buffer goes back just in
-        // time for the next one. Depth stays at 2: at this ratio a game near its frame budget
-        // misses whenever it tries depth 1, and each try costs repeated frames - nearly all of
-        // the latency gain comes from slot holding and timed release, not from depth 1.
-        // Not with frame generation: at one present per refresh there is no slot to fill.
-        const bool atRefresh = !grid && !fg && clockFresh && period > 0 &&
-                               std::llabs(spacing - period) <= period / 20;
-        if (atRefresh) { grid = true; spacing = period; }
-        if (atRefresh != pc.atRefresh) {
-            pc.atRefresh = atRefresh;
-            // Leaving or entering the pinned depth: the controller starts over.
-            pc.pipelineDepth = atRefresh ? 2 : 1;
-            pc.lateHistory = 0; pc.depthOneSinceNs = 0; pc.depthTwoHoldNs = 5000000000LL;
-            RLOG("frame pacing: limit %d %s the refresh rate grid", fps,
-                 atRefresh ? "on" : "off");
+        // A limit at the refresh rate (within 5 %: 60 on 60 Hz, 120 on 120 Hz) is the grid with
+        // one slot per refresh: the frame is held to its slot and the buffer goes back just in
+        // time for the next one, instead of frames shown at once and queued in FIFO behind the
+        // previous one. Not with frame generation: at one present per refresh there is no slot
+        // to fill.
+        if (!grid && !fg && clockFresh && period > 0 && std::llabs(spacing - period) <= period / 20) {
+            grid = true;
+            spacing = period;
         }
         if (grid) {
             // Composite this long before the slot's queue deadline (GPU blit + submit; with
             // frame generation also the chain up to the first generated frame).
-            const int64_t baseLead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+            const int64_t baseLead = queueLeadNs(period);
             const int64_t lead = fg ? fgLeadNs(baseLead, spacing) : baseLead;
             const auto snap = [&](int64_t t) {
                 return deadline + (int64_t)std::llround((double)(t - deadline) / (double)period) * period; };
@@ -2353,7 +2014,6 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
             int64_t ideal = pc.idealSlotNs ? pc.idealSlotNs + spacing : 0;
             int64_t slot  = ideal ? snap(ideal) : 0;
             const bool late = ideal != 0 && slot < earliest;
-            pc.lateHistory = (pc.lateHistory << 1) | (late ? 1u : 0u);
             // First frame or a late one (missed its slot): restart the cadence from the next
             // slot that can still be made.
             if (!ideal || late) { slot = ceilGrid(earliest); ideal = slot; }
@@ -2374,36 +2034,28 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
             staged = true;
             const int64_t due = slot - lead;
 
-            // One frame in flight while that makes its slots; two for a while after misses.
-            const int misses = __builtin_popcount(pc.lateHistory & 0x3FFFFFFFu);   // last 30
-            if (pc.atRefresh) {
-                pc.pipelineDepth = 2;   // pinned, see above
-            } else if (pc.pipelineDepth == 1 && misses >= 2) {
-                // Missing again within 3 s of the last try at depth 1: it does not fit yet,
-                // stay overlapped longer before the next try (up to a minute).
-                pc.depthTwoHoldNs = (pc.depthOneSinceNs != 0 && now - pc.depthOneSinceNs < 3000000000LL)
-                    ? std::min<int64_t>(pc.depthTwoHoldNs * 2, 60000000000LL) : 5000000000LL;
-                pc.pipelineDepth = 2; pc.depthTwoUntilNs = now + pc.depthTwoHoldNs; pc.lateHistory = 0;
-                RLOG("frame pacing: guest misses its slots, overlapping two frames for %lld s",
-                     (long long)(pc.depthTwoHoldNs / 1000000000LL));
-            } else if (pc.pipelineDepth == 2 && now > pc.depthTwoUntilNs) {
-                pc.pipelineDepth = 1; pc.lateHistory = 0; pc.depthOneSinceNs = now;
-            }
-            // The buffer given back now is drawn into for the next slot (depth 1) or the one
-            // after (depth 2); it should come back just before that slot's composite.
-            const int64_t target = snap(ideal + spacing * pc.pipelineDepth);
+            // The buffer given back now is drawn into for the next slot (depth 1) or, with the
+            // other one already out for that, the slot after (depth 2); it comes back just before
+            // its slot's composite. The release time of a given slot is the same at either
+            // depth: depth 2 only keeps a late frame from holding up the next buffer.
+            const int64_t target = snap(ideal + spacing * depth);
             const int64_t guestEst = pc.guestFrameValid
                 ? (int64_t)(pc.guestFrameMeanNs + 3.0 * pc.guestFrameDevNs) : spacing / 2;
             const int64_t justInTime = target - lead - guestEst - 2000000LL;
             out[0] = std::max<int64_t>({justInTime, pc.lastReleaseNs + spacing * 95 / 100, now});
-            out[1] = due + 1500000LL;   // previous frame off screen and its GPU reads done
-            out[2] = pc.pipelineDepth;
-            // The present is complete when it goes on screen - at its slot, not now. Guests
-            // that start their next frame on completion (DXVK 2.3+ with present_wait and frame
-            // latency 1, FIFO WSIs) then read input right after the frame is shown instead of a
-            // whole slot earlier. Overlapped (depth 2, the guest misses its slots): at once, so
-            // a heavy guest keeps its full frame time.
-            if (pc.pipelineDepth == 1) out[3] = slot;
+            // Until `due` the previous buffer is still the window's content. GPU reads of it
+            // that are still running after that are covered by sourceBusy() when the device has
+            // a timeline semaphore; without one, by a fixed margin.
+            out[1] = gpuTimeline_ != VK_NULL_HANDLE ? due : due + 1500000LL;
+            out[2] = depth;
+            // The present is complete when it goes on screen - at its slot, not now. Guests that
+            // start their next frame on completion (DXVK 2.3+ with present_wait, FIFO WSIs) then
+            // read input right after the frame is shown instead of up to a slot earlier. Only
+            // for a guest that keeps up: this frame made its slot and one frame (with the
+            // submit lead and margin) fits in a slot interval. A heavy or late guest completes
+            // at once, so it keeps overlapping its frames instead of losing a slot each time.
+            const bool keepsUp = !late && guestEst + lead + 2000000LL <= spacing;
+            if (keepsUp) out[3] = slot;
         } else {
             // Release cadence only (no clock, or limit >= refresh). Two buffers may overlap so
             // a heavy guest keeps its CPU/GPU pipelining.
@@ -2416,8 +2068,6 @@ void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHard
     } else {
         pc.idealSlotNs = 0;
         pc.lastReleaseNs = 0;
-        pc.pipelineDepth = 1; pc.lateHistory = 0;
-        pc.atRefresh = false;
     }
 
     if (staged) {
@@ -2449,6 +2099,59 @@ bool VulkanRendererContext::sourceBusy(int64_t srcId) {
     uint64_t done = 0;
     if (vk_.GetSemaphoreCounterValue(device, gpuTimeline_, &done) != VK_SUCCESS) return false;
     return done < serial;
+}
+
+uint64_t VulkanRendererContext::beginSourceIdleWait(int64_t srcId) {
+    if (gpuTimeline_ == VK_NULL_HANDLE || !vk_.GetSemaphoreCounterValue || !vk_.WaitSemaphores)
+        return 0;
+    uint64_t serial = 0;
+    {
+        std::lock_guard<std::mutex> lk(renderMutex);
+        auto it = srcImports.find(srcId);
+        if (it == srcImports.end()) return 0;
+        serial = it->second.lastSerial;
+    }
+    uint64_t done = 0;
+    if (serial == 0 || vk_.GetSemaphoreCounterValue(device, gpuTimeline_, &done) != VK_SUCCESS ||
+        done >= serial)
+        return 0;
+    idleWaiters_.fetch_add(1, std::memory_order_acq_rel);
+    return serial;
+}
+
+void VulkanRendererContext::endSourceIdleWait(uint64_t serial, uint64_t timeoutNs) {
+    // A timeout (a frame whose submit never went out signals nothing until a later frame
+    // passes it) or a lost device just returns: the buffer goes back on the caller's bound.
+    VkSemaphoreWaitInfo wi{};
+    wi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+    wi.semaphoreCount = 1;
+    wi.pSemaphores = &gpuTimeline_;
+    wi.pValues = &serial;
+    vk_.WaitSemaphores(device, &wi, timeoutNs);
+    idleWaiters_.fetch_sub(1, std::memory_order_acq_rel);
+}
+
+void VulkanRendererContext::releaseIdleWaiters() {
+    // Called by the destructor once the GPU is idle (renderMutex held, so submittedSerial is
+    // stable). Every submitted serial has signalled by now; a waiter can still be blocked on one
+    // whose submit failed, so move the timeline past every serial handed out. No new waiter can
+    // start: beginSourceIdleWait runs under the Java lock this destructor is called under.
+    if (gpuTimeline_ == VK_NULL_HANDLE) return;
+    if (idleWaiters_.load(std::memory_order_acquire) > 0 && vk_.SignalSemaphore &&
+        vk_.GetSemaphoreCounterValue) {
+        uint64_t current = 0;
+        if (vk_.GetSemaphoreCounterValue(device, gpuTimeline_, &current) == VK_SUCCESS &&
+            current <= submittedSerial) {
+            VkSemaphoreSignalInfo si{};
+            si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+            si.semaphore = gpuTimeline_;
+            si.value = (uint64_t)submittedSerial + 1;
+            vk_.SignalSemaphore(device, &si);
+        }
+    }
+    // Without vkSignalSemaphore this is bounded by the waiters' own timeout.
+    while (idleWaiters_.load(std::memory_order_acquire) > 0)
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
 }
 
 void VulkanRendererContext::noteGuestFrameLocked(int64_t nowNs) {
@@ -2536,8 +2239,7 @@ void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[],
     const int64_t interval = fgSourceIntervalNs();
     const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
     const int64_t now      = steadyNowNs();
-    if (period <= 0 || interval <= 0 || deadline == 0 ||
-        now - vsyncSeenNs_.load(std::memory_order_relaxed) > 250000000LL) return;
+    if (period <= 0 || interval <= 0 || !vsyncClockFresh(now)) return;
     // Only with a measured offset (frame timeline, API 33+). A guessed one that is off by more
     // than half a refresh moves every later present one refresh away from the first, which is
     // less even than plain back-to-back FIFO.
@@ -2550,7 +2252,7 @@ void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[],
     // refreshes of that slot each time. Without a slot only the spread matters, and only when
     // a present gets more than one refresh - back to back IS even otherwise, and holding
     // frames would only add latency.
-    const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
+    const int64_t lead = queueLeadNs(period);
     const int64_t reachable = deadline +
         (int64_t)std::ceil((double)(now + lead - deadline) / (double)period) * period;
     // A slot whose queue deadline has already passed (the chain ran late) is not kept.
@@ -2568,70 +2270,6 @@ void VulkanRendererContext::fgPresentTimes(uint32_t presents, int64_t desired[],
         // refresh even if the estimate is off by up to half of one. Unanchored, the first goes
         // out as soon as it is ready.
         if (anchored || k > 0) desired[k] = first + refreshes * period - period / 2;
-    }
-}
-
-int64_t VulkanRendererContext::fgPresentRecordTimeNs(uint32_t k, const int64_t desired[],
-                                                     int64_t reachableNs) const {
-    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-    if (period <= 0) return 0;
-    // The queue deadline of the refresh present k is for - the earliest it can be shown, so
-    // recording against it is never late on account of the estimate: a present held longer
-    // (FIFO backlog) only shows a slightly older cursor, as every present did before.
-    int64_t latch;
-    if (desired[k] > 0) {
-        // Desired times are presentation times, half a refresh early (fgPresentTimes).
-        const int64_t offset = vsyncPresentOffsetNs_.load(std::memory_order_relaxed);
-        if (offset <= 0) return 0;
-        latch = desired[k] + period / 2 - offset;
-    } else if (reachableNs > 0) {
-        latch = reachableNs + (int64_t)k * period;   // back to back: consecutive refreshes
-    } else {
-        return 0;
-    }
-    // GPU time this present still needs before its deadline: the copy into the swapchain image
-    // and the cursor pass, generated and real frames alike (a generation went to the GPU right
-    // after the previous present, a refresh earlier). With the compositor's usual queue-deadline
-    // lead on top, as every composite gets, and a millisecond of slack.
-    const int64_t lead = std::clamp<int64_t>(period * 2 / 5, 3000000LL, 8000000LL);
-    constexpr int64_t kCopyWorkNs = 1000000LL;
-    return latch - lead - kCopyWorkNs - 1000000LL;
-}
-
-bool VulkanRendererContext::fgNextSourceReady(int64_t nowNs) const {
-    // A frame held by the limiter whose time has come (applyDuePresentsLocked's horizon).
-    const int64_t due = nextPendingDueNs_.load(std::memory_order_relaxed);
-    if (due != 0 && due <= nowNs + 250000LL) return true;
-    // A new guest frame, counted as renderFrame counts it: presents while the guest presents
-    // through X Present, content updates otherwise.
-    const int64_t lastPresentNs = guestPresentNs_.load(std::memory_order_relaxed);
-    const bool presentsDriving = lastPresentNs != 0 && nowNs - lastPresentNs < kPresentActiveNs;
-    return presentsDriving
-        ? guestPresentSerial_.load(std::memory_order_relaxed) > fgSeenPresentSerial_
-        : guestFrameSerial_.load(std::memory_order_relaxed) > fgSeenContentSerial_;
-}
-
-bool VulkanRendererContext::waitRenderUntil(int64_t wakeNs) {
-    // Same clock as steadyNowNs(). Woken by every update (wakeRender); ends early (returns
-    // false) for a stop, a lost surface, a swapchain change, or the next source frame: a new
-    // guest frame or a held one coming due. The thread is single: a group still waiting for
-    // its refreshes would otherwise hold the next source frame's composite and chain back,
-    // and with them the next group's first present. Also for a configuration change waiting
-    // for frameMutex (lockFrameExclusive): this frame holds it shared, and its caller holds
-    // the app's view lock with the X server and the UI thread behind it - a new guest frame
-    // cannot even reach the renderer meanwhile.
-    std::unique_lock<std::mutex> lk(dirtyMutex);
-    for (;;) {
-        if (!isRunning.load() || surfaceDetached.load() || fbResized.load()) return false;
-        if (frameWriters_.load(std::memory_order_acquire) > 0) return false;
-        const int64_t now = steadyNowNs();
-        if (fgNextSourceReady(now)) return false;
-        if (now >= wakeNs) return true;
-        // A held frame's due time is not announced by a wake: sleep no longer than that.
-        int64_t until = wakeNs;
-        const int64_t due = nextPendingDueNs_.load(std::memory_order_relaxed);
-        if (due != 0 && due - 250000LL < until) until = due - 250000LL;
-        dirtyCV.wait_for(lk, std::chrono::nanoseconds(std::max<int64_t>(until - now, 0)));
     }
 }
 
@@ -2659,9 +2297,7 @@ void VulkanRendererContext::unrefSourceLocked(int64_t srcId) {
 void VulkanRendererContext::retireSourceLocked(std::unordered_map<int64_t, SourceImport>::iterator it) {
     // Destroyed (and its AHB reference dropped) once the last frame that may have sampled it
     // has completed on the GPU - see renderFrame()'s deleteQueue sweep.
-    WinTex deferred = it->second.wt;
-    deferred.isAHB = false;
-    deleteQueue.push_back({deferred, pendingFrameSerial ? pendingFrameSerial : submittedSerial,
+    deleteQueue.push_back({it->second.wt, pendingFrameSerial ? pendingFrameSerial : submittedSerial,
                            it->second.ahb});
     retirePending.store(true, std::memory_order_release);
     srcImports.erase(it);
@@ -2672,14 +2308,9 @@ void VulkanRendererContext::eraseContentLocked(int64_t contentId) {
     pacers_.erase(contentId);
     auto it = texMap.find(contentId);
     if (it == texMap.end()) return;
-    if (it->second.isAHB) {
-        const int64_t srcId = it->second.srcId;
-        texMap.erase(it);
-        unrefSourceLocked(srcId);
-    } else {
-        destroyWinTex(it->second);
-        texMap.erase(it);
-    }
+    const int64_t srcId = it->second.srcId;
+    texMap.erase(it);
+    unrefSourceLocked(srcId);
 }
 
 void VulkanRendererContext::releaseDrawable(int64_t id) {
@@ -2697,13 +2328,6 @@ void VulkanRendererContext::releaseDrawable(int64_t id) {
         sit->second.released = true;
         if (sit->second.users <= 0) retireSourceLocked(sit);
     }
-    needsRender.store(true); wakeRender();
-}
-
-void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, const int* ys, int count) {
-    std::lock_guard<std::mutex> lk(renderMutex);
-    renderList.resize(count);
-    for (int i=0;i<count;i++) renderList[i]={ids[i],xs[i],ys[i]};
     needsRender.store(true); wakeRender();
 }
 
@@ -2910,7 +2534,7 @@ void VulkanRendererContext::dumpRendererInfo() {
         "SupportedPresentModes: [%s] current=%d",pmList.c_str(),(int)requestedPresentMode);
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Filter: mode=%d (%s)",
-        filterMode, filterMode==3?"FSR1":filterMode==2?"SGSR":filterMode==1?"NEAREST":"LINEAR");
+        filterMode, filterMode==7?"NIS":filterMode==6?"SGSR_HQ":filterMode==5?"COLOR_BOOST":filterMode==4?"LANCZOS2":filterMode==3?"FSR":filterMode==2?"SGSR":filterMode==1?"NEAREST":"LINEAR");
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Surface: %dx%d container: %dx%d",surfaceWidth,surfaceHeight,containerWidth,containerHeight);
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
@@ -2926,13 +2550,25 @@ void VulkanRendererContext::setFilterMode(int mode) {
     // renderFrame() takes them in.
     auto frameLock = lockFrameExclusive();
     std::lock_guard<std::mutex> mapLock(renderMutex);
-    auto modeName=[](int m){ return m==1?"NEAREST":m==2?"SGSR":m==3?"FSR1":"LINEAR"; };
+    auto modeName=[](int m){ return m==1?"NEAREST":m==2?"SGSR":m==3?"FSR":m==4?"LANCZOS2":m==5?"COLOR_BOOST":m==6?"SGSR_HQ":m==7?"NIS":"LINEAR"; };
     RLOG("setFilterMode: %d -> %d (%s->%s)", filterMode, mode, modeName(filterMode), modeName(mode));
     if (filterMode==mode) { RLOG("setFilterMode: already set, skipping"); return; }
+    // Only NEAREST (mode 1) has a sampler of its own; every other switch keeps it, and with it
+    // the descriptor sets - no GPU drain on an upscaler change.
+    const bool samplerChanges = (filterMode == 1) != (mode == 1);
     filterMode=mode;
-    if (mode == 2 && sgsrPipeline == VK_NULL_HANDLE) createSgsrPipeline();
-    if (mode == 3 && fsr1Pipeline == VK_NULL_HANDLE) createFsr1Pipeline();
-    if (mode == 5 && postfxPipeline == VK_NULL_HANDLE) createPostFXPipeline();
+    // Every upscaler is built here, before the first frame that binds it, never while a frame is
+    // being recorded. Already-built pipelines are kept (the create calls return early).
+    switch (mode) {
+    case 2: tryCreatePipeline(&VulkanRendererContext::createSgsrPipeline,    "SGSR");    break;
+    case 3: tryCreatePipeline(&VulkanRendererContext::createFsr1Pipeline,    "FSR");     break;
+    case 4: tryCreatePipeline(&VulkanRendererContext::createLanczosPipeline, "Lanczos"); break;
+    case 6: tryCreatePipeline(&VulkanRendererContext::createSgsrHqPipeline,  "SGSR HQ"); break;
+    case 7: tryCreatePipeline(&VulkanRendererContext::createNisPipeline,     "NIS");     break;
+    default: break;
+    }
+    syncPostFXPipeline();   // waits for the GPU itself if it releases the postfx pipeline
+    if (!samplerChanges) { needsRender.store(true); wakeRender(); return; }
     vk_.DeviceWaitIdle(device);
     if (sampler!=VK_NULL_HANDLE){vk_.DestroySampler(device,sampler,nullptr);sampler=VK_NULL_HANDLE;}
     createSampler();
@@ -2956,7 +2592,7 @@ void VulkanRendererContext::setStretchMode(int mode) {
     RLOG("setStretchMode: %d -> %d", stretchMode, mode);
     if (stretchMode == mode) return;
     stretchMode = mode;
-    if (mode == 1 && stretchPipeline == VK_NULL_HANDLE) createStretchPipeline();
+    if (mode == 1) tryCreatePipeline(&VulkanRendererContext::createStretchPipeline, "stretch");
     needsRender.store(true); wakeRender();
 }
 
@@ -2995,12 +2631,8 @@ void VulkanRendererContext::setSwapRB(bool enabled) {
     // Imports own their views; window textures that show one borrow its handles.
     for (auto& [srcId, imp] : srcImports) rebuildContentView(imp.wt);
     for (auto& [id, wt] : texMap) {
-        if (wt.isAHB) {
-            auto sit = srcImports.find(wt.srcId);
-            if (sit != srcImports.end() && sit->second.wt.img == wt.img) wt.view = sit->second.wt.view;
-        } else {
-            rebuildContentView(wt);
-        }
+        auto sit = srcImports.find(wt.srcId);
+        if (sit != srcImports.end() && sit->second.wt.img == wt.img) wt.view = sit->second.wt.view;
     }
     needsRender.store(true); wakeRender();
 }
