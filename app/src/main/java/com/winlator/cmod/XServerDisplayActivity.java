@@ -2510,14 +2510,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (maxDeviceMemory != null && Integer.parseInt(maxDeviceMemory) > 0)
             envVars.put("WRAPPER_VMEM_MAX_SIZE", maxDeviceMemory);
 
+        // No swapchain length pinning for any mode: the X server (PresentExtension) keeps the
+        // newest presented pixmap until the next present, so with two images the guest's next
+        // buffer only comes back once its previous frame has finished on the GPU and reached the
+        // server - no CPU/GPU overlap. The WSI's own count (at least 3) applies to every mode;
+        // WRAPPER_MAX_IMAGE_COUNT stays available as a manual environment variable.
         String presentMode = graphicsDriverConfig.get("presentMode");
-        if (presentMode.contains("immediate")) {
-            // Two, not one: with a single image the guest draws into the very buffer the
-            // compositor is showing (the X server has to hand it back right after every present),
-            // so frames tear or show half-drawn. Two is the minimum for whole frames; the server
-            // hands the older one back at once without an FPS limit, so latency stays the same.
-            envVars.put("WRAPPER_MAX_IMAGE_COUNT", "2");
-        }
         envVars.put("MESA_VK_WSI_PRESENT_MODE", presentMode);
 
         String resourceType = graphicsDriverConfig.get("resourceType");
