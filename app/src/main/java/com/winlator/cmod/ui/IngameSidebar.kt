@@ -124,6 +124,21 @@ private fun IngameSidebar(
         Row(
             modifier = Modifier
                 .fillMaxSize()
+                // Swallow every touch that lands anywhere on the sidebar card, even on empty
+                // background (no child widget under the finger). Without this, background(),
+                // border() and shadow() are draw-only — they don't register a hit target — so a
+                // tap that doesn't land on an interactive child (a rail icon, a slider, a hidden
+                // panel) is never consumed here. The standard ViewGroup touch dispatch then
+                // falls through to the next lower z-order sibling at the same screen coordinates:
+                // FLXServerDisplay, which hosts InputControlsView, so the tap is read as a press
+                // on the in-game control under the sidebar.
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent().changes.forEach { it.consume() }
+                        }
+                    }
+                }
                 .shadow(elevation = 8.dp, shape = shape, clip = false)
                 .clip(shape)
                 .background(sidebarPanelColor())
@@ -180,7 +195,16 @@ private fun SidebarPanelLayer(selected: Boolean, scroll: ScrollState, slideOffse
             .then(
                 if (selected) Modifier
                 else Modifier
-                    .pointerInput(Unit) { }
+                    // Must actually consume, not just be present: an empty pointerInput block
+                    // never awaits an event, so it does nothing and the touch falls through to
+                    // whatever is behind this ComposeView (see note on the outer Row above).
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent().changes.forEach { it.consume() }
+                            }
+                        }
+                    }
                     .clearAndSetSemantics { }
                     .focusProperties { onEnter = { cancelFocusChange() } }
                     .focusGroup()

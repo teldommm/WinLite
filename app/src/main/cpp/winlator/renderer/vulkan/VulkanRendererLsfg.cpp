@@ -1,8 +1,6 @@
 // Native LSFG compositor integration adapted from Bannerlator 3.0.9 (e6f3410,
 // GPL-3.0-or-later). Credits: Bannerlator/The412Banner, WinNative, Camille
 // LaVey and the Eden Emulator Project, and PancakeTAS/lsfg-vk.
-// Win-FG Native is a separate upstream engine and is intentionally not
-// ported here: this file only wires up LSFG.
 #include "VulkanRendererContext.h"
 #include "lsfg/lsfg_engine.h"
 #include "lsfg/lsfg_vkd.h"
