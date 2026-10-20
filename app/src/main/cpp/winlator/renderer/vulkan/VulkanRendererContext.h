@@ -648,7 +648,11 @@ public:
     int64_t lastPresentNs_ = 0;
     int64_t pacingWaitNs(bool content) const;
     // lastDesiredNs: desired presentation time of the last present (display timing), 0 = none.
-    void    notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs = 0);
+    // startNs: when this group's first present was recorded (0 = now). The group's refreshes
+    // are counted from there, not from when its last present was queued: acquiring the later
+    // images can take most of a source interval, and that wait is not display time.
+    void    notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs = 0,
+                                   int64_t startNs = 0);
     // How long before a refresh's queue deadline a composite is started (GPU work + submit).
     static int64_t queueLeadNs(int64_t periodNs) {
         return std::clamp<int64_t>(periodNs * 2 / 5, 3000000LL, 8000000LL);

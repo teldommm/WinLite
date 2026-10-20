@@ -1292,10 +1292,12 @@ int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
     return std::min(wait, 2 * period);
 }
 
-void VulkanRendererContext::notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs) {
+void VulkanRendererContext::notePresentedForPacing(uint32_t presents, int64_t lastDesiredNs,
+                                                   int64_t startNs) {
     const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
     if (period <= 0 || presents == 0) return;
-    presentSlotEndNs_ = std::max(presentSlotEndNs_, steadyNowNs()) + (int64_t)presents * period;
+    presentSlotEndNs_ = std::max(presentSlotEndNs_, startNs > 0 ? startNs : steadyNowNs()) +
+                        (int64_t)presents * period;
     // Presents held for a desired time occupy the display until that refresh is over.
     // (desired = intended presentation - half a refresh; the frame stays one refresh.)
     // The model counts in queue deadlines; desired times are presentation times (deadline +
@@ -1676,6 +1678,8 @@ void VulkanRendererContext::renderFrame() {
 
     int64_t desiredPresent[kMaxPresentsPerFrame] = {};
     if (compositeActive()) fgPresentTimes(fgPlan_.presents, desiredPresent, fgAnchorSlotNs_);
+    // The group's presents go out from here; the model counts their refreshes from this point.
+    const int64_t groupStartNs = compositeActive() ? steadyNowNs() : 0;
 
     // The slot's fence rides on the LAST submit. A fence signal is ordered
     // after every command submitted earlier on the same queue, so it still
@@ -1796,7 +1800,8 @@ void VulkanRendererContext::renderFrame() {
     }
     trackPresentedRate(presented);
     if (presented > 0) lastPresentNs_ = steadyNowNs();
-    notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0);
+    notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0,
+                           groupStartNs);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
 }
 
