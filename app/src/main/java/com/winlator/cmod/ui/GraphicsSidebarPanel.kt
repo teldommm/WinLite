@@ -79,9 +79,14 @@ private val FRAMEGEN_LABELS = listOf("Off", "LSFG 2x", "LSFG 3x", "LSFG 4x", "LS
 // Index of "LSFG Adaptive FPS": presents paced to a typed-in rate instead of a fixed multiplier.
 const val FRAMEGEN_TARGET_INDEX = 4
 private const val TARGET_FPS_MAX = 1000
+// First 12 entries (indices 0-11) map 1:1 to window_postfx.frag effectId 0,10..20 via
+// XServerDisplayActivity's effectModes[] table. The last 5 (indices 12-16) were previously
+// implemented in the shader (applyVibrance/Curves/CASLite/Technicolor/Levels, effectId 5-9) but
+// never wired to any picker - added here so they're reachable; effectModes[] must stay in sync.
 private val RESHADE_EFFECTS = listOf(
     "Off", "Game Clarity", "Cinematic", "Vivid", "Competitive", "Adaptive Sharpen",
-    "Filmic", "Arcade", "Retro CRT", "Upscale Sharp", "Pixel Clean", "Anime Edge"
+    "Filmic", "Arcade", "Retro CRT", "Upscale Sharp", "Pixel Clean", "Anime Edge",
+    "Vibrance", "Curves", "CAS Lite", "Technicolor", "Levels"
 )
 
 // FPS Limit slider: position 0 = Off, positions 1..24 = 5..120 FPS in 5 FPS steps, position 25

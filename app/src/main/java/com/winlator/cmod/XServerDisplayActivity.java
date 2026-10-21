@@ -1909,7 +1909,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // original ReshadeSidebarPanelView never wrote to Container or Shortcut
                 // either, so this is session-only by design, not an oversight.
                 if (vkRenderer == null) return;
-                int[] effectModes = {0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
+                // Indices 0-11 are the original ReShade list (effectId 0, 10..20). Indices 12-16
+                // are applyVibrance/Curves/CASLite/Technicolor/Levels (effectId 5..9), which were
+                // implemented in window_postfx.frag but never reachable from any picker; wiring
+                // them here keeps this table in sync with GraphicsSidebarPanel's RESHADE_EFFECTS.
+                int[] effectModes = {0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 5, 6, 7, 8, 9};
                 if (index <= 0 || index >= effectModes.length) {
                     // ReShade's strength went into the shared sharpness; give the upscaler and
                     // DLS theirs back, or they keep it until the slider is touched.

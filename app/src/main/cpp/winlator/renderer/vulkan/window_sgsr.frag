@@ -79,7 +79,6 @@ void main() {
     left   -= vec4(mean);
     right  -= vec4(mean);
     upDown -= vec4(mean);
-    float cDelta = centerG - mean;
 
     float sum =
         abs(left.x)   + abs(left.y)   + abs(left.z)   + abs(left.w)   +
