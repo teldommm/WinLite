@@ -1,7 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Separable Lanczos2 resampling (4x4 / 16 source texels).
+// Separable Lanczos2 resampling (4x4 / 16 source texels), plus the shared Sharpness slider
+// applied as a light unsharp mask on top of the resample result.
 // Intended as a high-quality spatial texture filter between bilinear and heavier upscalers.
 
 layout(push_constant) uniform PC {
@@ -72,6 +73,21 @@ void main() {
 
     vec4 color = clamp(accum / max(abs(totalWeight), 1e-6), 0.0, 1.0);
     if (pc.useTexAlpha == 0) color.a = 1.0;
+
+    // Lanczos2's own Sharpness response: a light unsharp mask against a bilinear box blur,
+    // same SHARP = sharp * 1.2 response as applyDLS in postfx_common.glsl so the slider feels
+    // the same whichever mode is active. This is independent of the Post Effect picker: it
+    // runs even when Post Effect is None, and stacks with DLS if that's selected too.
+    float sharpAmt = clamp(pc.sharpness, 0.0, 1.0);
+    if (sharpAmt > 0.0) {
+        vec2 texel = 1.0 / srcSize;
+        vec3 blur = (texture(texSampler, fragTexCoord + vec2(texel.x, 0.0)).rgb
+                   + texture(texSampler, fragTexCoord - vec2(texel.x, 0.0)).rgb
+                   + texture(texSampler, fragTexCoord + vec2(0.0, texel.y)).rgb
+                   + texture(texSampler, fragTexCoord - vec2(0.0, texel.y)).rgb) * 0.25;
+        color.rgb = clamp(color.rgb + (color.rgb - blur) * (sharpAmt * 1.2), 0.0, 1.0);
+    }
+
     if (pc.effectId != 0) applyPostFX(color.rgb, fragTexCoord);
     outColor = color;
 }
