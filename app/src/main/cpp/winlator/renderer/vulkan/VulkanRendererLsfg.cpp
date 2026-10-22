@@ -1,5 +1,5 @@
-// Native LSFG compositor integration adapted from Bannerlator 3.0.9 (e6f3410,
-// GPL-3.0-or-later). Credits: Bannerlator/The412Banner, WinNative, Camille
+// Native LSFG compositor integration
+// GPL-3.0-or-later). Credits: Camille
 // LaVey and the Eden Emulator Project, and PancakeTAS/lsfg-vk.
 #include "VulkanRendererContext.h"
 #include "lsfg/lsfg_engine.h"
@@ -571,7 +571,7 @@ void VulkanRendererContext::guestExtentForFrameGen(uint32_t& w, uint32_t& h) con
     if (containerHeight > 0 && h > (uint32_t)containerHeight) h = (uint32_t)containerHeight;
 }
 
-// About one refresh interval, bounded to 2..20 ms (GameNative's bound): long
+// About one refresh interval, bounded to 2..20 ms: long
 // enough for a FIFO swapchain to release an image at the next vblank, short
 // enough that a missing generated frame never stalls the real one.
 uint64_t VulkanRendererContext::frameGenAcquireTimeoutNs() const {

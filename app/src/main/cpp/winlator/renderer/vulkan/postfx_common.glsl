@@ -3,15 +3,20 @@
 // output, window_postfx on the plain blit and on top of ColorBoost. Each function takes the
 // colour to work on; the neighbourhood taps read the source texture. Include after texSampler is
 // declared (needs GL_GOOGLE_include_directive). texel = one source pixel in UV.
+//
+// doSharpen: DLS's unsharp mask is applied only when nothing else in the pass already sharpens
+// (the plain blit). Under an upscaler or ColorBoost, which sharpen with the same slider, it is
+// false and DLS only does its contrast / saturation lift - otherwise the slider acts twice.
 
-vec3 applyDLS(vec3 center, vec2 uv, vec2 texel, float sharp) {
+vec3 applyDLS(vec3 center, vec2 uv, vec2 texel, float sharp, bool doSharpen) {
     float SAT   = 1.0 + sharp * 0.20;
     float CON   = 1.0 + sharp * 0.12;
-    float SHARP = sharp * 1.2;
     vec3 c = clamp((center - 0.5) * CON + 0.5, 0.0, 1.0);
     float gray = dot(c, vec3(0.299, 0.587, 0.114));
     c = mix(vec3(gray), c, SAT);
+    if (!doSharpen) return c;
 
+    float SHARP = sharp * 1.2;
     vec3 blur = (texture(texSampler, uv + vec2( 0.0,    -texel.y)).rgb
                + texture(texSampler, uv + vec2( 0.0,     texel.y)).rgb
                + texture(texSampler, uv + vec2(-texel.x,  0.0   )).rgb
@@ -58,8 +63,8 @@ vec3 applyNatural(vec3 c) {
 }
 
 // Any other id (0, or a window_postfx-only effect) leaves rgb as it is.
-vec3 applyPostFXEffect(int id, vec3 rgb, vec2 uv, vec2 texel, float sharp) {
-    if      (id == 1) return applyDLS    (rgb, uv, texel, sharp);
+vec3 applyPostFXEffect(int id, vec3 rgb, vec2 uv, vec2 texel, float sharp, bool doSharpen) {
+    if      (id == 1) return applyDLS    (rgb, uv, texel, sharp, doSharpen);
     else if (id == 2) return applyCRT    (rgb, uv);
     else if (id == 3) return applyHDR    (rgb, uv, texel);
     else if (id == 4) return applyNatural(rgb);

@@ -3011,7 +3011,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void startFrameGenRefreshTracking(final VulkanXServerView vkRenderer) {
         stopFrameGenRefreshTracking();
         frameGenRenderer = vkRenderer;
-        // Pick a display mode that suits frame generation (ported from WinNative) and hand the
+        // Pick a display mode that suits frame generation and hand the
         // native pacer the rate the panel is being moved to; the listener below then follows
         // the mode the system actually runs, including changes the app did not ask for.
         applyFrameGenDisplayMode();
@@ -3041,7 +3041,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     /**
-     * Display mode for frame generation (WinNative's selection). Adaptive wants a mode of at
+     * Display mode for frame generation. Adaptive wants a mode of at
      * least the target rate; a fixed multiplier with an FPS limit wants multiplier x limit;
      * otherwise the fastest mode. Among modes that meet the goal the slowest one wins (no
      * presents wasted above the target), preferring modes the FPS limit divides evenly. With

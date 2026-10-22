@@ -415,7 +415,7 @@ void main() {
     vec3 rgb;
     vec2 texel = 1.0 / max(vec2(pc.resW, pc.resH), vec2(1.0));
     if (pc.effectId >= 1 && pc.effectId <= 4)
-        rgb = applyPostFXEffect(pc.effectId, texture(texSampler, uv).rgb, uv, texel, pc.sharpness);
+        rgb = applyPostFXEffect(pc.effectId, texture(texSampler, uv).rgb, uv, texel, pc.sharpness, true);
     else if (pc.effectId == 5)  rgb = applyVibrance              (uv, pc.sharpness);
     else if (pc.effectId == 6)  rgb = applyCurves                (uv, pc.sharpness);
     else if (pc.effectId == 7)  rgb = applyCASLite               (uv, pc.sharpness);
@@ -436,6 +436,6 @@ void main() {
     else                        rgb = texture(texSampler, uv).rgb;
     // ColorBoost is picked as an upscaler, so the panel's PostFX effect rides on top of it the
     // way it does on SGSR, FSR, Lanczos and NIS.
-    if (pc.effectId == 21) rgb = applyPostFXEffect(pc.postFxId, rgb, uv, texel, pc.sharpness);
+    if (pc.effectId == 21) rgb = applyPostFXEffect(pc.postFxId, rgb, uv, texel, pc.sharpness, false);
     outColor = vec4(rgb, 1.0);
 }

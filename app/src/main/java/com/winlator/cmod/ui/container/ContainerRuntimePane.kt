@@ -202,7 +202,7 @@ internal fun ContainerRuntimePane(
                     renderer = it
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_present_mode), presentMode, listOf("mailbox", "fifo")) {
+                SettingChoice(uiStr(R.string.ui_present_mode), presentMode, listOf("fifo", "mailbox")) {
                     presentMode = it; container.setRendererPresentMode(it); container.saveData()
                 }
                 catalog?.let { c ->

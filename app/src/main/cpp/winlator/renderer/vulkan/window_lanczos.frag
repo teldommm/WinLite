@@ -42,7 +42,7 @@ float lanczos2(float x) {
 #include "postfx_common.glsl"
 
 void applyPostFX(inout vec3 rgb, vec2 uv) {
-    rgb = applyPostFXEffect(pc.effectId, rgb, uv, 1.0 / max(vec2(pc.srcW, pc.srcH), vec2(1.0)), pc.sharpness);
+    rgb = applyPostFXEffect(pc.effectId, rgb, uv, 1.0 / max(vec2(pc.srcW, pc.srcH), vec2(1.0)), pc.sharpness, false);
 }
 
 void main() {
@@ -77,7 +77,8 @@ void main() {
     // Lanczos2's own Sharpness response: a light unsharp mask against a bilinear box blur,
     // same SHARP = sharp * 1.2 response as applyDLS in postfx_common.glsl so the slider feels
     // the same whichever mode is active. This is independent of the Post Effect picker: it
-    // runs even when Post Effect is None, and stacks with DLS if that's selected too.
+    // runs even when Post Effect is None. DLS under this mode only lifts contrast/saturation
+    // (doSharpen = false), so the slider never sharpens twice.
     float sharpAmt = clamp(pc.sharpness, 0.0, 1.0);
     if (sharpAmt > 0.0) {
         vec2 texel = 1.0 / srcSize;

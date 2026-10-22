@@ -947,7 +947,7 @@ private fun ShortcutCategoryV2(
                     s.saveRenderer()
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_present_mode), s.presentMode, listOf("mailbox", "fifo")) {
+                SettingChoice(uiStr(R.string.ui_present_mode), s.presentMode, listOf("fifo", "mailbox")) {
                     s.presentMode = it
                     s.saveRenderer()
                 }

@@ -118,8 +118,8 @@ private fun GraphicsSidebarPanel(
     // Same visibility rule as the original updateSharpnessVis(): shown while Super Resolution
     // is on (any upscaler mode — SGSR/SGSR HQ/FSR/NIS/Lanczos2/Color Boost all read pc.sharpness
     // in their own shader) OR the Post Effect picker is set to DLS (index 1), since DLS also
-    // reads it. Sharpness feeds whichever is active, and can feed both at once (e.g. Lanczos2 +
-    // DLS stack their own sharpening passes).
+    // reads it. Under an upscaler DLS no longer sharpens (contrast/saturation only), so the
+    // slider drives a single sharpening stage.
     val sharpnessVisible = fsrEnabled || postFxIndex == 1
 
     Column(

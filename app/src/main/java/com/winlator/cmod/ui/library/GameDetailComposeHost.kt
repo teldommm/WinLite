@@ -449,7 +449,6 @@ private fun DetailAction(item: DetailActionItem, modifier: Modifier) {
 }
 
 // Playtime, plays, last launch and size, as dark glass chips (they always sit on the artwork) with
-// the same blue icons as WinNative's launch screen (OnArtwork.InfoIcon).
 
 private class StatEntry(val icon: ImageVector, val label: String, val value: String)
 

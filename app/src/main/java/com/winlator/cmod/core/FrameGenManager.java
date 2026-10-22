@@ -2,11 +2,6 @@ package com.winlator.cmod.core;
 
 /**
  * Helpers around native LSFG frame generation launch/env handling.
- *
- * <p>Unlike upstream Bannerlator, this build only carries the native LSFG
- * engine (Win-FG Native is a separate engine and was intentionally not
- * ported), so there is no backend selector here — frame generation is either
- * off or running LSFG.
  */
 public final class FrameGenManager {
     private FrameGenManager() {}

@@ -11,8 +11,7 @@ import java.io.File;
  *
  * <p>The 25 compute shaders that make up Lossless Scaling frame generation are
  * not redistributable. They live as resources inside the user's own paid copy
- * of {@code Lossless.dll} (Steam app 993090), so Bannerlator bundles nothing
- * and extracts them on device. The DLL is mapped read-only and parsed as data;
+ * of {@code Lossless.dll} (Steam app 993090). The DLL is mapped read-only and parsed as data;
  * it is never loaded as a library and never executed.
  *
  * <p>Extraction is slow enough to be worth doing once — the DXBC chain has to

@@ -390,7 +390,7 @@ float addDirFilters(float p[6][6], float phase_x_frac, float phase_y_frac,
 #include "postfx_common.glsl"
 
 void applyPostFX(inout vec3 rgb, vec2 uv) {
-    rgb = applyPostFXEffect(pc.effectId, rgb, uv, vec2(pc.invSrcW, pc.invSrcH), pc.sharpness);
+    rgb = applyPostFXEffect(pc.effectId, rgb, uv, vec2(pc.invSrcW, pc.invSrcH), pc.sharpness, false);
 }
 
 void main() {

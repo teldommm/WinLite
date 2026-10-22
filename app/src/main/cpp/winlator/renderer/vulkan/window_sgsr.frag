@@ -39,7 +39,7 @@ vec2 weightY(float dx, float dy, float c, float std, float spatialFactor) {
 #include "postfx_common.glsl"
 
 void applyPostFX(inout vec3 rgb, vec2 uv) {
-    rgb = applyPostFXEffect(pc.effectId, rgb, uv, vec2(pc.invSrcW, pc.invSrcH), pc.sharpness);
+    rgb = applyPostFXEffect(pc.effectId, rgb, uv, vec2(pc.invSrcW, pc.invSrcH), pc.sharpness, false);
 }
 
 void main() {
