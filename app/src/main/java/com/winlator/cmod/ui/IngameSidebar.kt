@@ -126,6 +126,11 @@ private fun IngameSidebar(
                 .fillMaxSize()
                 .shadow(elevation = 8.dp, shape = shape, clip = false)
                 .clip(shape)
+                // The card must be a pointer target everywhere. ComposeView only reports a touch
+                // as handled when some pointer-input node sits under the finger; the empty parts
+                // of the rail (between/below the buttons) have none, so the touch fell through the
+                // DrawerLayout to the game's TouchpadView behind it (cursor moved, game got clicks).
+                .pointerInput(Unit) { }
                 .background(sidebarPanelColor())
                 .border(BorderStroke(1.dp, hairlineColor()), shape)
         ) {
