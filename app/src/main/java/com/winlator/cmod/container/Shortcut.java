@@ -373,12 +373,6 @@ public class Shortcut {
     }
     public void setRendererFilterMode(int v) { putExtra("rendererFilterMode", String.valueOf(v)); }
 
-    public boolean getRendererSwapRB() {
-        String v = getExtra("rendererSwapRB", null);
-        return v != null ? v.equals("1") : container.getRendererSwapRB();
-    }
-    public void setRendererSwapRB(boolean v) { putExtra("rendererSwapRB", v ? "1" : "0"); }
-
     public int getLsfgMultiplier() {
         String value = getExtra("lsfgMultiplier", null);
         try {

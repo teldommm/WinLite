@@ -269,7 +269,6 @@ public:
     void setStretchMode(int mode);
     void setPostFXMode(int mode);
     void setSharpness(float s);
-    void setSwapRB(bool enabled);
     void setPresentMode(VkPresentModeKHR mode);
     std::vector<int> getSupportedPresentModes() const;
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
@@ -366,7 +365,6 @@ public:
     float stretchStrength = 0.40f;
     float stretchProfile  = 0.60f;
     std::atomic<float> sharpness{0.5f};   // written by the UI, read while recording
-    bool swapRB = false;
     float maxAnisotropy           = 1.0f;
     VkPhysicalDeviceMemoryProperties memProperties{};
     VkPresentModeKHR requestedPresentMode = VK_PRESENT_MODE_FIFO_KHR;
@@ -862,14 +860,6 @@ public:
     void createSyncObjects();
     void cleanupSwapchain();
 
-    // Swizzle of every content view: R and B exchanged when swapRB is set.
-    VkComponentMapping contentSwizzle() const {
-        const VkComponentSwizzle id = VK_COMPONENT_SWIZZLE_IDENTITY;
-        return swapRB ? VkComponentMapping{VK_COMPONENT_SWIZZLE_B, id, VK_COMPONENT_SWIZZLE_R, id}
-                      : VkComponentMapping{id, id, id, id};
-    }
-    // Replaces wt.view by one with the current swizzle and points wt.ds at it. Device idle.
-    bool  rebuildContentView(WinTex& wt);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
     void  destroyAllSourceImports();
     // renderMutex held for all of these.

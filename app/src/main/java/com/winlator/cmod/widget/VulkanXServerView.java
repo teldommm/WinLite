@@ -77,7 +77,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private int     pendingFilterMode     = 0;
     private int     pendingPostFXMode     = 0;
     private float   pendingSharpness      = 0.5f;
-    private boolean pendingSwapRB         = false;
     private int pendingLsfgMultiplier = 0;
     private float pendingLsfgFlowScale = 0.80f;
     private int pendingLsfgTargetRate = 0;
@@ -177,7 +176,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetFilterMode(long handle, int mode);
     private native void nativeSetStretchMode(long handle, int mode);
     private native void nativeSetPostFXMode(long handle, int mode);
-    private native void nativeSetSwapRB(long handle, boolean enabled);
     private native void nativeSetPresentMode(long handle, int mode);
     private native int[] nativeGetSupportedPresentModes(long handle);
 
@@ -236,7 +234,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
                         nativeSetPresentMode(nativeHandle, pendingPresentMode);
                         nativeSetFilterMode(nativeHandle, pendingFilterMode);
-                        nativeSetSwapRB(nativeHandle, pendingSwapRB);
                         nativeSetStretchMode(nativeHandle, pendingStretchMode);
                         nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                         nativeSetSharpness(nativeHandle, pendingSharpness);
@@ -263,7 +260,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (nativeHandle != 0) {
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
-                    nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     nativeSetStretchMode(nativeHandle, pendingStretchMode);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
@@ -528,6 +524,19 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         sendCursorToNative(lastCursor);
     }
 
+    /** R,G,B,A bytes to B,G,R,A bytes, in a new direct buffer (the cursor is a few KB). */
+    private static ByteBuffer rgbaToBgra(ByteBuffer src) {
+        final int size = src.capacity();
+        ByteBuffer dst = ByteBuffer.allocateDirect(size);
+        for (int i = 0; i + 3 < size; i += 4) {
+            dst.put(i, src.get(i + 2));
+            dst.put(i + 1, src.get(i + 1));
+            dst.put(i + 2, src.get(i));
+            dst.put(i + 3, src.get(i + 3));
+        }
+        return dst;
+    }
+
     private void sendCursorToNative(Cursor cursor) {
         if (nativeHandle == 0) return;
         Drawable cd; short hotX = 0, hotY = 0;
@@ -545,7 +554,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 ByteBuffer pixels = cd.lockBuffer(ahb);
                 if (pixels != null) {
                     try {
-                        nativeUpdateCursorImage(nativeHandle, pixels, cd.width, cd.height,
+                        // The renderer's cursor texture is B8G8R8A8; an RGBA drawable (rgba8
+                        // surface format) is converted first.
+                        ByteBuffer image = cd.format == Drawable.HAL_PIXEL_FORMAT_BGRA_8888
+                                ? pixels : rgbaToBgra(pixels);
+                        nativeUpdateCursorImage(nativeHandle, image, cd.width, cd.height,
                             cd.getStride(), hotX, hotY);
                     } finally {
                         cd.unlockBuffer(ahb);
@@ -978,11 +991,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void setFilterMode(int mode) {
         pendingFilterMode = mode;
         synchronized (lock) { if (nativeHandle != 0) nativeSetFilterMode(nativeHandle, mode); }
-    }
-
-    public void setSwapRB(boolean enabled) {
-        pendingSwapRB = enabled;
-        synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
     }
 
     /**

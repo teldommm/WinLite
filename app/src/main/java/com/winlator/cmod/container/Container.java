@@ -86,7 +86,6 @@ public class Container {
     private String rendererPresentMode = "fifo";
     private String rendererDriverId = "system";
     private int rendererFilterMode = 0;
-    private boolean rendererSwapRB = false;
     private boolean fullscreenStretched;
     private byte startupSelection = STARTUP_SELECTION_ESSENTIAL;
     private String cpuList;
@@ -172,8 +171,6 @@ public class Container {
     public void setRendererDriverId(String v) { this.rendererDriverId = v != null ? v : ""; }
     public int getRendererFilterMode() { return rendererFilterMode; }
     public void setRendererFilterMode(int v) { this.rendererFilterMode = v; }
-    public boolean getRendererSwapRB() { return rendererSwapRB; }
-    public void setRendererSwapRB(boolean v) { this.rendererSwapRB = v; }
 
     public String getGraphicsWrapper() {
         return normalizeGraphicsWrapper(getExtra("graphicsWrapper", DEFAULT_GRAPHICS_WRAPPER));
@@ -570,7 +567,6 @@ public class Container {
             data.put("rendererPresentMode", rendererPresentMode);
             if (!rendererDriverId.isEmpty()) data.put("rendererDriverId", rendererDriverId);
             if (rendererFilterMode != 0) data.put("rendererFilterMode", rendererFilterMode);
-            if (rendererSwapRB) data.put("rendererSwapRB", true);
             data.put("emulator", emulator);
             data.put("dxwrapper", dxwrapper);
             data.put("dxwrapperConfig", getDXWrapperConfig());
@@ -640,9 +636,6 @@ public class Container {
                     break;
                 case "rendererFilterMode" :
                     rendererFilterMode = data.getInt(key);
-                    break;
-                case "rendererSwapRB":
-                    rendererSwapRB = data.getBoolean(key);
                     break;
                 case "emulator":
                     setEmulator(data.getString(key));

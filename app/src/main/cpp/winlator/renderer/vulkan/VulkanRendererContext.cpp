@@ -1100,9 +1100,6 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D;
     vi.format=imageFormat;
-    // Guest content: "Swap red/blue" applies here too. It used to be applied only to textures
-    // filled from CPU memory, which nothing creates any more, so the setting did nothing.
-    vi.components=contentSwizzle();
     vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
     if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){
         destroyWinTex(wt);
@@ -2633,47 +2630,6 @@ void VulkanRendererContext::setStretchMode(int mode) {
     stretchMode = mode;
     if (mode == 1) tryCreatePipeline(&VulkanRendererContext::createStretchPipeline, "stretch");
     adpfNote(kAdpfResetGpu);
-    needsRender.store(true); wakeRender();
-}
-
-bool VulkanRendererContext::rebuildContentView(WinTex& wt) {
-    if (wt.img==VK_NULL_HANDLE || wt.view==VK_NULL_HANDLE || wt.fmt==VK_FORMAT_UNDEFINED) return false;
-    VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=wt.fmt;
-    vi.components=contentSwizzle();
-    vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-    VkImageView view=VK_NULL_HANDLE;
-    if (vk_.CreateImageView(device,&vi,nullptr,&view)!=VK_SUCCESS) return false;
-    vk_.DestroyImageView(device,wt.view,nullptr);
-    wt.view=view;
-    if (wt.ds!=VK_NULL_HANDLE) {
-        VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        dii.imageView=view; dii.sampler=sampler;
-        VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        wr.dstSet=wt.ds; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        wr.descriptorCount=1; wr.pImageInfo=&dii;
-        vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
-    }
-    return true;
-}
-
-void VulkanRendererContext::setSwapRB(bool enabled) {
-    // Views and descriptor sets in use by the frame being recorded are replaced: same locking
-    // as setFilterMode() (between frames, texture maps stable), and the GPU must be done with
-    // the old views.
-    auto frameLock = lockFrameExclusive();
-    std::lock_guard<std::mutex> mapLock(renderMutex);
-    if (swapRB == enabled) return;
-    swapRB = enabled;
-    RLOG("setSwapRB: %d", (int)swapRB);
-    if (srcImports.empty() && texMap.empty()) return;   // nothing imported yet (start-up)
-    vk_.DeviceWaitIdle(device);
-    // Imports own their views; window textures that show one borrow its handles.
-    for (auto& [srcId, imp] : srcImports) rebuildContentView(imp.wt);
-    for (auto& [id, wt] : texMap) {
-        auto sit = srcImports.find(wt.srcId);
-        if (sit != srcImports.end() && sit->second.wt.img == wt.img) wt.view = sit->second.wt.view;
-    }
     needsRender.store(true); wakeRender();
 }
 

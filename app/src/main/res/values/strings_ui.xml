@@ -410,7 +410,6 @@
     <string name="ui_snapdragon_super_resolution">Snapdragon Super Resolution</string>
     <string name="ui_amd_fidelityfx_super_resolution">AMD FidelityFX Super Resolution</string>
     <string name="ui_texture_filter">Texture Filter</string>
-    <string name="ui_swap_red_blue_channels">Swap red/blue channels</string>
     <string name="ui_screen_size">Screen Size</string>
     <string name="ui_vulkan_wrapper">Vulkan Wrapper</string>
     <string name="ui_vulkan_version">Vulkan Version</string>

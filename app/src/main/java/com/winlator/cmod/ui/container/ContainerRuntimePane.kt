@@ -94,7 +94,6 @@ internal fun ContainerRuntimePane(
     var presentMode by remember { mutableStateOf(container.getRendererPresentMode()) }
     var rendererDriverId by remember { mutableStateOf(container.getRendererDriverId()) }
     var filterMode by remember { mutableStateOf(container.getRendererFilterMode()) }
-    var swapRB by remember { mutableStateOf(container.getRendererSwapRB()) }
     var audio by remember { mutableStateOf(StringUtils.parseIdentifier(container.getAudioDriver())) }
     var directAudioMic by remember { mutableStateOf(DirectAudioDriver.isMicEnabled(container.getExtra(DirectAudioDriver.EXTRA_MIC, "0"))) }
 
@@ -216,8 +215,6 @@ internal fun ContainerRuntimePane(
                 SettingChoice(uiStr(R.string.ui_texture_filter), filters.getOrElse(filterMode) { filters.first() }, filters) {
                     filterMode = filters.indexOf(it).coerceAtLeast(0); container.setRendererFilterMode(filterMode); container.saveData()
                 }
-                SettingsDivider()
-                SettingToggle(uiStr(R.string.ui_swap_red_blue_channels), swapRB) { swapRB = it; container.setRendererSwapRB(it); container.saveData() }
             }
             SettingsCard {
                 SettingChoice(uiStr(R.string.ui_screen_size), screenChoice, screenEntries) {
