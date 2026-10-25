@@ -65,8 +65,8 @@ public final class LsfgNative {
      * The fp32 file keeps the old name, so existing caches stay valid.
      */
     public static File cacheFile(Context context, boolean preferFp16) {
-        return new File(context.getFilesDir(),
-                preferFp16 ? "lsfg-native/shaders_fp16.cache" : "lsfg-native/shaders.cache");
+        return new File(LosslessDll.lsfgDir(context),
+                preferFp16 ? "shaders_fp16.cache" : "shaders.cache");
     }
 
     public static boolean isDllAvailable(Context context) {

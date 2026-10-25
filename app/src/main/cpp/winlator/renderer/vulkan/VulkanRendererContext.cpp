@@ -2482,8 +2482,10 @@ void VulkanRendererContext::collectWindowNodes(int64_t id, int absX, int absY,
     if (id != rootWindowId) {
         myAbsX = absX + node.x;
         myAbsY = absY + node.y;
-        // 1x1 helper windows are skipped, but their children still get collected below.
-        bool renderable = node.width > 1 && node.height > 1;
+        // Only 1x1 helper windows are skipped (and empty ones); a 1xN or Nx1 window is real
+        // content. Their children still get collected below.
+        bool renderable = node.width >= 1 && node.height >= 1 &&
+                          !(node.width == 1 && node.height == 1);
         if (node.viewable && renderable) {
             out.push_back({node.contentId, myAbsX, myAbsY});
             outSizes.push_back({node.width, node.height});

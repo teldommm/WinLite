@@ -89,86 +89,41 @@ target_link_options(containeroverlay PRIVATE
 # `winlator` target). Still built as its own JNI library (vulkan_renderer.so).
 set(VULKAN_RENDERER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/winlator/renderer/vulkan)
 
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_vert.h
-    COMMAND glslangValidator -V --vn window_vert_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_vert.h
-            ${VULKAN_RENDERER_DIR}/window.vert
-    DEPENDS ${VULKAN_RENDERER_DIR}/window.vert
-    COMMENT "Compiling window.vert -> window_vert.h"
-)
+# Shaders live in their own folder and are compiled to SPIR-V headers at build time
+# (glslangValidator); the renderer includes the generated <base>.h from the build directory.
+set(VULKAN_SHADER_DIR ${VULKAN_RENDERER_DIR}/shaders)
+set(VULKAN_SHADER_HEADERS "")
 
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_frag.h
-    COMMAND glslangValidator -V --vn window_frag_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_frag.h
-            ${VULKAN_RENDERER_DIR}/window.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window.frag
-    COMMENT "Compiling window.frag -> window_frag.h"
-)
+# vulkan_shader(<source in shaders/> <base name> [USES_POSTFX])
+#   -> ${CMAKE_CURRENT_BINARY_DIR}/<base>.h defining the array <base>_code.
+# USES_POSTFX: the shader #includes postfx_common.glsl, so it is rebuilt when that changes.
+function(vulkan_shader SOURCE BASE)
+    cmake_parse_arguments(ARG "USES_POSTFX" "" "" ${ARGN})
+    set(_src ${VULKAN_SHADER_DIR}/${SOURCE})
+    set(_out ${CMAKE_CURRENT_BINARY_DIR}/${BASE}.h)
+    set(_deps ${_src})
+    if(ARG_USES_POSTFX)
+        list(APPEND _deps ${VULKAN_SHADER_DIR}/postfx_common.glsl)
+    endif()
+    add_custom_command(
+        OUTPUT ${_out}
+        COMMAND glslangValidator -V --vn ${BASE}_code -x -o ${_out} ${_src}
+        DEPENDS ${_deps}
+        COMMENT "Compiling ${SOURCE} -> ${BASE}.h"
+        VERBATIM
+    )
+    set(VULKAN_SHADER_HEADERS ${VULKAN_SHADER_HEADERS} ${_out} PARENT_SCOPE)
+endfunction()
 
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_frag.h
-    COMMAND glslangValidator -V --vn window_sgsr_frag_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_frag.h
-            ${VULKAN_RENDERER_DIR}/window_sgsr.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_sgsr.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
-    COMMENT "Compiling window_sgsr.frag -> window_sgsr_frag.h"
-)
-
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_hq_frag.h
-    COMMAND glslangValidator -V --vn window_sgsr_hq_frag_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_hq_frag.h
-            ${VULKAN_RENDERER_DIR}/window_sgsr_hq.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_sgsr_hq.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
-    COMMENT "Compiling window_sgsr_hq.frag -> window_sgsr_hq_frag.h"
-)
-
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_nis_frag.h
-    COMMAND glslangValidator -V --vn window_nis_frag_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_nis_frag.h
-            ${VULKAN_RENDERER_DIR}/window_nis.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_nis.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
-    COMMENT "Compiling window_nis.frag -> window_nis_frag.h"
-)
-
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_fsr1_frag.h
-    COMMAND glslangValidator -V --vn window_fsr1_frag_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_fsr1_frag.h
-            ${VULKAN_RENDERER_DIR}/window_fsr1.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_fsr1.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
-    COMMENT "Compiling single-pass FSR -> window_fsr1_frag.h"
-)
-
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_lanczos_frag.h
-    COMMAND glslangValidator -V --vn window_lanczos_frag_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_lanczos_frag.h
-            ${VULKAN_RENDERER_DIR}/window_lanczos.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_lanczos.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
-    COMMENT "Compiling Lanczos 2 -> window_lanczos_frag.h"
-)
-
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
-    COMMAND glslangValidator -V --vn window_stretch_frag_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
-            ${VULKAN_RENDERER_DIR}/window_stretch.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_stretch.frag
-    COMMENT "Compiling window_stretch.frag -> window_stretch_frag.h"
-)
-
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_postfx_frag.h
-    COMMAND glslangValidator -V --vn window_postfx_frag_code
-            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_postfx_frag.h
-            ${VULKAN_RENDERER_DIR}/window_postfx.frag
-    DEPENDS ${VULKAN_RENDERER_DIR}/window_postfx.frag ${VULKAN_RENDERER_DIR}/postfx_common.glsl
-    COMMENT "Compiling window_postfx.frag -> window_postfx_frag.h"
-)
+vulkan_shader(window.vert         window_vert)
+vulkan_shader(window.frag         window_frag)
+vulkan_shader(window_stretch.frag window_stretch_frag)
+vulkan_shader(window_sgsr.frag    window_sgsr_frag    USES_POSTFX)
+vulkan_shader(window_sgsr_hq.frag window_sgsr_hq_frag USES_POSTFX)
+vulkan_shader(window_nis.frag     window_nis_frag     USES_POSTFX)
+vulkan_shader(window_fsr1.frag    window_fsr1_frag    USES_POSTFX)
+vulkan_shader(window_lanczos.frag window_lanczos_frag USES_POSTFX)
+vulkan_shader(window_postfx.frag  window_postfx_frag  USES_POSTFX)
 
 include_directories(
         ${CMAKE_CURRENT_BINARY_DIR}
@@ -202,15 +157,7 @@ add_library(vulkan_renderer SHARED
         winlator/renderer/vulkan/view_transformation.cpp
         winlator/renderer/vulkan/xform.cpp
 
-        ${CMAKE_CURRENT_BINARY_DIR}/window_vert.h
-        ${CMAKE_CURRENT_BINARY_DIR}/window_frag.h
-        ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_frag.h
-        ${CMAKE_CURRENT_BINARY_DIR}/window_fsr1_frag.h
-        ${CMAKE_CURRENT_BINARY_DIR}/window_lanczos_frag.h
-        ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_hq_frag.h
-        ${CMAKE_CURRENT_BINARY_DIR}/window_nis_frag.h
-        ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
-        ${CMAKE_CURRENT_BINARY_DIR}/window_postfx_frag.h
+        ${VULKAN_SHADER_HEADERS}
 )
 
 set_target_properties(vulkan_renderer PROPERTIES

@@ -278,7 +278,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             }
             synchronized (lock) {
                 if (nativeHandle != 0) {
-                    nativeSetVerboseLog(nativeHandle, true);
+                    nativeSetVerboseLog(nativeHandle, validationEnabled);
                     nativeDumpRendererInfo(nativeHandle);
                     queueEvent(this::applyFrameGenNative);
                 }

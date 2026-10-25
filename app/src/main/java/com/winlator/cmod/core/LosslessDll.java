@@ -15,7 +15,48 @@ public final class LosslessDll {
     private static final String DLL_RELATIVE_DIR = ".local/share/lsfg-vk";
     private static final String LOSSLESS_DLL_NAME = "Lossless.dll";
 
+    // App-private LSFG storage: the imported Lossless.dll and the shader caches built from it.
+    private static final String LSFG_DIR = "lsfg";
+    // Older builds kept the DLL and the caches in two separate folders.
+    private static final String LEGACY_DLL_DIR = "lsfg-vk";
+    private static final String LEGACY_CACHE_DIR = "lsfg-native";
+    private static volatile boolean legacyMigrated = false;
+
     private LosslessDll() {}
+
+    /** The one folder LSFG keeps its files in (Lossless.dll and the shader caches). */
+    public static File lsfgDir(Context context) {
+        File dir = new File(context.getFilesDir(), LSFG_DIR);
+        if (!legacyMigrated) migrateLegacy(context.getFilesDir(), dir);
+        return dir;
+    }
+
+    /**
+     * Moves what the two old folders held into the new one, once per process: the imported DLL
+     * must survive an update (the user would have to import it again), the caches keep their
+     * names and stay valid. Whatever cannot be moved stays where it is and is retried next time.
+     */
+    private static synchronized void migrateLegacy(File filesDir, File dir) {
+        if (legacyMigrated) return;
+        boolean done = true;
+        for (String legacyName : new String[] {LEGACY_DLL_DIR, LEGACY_CACHE_DIR}) {
+            File legacy = new File(filesDir, legacyName);
+            File[] files = legacy.listFiles();
+            if (files == null) continue;   // not there (anymore)
+            if (!dir.isDirectory() && !dir.mkdirs()) { done = false; continue; }
+            for (File f : files) {
+                File dst = new File(dir, f.getName());
+                if (dst.exists()) {
+                    f.delete();   // the new folder already has it; that one wins
+                } else if (!f.renameTo(dst)) {
+                    Log.w(TAG, "could not move " + f + " to " + dst);
+                    done = false;
+                }
+            }
+            legacy.delete();   // only succeeds once it is empty
+        }
+        legacyMigrated = done;
+    }
 
     public static boolean isGlobalDllAvailable(Context context) {
         File dllFile = globalDllFile(context);
@@ -24,7 +65,7 @@ public final class LosslessDll {
 
     public static File globalDllFile(Context context) {
         if (context == null) return null;
-        return new File(context.getFilesDir(), "lsfg-vk/" + LOSSLESS_DLL_NAME);
+        return new File(lsfgDir(context), LOSSLESS_DLL_NAME);
     }
 
     public static boolean importGlobalLosslessDll(Context context, Uri uri) {

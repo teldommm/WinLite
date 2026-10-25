@@ -123,7 +123,7 @@ struct VkTable {
 #include <deque>
 #include <string>
 #define WLOG_TAG "Winlator_Renderer"
-#define RLOG(...) if(verboseLog) __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,__VA_ARGS__)
+#define RLOG(...) do { if (verboseLog) __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,__VA_ARGS__); } while (0)
 #define RLOG_E(...) __android_log_print(ANDROID_LOG_ERROR,WLOG_TAG,__VA_ARGS__)
 
 #include <vulkan/vulkan_android.h>
@@ -238,8 +238,10 @@ public:
     void detachSurface();
     bool reattachSurface(ANativeWindow* newWindow);
 
-    bool verboseLog = true;
-    void setVerboseLog(bool v) { verboseLog = v; }
+    // Off by default; the view turns it on together with the validation layer. Errors
+    // (RLOG_E) are always logged. Read by the render thread, written from JNI.
+    std::atomic<bool> verboseLog{false};
+    void setVerboseLog(bool v) { verboseLog.store(v, std::memory_order_relaxed); }
     void dumpRendererInfo();
 
     std::string adrenoDriverPath;
