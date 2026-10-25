@@ -27,6 +27,7 @@ public class XServerComponent extends EnvironmentComponent {
         // and every cursor update passes through it, so it must not queue behind the emulator's
         // guest threads (default nice 0). Same level as the present limiter.
         connector.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY);
+        connector.setPerfHintThread(true);   // joins the renderer's ADPF session when it is on
         connector.start();
     }
 

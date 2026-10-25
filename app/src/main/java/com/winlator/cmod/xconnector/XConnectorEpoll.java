@@ -16,6 +16,7 @@ public class XConnectorEpoll implements Runnable {
     private Thread epollThread;
     private volatile boolean running = false;
     private boolean multithreadedClients = false;
+    private volatile boolean perfHintThread = false;
     private boolean canReceiveAncillaryMessages = false;
     private int initialInputBufferCapacity = 4096;
     private int initialOutputBufferCapacity = 4096;
@@ -97,8 +98,19 @@ public class XConnectorEpoll implements Runnable {
     @Override
     public void run() {
         applyThreadPriority();
-        while (running && doEpollIndefinitely(epollFd, serverFd, !multithreadedClients));
+        // For the X server this thread reads the guest's requests: the first step of every frame.
+        final int perfHintTid = perfHintThread ? com.winlator.cmod.core.PerfHintThreads.register() : 0;
+        try {
+            while (running && doEpollIndefinitely(epollFd, serverFd, !multithreadedClients));
+        } finally {
+            if (perfHintTid != 0) com.winlator.cmod.core.PerfHintThreads.unregister(perfHintTid);
+        }
         shutdown();
+    }
+
+    /** Lets the epoll thread join the renderer's performance hint session (X server only). */
+    public void setPerfHintThread(boolean value) {
+        this.perfHintThread = value;
     }
 
     @Keep

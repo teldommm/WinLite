@@ -12,6 +12,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +24,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 // ---------- Graphics panel ----------
 
@@ -43,7 +47,11 @@ data class GraphicsPanelState(
     val frameGenFlowScale: Float,
     val frameGenTargetFps: Int,      // Adaptive target FPS shown in the field (last entered/saved)
     val rendererSwitchAvailable: Boolean = false,  // SurfaceFlinger renderer usable on this device
-    val surfaceFlinger: Boolean = false            // the SurfaceFlinger renderer is the active one
+    val surfaceFlinger: Boolean = false,           // the SurfaceFlinger renderer is the active one
+    val perfHintAvailable: Boolean = false,        // the active renderer and the device support ADPF
+    val perfHintEnabled: Boolean = false,          // saved switch position (off unless chosen)
+    // One line about the live hint session; called off the main thread. Null = no status line.
+    val perfHintStatus: (() -> String)? = null
 )
 
 interface GraphicsPanelCallbacks {
@@ -60,6 +68,8 @@ interface GraphicsPanelCallbacks {
     fun onFrameGenTargetFpsChanged(fps: Int)
     // Hot-switches the X server renderer: false = Vulkan, true = SurfaceFlinger.
     fun onRendererChanged(surfaceFlinger: Boolean)
+    // ADPF (Android Performance Hint) switch of the Vulkan renderer.
+    fun onPerformanceHintChanged(enabled: Boolean)
 }
 
 object GraphicsSidebarPanelHost {
@@ -119,6 +129,7 @@ private fun GraphicsSidebarPanel(
     // Last Adaptive target. Kept here (state is a one-shot snapshot) so switching to a fixed
     // multiplier and back doesn't forget what was typed.
     var targetFps by remember { mutableStateOf(state.frameGenTargetFps) }
+    var perfHintOn by remember { mutableStateOf(state.perfHintEnabled) }
 
     // Same visibility rule as the original updateSharpnessVis(): shown while Super Resolution
     // is on (any upscaler mode — SGSR/SGSR HQ/FSR/NIS/Lanczos2/Color Boost all read pc.sharpness
@@ -307,6 +318,39 @@ private fun GraphicsSidebarPanel(
                         valueRange = 0.25f..1.0f
                     )
                 }
+            }
+        }
+
+        if (state.perfHintAvailable && !sfActive) {
+            SidebarGap()
+            SidebarCard {
+                SidebarInlineToggle(
+                    label = "Performance hint (ADPF)",
+                    checked = perfHintOn,
+                    onCheckedChange = {
+                        perfHintOn = it
+                        callbacks.onPerformanceHintChanged(it)
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                var hintStatus by remember { mutableStateOf("") }
+                val statusProvider = state.perfHintStatus
+                // The session is opened by the render thread a moment after the switch flips, so
+                // the line is refreshed a few times; reading it can wait on the renderer's lock.
+                LaunchedEffect(perfHintOn) {
+                    if (!perfHintOn || statusProvider == null) {
+                        hintStatus = ""
+                    } else {
+                        repeat(8) {
+                            hintStatus = withContext(Dispatchers.IO) { statusProvider() }
+                            delay(500)
+                        }
+                    }
+                }
+                SidebarCaption(
+                    if (perfHintOn && hintStatus.isNotEmpty()) hintStatus
+                    else "Tells the system how much CPU/GPU time a frame needs, so it picks clocks to match."
+                )
             }
         }
 

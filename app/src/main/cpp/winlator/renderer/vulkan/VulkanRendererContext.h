@@ -10,6 +10,7 @@ namespace lsfg { class Engine; }
 
 #include "view_transformation.hpp"
 #include "xform.hpp"
+#include "../adpf/adpf_session.h"
 
 struct VkTable {
 
@@ -222,6 +223,18 @@ public:
     void presentFrame(int64_t contentId, int64_t sourceId, AHardwareBuffer* ahb,
                       int64_t guestFrameNs, int64_t out[4]);
     void setFpsLimit(int fps);
+
+    // --- ADPF (Android Performance Hint), opt-in ----------------------------------------------
+    // One hint session over the render thread and the companion threads Java registers (the X
+    // server's connector thread, the Present limiter threads), fed with how long each render
+    // cycle really worked. Off until switched on; switching off closes the session. Safe from
+    // any thread: they only set flags and wake the render loop, which owns the session.
+    void setPerformanceHint(bool enabled);
+    // The companion threads' ids (app threads only); the render thread is always in the session.
+    void setPerformanceHintThreads(const int32_t* tids, size_t count);
+    // "off", "starting", "unavailable: <why>" or the session's one-line description.
+    std::string performanceHintStatus();
+
     // Choreographer timing from Java, once per vsync. deadlineNs/presentNs are the preferred
     // frame timeline (API 33+); 0 when unavailable.
     void onVsync(int64_t frameTimeNs, int64_t deadlineNs, int64_t presentNs);
@@ -664,6 +677,35 @@ public:
         return vsyncDeadlineNs_.load(std::memory_order_relaxed) != 0 &&
                nowNs - vsyncSeenNs_.load(std::memory_order_relaxed) < 250000000LL;
     }
+
+    // --- ADPF state ---------------------------------------------------------------------------
+    // A hint session is not thread safe, so every call on adpfSession_ is made either by the
+    // render thread (renderLoop / renderFrame, which holds frameMutex shared) or by a setter
+    // that holds frameMutex exclusive - never two at once. Java threads only touch the flags.
+    enum : uint32_t {
+        kAdpfResetAll     = 1u << 0,   // resolution / pipeline changed: forget what was learned
+        kAdpfResetGpu     = 1u << 1,   // a GPU effect (upscaler, post-FX, ...) was switched
+        kAdpfIncreaseGpu  = 1u << 2,   // heavier GPU work is coming (frame generation armed)
+        kAdpfSpikeAll     = 1u << 3,   // one-off expensive frame
+    };
+    std::atomic<bool>     adpfWanted_{false};    // the option
+    std::atomic<bool>     adpfDirty_{false};     // something for adpfService()
+    std::atomic<uint32_t> adpfNotifyBits_{0};
+    std::atomic<int>      renderTid_{0};
+    std::mutex            adpfMutex_;            // companions + status text
+    std::vector<int32_t>  adpfCompanions_;
+    bool                  adpfCompanionsDirty_ = false;
+    std::string           adpfStatus_ = "off";
+    bool                  adpfOpenTried_ = false;   // render thread: gave it a go since the last toggle
+    int64_t               adpfTargetNs_ = 0;        // render thread: the target the session has
+    adpf::Session         adpfSession_;
+    // Asks for adpfService() and wakes the render loop; no-op while the option is off.
+    void adpfNote(uint32_t bits);
+    void adpfService();                              // render thread, between frames
+    void adpfShutdown();                             // render thread, on its way out
+    int64_t adpfCycleNs() const;                     // what one cycle of work should fit in
+    void adpfFrameEnd(int64_t startNs, int64_t blockedNs);   // renderFrame, success path
+    void adpfSetStatus(const std::string& text);
 
     // Limiter state. Atomics are written from Java threads; the rest is renderMutex.
     std::atomic<int>     fpsLimit_{0};

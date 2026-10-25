@@ -77,4 +77,11 @@ public abstract class XServerRendererView extends SurfaceView {
 
     public abstract void setFpsLimit(int fps);
     public abstract int getFpsLimit();
+
+    // ADPF (Android Performance Hint). Only the Vulkan renderer has a render thread to hint; the
+    // others report "unsupported" and ignore the switch.
+    public boolean isPerformanceHintSupported() { return false; }
+    public void setPerformanceHint(boolean enabled) {}
+    /** One line about the live hint session (mode, threads, target), "off" when there is none. */
+    public String getPerformanceHintStatus() { return "off"; }
 }

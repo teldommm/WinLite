@@ -1967,6 +1967,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (initPFX > 0) vkRenderer.setPostFXMode(initPFX);
         }
 
+        // ADPF: opt-in. The switch is saved like the FPS limit (shortcut first, else container)
+        // and only exists on the Vulkan renderer, on a device that offers hint sessions.
+        final boolean perfHintAvailable = vkRenderer != null && vkRenderer.isPerformanceHintSupported();
+        final boolean perfHintOn = perfHintAvailable && loadPerformanceHint();
+        if (vkRenderer != null) vkRenderer.setPerformanceHint(perfHintOn);
+        final kotlin.jvm.functions.Function0<String> perfHintStatus =
+                vkRenderer != null ? () -> vkRenderer.getPerformanceHintStatus() : null;
+
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
                 fsrOn,
@@ -1980,7 +1988,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 activeLsfgFlowScale,
                 rememberedLsfgTargetRate,
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ASurfaceXServerView.isSupported(),
-                renderer instanceof ASurfaceXServerView
+                renderer instanceof ASurfaceXServerView,
+                perfHintAvailable,
+                perfHintOn,
+                perfHintStatus
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
@@ -1991,6 +2002,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // A fixed multiplier with an FPS limit picks its display mode from the limit, and
                 // so does a plain limit: 30/40/60 on 144 Hz cannot be shown evenly, on 120 Hz they can.
                 if (activeLsfgMultiplier < 2 || activeLsfgTargetRate == 0) applyFrameGenDisplayMode();
+            }
+
+            @Override
+            public void onPerformanceHintChanged(boolean enabled) {
+                savePerformanceHint(enabled);
+                if (vkRenderer != null) vkRenderer.setPerformanceHint(enabled);
             }
 
             @Override
@@ -2203,6 +2220,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         if ("0".equals(oldEnabled)) limit = 0;
         return limit;
+    }
+
+    private boolean loadPerformanceHint() {
+        String saved = "";
+        if (shortcut != null) saved = shortcut.getExtra("performanceHint", "");
+        if (saved.isEmpty() && container != null) saved = container.getExtra("performanceHint", "");
+        return "1".equals(saved);
+    }
+
+    private void savePerformanceHint(boolean enabled) {
+        final String value = enabled ? "1" : "0";
+        if (shortcut != null) {
+            shortcut.putExtra("performanceHint", value);
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra("performanceHint", value);
+            container.saveData();
+        }
     }
 
     private void saveFpsLimit(int fps) {

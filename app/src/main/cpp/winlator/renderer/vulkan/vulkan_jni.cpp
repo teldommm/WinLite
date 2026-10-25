@@ -247,6 +247,44 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetFpsLimit(
     if (r) r->setFpsLimit(fps);
 }
 
+// ---- ADPF (Android Performance Hint) ----
+
+// What the device offers: 0 = nothing, otherwise the API step 33 / 34 / 35 / 36.
+extern "C" JNIEXPORT jint JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativePerformanceHintLevel(JNIEnv*, jobject)
+{
+    return adpf::caps().level();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPerformanceHint(
+    JNIEnv*, jobject, jlong handle, jboolean enabled)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setPerformanceHint(enabled == JNI_TRUE);
+}
+
+// Native thread ids (gettid) of the other threads that carry a frame.
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPerformanceHintThreads(
+    JNIEnv* env, jobject, jlong handle, jintArray tids)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r) return;
+    const jsize n = tids ? env->GetArrayLength(tids) : 0;
+    std::vector<int32_t> list((size_t)n);
+    if (n > 0) env->GetIntArrayRegion(tids, 0, n, reinterpret_cast<jint*>(list.data()));
+    r->setPerformanceHintThreads(list.data(), list.size());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativePerformanceHintStatus(
+    JNIEnv* env, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return env->NewStringUTF(r ? r->performanceHintStatus().c_str() : "off");
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeOnVsync(
     JNIEnv*, jobject, jlong handle, jlong frameTimeNs, jlong deadlineNs, jlong presentNs)

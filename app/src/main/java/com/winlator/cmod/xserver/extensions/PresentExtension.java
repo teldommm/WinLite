@@ -213,7 +213,9 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
                     Thread thread = new Thread(() -> {
                         android.os.Process.setThreadPriority(
                                 android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY);
-                        runnable.run();
+                        // Part of the frame's path, so part of the renderer's ADPF session (when
+                        // on). Not the GPU-idle thread: it only blocks on a fence.
+                        com.winlator.cmod.core.PerfHintThreads.runRegistered(runnable);
                     }, "PresentFpsLimiter");
                     thread.setDaemon(true);
                     return thread;

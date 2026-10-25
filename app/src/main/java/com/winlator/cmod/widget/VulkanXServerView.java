@@ -89,6 +89,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private FrameRating classicHudRef = null;
     private volatile int fpsWindowId = -1;
     private volatile int fpsLimit = 0;
+    // ADPF switch (opt-in, off by default); applied to the renderer once it exists.
+    private volatile boolean perfHint = false;
+    private com.winlator.cmod.core.PerfHintThreads.Listener perfHintListener;
     // Display vsync for frame pacing and for Present's MSC/UST; runs while a renderer exists.
     private final VsyncClock vsyncClock = new VsyncClock(this::onVsyncTick);
 
@@ -145,6 +148,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativePresentFrame(long handle, long contentId, long sourceId,
         long ahbPtr, long guestFrameNs, long[] plan);
     private native void nativeSetFpsLimit(long handle, int fps);
+    // ADPF. Plain natives on purpose: they take the renderer's locks or a mutex.
+    private native int nativePerformanceHintLevel();
+    private native void nativeSetPerformanceHint(long handle, boolean enabled);
+    private native void nativeSetPerformanceHintThreads(long handle, int[] tids);
+    private native String nativePerformanceHintStatus(long handle);
     private native boolean nativeSourceBusy(long handle, long sourceId);
     private native long nativeBeginSourceIdleWait(long handle, long sourceId);
     private native void nativeEndSourceIdleWait(long handle, long serial, long timeoutNs);
@@ -263,6 +271,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     updateTransform();
                     pushDisplayRefreshRateLocked();
                     nativeSetFpsLimit(nativeHandle, fpsLimit);
+                    if (perfHint) {
+                        // Threads first: the session is opened with them in one go.
+                        nativeSetPerformanceHintThreads(nativeHandle,
+                            com.winlator.cmod.core.PerfHintThreads.snapshot());
+                        nativeSetPerformanceHint(nativeHandle, true);
+                    }
                     vsyncClock.start();
                     nativeSetCursorVisible(nativeHandle, false);
 
@@ -412,6 +426,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         }
         compositeRedirectedWindows.clear();
         vsyncClock.stop();
+        if (perfHintListener != null)
+            com.winlator.cmod.core.PerfHintThreads.clearListener(perfHintListener);
         synchronized (lock) {
             if (nativeHandle != 0) {
                 nativeDestroy(nativeHandle);
@@ -1121,6 +1137,46 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         com.winlator.cmod.xserver.ShmFramePacer.setFrameRateLimit(this.fpsLimit);
         synchronized (lock) { if (nativeHandle != 0) nativeSetFpsLimit(nativeHandle, fpsLimit); }
     }
+    @Override
+    public boolean isPerformanceHintSupported() {
+        try {
+            loadNativeLibrary();
+            return nativePerformanceHintLevel() > 0;
+        } catch (UnsatisfiedLinkError e) {
+            return false;
+        }
+    }
+
+    @Override
+    public void setPerformanceHint(boolean enabled) {
+        perfHint = enabled;
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeSetPerformanceHint(nativeHandle, enabled);
+        }
+        // Subscribe only while on: with the hint off nothing here is touched on a thread start.
+        if (enabled) {
+            if (perfHintListener == null) {
+                // Hands the work to the event thread: the caller is a connector or limiter
+                // thread and must not wait on this view's lock.
+                perfHintListener = tids -> queueEvent(() -> {
+                    synchronized (lock) {
+                        if (nativeHandle != 0 && perfHint) nativeSetPerformanceHintThreads(nativeHandle, tids);
+                    }
+                });
+            }
+            com.winlator.cmod.core.PerfHintThreads.setListener(perfHintListener);
+        } else if (perfHintListener != null) {
+            com.winlator.cmod.core.PerfHintThreads.clearListener(perfHintListener);
+        }
+    }
+
+    @Override
+    public String getPerformanceHintStatus() {
+        synchronized (lock) {
+            return nativeHandle != 0 ? nativePerformanceHintStatus(nativeHandle) : "off";
+        }
+    }
+
     public void setPipMode(boolean pip) { inPipMode = pip; }
     public int getSurfaceWidth() { return surfaceWidth; }
     public int getSurfaceHeight() { return surfaceHeight; }

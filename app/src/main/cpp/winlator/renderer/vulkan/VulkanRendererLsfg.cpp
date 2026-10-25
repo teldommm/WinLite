@@ -474,10 +474,14 @@ void VulkanRendererContext::setFrameGenArmed(bool armed, int multiplier, int tar
     if (wasMult != multiplier) {
         fgConfigDirty_.store(true, std::memory_order_relaxed);
         RLOG("lsfg-native: multiplier %d -> %d (armed=%d)", wasMult, multiplier, (int)armed);
+        if (armed) adpfNote(kAdpfIncreaseGpu | kAdpfResetGpu);   // more generated frames per source
     }
     if (was == armed) return;
 
     fgArmed_.store(armed, std::memory_order_relaxed);
+    // Frame generation on: the GPU has a whole interpolation chain to run each frame; off: it
+    // drops. Either way the history the system has for the GPU side is stale.
+    adpfNote(armed ? (kAdpfIncreaseGpu | kAdpfResetGpu) : kAdpfResetGpu);
     fgChainCostNs_.store(0, std::memory_order_relaxed);
     RLOG("lsfg-native: frame gen %s (multiplier=%d) - recreating swapchain",
          armed ? "ARMED" : "disarmed", multiplier);

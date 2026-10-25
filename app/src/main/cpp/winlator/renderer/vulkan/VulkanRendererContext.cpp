@@ -866,6 +866,7 @@ void VulkanRendererContext::setPostFXMode(int mode) {
     if (postFXMode == mode) return;
     postFXMode = mode;
     syncPostFXPipeline();
+    adpfNote(kAdpfResetGpu);   // a different amount of GPU work per frame
     needsRender.store(true); wakeRender();
 }
 
@@ -1196,6 +1197,8 @@ void VulkanRendererContext::renderLoop() {
     // its own display-critical threads; an app may lower its own threads' nice value.
     if (setpriority(PRIO_PROCESS, 0, -10) != 0)
         RLOG_E("renderLoop: could not raise render thread priority (errno=%d)", errno);
+    // The head of the hint session's thread set (setPerformanceHint).
+    renderTid_.store((int)gettid(), std::memory_order_relaxed);
     while (isRunning) {
         {
             std::unique_lock<std::mutex> lk(dirtyMutex);
@@ -1206,6 +1209,8 @@ void VulkanRendererContext::renderLoop() {
             const auto fgDeadline = std::chrono::steady_clock::now() +
                                     std::chrono::milliseconds(kFgIdleMs);
             while (isRunning) {
+                // A hint-session request needs this thread; it is served below, between frames.
+                if (adpfDirty_.load(std::memory_order_acquire)) break;
                 const bool detached = surfaceDetached.load();
                 if (!detached && fbResized.load()) break;
                 const bool content = needsRender.load();
@@ -1239,6 +1244,9 @@ void VulkanRendererContext::renderLoop() {
             }
         }
         if (!isRunning) break;
+        // Hint session (switched on or off, threads, a workload change): between frames, then back
+        // to the wait, so pacing still decides when a frame that is due goes out.
+        if (adpfDirty_.load(std::memory_order_acquire)) { adpfService(); continue; }
         try { renderFrame(); }
         catch (const std::exception& error) {
             if (!swapchainRetryPending.exchange(true)) RLOG_E("renderFrame failed: %s", error.what());
@@ -1258,6 +1266,7 @@ void VulkanRendererContext::renderLoop() {
                 return !isRunning||surfaceDetached.load(); });
         }
     }
+    adpfShutdown();   // the session belongs to this thread's frames: it ends with them
 }
 
 int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
@@ -1342,6 +1351,11 @@ void VulkanRendererContext::destroyTexNow(RetiredTex& retired) {
 void VulkanRendererContext::renderFrame() {
     std::shared_lock<std::shared_mutex> frameLock(frameMutex);
 
+    // ADPF: when this cycle's work began (0 = no hint session), and how much of it was spent
+    // blocked on the GPU or the display - waiting, not working (see VulkanRendererAdpf.cpp).
+    const int64_t adpfStart = adpfSession_.isOpen() ? steadyNowNs() : 0;
+    int64_t adpfBlocked = 0;
+
     needsRender.store(false,std::memory_order_relaxed);
     cursorMoved.store(false,std::memory_order_relaxed);
 
@@ -1364,6 +1378,8 @@ void VulkanRendererContext::renderFrame() {
             swapchainRetryPending.store(false);
             needsRender.store(true);
             wakeRender();
+            // New swapchain: size, image count and (frame generation) pipeline may all differ.
+            if (adpfStart) adpfSession_.notify(adpf::Hint::Reset, true, true, "winlite-swapchain");
         }
         return;
     }
@@ -1426,8 +1442,10 @@ void VulkanRendererContext::renderFrame() {
     bool currentFenceWaited = false;
     VkResult fenceState=vk_.GetFenceStatus ? vk_.GetFenceStatus(device,inFlightFences[currentFrame]) : VK_NOT_READY;
     if (fenceState==VK_NOT_READY) {
+        const int64_t waitFrom = adpfStart ? steadyNowNs() : 0;
         if (vk_.WaitForFences(device,1,&inFlightFences[currentFrame],VK_TRUE,UINT64_MAX)!=VK_SUCCESS)
             throw std::runtime_error("frame fence wait");
+        if (adpfStart) adpfBlocked += steadyNowNs() - waitFrom;
         currentFenceWaited = true;
     } else if (fenceState!=VK_SUCCESS) throw std::runtime_error("frame fence status");
 
@@ -1497,8 +1515,11 @@ void VulkanRendererContext::renderFrame() {
             guestExtentForFrameGen(gw, gh);
             if (gw > 0 && gh > 0) lsfgEngine_->setGuestExtent(gw, gh);
         }
-        if (lsfgEngine_->needsRebuild(compositeW, compositeH, swapchainFmt))
+        if (lsfgEngine_->needsRebuild(compositeW, compositeH, swapchainFmt)) {
+            // Building the chain: a frame that costs far more than the rest, once.
+            if (adpfStart) adpfSession_.notify(adpf::Hint::Spike, true, true, "winlite-rebuild");
             vk_.DeviceWaitIdle(device);
+        }
         if (lsfgEngine_->prepare(compositeW, compositeH, swapchainFmt)) {
             lsfgEngine_->setPresentedRate(fgPresentedRate_.load(std::memory_order_relaxed));
             // The pacer gets GUEST frames, not compositor passes: with
@@ -1525,9 +1546,11 @@ void VulkanRendererContext::renderFrame() {
     const uint64_t genAcquireTimeout = frameGenAcquireTimeoutNs();
     for (uint32_t k = 0; k < fgPlan_.presents; k++) {
         uint32_t idx = 0;
+        const int64_t acquireFrom = adpfStart ? steadyNowNs() : 0;
         VkResult ar = vk_.AcquireNextImageKHR(device,swapchain,
                                               k == 0 ? 2000000000ULL : genAcquireTimeout,
                                               imgAvailSems[syncSlot(k)],VK_NULL_HANDLE,&idx);
+        if (adpfStart) adpfBlocked += steadyNowNs() - acquireFrom;   // FIFO: waits for the display
         if (k > 0 && (ar == VK_TIMEOUT || ar == VK_NOT_READY)) {
             fgPlan_.presents    = k;
             fgPlan_.generations = k - 1;
@@ -1580,7 +1603,10 @@ void VulkanRendererContext::renderFrame() {
         if (imgInFlight[idx]!=VK_NULL_HANDLE &&
             (!currentFenceWaited || imgInFlight[idx] != inFlightFences[currentFrame])) {
             if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, imgInFlight[idx]) == VK_NOT_READY) {
-                if (vk_.WaitForFences(device,1,&imgInFlight[idx],VK_TRUE,2000000000ULL) != VK_SUCCESS) {
+                const int64_t imgWaitFrom = adpfStart ? steadyNowNs() : 0;
+                const VkResult imgWait = vk_.WaitForFences(device,1,&imgInFlight[idx],VK_TRUE,2000000000ULL);
+                if (adpfStart) adpfBlocked += steadyNowNs() - imgWaitFrom;
+                if (imgWait != VK_SUCCESS) {
                     RLOG_E("renderFrame: in-flight image fence wait timed out (2s), skipping frame");
                     fbResized.store(true);
                     return;
@@ -1803,6 +1829,7 @@ void VulkanRendererContext::renderFrame() {
     notePresentedForPacing(presented, presented > 0 ? desiredPresent[presented - 1] : 0,
                            groupStartNs);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
+    if (adpfStart) adpfFrameEnd(adpfStart, adpfBlocked);
 }
 
 void VulkanRendererContext::onSurfaceResized(int w, int h) {
@@ -1814,7 +1841,10 @@ void VulkanRendererContext::onSurfaceResized(int w, int h) {
 void VulkanRendererContext::detachSurface() {
     surfaceDetached.store(true, std::memory_order_release);
     wakeRender(true);
-    { std::unique_lock<std::shared_mutex> frameLock(frameMutex); }
+    {
+        std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+        adpfSession_.bindWindow(nullptr);   // the window is released below
+    }
     vk_.DeviceWaitIdle(device);
     cleanupSwapchain();
     if (surface != VK_NULL_HANDLE) {
@@ -1854,6 +1884,7 @@ bool VulkanRendererContext::reattachSurface(ANativeWindow* newWindow) {
         // would throw their contents away.
         swapchainRetryPending.store(false);
         surfaceDetached.store(false, std::memory_order_release);
+        adpfSession_.bindWindow(window);   // no-op without an open session
     }
     needsRender.store(true, std::memory_order_release);
     wakeRender(true);
@@ -2575,6 +2606,7 @@ void VulkanRendererContext::setFilterMode(int mode) {
     default: break;
     }
     syncPostFXPipeline();   // waits for the GPU itself if it releases the postfx pipeline
+    adpfNote(kAdpfResetGpu);   // an upscaler costs a different amount of GPU time
     if (!samplerChanges) { needsRender.store(true); wakeRender(); return; }
     vk_.DeviceWaitIdle(device);
     if (sampler!=VK_NULL_HANDLE){vk_.DestroySampler(device,sampler,nullptr);sampler=VK_NULL_HANDLE;}
@@ -2600,6 +2632,7 @@ void VulkanRendererContext::setStretchMode(int mode) {
     if (stretchMode == mode) return;
     stretchMode = mode;
     if (mode == 1) tryCreatePipeline(&VulkanRendererContext::createStretchPipeline, "stretch");
+    adpfNote(kAdpfResetGpu);
     needsRender.store(true); wakeRender();
 }
 
