@@ -945,7 +945,7 @@ private fun ShortcutCategoryV2(
                     SettingChoice(
                         uiStr(R.string.ui_surface_format),
                         if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
-                        listOf("RGBA", "BGRA")
+                        listOf("BGRA", "RGBA")
                     ) {
                         s.surfaceFormat = if (it == "BGRA") "bgra8" else "rgba8"
                         s.saveRenderer()

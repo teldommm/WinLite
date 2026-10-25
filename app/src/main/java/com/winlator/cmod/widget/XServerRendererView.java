@@ -64,9 +64,6 @@ public abstract class XServerRendererView extends SurfaceView {
     public void waitGuestBufferIdle(Drawable buffer, long timeoutNs) {}
     // Period of the 60 Hz time base the fallback MSC (and the real one's anchor) uses.
     public static final long FALLBACK_MSC_PERIOD_NS = 16_666_667L;
-    // Windows currently redirected by the Composite extension, so a renderer that replaces this
-    // one mid-game (hot renderer switch) can be told about them again.
-    public int[] getCompositeRedirectedWindowIds() { return new int[0]; }
     public abstract void requestRender();
     public abstract void queueEvent(Runnable action);
     public abstract void onSurfaceChanged(int width, int height);

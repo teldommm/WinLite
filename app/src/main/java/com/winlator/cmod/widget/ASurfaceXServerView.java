@@ -234,7 +234,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
             }
         }
         if (!started) {
-            // Nothing would ever be drawn: let the owner fall back to another renderer.
+            // Nothing would ever be drawn: tell the owner.
             Log.e(TAG, "SurfaceFlinger renderer could not be started");
             final OnStartFailedListener listener = startFailedListener;
             if (listener != null) listener.onStartFailed();
@@ -348,9 +348,6 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     }
 
     public void forceCleanup() {
-        // Stop listening: this view may be replaced by another renderer while the game runs.
-        xServer.windowManager.removeOnWindowModificationListener(this);
-        xServer.pointer.removeOnPointerMotionListener(this);
         fpsWindowId = -1;
         hudRef = null;
         classicHudRef = null;
@@ -883,14 +880,6 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     }
 
     // ------------------------------------------------------------------ composite redirect
-
-    @Override
-    public int[] getCompositeRedirectedWindowIds() {
-        Integer[] boxed = compositeRedirectedWindows.toArray(new Integer[0]);
-        int[] ids = new int[boxed.length];
-        for (int i = 0; i < boxed.length; i++) ids[i] = boxed[i];
-        return ids;
-    }
 
     @Override
     public void nativeSetCompositeRedirected(int windowId, boolean redirected) {

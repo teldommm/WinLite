@@ -27,7 +27,7 @@ public class WindowManager extends XResourceManager {
     public final DrawableManager drawableManager;
     private Window focusedWindow;
     private FocusRevertTo focusRevertTo = FocusRevertTo.NONE;
-    private final java.util.concurrent.CopyOnWriteArrayList<OnWindowModificationListener> onWindowModificationListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final ArrayList<OnWindowModificationListener> onWindowModificationListeners = new ArrayList<>();
 
     public interface OnWindowModificationListener {
         default void onCreateWindow(Window window, Window parent) {}
@@ -349,26 +349,12 @@ public class WindowManager extends XResourceManager {
         return child != null ? findPointWindow(child, rootX, rootY) : window;
     }
 
-    // Added from the UI thread (a renderer swap) while the X server thread walks the list:
-    // copy-on-write, and the slot of a removed listener is reused instead of growing the list.
     public void addOnWindowModificationListener(OnWindowModificationListener onWindowModificationListener) {
-        synchronized (onWindowModificationListeners) {
-            int free = onWindowModificationListeners.indexOf(REMOVED_LISTENER);
-            if (free >= 0) onWindowModificationListeners.set(free, onWindowModificationListener);
-            else onWindowModificationListeners.add(onWindowModificationListener);
-        }
+        onWindowModificationListeners.add(onWindowModificationListener);
     }
 
-    private static final OnWindowModificationListener REMOVED_LISTENER = new OnWindowModificationListener() {};
-
-    // The list is walked by index on the X server thread while this runs on another one (a
-    // renderer swap): a removal must not shift or shrink it under the walk, so the slot is
-    // replaced with a listener that does nothing.
     public void removeOnWindowModificationListener(OnWindowModificationListener onWindowModificationListener) {
-        synchronized (onWindowModificationListeners) {
-            int index = onWindowModificationListeners.indexOf(onWindowModificationListener);
-            if (index >= 0) onWindowModificationListeners.set(index, REMOVED_LISTENER);
-        }
+        onWindowModificationListeners.remove(onWindowModificationListener);
     }
 
     private void triggerOnMapWindow(Window window) {

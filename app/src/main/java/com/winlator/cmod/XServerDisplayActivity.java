@@ -177,8 +177,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public static int NOTIFICATION_ID = -1;
     private XServerRendererView xServerView;
     private boolean screenOffsetYRelativeToCursor = false;
-    private boolean softStretch = false;   // sidebar "stretch" switch; only the Vulkan renderer can honour it
-    private boolean rendererSwapping = false;
     private InputControlsView inputControlsView;
     private TouchpadView touchpadView;
     private XEnvironment environment;
@@ -1295,8 +1293,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (surfaceFlinger) {
             final ASurfaceXServerView sfView = new ASurfaceXServerView(this, xServer);
             // Supported on paper, but the native side could not start (no layers could be created):
-            // nothing would ever be drawn, so go back to Vulkan.
-            sfView.setOnStartFailedListener(() -> handler.post(() -> onSurfaceFlingerStartFailed(sfView)));
+            // nothing will be drawn. The renderer is chosen in the container/shortcut settings.
+            sfView.setOnStartFailedListener(() -> handler.post(() -> WinToast.show(this,
+                    "SurfaceFlinger renderer could not start. Choose Vulkan in the container settings.",
+                    Toast.LENGTH_LONG)));
             view = sfView;
         }
         else {
@@ -1322,93 +1322,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             view.setUnviewableWMClasses("explorer.exe");
         }
         return view;
-    }
-
-    /**
-     * Switches between the Vulkan and SurfaceFlinger renderers while the game runs (UI thread).
-     * The X server keeps all its state; the new view starts like a late first start, sending the
-     * whole window tree from scratch. The choice is saved for the next launch as well.
-     */
-    private void swapRenderer(boolean toSurfaceFlinger) {
-        swapRenderer(toSurfaceFlinger, true);
-    }
-
-    /** The SurfaceFlinger view could not start: fall back to Vulkan for this session (the saved choice stays). */
-    private void onSurfaceFlingerStartFailed(ASurfaceXServerView failed) {
-        if (xServerView != failed) return;   // already replaced
-        WinToast.show(this, "SurfaceFlinger renderer could not start; using Vulkan.", Toast.LENGTH_LONG);
-        swapRenderer(false, false);
-    }
-
-    /** persist = false: the switch is for this session only (a fallback), the saved renderer is left as it is. */
-    private void swapRenderer(boolean toSurfaceFlinger, boolean persist) {
-        if (rendererSwapping || xServerView == null) return;
-        if ((xServerView instanceof ASurfaceXServerView) == toSurfaceFlinger) return;
-        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
-        if (rootView == null) return;
-        if (toSurfaceFlinger && !ASurfaceXServerView.isSupported()) {
-            WinToast.show(this, "SurfaceFlinger renderer needs Android 10+.", Toast.LENGTH_LONG);
-            setupSidebarGraphicsControls();
-            return;
-        }
-        if (toSurfaceFlinger && xServer.getSurfaceFormat() != Drawable.HAL_PIXEL_FORMAT_RGBA_8888) {
-            // Windows and guest buffers are BGRA for the rest of this session.
-            WinToast.show(this, "SurfaceFlinger needs the RGBA surface format; choose it in the container settings.",
-                    Toast.LENGTH_LONG);
-            setupSidebarGraphicsControls();
-            return;
-        }
-
-        rendererSwapping = true;
-        try {
-            final XServerRendererView old = xServerView;
-            final boolean wasFullscreen = old.isFullscreen();
-            final float zoom = old.getMagnifierZoom();
-            final int[] redirected = old.getCompositeRedirectedWindowIds();
-            final int index = rootView.indexOfChild(old);
-
-            // Old one first: it stops listening to the X server and frees its surface and native
-            // state. Calls reaching it meanwhile find nothing to do; the Present extension times
-            // its own completions, so no frame is left waiting for it.
-            old.forceCleanup();
-            rootView.removeView(old);
-
-            final XServerRendererView view = createRendererView(toSurfaceFlinger);
-            rootView.addView(view, index >= 0 ? Math.min(index, rootView.getChildCount()) : 0);
-
-            for (int windowId : redirected) view.nativeSetCompositeRedirected(windowId, true);
-            if (wasFullscreen) view.toggleFullscreen();
-            // Stretch is a Vulkan shader mode: a view created for it starts unstretched.
-            if (view instanceof VulkanXServerView && softStretch)
-                ((VulkanXServerView) view).setStretchMode(1);
-            if (zoom != 1.0f) view.setMagnifierZoom(zoom);
-            if (screenOffsetYRelativeToCursor) view.setScreenOffsetYRelativeToCursor(true);
-            view.setCursorVisible(isDrawnCursorVisible());
-            if (isInPictureInPictureMode()) view.setPipMode(true);
-
-            // The HUDs belong to the activity: hand them to the new view.
-            if (modernHud != null) view.setFrameRating(modernHud);
-            if (classicHud != null) view.setFrameRating(classicHud);
-            applyHudRendererSuffix();
-            if (frameRatingWindowId != -1) view.setFpsWindowId(frameRatingWindowId);
-
-            if (persist) {
-                if (shortcut != null) {
-                    shortcut.setRenderer(toSurfaceFlinger ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN);
-                    shortcut.saveData();
-                } else if (container != null) {
-                    container.setRenderer(toSurfaceFlinger ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN);
-                    container.saveData();
-                }
-            }
-
-            // Applies the saved FPS limit and (Vulkan only) upscaler/post-processing settings to
-            // the new view and rebuilds the sidebar panel for what it supports.
-            setupSidebarGraphicsControls();
-            drawerLayout.closeDrawers();
-        } finally {
-            rendererSwapping = false;
-        }
     }
 
     /**
@@ -1764,7 +1677,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
                 @Override
                 public void onSoftStretch(boolean enabled) {
-                    softStretch = enabled;
                     if (xServerView != null) {
                         XServerRendererView rendererRef = xServerView;
                         if (enabled && !rendererRef.isFullscreen()) {
@@ -2084,13 +1996,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final boolean perfHintOn = perfHintAvailable && loadPerformanceHint();
         if (vkRenderer != null) vkRenderer.setPerformanceHint(perfHintOn);
 
-        // The SurfaceFlinger renderer only takes RGBA buffers, and the surface format cannot change
-        // while the game runs: on a BGRA session the switch is not offered (the container/shortcut
-        // renderer setting forces rgba8 for the next start).
-        final boolean sfDeviceOk = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                && ASurfaceXServerView.isSupported();
-        final boolean sfFormatOk = xServer.getSurfaceFormat() == Drawable.HAL_PIXEL_FORMAT_RGBA_8888;
-
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
                 fsrOn,
@@ -2103,11 +2008,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 frameGenSpinnerIndex(),
                 activeLsfgFlowScale,
                 rememberedLsfgTargetRate,
-                sfDeviceOk && sfFormatOk,
                 renderer instanceof ASurfaceXServerView,
                 perfHintAvailable,
-                perfHintOn,
-                sfDeviceOk && !sfFormatOk
+                perfHintOn
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
@@ -2245,13 +2148,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     vkRenderer.setFrameGenNative(activeLsfgDll, activeLsfgMultiplier,
                             activeLsfgFlowScale, activeLsfgTargetRate);
                 if (adaptive) applyFrameGenDisplayMode();
-            }
-
-            @Override
-            public void onRendererChanged(boolean surfaceFlinger) {
-                // Not inline: this runs inside the panel's own click handler, and the switch
-                // rebuilds that panel. Posted so the handler returns first.
-                handler.post(() -> swapRenderer(surfaceFlinger));
             }
 
             @Override

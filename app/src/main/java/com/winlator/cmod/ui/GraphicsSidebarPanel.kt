@@ -42,13 +42,9 @@ data class GraphicsPanelState(
     val frameGenMultiplierIndex: Int,
     val frameGenFlowScale: Float,
     val frameGenTargetFps: Int,      // Adaptive target FPS shown in the field (last entered/saved)
-    val rendererSwitchAvailable: Boolean = false,  // SurfaceFlinger renderer usable on this device
     val surfaceFlinger: Boolean = false,           // the SurfaceFlinger renderer is the active one
     val perfHintAvailable: Boolean = false,        // the active renderer and the device support ADPF
-    val perfHintEnabled: Boolean = false,          // saved switch position (off unless chosen)
-    // SurfaceFlinger would work on this device, but this session's surface format is BGRA (fixed
-    // when the game started): the switch is replaced by a hint on how to get it.
-    val surfaceFlingerNeedsRgba: Boolean = false
+    val perfHintEnabled: Boolean = false           // saved switch position (off unless chosen)
 )
 
 interface GraphicsPanelCallbacks {
@@ -63,8 +59,6 @@ interface GraphicsPanelCallbacks {
     fun onFrameGenChanged(multiplierIndex: Int)
     fun onFrameGenFlowScaleChanged(scale: Float)
     fun onFrameGenTargetFpsChanged(fps: Int)
-    // Hot-switches the X server renderer: false = Vulkan, true = SurfaceFlinger.
-    fun onRendererChanged(surfaceFlinger: Boolean)
     // ADPF (Android Performance Hint) switch of the Vulkan renderer.
     fun onPerformanceHintChanged(enabled: Boolean)
 }
@@ -85,7 +79,6 @@ object GraphicsSidebarPanelHost {
 // shown right after SGSR (HQ) and after FSR (NIS) in the dropdown through UPSCALER_DISPLAY_ORDER.
 private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost", "SGSR HQ", "NIS")
 private val UPSCALER_DISPLAY_ORDER = listOf(0, 4, 1, 5, 2, 3)
-private val RENDERER_LABELS = listOf("Vulkan", "SurfaceFlinger")
 private val POSTFX_LABELS = listOf("None", "DLS", "CRT", "HDR", "Natural")
 private val FRAMEGEN_LABELS = listOf("Off", "LSFG 2x", "LSFG 3x", "LSFG 4x", "LSFG Adaptive FPS")
 // Index of "LSFG Adaptive FPS": presents paced to a typed-in rate instead of a fixed multiplier.
@@ -143,50 +136,24 @@ private fun GraphicsSidebarPanel(
     ) {
         SidebarPanelTitle(uiStr(R.string.ui_rendering))
 
-        val showAdpf = state.perfHintAvailable && !sfActive
-        val showRenderer = state.rendererSwitchAvailable || sfActive
-        val showSfHint = !showRenderer && state.surfaceFlingerNeedsRgba
-        if (showRenderer || showSfHint || showAdpf) {
-            SidebarCard {
-                if (showSfHint) {
-                    SidebarSectionTitle("Renderer")
-                    Spacer(Modifier.height(6.dp))
-                    SidebarCaption(
-                        "SurfaceFlinger needs the RGBA surface format. Choose SurfaceFlinger as the " +
-                            "renderer in the container or shortcut settings and restart the game."
-                    )
-                }
-                if (showRenderer) {
-                    SidebarSectionTitle("Renderer")
-                    Spacer(Modifier.height(10.dp))
-                    SidebarDropdownField(
-                        caption = null,
-                        options = RENDERER_LABELS,
-                        selectedIndex = if (sfActive) 1 else 0,
-                        onSelect = { index ->
-                            if ((index == 1) != sfActive) callbacks.onRendererChanged(index == 1)
-                        }
-                    )
-                }
-                if (showAdpf) {
-                    if (showRenderer || showSfHint) Spacer(Modifier.height(10.dp))
-                    SidebarInlineToggle(
-                        label = "ADPF",
-                        checked = perfHintOn,
-                        onCheckedChange = {
-                            perfHintOn = it
-                            callbacks.onPerformanceHintChanged(it)
-                        }
-                    )
-                }
-            }
-            SidebarGap()
-        }
-
         FpsLimiterCard(
             initialFps = state.fpsLimit,
             onFpsChanged = callbacks::onFpsLimitChanged
         )
+
+        if (state.perfHintAvailable && !sfActive) {
+            SidebarGap()
+            SidebarCard {
+                SidebarInlineToggle(
+                    label = "ADPF",
+                    checked = perfHintOn,
+                    onCheckedChange = {
+                        perfHintOn = it
+                        callbacks.onPerformanceHintChanged(it)
+                    }
+                )
+            }
+        }
 
         if (!sfActive) {
         SidebarGap()
