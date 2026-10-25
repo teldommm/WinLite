@@ -20,7 +20,6 @@ import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.contents.ContentProfile;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.Callback;
-import com.winlator.cmod.core.DefaultVersion;
 import com.winlator.cmod.core.EnvVars;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.FrameGenManager;
@@ -147,32 +146,6 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         };
     }
 
-    /**
-     * A version whose bundled archive is no longer shipped (e.g. FEXCore 2601, Box64 0.4.2) and that
-     * is not installed as a content package would fail to apply: use the current default instead and
-     * store it where it was selected (shortcut or container).
-     */
-    private String resolveBundledVersion(ContentProfile.ContentType type, String version, String extraKey,
-                                         String assetDir, String assetPrefix, String fallback) {
-        if (version == null || version.isEmpty() || resolveInstalledRuntimeProfile(type, version) != null) return version;
-        try {
-            String[] shipped = environment.getContext().getAssets().list(assetDir);
-            if (shipped == null || java.util.Arrays.asList(shipped).contains(assetPrefix + "-" + version + ".tzst")) return version;
-        } catch (IOException e) {
-            return version;
-        }
-        Log.w("GuestProgramLauncherComponent", assetPrefix + " " + version + " is no longer bundled, using " + fallback);
-        if (shortcut != null && !shortcut.getExtra(extraKey).isEmpty()) {
-            shortcut.putExtra(extraKey, fallback);
-            shortcut.saveData();
-        } else {
-            if (extraKey.equals("fexcoreVersion")) container.setFEXCoreVersion(fallback);
-            else container.setBox64Version(fallback);
-            container.saveData();
-        }
-        return fallback;
-    }
-
     private void extractBox64Files() {
         ImageFs imageFs = environment.getImageFs();
         Context context = environment.getContext();
@@ -182,8 +155,6 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         if (shortcut != null)
             box64Version = shortcut.getExtra("box64Version", shortcut.container.getBox64Version());
 
-        box64Version = resolveBundledVersion(ContentProfile.ContentType.CONTENT_TYPE_BOX64, box64Version,
-                "box64Version", "box64", "box64", DefaultVersion.BOX64);
         Log.d("GuestProgramLauncherComponent", "box64Version: " + box64Version);
 
         File rootDir = imageFs.getRootDir();
@@ -222,11 +193,6 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             wowbox64Version = shortcut.getExtra("box64Version", shortcut.container.getBox64Version());
             fexcoreVersion = shortcut.getExtra("fexcoreVersion", shortcut.container.getFEXCoreVersion());
         }
-
-        wowbox64Version = resolveBundledVersion(ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64, wowbox64Version,
-                "box64Version", "wowbox64", "wowbox64", DefaultVersion.WOWBOX64);
-        fexcoreVersion = resolveBundledVersion(ContentProfile.ContentType.CONTENT_TYPE_FEXCORE, fexcoreVersion,
-                "fexcoreVersion", "fexcore", "fexcore", DefaultVersion.FEXCORE);
 
         Log.d("GuestProgramLauncherComponent", "box64Version in use: " + wowbox64Version);
         Log.d("GuestProgramLauncherComponent", "fexcoreVersion in use: " + fexcoreVersion);

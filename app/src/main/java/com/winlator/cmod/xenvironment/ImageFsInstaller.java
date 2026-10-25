@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class ImageFsInstaller {
-    public static final byte LATEST_VERSION = 23;
+    public static final byte LATEST_VERSION = 22;
     
     public abstract interface onInstallationFinish {
         public void call();

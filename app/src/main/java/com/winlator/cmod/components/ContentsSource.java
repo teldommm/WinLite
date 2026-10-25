@@ -4,6 +4,7 @@ import android.content.Context;
 import android.net.Uri;
 
 import com.winlator.cmod.R;
+import com.winlator.cmod.core.BundledComponents;
 import com.winlator.cmod.contents.ContentProfile;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.Downloader;
@@ -82,7 +83,11 @@ public final class ContentsSource implements ComponentSource {
                 } else {
                     installed = installedFor.get(profile);
                 }
-                ContentEntry entry = new ContentEntry(typeName, profile, installed);
+                // A catalog row for a version the APK already ships is that same component: one
+                // row, marked as built in, instead of a download next to the copy the app has.
+                boolean builtIn = installed == null && profile.remoteUrl != null
+                        && BundledComponents.contains(context, typeName, profile.verName);
+                ContentEntry entry = new ContentEntry(typeName, profile, installed, builtIn);
                 if (!seen.add(entry.id)) continue;
                 out.add(entry);
                 contentRows.add(entry);
@@ -102,7 +107,7 @@ public final class ContentsSource implements ComponentSource {
                 String typeName = displayType(type);
                 if (typeName.isEmpty()) continue;
                 if (claimed.contains(ContentsManager.getEntryName(profile))) continue;
-                ContentEntry entry = new ContentEntry(typeName, profile, profile);
+                ContentEntry entry = new ContentEntry(typeName, profile, profile, false);
                 if (!seen.add(entry.id)) continue;
                 out.add(entry);
                 contentRows.add(entry);
@@ -268,13 +273,26 @@ public final class ContentsSource implements ComponentSource {
         /** The package on disk behind this row, or null while it is only in the catalog. */
         final ContentProfile installedProfile;
         String installedName;
+        /** Shipped inside the APK and not installed from the catalog: nothing to download or delete. */
+        final boolean builtIn;
 
-        ContentEntry(String typeName, ContentProfile profile, ContentProfile installedProfile) {
+        ContentEntry(String typeName, ContentProfile profile, ContentProfile installedProfile, boolean builtIn) {
             super(typeName + ":" + profile.verCode + ":" + profile.verName, typeName, profile.verName, profile.verCode);
             this.profile = profile;
             this.installedProfile = installedProfile;
-            this.installed = installedProfile != null;
+            this.builtIn = builtIn;
+            this.installed = installedProfile != null || builtIn;
             this.installedName = installedProfile != null ? ContentsManager.getEntryName(installedProfile) : "";
+        }
+
+        @Override
+        public String label() {
+            return builtIn ? name + " \u2022 Built-in" : name;
+        }
+
+        @Override
+        public boolean removable() {
+            return !builtIn && installed;
         }
 
         /** The catalog marks this version (or the catalog version this package was installed as). */

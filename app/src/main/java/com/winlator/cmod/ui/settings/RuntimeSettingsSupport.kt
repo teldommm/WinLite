@@ -59,6 +59,7 @@ import com.winlator.cmod.contents.AdrenotoolsManager
 import com.winlator.cmod.contents.ContentProfile
 import com.winlator.cmod.components.ComponentCatalog
 import com.winlator.cmod.components.InstallOutcome
+import com.winlator.cmod.core.BundledComponents
 import com.winlator.cmod.core.DefaultVersion
 import com.winlator.cmod.core.GPUInformation
 import com.winlator.cmod.core.ProtonPackageManager
@@ -238,11 +239,11 @@ internal fun initialSettingsCatalog(
     }
 
     return SettingsCatalog(
-        dxvk = versions(context.resources.getStringArray(R.array.dxvk_version_entries).toList(), selectedDxvk),
-        vkd3d = versions(context.resources.getStringArray(R.array.vkd3d_version_entries).toList(), selectedVkd3d),
-        fex = versions(emptyList(), selectedFex, false),
-        box = versions(emptyList(), selectedBox, false),
-        wow = versions(emptyList(), selectedBox, false),
+        dxvk = versions(BundledComponents.names(context, "DXVK"), selectedDxvk),
+        vkd3d = versions(listOf("None") + BundledComponents.names(context, "VKD3D"), selectedVkd3d),
+        fex = versions(BundledComponents.names(context, "FEXCore"), selectedFex, false),
+        box = versions(BundledComponents.names(context, "Box64"), selectedBox, false),
+        wow = versions(BundledComponents.names(context, "WOWBox64"), selectedBox, false),
         drivers = drivers.values.toList(),
         rendererDrivers = rendererDrivers
     )
@@ -330,25 +331,25 @@ private suspend fun loadSettingsCatalogUncached(
     SettingsCatalog(
         dxvk = versions(
             ContentProfile.ContentType.CONTENT_TYPE_DXVK,
-            context.resources.getStringArray(R.array.dxvk_version_entries).toList(),
+            BundledComponents.names(context, "DXVK"),
             selectedDxvk
         ),
         vkd3d = versions(
             ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
-            context.resources.getStringArray(R.array.vkd3d_version_entries).toList(),
+            listOf("None") + BundledComponents.names(context, "VKD3D"),
             selectedVkd3d
         ),
         fex = versions(
             ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
-            DefaultVersion.FEXCORE_BUNDLED.toList(), selectedFex, false
+            BundledComponents.names(context, "FEXCore"), selectedFex, false
         ),
         box = versions(
             ContentProfile.ContentType.CONTENT_TYPE_BOX64,
-            listOf(DefaultVersion.BOX64), selectedBox, false
+            BundledComponents.names(context, "Box64"), selectedBox, false
         ),
         wow = versions(
             ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64,
-            listOf(DefaultVersion.WOWBOX64), selectedBox, false
+            BundledComponents.names(context, "WOWBox64"), selectedBox, false
         ),
         drivers = driverOptions.values.toList(),
         rendererDrivers = rendererDrivers
