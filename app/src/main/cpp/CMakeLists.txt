@@ -152,7 +152,7 @@ add_library(vulkan_renderer SHARED
 
         winlator/renderer/vulkan/VulkanRendererContext.cpp
         winlator/renderer/vulkan/VulkanRendererAdpf.cpp
-        winlator/renderer/adpf/adpf_session.cpp
+        winlator/renderer/vulkan/adpf/adpf_session.cpp
         winlator/renderer/vulkan/VulkanRendererFilters.cpp
         winlator/renderer/vulkan/VulkanRendererPipelineOpt.cpp
 

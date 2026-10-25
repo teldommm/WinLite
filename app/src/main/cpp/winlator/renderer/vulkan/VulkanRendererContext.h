@@ -10,7 +10,7 @@ namespace lsfg { class Engine; }
 
 #include "view_transformation.hpp"
 #include "xform.hpp"
-#include "../adpf/adpf_session.h"
+#include "adpf/adpf_session.h"
 
 struct VkTable {
 
