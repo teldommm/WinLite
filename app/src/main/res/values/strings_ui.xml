@@ -145,7 +145,6 @@
     <string name="ui_variable">Variable</string>
     <string name="ui_pasted_list_variable_s">Pasted list: %1$s variable(s)</string>
     <string name="ui_invalid_will_be_skipped">, %1$s invalid will be skipped</string>
-    <string name="ui_use_letters_digits_and_not_starting_with">Use letters, digits and _, not starting with a digit</string>
     <string name="ui_known_variable_it_will_get_its_own_editor">Known variable: it will get its own editor</string>
     <string name="ui_name">Name</string>
     <string name="ui_already_added_its_value_will_be_replaced">Already added: its value will be replaced.</string>
@@ -348,6 +347,7 @@
     <string name="ui_bundled_installing">Bundled • Installing %1$s%%</string>
     <string name="ui_bundled_not_installed">Bundled • Not installed</string>
     <string name="ui_in_use">In use</string>
+    <string name="ui_built_in">Built-in</string>
     <string name="ui_in_use_2">%1$s • In use</string>
     <string name="ui_component_installation">Component installation</string>
     <string name="ui_installing_component">Installing component…</string>

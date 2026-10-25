@@ -417,7 +417,6 @@ private fun AddEnvironmentVariableDialog(
                     val customMessage: String? = when {
                         custom.bulk -> uiStr(R.string.ui_pasted_list_variable_s, custom.entries.size) +
                             if (custom.invalid.isNotEmpty()) uiStr(R.string.ui_invalid_will_be_skipped, custom.invalid.size) else ""
-                        custom.invalid.isNotEmpty() -> uiStr(R.string.ui_use_letters_digits_and_not_starting_with)
                         customSpec != null -> uiStr(R.string.ui_known_variable_it_will_get_its_own_editor)
                         else -> null
                     }

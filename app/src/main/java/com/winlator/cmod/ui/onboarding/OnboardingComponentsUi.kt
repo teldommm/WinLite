@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Download
@@ -629,7 +628,17 @@ private fun ComponentCard(
                         enabled = !locked,
                         colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
                     ) { Text(uiStr(R.string.ui_download_2)) }
-                } else Icon(Icons.Outlined.Check, null)
+                } else {
+                    // Built into the app: nothing to download or delete. Shown exactly like an
+                    // in-use Wine/Proton row (disabled grey button) instead of a checkmark.
+                    Button(
+                        onClick = {},
+                        enabled = false,
+                        colors = ButtonDefaults.buttonColors(containerColor = destructiveColor(), contentColor = Color.White)
+                    ) {
+                        Text(uiStr(R.string.ui_built_in))
+                    }
+                }
             }
             if (busy) {
                 Spacer(Modifier.height(9.dp))

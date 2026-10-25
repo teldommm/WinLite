@@ -286,11 +286,6 @@ public final class ContentsSource implements ComponentSource {
         }
 
         @Override
-        public String label() {
-            return builtIn ? name + " \u2022 Built-in" : name;
-        }
-
-        @Override
         public boolean removable() {
             return !builtIn && installed;
         }
