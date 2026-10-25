@@ -7,18 +7,13 @@
 // The ASurface* NDK entry points are API 29; the app's minSdk is 28, so they are resolved with
 // dlsym and the whole path stays unavailable (nativeIsSupported() == false) on older systems.
 //
-// Buffer modes (Ctx::copyMode):
-//   2 auto (default): an RGBA8888 / RGBX8888 window buffer that the GPU can sample goes to
-//     SurfaceFlinger as it is (no copy). Anything else - BGRA, which is what the guest allocates
-//     unless its surface format is set to rgba8, or a buffer without GPU usage - is first copied by
-//     a small GL pass (BlitConverter) into an RGBA buffer this file allocated itself (GPU color
-//     output + composer overlay), and only that copy is given to the layer.
-//   1 copy: every frame is copied. 0 direct: nothing is copied (the first version of this path).
-// Buffers handed over as they are (BGRA / CPU-lockable / foreign) are what makes some
-// SurfaceFlinger/HWC/GPU-driver combinations misbehave (inverted colors, crashes). A copied frame
-// frees the guest's buffer as soon as the copy has finished instead of when SurfaceFlinger lets go.
-// Switch: ASurfaceXServerView.setCompatMode() (true = 2, false = 0) for views created afterwards, or
-// `setprop debug.winlite.sf_compat 0|1|2` (wins over the Java setting).
+// Window buffers go to SurfaceFlinger exactly as the guest drew them: no copy, no GPU pass of our
+// own. That only works for RGBA8888 / RGBX8888. The surface format of the X server is therefore
+// forced to rgba8 whenever this renderer is selected (Container/Shortcut.getSurfaceFormat()). A
+// window buffer in any other layout (BGRA is HAL format 5, outside the documented
+// AHARDWAREBUFFER_FORMAT_* set) is never handed to SurfaceFlinger - doing so made some
+// SurfaceFlinger/HWC/GPU-driver combinations crash or restart the device - the frame is dropped
+// and logged instead.
 //
 // Locking: one mutex (Ctx::mu) guards all state. Transactions are built and applied under it so
 // their order is the order of the state changes. Completion callbacks arrive on a SurfaceFlinger
@@ -32,9 +27,7 @@
 #include <android/native_window_jni.h>
 #include <android/rect.h>
 #include <dlfcn.h>
-#include <fcntl.h>
 #include <poll.h>
-#include <sys/system_properties.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -48,8 +41,6 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
-
-#include "blit_converter.h"
 
 #define LOG_TAG "ASurfaceXServer"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -141,12 +132,6 @@ constexpr int64_t kCallbackGraceNs = 200'000'000LL;
 // No completion for this long with the in-flight slots all taken: the callbacks are taken as
 // lost (surface hidden, display off) and the slots are given back, so frames flow again.
 constexpr int64_t kInflightStallNs = 300'000'000LL;
-// Compat mode: upper bound for converted buffers kept around (a layer needs up to four: the one
-// on screen and one per transaction in flight), and how long a replaced one may wait for its
-// release before the transaction callback is taken as lost and the buffer is reused.
-constexpr size_t kMaxSlots = 64;
-constexpr int64_t kSlotStallNs = 3'000'000'000LL;
-
 struct Ctx;
 
 // An ASurfaceControl, released when the last reference (a layer, or a transaction callback that
@@ -157,31 +142,11 @@ struct SCRef {
     ~SCRef() { if (sc) g_api.scRelease(sc); }
 };
 
-// A converted (RGBA8888) buffer SurfaceFlinger may be reading. Compat mode only.
-struct Slot {
-    AHardwareBuffer* buf = nullptr;
-    uint32_t w = 0, h = 0;
-    bool inUse = false;         // on screen, or replaced and not yet released by SurfaceFlinger
-    uint32_t epoch = 0;         // bumped when a lost slot is taken back: late callbacks are ignored
-    int fence = -1;             // release fence of SurfaceFlinger's last read; the next copy waits on it
-    int64_t replacedAtNs = 0;   // when its layer moved on to another buffer (0 = still shown)
-    int64_t freedAtNs = 0;
-    Slot() = default;
-    Slot(const Slot&) = delete;
-    Slot& operator=(const Slot&) = delete;
-    ~Slot() {
-        if (fence >= 0) close(fence);
-        if (buf) AHardwareBuffer_release(buf);
-    }
-};
-
 struct Layer {
     int64_t id = 0;
     std::shared_ptr<SCRef> sc;
     int64_t curSource = 0;            // uid of the buffer submitted last (0 = none yet)
     AHardwareBuffer* curAhb = nullptr;  // our reference to it (re-submitted when the CPU drew in it)
-    std::shared_ptr<Slot> curSlot;    // the copy SurfaceFlinger shows, when the frame was copied
-    bool curDirect = false;           // else: curSource itself is what it shows (counted in shownRefs)
     int bufW = 0, bufH = 0;
     int baseX = 0, baseY = 0;         // window position in X root coordinates
     int offX = 0, offY = 0;           // extra offset of the shown buffer inside the window
@@ -211,12 +176,8 @@ struct Entry {
     std::shared_ptr<Layer> layer;   // null for entries that only keep a control alive
     std::shared_ptr<SCRef> sc;
     int64_t prevSource;             // buffer this transaction replaced (0 = none / not tracked)
-    std::shared_ptr<Slot> prevSlot; // compat mode: converted buffer this transaction replaced
-    uint32_t prevSlotEpoch;
-    Entry(std::shared_ptr<Layer> l, std::shared_ptr<SCRef> s, int64_t prev,
-          std::shared_ptr<Slot> slot = nullptr, uint32_t epoch = 0)
-        : layer(std::move(l)), sc(std::move(s)), prevSource(prev),
-          prevSlot(std::move(slot)), prevSlotEpoch(epoch) {}
+    Entry(std::shared_ptr<Layer> l, std::shared_ptr<SCRef> s, int64_t prev)
+        : layer(std::move(l)), sc(std::move(s)), prevSource(prev) {}
 };
 
 struct TxCtx {
@@ -247,13 +208,8 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     std::unordered_map<int64_t, std::shared_ptr<Layer>> layers;
     std::unordered_map<int64_t, BufState> bufs;
 
-    // compat mode: GL copy pass and the converted buffers
-    int copyMode = 0;                 // 0 direct, 1 copy all, 2 auto
-    BlitConverter* conv = nullptr;
-    bool loggedDirect = false, loggedCopy = false;
-    std::vector<std::shared_ptr<Slot>> slots;
+    bool loggedFormat = false;        // the first window buffer's layout was logged
     int64_t lastWarnNs = 0;
-    enum class Sub { Ok, NoSlot, Failed };
 
     // scene transform (X root coordinates -> surface pixels) and the clip rectangle
     float ox = 0, oy = 0, sx = 1, sy = 1;
@@ -285,15 +241,11 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     void applyLayerGeometry(Tx& tx, const std::shared_ptr<Layer>& L);
     void submit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
                 int64_t desiredNs = 0);
-    Sub doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
-                 int64_t desiredNs = 0);
+    bool doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
+                  int64_t desiredNs = 0);
     void stashPending(const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
                       int64_t desiredNs);
-    Sub acquireSlot(uint32_t w, uint32_t h, std::shared_ptr<Slot>& out, int& acquireFence);
-    Sub convertToSlot(AHardwareBuffer* ahb, const AHardwareBuffer_Desc& desc,
-                      std::shared_ptr<Slot>& slot, int& fenceFd);
     bool warnDue();
-    bool copyNeeded(const AHardwareBuffer_Desc& desc) const;
     void ensureBgBuffer();
     void dropPending(const std::shared_ptr<Layer>& L);
     bool promotePending(Tx& tx, const std::shared_ptr<Layer>& L);
@@ -306,7 +258,6 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     void applyCursor(Tx& tx);
     void flushLocked();
     void teardownLocked();
-    ~Ctx() { delete conv; }
 };
 
 void Ctx::sendTx(Tx& tx) {
@@ -377,15 +328,6 @@ void Ctx::dropPending(const std::shared_ptr<Layer>& L) {
     L->pendDesiredNs = 0;
 }
 
-bool Ctx::copyNeeded(const AHardwareBuffer_Desc& desc) const {
-    if (!conv || copyMode == 0) return false;
-    if (copyMode == 1) return true;
-    // Auto: only layouts and usages that were checked to be safe for SurfaceFlinger go as they are.
-    const bool rgba = desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
-                      desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM;
-    return !(rgba && desc.layers == 1 && (desc.usage & AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE));
-}
-
 bool Ctx::warnDue() {
     const int64_t now = nowNs();
     if (now - lastWarnNs < 1'000'000'000LL) return false;
@@ -393,105 +335,11 @@ bool Ctx::warnDue() {
     return true;
 }
 
-// Compat mode: a free converted buffer of this size (its release fence, if any, comes back in
-// acquireFence and is consumed by the copy), allocating one when needed. NoSlot: all are busy.
-Ctx::Sub Ctx::acquireSlot(uint32_t w, uint32_t h, std::shared_ptr<Slot>& out, int& acquireFence) {
-    acquireFence = -1;
-    const int64_t now = nowNs();
-    for (auto& sl : slots) {
-        // The callback that would release it never came (surface hidden, display off).
-        if (sl->inUse && sl->replacedAtNs && now - sl->replacedAtNs > kSlotStallNs) {
-            sl->epoch++;
-            sl->inUse = false;
-            sl->replacedAtNs = 0;
-            sl->freedAtNs = now;
-            if (sl->fence >= 0) { close(sl->fence); sl->fence = -1; }
-        }
-    }
-    for (auto& sl : slots) {
-        if (!sl->inUse && sl->w == w && sl->h == h) {
-            sl->inUse = true;
-            sl->replacedAtNs = 0;
-            acquireFence = sl->fence;
-            sl->fence = -1;
-            out = sl;
-            return Sub::Ok;
-        }
-    }
-    if (slots.size() >= kMaxSlots) {
-        // Make room: the idle buffer (necessarily of another size) that has been idle longest.
-        size_t victim = slots.size();
-        for (size_t i = 0; i < slots.size(); i++) {
-            if (slots[i]->inUse) continue;
-            if (victim == slots.size() || slots[i]->freedAtNs < slots[victim]->freedAtNs) victim = i;
-        }
-        if (victim == slots.size()) return Sub::NoSlot;
-        conv->unregisterBuffer(slots[victim]->buf);
-        slots.erase(slots.begin() + (std::ptrdiff_t) victim);
-    }
-
-    AHardwareBuffer_Desc d{};
-    d.width = w; d.height = h; d.layers = 1;
-    d.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
-    d.usage = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
-              AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY;
-    AHardwareBuffer* buf = nullptr;
-    int rc = AHardwareBuffer_allocate(&d, &buf);
-    if (rc != 0 || !buf) {
-        d.usage = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
-        buf = nullptr;
-        rc = AHardwareBuffer_allocate(&d, &buf);
-    }
-    if (rc != 0 || !buf) {
-        if (warnDue()) LOGE("converted buffer %ux%u not allocated (%d)", w, h, rc);
-        return Sub::Failed;
-    }
-    if (!conv->registerBuffer(buf)) {
-        if (warnDue()) LOGE("converted buffer %ux%u not usable by the GL pass", w, h);
-        AHardwareBuffer_release(buf);
-        return Sub::Failed;
-    }
-    auto sl = std::make_shared<Slot>();
-    sl->buf = buf;
-    sl->w = w;
-    sl->h = h;
-    sl->inUse = true;
-    slots.push_back(sl);
-    out = sl;
-    return Sub::Ok;
-}
-
-// Compat mode: copies ahb into a converted buffer. The GL pass is submitted when this returns, not
-// finished: fenceFd (>= 0 on Ok, ownership goes to the caller) signals the end of the copy.
-Ctx::Sub Ctx::convertToSlot(AHardwareBuffer* ahb, const AHardwareBuffer_Desc& desc,
-                            std::shared_ptr<Slot>& slot, int& fenceFd) {
-    fenceFd = -1;
-    if (!conv) return Sub::Failed;
-    // 1 = RGBA8888, 2 = RGBX8888, 5 = BGRA8888 (HAL_PIXEL_FORMAT_BGRA_8888).
-    if (desc.layers != 1 || desc.width == 0 || desc.height == 0 ||
-        (desc.format != AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM &&
-         desc.format != AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM && desc.format != 5u)) {
-        if (warnDue()) LOGW("window buffer %ux%u format %u cannot be converted, frame dropped",
-                            desc.width, desc.height, desc.format);
-        return Sub::Failed;
-    }
-    int dstFence = -1;
-    const Sub st = acquireSlot(desc.width, desc.height, slot, dstFence);
-    if (st != Sub::Ok) return st;
-    // No acquire fence for the source: the guest finishes rendering before it sends PresentPixmap
-    // (and CPU drawing is done when its draw request returns). The copy waits for the slot's last
-    // read by SurfaceFlinger on the GPU side. Blocks until the draw is submitted.
-    const int fd = conv->convertBGRAtoRGBA(ahb, slot->buf, -1, dstFence, false).get();
-    if (fd < 0) {
-        slot->inUse = false;
-        slot->freedAtNs = nowNs();
-        slot.reset();
-        if (warnDue()) LOGE("GL copy of a %ux%u window buffer (format %u) failed",
-                            desc.width, desc.height, desc.format);
-        return Sub::Failed;
-    }
-    fenceFd = fd;
-    return Sub::Ok;
+// RGBA8888 / RGBX8888, single layer: the only layouts that are given to SurfaceFlinger.
+static bool sfSafeFormat(const AHardwareBuffer_Desc& desc) {
+    return desc.layers == 1 && desc.width > 0 && desc.height > 0 &&
+           (desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
+            desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM);
 }
 
 void Ctx::stashPending(const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
@@ -515,41 +363,23 @@ void Ctx::submit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardw
         return;
     }
     dropPending(L);
-    // No converted buffer free (compat mode): the frame waits like one without an in-flight slot.
-    if (doSubmit(tx, L, source, ahb, desiredNs) == Sub::NoSlot) stashPending(L, source, ahb, desiredNs);
+    doSubmit(tx, L, source, ahb, desiredNs);   // false: unusable layout, the frame is dropped
 }
 
-Ctx::Sub Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
-                       int64_t desiredNs) {
+bool Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
+                   int64_t desiredNs) {
     AHardwareBuffer_Desc desc{};
     AHardwareBuffer_describe(ahb, &desc);
 
-    AHardwareBuffer* shown = ahb;   // what SurfaceFlinger gets
-    int fence = -1;                 // its acquire fence (ownership goes to the transaction)
-    std::shared_ptr<Slot> slot;
-    const bool viaCopy = copyNeeded(desc);
-    if (viaCopy) {
-        if (!loggedCopy) {
-            loggedCopy = true;
-            LOGI("window buffer %ux%u format %u usage 0x%llx: copied before SurfaceFlinger", desc.width,
-                 desc.height, desc.format, (unsigned long long) desc.usage);
-        }
-        const Sub st = convertToSlot(ahb, desc, slot, fence);
-        if (st != Sub::Ok) return st;
-        shown = slot->buf;
-        // SurfaceFlinger never reads the guest's buffer: it is free as soon as the copy is done.
-        BufState& b = bufs[source];
-        const int copyFence = fcntl(fence, F_DUPFD_CLOEXEC, 0);
-        if (copyFence >= 0) {
-            if (b.fence >= 0) close(b.fence);
-            b.fence = copyFence;
-        } else {
-            pollfd pfd{fence, POLLIN, 0};   // out of descriptors: wait for the copy instead
-            poll(&pfd, 1, 1000);
-            gcBuf(source);
-        }
-    } else if (!loggedDirect) {
-        loggedDirect = true;
+    // Nothing has been touched yet, so a refused frame leaves the layer showing what it showed.
+    if (!sfSafeFormat(desc)) {
+        if (warnDue()) LOGW("window buffer %ux%u format %u is not RGBA8888/RGBX8888: frame dropped "
+                            "(the surface format must be rgba8 with this renderer)",
+                            desc.width, desc.height, desc.format);
+        return false;
+    }
+    if (!loggedFormat) {
+        loggedFormat = true;
         LOGI("window buffer %ux%u format %u usage 0x%llx: given to SurfaceFlinger as it is", desc.width,
              desc.height, desc.format, (unsigned long long) desc.usage);
     }
@@ -567,49 +397,40 @@ Ctx::Sub Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, 
         g_api.txSetTransparency(tx.raw, L->sc->sc, L->translucent ? kTranslucent : kOpaque);
         L->trApplied = true; L->trValue = L->translucent;
     }
-    // Not copied: no acquire fence, the guest finishes rendering before it sends PresentPixmap.
-    // Copied: the fence of the copy.
-    g_api.txSetBuffer(tx.raw, L->sc->sc, shown, fence);
+    // No acquire fence: the guest finishes rendering before it sends PresentPixmap.
+    g_api.txSetBuffer(tx.raw, L->sc->sc, ahb, -1);
     // FPS limiter: SurfaceFlinger holds the frame back until its slot, so it is shown at a fixed
     // phase of the refresh however the guest's present times jitter. Past times mean "now".
     if (desiredNs > 0 && g_api.txSetDesiredPresentTime) g_api.txSetDesiredPresentTime(tx.raw, desiredNs);
 
-    // What this transaction replaces: a copy (freed when the transaction completes), or the
-    // guest's own buffer (busy until then, and until its release fence has signalled).
+    // What this transaction replaces: the guest's previous buffer, busy until the transaction
+    // completes and until its release fence has signalled. The same buffer again (the CPU drew in
+    // it) replaces nothing.
     int64_t replaced = 0;
-    std::shared_ptr<Slot> prevSlot = std::move(L->curSlot);
-    if (prevSlot) prevSlot->replacedAtNs = nowNs();
-    const bool sameDirect = L->curDirect && !viaCopy && prev == source;
-    if (L->curDirect && prev && !sameDirect) {
+    const bool same = prev == source;
+    if (prev && !same) {
         BufState& p = bufs[prev];
         p.shownRefs--;
         p.awaitCb++;
         p.replacedAtNs = nowNs();
         replaced = prev;
     }
-    if (viaCopy) {
-        L->curSlot = slot;
-        L->curDirect = false;
-    } else {
-        if (!sameDirect) bufs[source].shownRefs++;
-        L->curDirect = true;
-    }
+    if (!same) bufs[source].shownRefs++;
     if (L->inflight == 0) L->progressNs = nowNs();
     L->inflight++;
-    const uint32_t prevEpoch = prevSlot ? prevSlot->epoch : 0;
-    tx.entries.push_back(Entry(L, L->sc, replaced, std::move(prevSlot), prevEpoch));
+    tx.entries.push_back(Entry(L, L->sc, replaced));
     applyLayerGeometry(tx, L);
-    return Sub::Ok;
+    return true;
 }
 
-// Sends the frame that waited for an in-flight slot (or a converted buffer), if there is one now.
+// Sends the frame that waited for an in-flight slot, if there is one now.
 bool Ctx::promotePending(Tx& tx, const std::shared_ptr<Layer>& L) {
     if (!L->pendAhb || L->inflight >= kMaxInflight) return false;
     AHardwareBuffer* ahb = L->pendAhb;
     const int64_t src = L->pendSource;
     const int64_t desired = L->pendDesiredNs;
-    if (doSubmit(tx, L, src, ahb, desired) == Sub::NoSlot) return false;   // stays pending
-    // Sent, or dropped for good: the pending reference goes.
+    doSubmit(tx, L, src, ahb, desired);   // sent, or dropped for good (unusable layout)
+    // Either way the pending reference goes.
     L->pendAhb = nullptr;
     L->pendSource = 0;
     L->pendDesiredNs = 0;
@@ -648,29 +469,20 @@ void Ctx::retireLayer(const std::shared_ptr<Layer>& L) {
     dropPending(L);
     Tx tx;
     int64_t replaced = 0;
-    std::shared_ptr<Slot> slot = std::move(L->curSlot);
     if (L->curSource) {
-        if (L->curDirect) {
-            BufState& p = bufs[L->curSource];
-            p.shownRefs--;
-            p.awaitCb++;
-            p.replacedAtNs = nowNs();
-            replaced = L->curSource;
-        }
+        BufState& p = bufs[L->curSource];
+        p.shownRefs--;
+        p.awaitCb++;
+        p.replacedAtNs = nowNs();
+        replaced = L->curSource;
         L->curSource = 0;
     }
-    L->curDirect = false;
-    if (slot) slot->replacedAtNs = nowNs();
     if (tx.raw) {
         g_api.txSetVisibility(tx.raw, L->sc->sc, kVisHide);
         g_api.txReparent(tx.raw, L->sc->sc, nullptr);
-        const uint32_t slotEpoch = slot ? slot->epoch : 0;
-        tx.entries.push_back(Entry(L, L->sc, replaced, std::move(slot), slotEpoch));
+        tx.entries.push_back(Entry(L, L->sc, replaced));
         L->inflight++;
         sendTx(tx);
-    } else if (slot) {
-        slot->inUse = false;
-        slot->freedAtNs = nowNs();
     }
     if (L->curAhb) { AHardwareBuffer_release(L->curAhb); L->curAhb = nullptr; }
 }
@@ -832,12 +644,12 @@ void Ctx::flushLocked() {
             AHardwareBuffer* ahb = L->curAhb;
             AHardwareBuffer_acquire(ahb);          // doSubmit swaps curAhb
             const int64_t src = L->curSource;
-            const Sub r = doSubmit(tx, L, src, ahb);
+            const bool sent = doSubmit(tx, L, src, ahb);
             AHardwareBuffer_release(ahb);
-            if (r != Sub::Ok) {
-                // NoSlot: the frame is retried at the next vsync; Failed: it is dropped. Either
-                // way doSubmit did not apply the new transform to this layer.
-                if (r == Sub::Failed) L->bufDirty = false;
+            if (!sent) {
+                // Unusable layout: the frame is dropped, and doSubmit did not apply the new
+                // transform to this layer.
+                L->bufDirty = false;
                 if (xformDirty) applyLayerGeometry(tx, L);
             }
         } else if (xformDirty) {
@@ -872,7 +684,7 @@ void onTransactionComplete(void* context, void* stats) {
     g_api.statsGetControls(stats, &controls, &count);
     for (size_t i = 0; i < tc->entries.size(); i++) {
         const Entry& e = tc->entries[i];
-        if (!e.prevSource && !e.prevSlot) continue;
+        if (!e.prevSource) continue;
         for (size_t k = 0; k < count; k++) {
             if (controls[k] == e.sc->sc) { fences[i] = g_api.statsPrevReleaseFence(stats, e.sc->sc); break; }
         }
@@ -894,15 +706,6 @@ void onTransactionComplete(void* context, void* stats) {
                 }
                 ctx->gcBuf(e.prevSource);
             }
-        }
-        // Compat mode: SurfaceFlinger is done with the converted buffer this transaction replaced.
-        if (e.prevSlot && e.prevSlot->epoch == e.prevSlotEpoch) {
-            if (e.prevSlot->fence >= 0) close(e.prevSlot->fence);
-            e.prevSlot->fence = fences[i];
-            fences[i] = -1;
-            e.prevSlot->inUse = false;
-            e.prevSlot->replacedAtNs = 0;
-            e.prevSlot->freedAtNs = nowNs();
         }
         if (fences[i] >= 0) close(fences[i]);
         if (e.layer) {
@@ -947,34 +750,13 @@ Java_com_winlator_cmod_widget_ASurfaceXServerView_nativeIsSupported(JNIEnv*, jcl
 
 JNIEXPORT jlong JNICALL
 Java_com_winlator_cmod_widget_ASurfaceXServerView_nativeInit(JNIEnv* env, jobject, jobject surface,
-                                                             jint screenW, jint screenH, jboolean compatWanted) {
+                                                             jint screenW, jint screenH) {
     (void) screenW; (void) screenH;
     if (!apiAvailable() || !surface) return 0;
     ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
     if (!window) return 0;
 
-    int mode = compatWanted == JNI_TRUE ? 2 : 0;
-    char prop[PROP_VALUE_MAX] = {};
-    if (__system_property_get("debug.winlite.sf_compat", prop) > 0) {
-        if (prop[0] == '0') mode = 0;
-        else if (prop[0] == '1') mode = 1;
-        else if (prop[0] == '2') mode = 2;
-    }
     auto ctx = std::make_shared<Ctx>();
-    if (mode != 0) {
-        // EGL context, shader and private GL objects are created now, not on the first frame.
-        BlitConverter* c = new BlitConverter(32);
-        if (c->initialize()) {
-            ctx->conv = c;
-            ctx->copyMode = mode;
-        } else {
-            LOGW("GL copy pass unavailable on this device: buffers go to SurfaceFlinger as they are");
-            delete c;
-        }
-    }
-    LOGI("window buffers go to SurfaceFlinger: %s",
-         ctx->copyMode == 2 ? "RGBA as they are, others copied (auto)" :
-         ctx->copyMode == 1 ? "all copied" : "all as they are (direct)");
     {
         std::lock_guard<std::mutex> lk(ctx->mu);
         ctx->window = window;
@@ -1027,14 +809,6 @@ Java_com_winlator_cmod_widget_ASurfaceXServerView_nativeDestroy(JNIEnv*, jobject
         ctx->cv.wait(lk, [&] { return ctx->waiters == 0; });
         ctx->teardownLocked();
         ctx->dead = true;
-        if (ctx->conv) {
-            // Queued copies finish first; the worker then drops every import it holds.
-            for (auto& sl : ctx->slots) ctx->conv->unregisterBuffer(sl->buf);
-            ctx->slots.clear();
-            ctx->conv->shutdown();
-            delete ctx->conv;
-            ctx->conv = nullptr;
-        }
         for (auto& kv : ctx->bufs) if (kv.second.fence >= 0) close(kv.second.fence);
         ctx->bufs.clear();
         if (ctx->curBuf) { AHardwareBuffer_release(ctx->curBuf); ctx->curBuf = nullptr; }

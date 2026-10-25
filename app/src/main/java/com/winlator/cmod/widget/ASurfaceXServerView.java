@@ -59,19 +59,6 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     private static final String TAG = "ASurfaceXServerView";
 
     private static volatile boolean nativeLibLoaded = false;
-    // Compat mode (default): RGBA window buffers (surface format rgba8) go to SurfaceFlinger as they
-    // are, anything else (BGRA) is copied into RGBA buffers owned by the renderer first. Off = the
-    // guest's buffers are always handed over as they are. Applies to views created afterwards;
-    // `setprop debug.winlite.sf_compat 0` (direct), `1` (copy everything), `2` (the default) override it.
-    private static volatile boolean compatMode = true;
-
-    public static void setCompatMode(boolean enabled) {
-        compatMode = enabled;
-    }
-
-    public static boolean isCompatMode() {
-        return compatMode;
-    }
     private static volatile boolean supportChecked = false;
     private static volatile boolean supported = false;
     private static volatile boolean gpuImageChecked = false;
@@ -184,7 +171,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
         }
     }
 
-    private native long nativeInit(Surface surface, int screenWidth, int screenHeight, boolean compat);
+    private native long nativeInit(Surface surface, int screenWidth, int screenHeight);
     private native void nativeDestroy(long handle);
     private native void nativeDetachSurface(long handle);
     private native boolean nativeReattachSurface(long handle, Surface surface);
@@ -236,7 +223,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
                 }
             }
             if (nativeHandle == 0) {
-                nativeHandle = nativeInit(surface, xServer.screenInfo.width, xServer.screenInfo.height, compatMode);
+                nativeHandle = nativeInit(surface, xServer.screenInfo.width, xServer.screenInfo.height);
             }
             started = nativeHandle != 0;
             if (started) {

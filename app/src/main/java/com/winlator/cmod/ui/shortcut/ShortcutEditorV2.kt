@@ -202,7 +202,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var presentMode by mutableStateOf(shortcut.getRendererPresentMode())
     var rendererDriver by mutableStateOf(shortcut.getRendererDriverId())
     var filterMode by mutableIntStateOf(shortcut.getRendererFilterMode())
-    var surfaceFormat by mutableStateOf(shortcut.getSurfaceFormat())
+    var surfaceFormat by mutableStateOf(shortcut.getSurfaceFormatSetting())
     var graphicsDriver by mutableStateOf(StringUtils.parseIdentifier(shortcut.getExtra("graphicsDriver", container.getGraphicsDriver())))
     var graphicsWrapper by mutableStateOf(Container.normalizeGraphicsWrapper(
         shortcut.getExtra("graphicsWrapper", container.getGraphicsWrapper())
@@ -938,14 +938,18 @@ private fun ShortcutCategoryV2(
                     s.renderer = it
                     s.saveRenderer()
                 }
-                SettingsDivider()
-                SettingChoice(
-                    uiStr(R.string.ui_surface_format),
-                    if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
-                    listOf("RGBA", "BGRA")
-                ) {
-                    s.surfaceFormat = if (it == "BGRA") "bgra8" else "rgba8"
-                    s.saveRenderer()
+                // The SurfaceFlinger renderer only takes RGBA buffers: its surface format is fixed to
+                // rgba8 (Shortcut.getSurfaceFormat()), so the choice only exists for Vulkan.
+                if (s.renderer != "SurfaceFlinger") {
+                    SettingsDivider()
+                    SettingChoice(
+                        uiStr(R.string.ui_surface_format),
+                        if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
+                        listOf("RGBA", "BGRA")
+                    ) {
+                        s.surfaceFormat = if (it == "BGRA") "bgra8" else "rgba8"
+                        s.saveRenderer()
+                    }
                 }
                 // Present mode, renderer driver and the upscaling filter belong to the Vulkan renderer only.
                 if (s.renderer != "SurfaceFlinger") {

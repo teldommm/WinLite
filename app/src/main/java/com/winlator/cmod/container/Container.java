@@ -194,10 +194,18 @@ public class Container {
         return DEFAULT_GRAPHICS_WRAPPER;
     }
 
-    public String getSurfaceFormat() {
+    /** The surface format the user chose ("bgra8" by default). What the editors show and save. */
+    public String getSurfaceFormatSetting() {
         String value = getExtra("surfaceFormat", null);
         if (value == null || value.isEmpty()) value = "bgra8";
         return "bgra8".equalsIgnoreCase(value) ? "bgra8" : "rgba8";
+    }
+    /**
+     * The surface format the X server and the guest actually use: always rgba8 with the
+     * SurfaceFlinger renderer (it only takes RGBA buffers), the chosen one with Vulkan.
+     */
+    public String getSurfaceFormat() {
+        return RENDERER_SURFACEFLINGER.equals(getRenderer()) ? "rgba8" : getSurfaceFormatSetting();
     }
     public void setSurfaceFormat(String value) {
         putExtra("surfaceFormat", "bgra8".equalsIgnoreCase(value) ? "bgra8" : "rgba8");

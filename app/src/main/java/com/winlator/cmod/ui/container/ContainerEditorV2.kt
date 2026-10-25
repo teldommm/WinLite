@@ -191,7 +191,7 @@ private class ContainerEditorStateV2(
     var rendererPresentMode by mutableStateOf(editing?.rendererPresentMode ?: "fifo")
     var rendererDriver by mutableStateOf(editing?.rendererDriverId ?: "system")
     var filterMode by mutableIntStateOf(editing?.rendererFilterMode ?: 0)
-    var surfaceFormat by mutableStateOf(editing?.getSurfaceFormat() ?: "bgra8")
+    var surfaceFormat by mutableStateOf(editing?.getSurfaceFormatSetting() ?: "bgra8")
 
     var graphicsDriver by mutableStateOf(
         editing?.graphicsDriver ?: if (preferredDriver == DefaultVersion.WRAPPER_ADRENO) {
@@ -889,12 +889,16 @@ private fun ContainerCategoryV2(
                 SettingChoice(uiStr(R.string.ui_renderer), s.renderer, if (android.os.Build.VERSION.SDK_INT >= 29) listOf("Vulkan", "SurfaceFlinger") else listOf("Vulkan")) {
                     s.renderer = it
                 }
-                SettingsDivider()
-                SettingChoice(
-                    uiStr(R.string.ui_surface_format),
-                    if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
-                    listOf("RGBA", "BGRA")
-                ) { s.surfaceFormat = if (it == "BGRA") "bgra8" else "rgba8" }
+                // The SurfaceFlinger renderer only takes RGBA buffers: its surface format is fixed to
+                // rgba8 (Container.getSurfaceFormat()), so the choice only exists for Vulkan.
+                if (s.renderer != "SurfaceFlinger") {
+                    SettingsDivider()
+                    SettingChoice(
+                        uiStr(R.string.ui_surface_format),
+                        if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
+                        listOf("RGBA", "BGRA")
+                    ) { s.surfaceFormat = if (it == "BGRA") "bgra8" else "rgba8" }
+                }
                 // Present mode, renderer driver and the upscaling filter belong to the Vulkan renderer only.
                 if (s.renderer != "SurfaceFlinger") {
                     SettingsDivider()

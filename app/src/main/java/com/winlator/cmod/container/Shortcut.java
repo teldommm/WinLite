@@ -334,10 +334,15 @@ public class Shortcut {
         return exe;
     }
 
-    public String getSurfaceFormat() {
+    /** The surface format the user chose for this shortcut (the container's when it has none). */
+    public String getSurfaceFormatSetting() {
         String v = getExtra("surfaceFormat", null);
-        if (v == null || v.isEmpty()) return container.getSurfaceFormat();
+        if (v == null || v.isEmpty()) return container.getSurfaceFormatSetting();
         return "bgra8".equalsIgnoreCase(v) ? "bgra8" : "rgba8";
+    }
+    /** What the X server and the guest actually use: always rgba8 with the SurfaceFlinger renderer. */
+    public String getSurfaceFormat() {
+        return Container.RENDERER_SURFACEFLINGER.equals(getRenderer()) ? "rgba8" : getSurfaceFormatSetting();
     }
     public void setSurfaceFormat(String value) {
         putExtra("surfaceFormat", "bgra8".equalsIgnoreCase(value) ? "bgra8" : "rgba8");

@@ -45,7 +45,10 @@ data class GraphicsPanelState(
     val rendererSwitchAvailable: Boolean = false,  // SurfaceFlinger renderer usable on this device
     val surfaceFlinger: Boolean = false,           // the SurfaceFlinger renderer is the active one
     val perfHintAvailable: Boolean = false,        // the active renderer and the device support ADPF
-    val perfHintEnabled: Boolean = false           // saved switch position (off unless chosen)
+    val perfHintEnabled: Boolean = false,          // saved switch position (off unless chosen)
+    // SurfaceFlinger would work on this device, but this session's surface format is BGRA (fixed
+    // when the game started): the switch is replaced by a hint on how to get it.
+    val surfaceFlingerNeedsRgba: Boolean = false
 )
 
 interface GraphicsPanelCallbacks {
@@ -141,9 +144,19 @@ private fun GraphicsSidebarPanel(
         SidebarPanelTitle(uiStr(R.string.ui_rendering))
 
         val showAdpf = state.perfHintAvailable && !sfActive
-        if (state.rendererSwitchAvailable || sfActive || showAdpf) {
+        val showRenderer = state.rendererSwitchAvailable || sfActive
+        val showSfHint = !showRenderer && state.surfaceFlingerNeedsRgba
+        if (showRenderer || showSfHint || showAdpf) {
             SidebarCard {
-                if (state.rendererSwitchAvailable || sfActive) {
+                if (showSfHint) {
+                    SidebarSectionTitle("Renderer")
+                    Spacer(Modifier.height(6.dp))
+                    SidebarCaption(
+                        "SurfaceFlinger needs the RGBA surface format. Choose SurfaceFlinger as the " +
+                            "renderer in the container or shortcut settings and restart the game."
+                    )
+                }
+                if (showRenderer) {
                     SidebarSectionTitle("Renderer")
                     Spacer(Modifier.height(10.dp))
                     SidebarDropdownField(
@@ -156,7 +169,7 @@ private fun GraphicsSidebarPanel(
                     )
                 }
                 if (showAdpf) {
-                    if (state.rendererSwitchAvailable || sfActive) Spacer(Modifier.height(10.dp))
+                    if (showRenderer || showSfHint) Spacer(Modifier.height(10.dp))
                     SidebarInlineToggle(
                         label = "ADPF",
                         checked = perfHintOn,

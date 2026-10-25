@@ -1351,6 +1351,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             setupSidebarGraphicsControls();
             return;
         }
+        if (toSurfaceFlinger && xServer.getSurfaceFormat() != Drawable.HAL_PIXEL_FORMAT_RGBA_8888) {
+            // Windows and guest buffers are BGRA for the rest of this session.
+            WinToast.show(this, "SurfaceFlinger needs the RGBA surface format; choose it in the container settings.",
+                    Toast.LENGTH_LONG);
+            setupSidebarGraphicsControls();
+            return;
+        }
 
         rendererSwapping = true;
         try {
@@ -2077,6 +2084,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final boolean perfHintOn = perfHintAvailable && loadPerformanceHint();
         if (vkRenderer != null) vkRenderer.setPerformanceHint(perfHintOn);
 
+        // The SurfaceFlinger renderer only takes RGBA buffers, and the surface format cannot change
+        // while the game runs: on a BGRA session the switch is not offered (the container/shortcut
+        // renderer setting forces rgba8 for the next start).
+        final boolean sfDeviceOk = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && ASurfaceXServerView.isSupported();
+        final boolean sfFormatOk = xServer.getSurfaceFormat() == Drawable.HAL_PIXEL_FORMAT_RGBA_8888;
+
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
                 fsrOn,
@@ -2089,10 +2103,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 frameGenSpinnerIndex(),
                 activeLsfgFlowScale,
                 rememberedLsfgTargetRate,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ASurfaceXServerView.isSupported(),
+                sfDeviceOk && sfFormatOk,
                 renderer instanceof ASurfaceXServerView,
                 perfHintAvailable,
-                perfHintOn
+                perfHintOn,
+                sfDeviceOk && !sfFormatOk
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
