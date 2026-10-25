@@ -187,6 +187,7 @@ target_link_libraries(vulkan_renderer
 # entry points (API 29) are resolved with dlsym, so the library loads on the app's minSdk 28 too.
 add_library(asurface_renderer SHARED
         winlator/renderer/asurface/asurface_jni.cpp
+        winlator/renderer/asurface/blit_converter.cpp
 )
 
 set_target_properties(asurface_renderer PROPERTIES
@@ -202,5 +203,7 @@ target_compile_options(asurface_renderer PRIVATE
 target_link_libraries(asurface_renderer
         log
         android
+        EGL
+        GLESv3
         dl
 )
