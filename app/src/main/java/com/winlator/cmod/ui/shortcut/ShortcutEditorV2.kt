@@ -198,7 +198,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var name by mutableStateOf(shortcut.name)
     var saveProfileMode by mutableStateOf(SaveProfiles.getMode(shortcut))
     var screen by mutableStateOf(normalizeResolution(shortcut.getExtra("screenSize", container.getScreenSize())))
-    var renderer by mutableStateOf("Vulkan")
+    var renderer by mutableStateOf(if (shortcut.getRenderer() == Container.RENDERER_SURFACEFLINGER) "SurfaceFlinger" else "Vulkan")
     var presentMode by mutableStateOf(shortcut.getRendererPresentMode())
     var rendererDriver by mutableStateOf(shortcut.getRendererDriverId())
     var filterMode by mutableIntStateOf(shortcut.getRendererFilterMode())
@@ -473,6 +473,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     }
 
     fun saveRenderer() {
+        shortcut.setRenderer(renderer)
         shortcut.setRendererPresentMode(presentMode)
         shortcut.setRendererDriverId(rendererDriver)
         shortcut.setRendererFilterMode(filterMode)
@@ -933,7 +934,7 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan")) {
+                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, if (android.os.Build.VERSION.SDK_INT >= 29) listOf("Vulkan", "SurfaceFlinger") else listOf("Vulkan")) {
                     s.renderer = it
                     s.saveRenderer()
                 }

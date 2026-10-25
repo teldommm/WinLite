@@ -122,9 +122,17 @@ public class FrameRating extends FrameLayout implements Runnable {
         return StringUtils.formatBytes(usedKb * 1024L, false);
     }
 
+    // Appended to the renderer name ("DXVK+"): marks the SurfaceFlinger display path.
+    private String rendererSuffix = "";
+
     public void setRenderer(String renderer) {
         lastKnownRenderer = renderer; 
-        tvRenderer.setText(renderer);
+        tvRenderer.setText(renderer + rendererSuffix);
+    }
+
+    public void setRendererSuffix(String suffix) {
+        rendererSuffix = suffix != null ? suffix : "";
+        tvRenderer.setText((lastKnownRenderer != null ? lastKnownRenderer : "Vulkan") + rendererSuffix);
     }
 
     public void setGpuName (String gpuName) {
@@ -133,7 +141,7 @@ public class FrameRating extends FrameLayout implements Runnable {
 
     public void reset() {
 
-        tvRenderer.setText(lastKnownRenderer != null ? lastKnownRenderer : "Vulkan");
+        tvRenderer.setText((lastKnownRenderer != null ? lastKnownRenderer : "Vulkan") + rendererSuffix);
         tvGPU.setText(GPUInformation.getRenderer(graphicsDriverConfig.get("version").toString(), context));
     }
 

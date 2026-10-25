@@ -187,7 +187,7 @@ private class ContainerEditorStateV2(
     var mouseWarp by mutableStateOf(editing?.getExtra("mouseWarpOverride", "disable") ?: "disable")
     var drives by mutableStateOf(editing?.drives ?: Container.DEFAULT_DRIVES)
 
-    var renderer by mutableStateOf("Vulkan")
+    var renderer by mutableStateOf(if (editing?.getRenderer() == Container.RENDERER_SURFACEFLINGER) "SurfaceFlinger" else "Vulkan")
     var rendererPresentMode by mutableStateOf(editing?.rendererPresentMode ?: "fifo")
     var rendererDriver by mutableStateOf(editing?.rendererDriverId ?: "system")
     var filterMode by mutableIntStateOf(editing?.rendererFilterMode ?: 0)
@@ -473,6 +473,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.setGraphicsDriver(state.graphicsDriver)
         container.setGraphicsWrapper(state.graphicsWrapper)
         container.setGraphicsDriverConfig(state.graphicsConfig)
+        container.setRenderer(state.renderer)
         container.setRendererPresentMode(state.rendererPresentMode)
         container.setRendererDriverId(state.rendererDriver)
         container.setRendererFilterMode(state.filterMode)
@@ -565,6 +566,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     .put("hudMode", state.hudMode.toString())
                     .put("mouseWarpOverride", state.mouseWarp)
                     .put("surfaceFormat", state.surfaceFormat)
+                    .put("renderer", if (state.renderer == "SurfaceFlinger") Container.RENDERER_SURFACEFLINGER else Container.RENDERER_VULKAN)
                     .put("oboeProfile", state.oboeProfile)
                     .put("oboeApi", state.oboeApi)
                     .put("oboeAdaptive", if (state.oboeAdaptive) "1" else "0")
@@ -884,7 +886,7 @@ private fun ContainerCategoryV2(
                     ResolutionField(s.screen) { s.screen = it }
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan")) {
+                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, if (android.os.Build.VERSION.SDK_INT >= 29) listOf("Vulkan", "SurfaceFlinger") else listOf("Vulkan")) {
                     s.renderer = it
                 }
                 SettingsDivider()

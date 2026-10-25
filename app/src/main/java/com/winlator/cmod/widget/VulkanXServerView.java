@@ -397,6 +397,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void forceCleanup() {
+        // Stop listening: this view may be replaced by another renderer while the game runs.
+        xServer.windowManager.removeOnWindowModificationListener(this);
+        xServer.pointer.removeOnPointerMotionListener(this);
+        fpsWindowId = -1;
+        hudRef = null;
+        classicHudRef = null;
         initComplete = false;
         if (initExecutor != null) {
             initExecutor.shutdownNow();
@@ -803,6 +809,14 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         synchronized (lock) {
             if (nativeHandle != 0) nativeReleaseDrawable(nativeHandle, did(drawable));
         }
+    }
+
+    @Override
+    public int[] getCompositeRedirectedWindowIds() {
+        Integer[] boxed = compositeRedirectedWindows.toArray(new Integer[0]);
+        int[] ids = new int[boxed.length];
+        for (int i = 0; i < boxed.length; i++) ids[i] = boxed[i];
+        return ids;
     }
 
     @Override

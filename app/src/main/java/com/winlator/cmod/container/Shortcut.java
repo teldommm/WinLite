@@ -343,6 +343,17 @@ public class Shortcut {
         putExtra("surfaceFormat", "bgra8".equalsIgnoreCase(value) ? "bgra8" : "rgba8");
     }
 
+    public String getRenderer() {
+        String v = getExtra("renderer", null);
+        if (v == null || v.isEmpty()) return container.getRenderer();
+        return Container.RENDERER_SURFACEFLINGER.equalsIgnoreCase(v)
+                ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN;
+    }
+    public void setRenderer(String value) {
+        putExtra("renderer", value != null && value.equalsIgnoreCase(Container.RENDERER_SURFACEFLINGER)
+                ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN);
+    }
+
     public String getRendererPresentMode() {
         String v = getExtra("rendererPresentMode", null);
         return v != null && !v.isEmpty() ? v : container.getRendererPresentMode();

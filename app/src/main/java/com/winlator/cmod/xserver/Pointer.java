@@ -92,8 +92,12 @@ public class Pointer {
         onPointerMotionListeners.add(onPointerMotionListener);
     }
 
+    private static final OnPointerMotionListener REMOVED_LISTENER = new OnPointerMotionListener() {};
+
+    // See WindowManager.removeOnWindowModificationListener: the slot is blanked, not removed.
     public void removeOnPointerMotionListener(OnPointerMotionListener onPointerMotionListener) {
-        onPointerMotionListeners.remove(onPointerMotionListener);
+        int index = onPointerMotionListeners.indexOf(onPointerMotionListener);
+        if (index >= 0) onPointerMotionListeners.set(index, REMOVED_LISTENER);
     }
 
     private void triggerOnPointerButtonPress(Button button) {

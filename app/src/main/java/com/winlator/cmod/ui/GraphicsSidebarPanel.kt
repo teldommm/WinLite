@@ -41,7 +41,9 @@ data class GraphicsPanelState(
     val frameGenAvailable: Boolean,
     val frameGenMultiplierIndex: Int,
     val frameGenFlowScale: Float,
-    val frameGenTargetFps: Int       // Adaptive target FPS shown in the field (last entered/saved)
+    val frameGenTargetFps: Int,      // Adaptive target FPS shown in the field (last entered/saved)
+    val rendererSwitchAvailable: Boolean = false,  // SurfaceFlinger renderer usable on this device
+    val surfaceFlinger: Boolean = false            // the SurfaceFlinger renderer is the active one
 )
 
 interface GraphicsPanelCallbacks {
@@ -56,6 +58,8 @@ interface GraphicsPanelCallbacks {
     fun onFrameGenChanged(multiplierIndex: Int)
     fun onFrameGenFlowScaleChanged(scale: Float)
     fun onFrameGenTargetFpsChanged(fps: Int)
+    // Hot-switches the X server renderer: false = Vulkan, true = SurfaceFlinger.
+    fun onRendererChanged(surfaceFlinger: Boolean)
 }
 
 object GraphicsSidebarPanelHost {
@@ -74,6 +78,7 @@ object GraphicsSidebarPanelHost {
 // shown right after SGSR (HQ) and after FSR (NIS) in the dropdown through UPSCALER_DISPLAY_ORDER.
 private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost", "SGSR HQ", "NIS")
 private val UPSCALER_DISPLAY_ORDER = listOf(0, 4, 1, 5, 2, 3)
+private val RENDERER_LABELS = listOf("Vulkan", "SurfaceFlinger")
 private val POSTFX_LABELS = listOf("None", "DLS", "CRT", "HDR", "Natural")
 private val FRAMEGEN_LABELS = listOf("Off", "LSFG 2x", "LSFG 3x", "LSFG 4x", "LSFG Adaptive FPS")
 // Index of "LSFG Adaptive FPS": presents paced to a typed-in rate instead of a fixed multiplier.
@@ -121,6 +126,7 @@ private fun GraphicsSidebarPanel(
     // reads it. Under an upscaler DLS no longer sharpens (contrast/saturation only), so the
     // slider drives a single sharpening stage.
     val sharpnessVisible = fsrEnabled || postFxIndex == 1
+    val sfActive = state.surfaceFlinger
 
     Column(
         modifier = Modifier
@@ -134,6 +140,27 @@ private fun GraphicsSidebarPanel(
             onFpsChanged = callbacks::onFpsLimitChanged
         )
 
+        if (state.rendererSwitchAvailable || sfActive) {
+            SidebarGap()
+            SidebarCard {
+                SidebarSectionTitle("Renderer")
+                Spacer(Modifier.height(10.dp))
+                SidebarDropdownField(
+                    caption = null,
+                    options = RENDERER_LABELS,
+                    selectedIndex = if (sfActive) 1 else 0,
+                    onSelect = { index ->
+                        if ((index == 1) != sfActive) callbacks.onRendererChanged(index == 1)
+                    }
+                )
+                if (sfActive) {
+                    Spacer(Modifier.height(8.dp))
+                    SidebarCaption("Upscalers, post-processing, ReShade and frame generation need the Vulkan renderer.")
+                }
+            }
+        }
+
+        if (!sfActive) {
         SidebarGap()
         SidebarCard {
             SidebarInlineToggle(
@@ -232,6 +259,8 @@ private fun GraphicsSidebarPanel(
                     valueRange = 0f..100f
                 )
             }
+        }
+
         }
 
         if (state.frameGenAvailable) {

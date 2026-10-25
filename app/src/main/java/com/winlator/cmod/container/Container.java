@@ -206,6 +206,19 @@ public class Container {
         putExtra("surfaceFormat", "bgra8".equalsIgnoreCase(value) ? "bgra8" : "rgba8");
     }
 
+    public static final String RENDERER_VULKAN = "vulkan";
+    public static final String RENDERER_SURFACEFLINGER = "surfaceflinger";
+
+    /** Which X server renderer shows the container: RENDERER_VULKAN (default) or RENDERER_SURFACEFLINGER. */
+    public String getRenderer() {
+        return RENDERER_SURFACEFLINGER.equalsIgnoreCase(getExtra("renderer", RENDERER_VULKAN))
+                ? RENDERER_SURFACEFLINGER : RENDERER_VULKAN;
+    }
+    public void setRenderer(String value) {
+        putExtra("renderer", value != null && value.equalsIgnoreCase(RENDERER_SURFACEFLINGER)
+                ? RENDERER_SURFACEFLINGER : RENDERER_VULKAN);
+    }
+
     public int getLsfgMultiplier() {
         try {
             int value = Integer.parseInt(getExtra("lsfgMultiplier", "0"));

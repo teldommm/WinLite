@@ -191,6 +191,8 @@ public class WinlatorHUD extends View {
     private volatile boolean snapCharging = false;
 
     private volatile String rendererLabel = "Vulkan";
+    // Appended to the renderer name ("DXVK+"): marks the SurfaceFlinger display path.
+    private volatile String rendererSuffix = "";
     private boolean isNative = false;
     private boolean mesaRendererActive = false;
 
@@ -378,7 +380,7 @@ public class WinlatorHUD extends View {
     private void refreshBackendRenderer(boolean relayout) {
         if (mesaRendererActive) return;
         rendererLabel = resolveBackendRenderer();
-        strRend = rendererLabel;
+        strRend = rendererLabel + rendererSuffix;
         wDynRend = pRend.measureText(strRend);
         if (relayout) requestRelayout();
     }
@@ -1638,7 +1640,7 @@ public class WinlatorHUD extends View {
             if (name != null && !name.trim().isEmpty()) {
                 mesaRendererActive = true;
                 rendererLabel = name.trim();
-                strRend = rendererLabel;
+                strRend = rendererLabel + rendererSuffix;
                 wDynRend = pRend.measureText(strRend);
                 requestRelayout();
             } else {
@@ -1651,6 +1653,16 @@ public class WinlatorHUD extends View {
                 setVisibility(VISIBLE);
                 scheduleRedraw();
             }
+        });
+    }
+
+    public void setRendererSuffix(String suffix) {
+        final String clean = suffix != null ? suffix : "";
+        uiHandler.post(() -> {
+            rendererSuffix = clean;
+            strRend = rendererLabel + rendererSuffix;
+            wDynRend = pRend.measureText(strRend);
+            requestRelayout();
         });
     }
 
@@ -1691,7 +1703,7 @@ public class WinlatorHUD extends View {
         uiHandler.post(() -> {
             mesaRendererActive = true;
             rendererLabel = clean;
-            strRend = rendererLabel;
+            strRend = rendererLabel + rendererSuffix;
             wDynRend = pRend.measureText(strRend);
             requestRelayout();
 

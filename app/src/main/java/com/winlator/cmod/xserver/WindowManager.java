@@ -353,8 +353,14 @@ public class WindowManager extends XResourceManager {
         onWindowModificationListeners.add(onWindowModificationListener);
     }
 
+    private static final OnWindowModificationListener REMOVED_LISTENER = new OnWindowModificationListener() {};
+
+    // The list is walked by index on the X server thread while this runs on another one (a
+    // renderer swap): a removal must not shift or shrink it under the walk, so the slot is
+    // replaced with a listener that does nothing.
     public void removeOnWindowModificationListener(OnWindowModificationListener onWindowModificationListener) {
-        onWindowModificationListeners.remove(onWindowModificationListener);
+        int index = onWindowModificationListeners.indexOf(onWindowModificationListener);
+        if (index >= 0) onWindowModificationListeners.set(index, REMOVED_LISTENER);
     }
 
     private void triggerOnMapWindow(Window window) {
