@@ -2959,7 +2959,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.d(TAG, "Extracting nglide wrapper");
             SharedComponents.extractAndLink(this, "ddrawrapper/nglide.tzst", windowsDir, onExtractFileListener);
 
-            if (ddrawrapper.contains("None")) {
+            if (ddrawrapper.equalsIgnoreCase("none")) {
                 Log.d(TAG, "No DDRaw wrapper has been selected, restoring original ddraw files");
                 restoreOriginalDllFiles(new String[] { "ddraw.dll", "d3dimm.dll" });
             } else {
