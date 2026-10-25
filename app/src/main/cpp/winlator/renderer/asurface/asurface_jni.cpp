@@ -7,14 +7,18 @@
 // The ASurface* NDK entry points are API 29; the app's minSdk is 28, so they are resolved with
 // dlsym and the whole path stays unavailable (nativeIsSupported() == false) on older systems.
 //
-// Compat mode (default): SurfaceFlinger never gets the guest's buffers. Every frame is first copied
-// by a small GL pass (BlitConverter) into a buffer this file allocated itself - RGBA8888, GPU
-// color output + composer overlay - and only that buffer is given to the layer. The guest's
-// BGRA / CPU-lockable / foreign (DRI3) buffers handed over as they are are what makes some
-// SurfaceFlinger/HWC/GPU-driver combinations misbehave (inverted colors, crashes). The guest gets
-// its buffer back as soon as the copy has finished instead of when SurfaceFlinger lets go of it.
-// Off ("direct" mode): the previous behavior. Switch: ASurfaceXServerView.setCompatMode() for views
-// created afterwards, or `setprop debug.winlite.sf_compat 0|1` (wins over the Java setting).
+// Buffer modes (Ctx::copyMode):
+//   2 auto (default): an RGBA8888 / RGBX8888 window buffer that the GPU can sample goes to
+//     SurfaceFlinger as it is (no copy). Anything else - BGRA, which is what the guest allocates
+//     unless its surface format is set to rgba8, or a buffer without GPU usage - is first copied by
+//     a small GL pass (BlitConverter) into an RGBA buffer this file allocated itself (GPU color
+//     output + composer overlay), and only that copy is given to the layer.
+//   1 copy: every frame is copied. 0 direct: nothing is copied (the first version of this path).
+// Buffers handed over as they are (BGRA / CPU-lockable / foreign) are what makes some
+// SurfaceFlinger/HWC/GPU-driver combinations misbehave (inverted colors, crashes). A copied frame
+// frees the guest's buffer as soon as the copy has finished instead of when SurfaceFlinger lets go.
+// Switch: ASurfaceXServerView.setCompatMode() (true = 2, false = 0) for views created afterwards, or
+// `setprop debug.winlite.sf_compat 0|1|2` (wins over the Java setting).
 //
 // Locking: one mutex (Ctx::mu) guards all state. Transactions are built and applied under it so
 // their order is the order of the state changes. Completion callbacks arrive on a SurfaceFlinger
@@ -176,7 +180,8 @@ struct Layer {
     std::shared_ptr<SCRef> sc;
     int64_t curSource = 0;            // uid of the buffer submitted last (0 = none yet)
     AHardwareBuffer* curAhb = nullptr;  // our reference to it (re-submitted when the CPU drew in it)
-    std::shared_ptr<Slot> curSlot;    // compat mode: the converted copy SurfaceFlinger shows
+    std::shared_ptr<Slot> curSlot;    // the copy SurfaceFlinger shows, when the frame was copied
+    bool curDirect = false;           // else: curSource itself is what it shows (counted in shownRefs)
     int bufW = 0, bufH = 0;
     int baseX = 0, baseY = 0;         // window position in X root coordinates
     int offX = 0, offY = 0;           // extra offset of the shown buffer inside the window
@@ -243,8 +248,9 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     std::unordered_map<int64_t, BufState> bufs;
 
     // compat mode: GL copy pass and the converted buffers
-    bool compat = false;
+    int copyMode = 0;                 // 0 direct, 1 copy all, 2 auto
     BlitConverter* conv = nullptr;
+    bool loggedDirect = false, loggedCopy = false;
     std::vector<std::shared_ptr<Slot>> slots;
     int64_t lastWarnNs = 0;
     enum class Sub { Ok, NoSlot, Failed };
@@ -258,6 +264,8 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     // letterbox background
     std::shared_ptr<SCRef> bgSc;
     AHardwareBuffer* bgBuf = nullptr;
+    uint32_t bgBufW = 0, bgBufH = 0;
+    bool bgBufPending = false;        // bgBuf is not on the control yet
     bool bgDirty = true;
 
     // cursor
@@ -285,6 +293,8 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     Sub convertToSlot(AHardwareBuffer* ahb, const AHardwareBuffer_Desc& desc,
                       std::shared_ptr<Slot>& slot, int& fenceFd);
     bool warnDue();
+    bool copyNeeded(const AHardwareBuffer_Desc& desc) const;
+    void ensureBgBuffer();
     void dropPending(const std::shared_ptr<Layer>& L);
     bool promotePending(Tx& tx, const std::shared_ptr<Layer>& L);
     void retireLayer(const std::shared_ptr<Layer>& L);
@@ -365,6 +375,15 @@ void Ctx::dropPending(const std::shared_ptr<Layer>& L) {
     L->pendAhb = nullptr;
     L->pendSource = 0;
     L->pendDesiredNs = 0;
+}
+
+bool Ctx::copyNeeded(const AHardwareBuffer_Desc& desc) const {
+    if (!conv || copyMode == 0) return false;
+    if (copyMode == 1) return true;
+    // Auto: only layouts and usages that were checked to be safe for SurfaceFlinger go as they are.
+    const bool rgba = desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
+                      desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM;
+    return !(rgba && desc.layers == 1 && (desc.usage & AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE));
 }
 
 bool Ctx::warnDue() {
@@ -508,7 +527,13 @@ Ctx::Sub Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, 
     AHardwareBuffer* shown = ahb;   // what SurfaceFlinger gets
     int fence = -1;                 // its acquire fence (ownership goes to the transaction)
     std::shared_ptr<Slot> slot;
-    if (compat) {
+    const bool viaCopy = copyNeeded(desc);
+    if (viaCopy) {
+        if (!loggedCopy) {
+            loggedCopy = true;
+            LOGI("window buffer %ux%u format %u usage 0x%llx: copied before SurfaceFlinger", desc.width,
+                 desc.height, desc.format, (unsigned long long) desc.usage);
+        }
         const Sub st = convertToSlot(ahb, desc, slot, fence);
         if (st != Sub::Ok) return st;
         shown = slot->buf;
@@ -523,6 +548,10 @@ Ctx::Sub Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, 
             poll(&pfd, 1, 1000);
             gcBuf(source);
         }
+    } else if (!loggedDirect) {
+        loggedDirect = true;
+        LOGI("window buffer %ux%u format %u usage 0x%llx: given to SurfaceFlinger as it is", desc.width,
+             desc.height, desc.format, (unsigned long long) desc.usage);
     }
 
     const int64_t prev = L->curSource;
@@ -538,28 +567,32 @@ Ctx::Sub Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, 
         g_api.txSetTransparency(tx.raw, L->sc->sc, L->translucent ? kTranslucent : kOpaque);
         L->trApplied = true; L->trValue = L->translucent;
     }
-    // Direct mode: no acquire fence, the guest finishes rendering before it sends PresentPixmap.
-    // Compat mode: the fence of the copy.
+    // Not copied: no acquire fence, the guest finishes rendering before it sends PresentPixmap.
+    // Copied: the fence of the copy.
     g_api.txSetBuffer(tx.raw, L->sc->sc, shown, fence);
     // FPS limiter: SurfaceFlinger holds the frame back until its slot, so it is shown at a fixed
     // phase of the refresh however the guest's present times jitter. Past times mean "now".
     if (desiredNs > 0 && g_api.txSetDesiredPresentTime) g_api.txSetDesiredPresentTime(tx.raw, desiredNs);
 
+    // What this transaction replaces: a copy (freed when the transaction completes), or the
+    // guest's own buffer (busy until then, and until its release fence has signalled).
     int64_t replaced = 0;
-    std::shared_ptr<Slot> prevSlot;
-    if (compat) {
-        prevSlot = std::move(L->curSlot);
+    std::shared_ptr<Slot> prevSlot = std::move(L->curSlot);
+    if (prevSlot) prevSlot->replacedAtNs = nowNs();
+    const bool sameDirect = L->curDirect && !viaCopy && prev == source;
+    if (L->curDirect && prev && !sameDirect) {
+        BufState& p = bufs[prev];
+        p.shownRefs--;
+        p.awaitCb++;
+        p.replacedAtNs = nowNs();
+        replaced = prev;
+    }
+    if (viaCopy) {
         L->curSlot = slot;
-        if (prevSlot) prevSlot->replacedAtNs = nowNs();
-    } else if (prev != source) {
-        if (prev) {
-            BufState& p = bufs[prev];
-            p.shownRefs--;
-            p.awaitCb++;
-            p.replacedAtNs = nowNs();
-            replaced = prev;
-        }
-        bufs[source].shownRefs++;
+        L->curDirect = false;
+    } else {
+        if (!sameDirect) bufs[source].shownRefs++;
+        L->curDirect = true;
     }
     if (L->inflight == 0) L->progressNs = nowNs();
     L->inflight++;
@@ -617,7 +650,7 @@ void Ctx::retireLayer(const std::shared_ptr<Layer>& L) {
     int64_t replaced = 0;
     std::shared_ptr<Slot> slot = std::move(L->curSlot);
     if (L->curSource) {
-        if (!compat) {
+        if (L->curDirect) {
             BufState& p = bufs[L->curSource];
             p.shownRefs--;
             p.awaitCb++;
@@ -626,6 +659,7 @@ void Ctx::retireLayer(const std::shared_ptr<Layer>& L) {
         }
         L->curSource = 0;
     }
+    L->curDirect = false;
     if (slot) slot->replacedAtNs = nowNs();
     if (tx.raw) {
         g_api.txSetVisibility(tx.raw, L->sc->sc, kVisHide);
@@ -650,29 +684,13 @@ void Ctx::createFixedLayers() {
     if (cur) curSc = std::make_shared<SCRef>(cur);
     else LOGE("cursor control not created");
 
-    if (bgSc && !bgBuf) {
-        AHardwareBuffer_Desc d{};
-        d.width = 1; d.height = 1; d.layers = 1;
-        d.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
-        d.usage = AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
-                  AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY;
-        if (AHardwareBuffer_allocate(&d, &bgBuf) != 0) {
-            d.usage = AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
-            if (AHardwareBuffer_allocate(&d, &bgBuf) != 0) bgBuf = nullptr;
-        }
-        if (bgBuf) {
-            void* p = nullptr;
-            if (AHardwareBuffer_lock(bgBuf, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, nullptr, &p) == 0 && p) {
-                *reinterpret_cast<uint32_t*>(p) = 0xFF000000u;
-                AHardwareBuffer_unlock(bgBuf, nullptr);
-            }
-        }
-    }
+    if (bgSc) ensureBgBuffer();
     if (bgSc && bgBuf) {
         Tx tx;
         if (tx.raw) {
             g_api.txSetTransparency(tx.raw, bgSc->sc, kOpaque);
             g_api.txSetBuffer(tx.raw, bgSc->sc, bgBuf, -1);
+            bgBufPending = false;
             g_api.txSetZOrder(tx.raw, bgSc->sc, INT_MIN);
             sendTx(tx);
         }
@@ -708,9 +726,61 @@ void Ctx::retireFixedLayers() {
     curGeoApplied = false;
 }
 
+// Opaque black at the surface's size, shown 1:1: a 1x1 buffer stretched over the screen is beyond
+// every display controller's scaler, so the layer would go to GPU composition (and with it a GPU
+// pass every frame wherever the game does not cover the screen). The stretched 1x1 buffer stays as
+// the fallback when the big one cannot be allocated.
+void Ctx::ensureBgBuffer() {
+    if (surfW <= 0 || surfH <= 0) return;
+    if (bgBuf && bgBufW == (uint32_t) surfW && bgBufH == (uint32_t) surfH) return;
+    AHardwareBuffer_Desc d{};
+    d.width = (uint32_t) surfW; d.height = (uint32_t) surfH; d.layers = 1;
+    d.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+    d.usage = AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+              AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY;
+    AHardwareBuffer* nb = nullptr;
+    if (AHardwareBuffer_allocate(&d, &nb) != 0) {
+        d.usage = AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+        nb = nullptr;
+        if (AHardwareBuffer_allocate(&d, &nb) != 0) nb = nullptr;
+    }
+    uint32_t w = d.width, h = d.height;
+    if (!nb) {
+        if (bgBuf) return;      // keep what there is
+        w = 1; h = 1;
+        d.width = 1; d.height = 1;
+        d.usage = AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+        if (AHardwareBuffer_allocate(&d, &nb) != 0) return;
+        LOGW("background buffer %dx%d not allocated, using a stretched 1x1", surfW, surfH);
+    }
+    AHardwareBuffer_Desc got{};
+    AHardwareBuffer_describe(nb, &got);
+    void* p = nullptr;
+    if (AHardwareBuffer_lock(nb, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, nullptr, &p) == 0 && p) {
+        const uint32_t stride = got.stride ? got.stride : w;
+        for (uint32_t y = 0; y < h; y++) {
+            uint32_t* row = reinterpret_cast<uint32_t*>(p) + (size_t) y * stride;
+            std::fill(row, row + w, 0xFF000000u);
+        }
+        AHardwareBuffer_unlock(nb, nullptr);
+    }
+    if (bgBuf) AHardwareBuffer_release(bgBuf);   // SurfaceFlinger holds its own reference
+    bgBuf = nb;
+    bgBufW = w;
+    bgBufH = h;
+    bgBufPending = true;
+}
+
 void Ctx::applyBackground(Tx& tx) {
-    if (!bgDirty || !bgSc || !bgBuf || surfW <= 0 || surfH <= 0) return;
-    ARect src{0, 0, 1, 1}, dst{0, 0, surfW, surfH};
+    if (!bgDirty || !bgSc || surfW <= 0 || surfH <= 0) return;
+    ensureBgBuffer();
+    if (!bgBuf) return;
+    if (bgBufPending) {
+        g_api.txSetTransparency(tx.raw, bgSc->sc, kOpaque);
+        g_api.txSetBuffer(tx.raw, bgSc->sc, bgBuf, -1);
+        bgBufPending = false;
+    }
+    ARect src{0, 0, (int32_t) bgBufW, (int32_t) bgBufH}, dst{0, 0, surfW, surfH};
     g_api.txSetGeometry(tx.raw, bgSc->sc, &src, &dst, 0);
     g_api.txSetVisibility(tx.raw, bgSc->sc, kVisShow);
     bgDirty = false;
@@ -883,26 +953,28 @@ Java_com_winlator_cmod_widget_ASurfaceXServerView_nativeInit(JNIEnv* env, jobjec
     ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
     if (!window) return 0;
 
-    bool wantCompat = compatWanted == JNI_TRUE;
+    int mode = compatWanted == JNI_TRUE ? 2 : 0;
     char prop[PROP_VALUE_MAX] = {};
     if (__system_property_get("debug.winlite.sf_compat", prop) > 0) {
-        if (prop[0] == '0') wantCompat = false;
-        else if (prop[0] == '1') wantCompat = true;
+        if (prop[0] == '0') mode = 0;
+        else if (prop[0] == '1') mode = 1;
+        else if (prop[0] == '2') mode = 2;
     }
     auto ctx = std::make_shared<Ctx>();
-    if (wantCompat) {
+    if (mode != 0) {
         // EGL context, shader and private GL objects are created now, not on the first frame.
         BlitConverter* c = new BlitConverter(32);
         if (c->initialize()) {
             ctx->conv = c;
-            ctx->compat = true;
+            ctx->copyMode = mode;
         } else {
             LOGW("GL copy pass unavailable on this device: buffers go to SurfaceFlinger as they are");
             delete c;
         }
     }
-    LOGI("window buffers go to SurfaceFlinger %s",
-         ctx->compat ? "as RGBA copies (compat mode)" : "as they are (direct mode)");
+    LOGI("window buffers go to SurfaceFlinger: %s",
+         ctx->copyMode == 2 ? "RGBA as they are, others copied (auto)" :
+         ctx->copyMode == 1 ? "all copied" : "all as they are (direct)");
     {
         std::lock_guard<std::mutex> lk(ctx->mu);
         ctx->window = window;
@@ -1181,8 +1253,8 @@ Java_com_winlator_cmod_widget_ASurfaceXServerView_nativeReleaseDrawable(JNIEnv*,
     for (auto& kv : ctx->layers) {
         if (kv.second->pendAhb && kv.second->pendSource == uid) ctx->dropPending(kv.second);
     }
-    // Compat mode: only the copy's fence is left to track for a buffer that is gone.
-    if (ctx->compat) {
+    // Whatever is left to track for a buffer that is gone is the copy's fence.
+    {
         auto it = ctx->bufs.find(uid);
         if (it != ctx->bufs.end() && it->second.shownRefs <= 0 && it->second.awaitCb <= 0) {
             if (it->second.fence >= 0) close(it->second.fence);

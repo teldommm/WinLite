@@ -59,9 +59,10 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     private static final String TAG = "ASurfaceXServerView";
 
     private static volatile boolean nativeLibLoaded = false;
-    // Compat mode: window buffers are copied into RGBA buffers owned by the renderer before they go
-    // to SurfaceFlinger (default). Off = the guest's buffers are handed over as they are. Applies to
-    // views created afterwards; `setprop debug.winlite.sf_compat 0|1` overrides it.
+    // Compat mode (default): RGBA window buffers (surface format rgba8) go to SurfaceFlinger as they
+    // are, anything else (BGRA) is copied into RGBA buffers owned by the renderer first. Off = the
+    // guest's buffers are always handed over as they are. Applies to views created afterwards;
+    // `setprop debug.winlite.sf_compat 0` (direct), `1` (copy everything), `2` (the default) override it.
     private static volatile boolean compatMode = true;
 
     public static void setCompatMode(boolean enabled) {
