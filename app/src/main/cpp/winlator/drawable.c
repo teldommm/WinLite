@@ -75,6 +75,40 @@ static inline uint32_t solidPixel(int color) {
 }
 
 /*
+ * Channel order of a drawable's buffer.
+ *
+ * The X visual is fixed (red 0xff0000, green 0x00ff00, blue 0x0000ff), so everything the X
+ * protocol hands us - PutImage data, pixel values, colors - is B,G,R,A in memory. A drawable
+ * allocated as BGRA_8888 takes those bytes as they are. With the "rgba8" surface format the
+ * server's drawables are RGBA_8888 buffers (R first in memory), and the same bytes would show
+ * with red and blue exchanged: Wine's desktop, wallpaper and window colors (all CPU drawn).
+ * So every place where pixels cross between the X protocol and a buffer converts when the
+ * buffer is RGBA. Copies between two buffers of the same order stay plain copies.
+ */
+static inline bool isRgbaOrder(AHardwareBuffer *hardwareBuffer) {
+    AHardwareBuffer_Desc d;
+    AHardwareBuffer_describe(hardwareBuffer, &d);
+    return d.format == AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
+           d.format == AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM;
+}
+
+/* Exchanges the first and the third byte of a 32-bit pixel (B,G,R,A <-> R,G,B,A in memory). */
+static inline uint32_t swapRB32(uint32_t p) {
+    return (p & 0xff00ff00u) | ((p & 0x000000ffu) << 16) | ((p >> 16) & 0x000000ffu);
+}
+
+/* Copies count pixels, exchanging red and blue. memcpy-sized accesses: the source may be client
+ * memory with no 4-byte alignment guarantee. */
+static void copyRowSwapRB(uint8_t *dst, const uint8_t *src, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        uint32_t p;
+        memcpy(&p, src + i * 4, 4);
+        p = swapRB32(p);
+        memcpy(dst + i * 4, &p, 4);
+    }
+}
+
+/*
  * Every function below locks the buffers it needs and, on every path out - including the
  * failure of a later lock - unlocks exactly the ones it locked. A buffer left locked by an early
  * return made every later lock of it fail, so the window it backs never updated again.
@@ -156,10 +190,14 @@ Java_com_winlator_cmod_xserver_Drawable_copyArea1(JNIEnv *env, jclass obj, jshor
         return;
     }
 
+    /* Client data is B,G,R,A: an RGBA buffer needs red and blue exchanged on the way in. */
+    const bool swap = isRgbaOrder(hardwareBuffer);
     const size_t copyAmount = (size_t)width * 4;
     for (int y = 0; y < height; y++) {
-        memcpy(dstDataAddr + ((size_t)dstX + (size_t)(y + dstY) * dstStride) * 4,
-               srcDataAddr + ((size_t)srcX + (size_t)(y + srcY) * srcStride) * 4, copyAmount);
+        uint8_t *dstRow = dstDataAddr + ((size_t)dstX + (size_t)(y + dstY) * dstStride) * 4;
+        const uint8_t *srcRow = srcDataAddr + ((size_t)srcX + (size_t)(y + srcY) * srcStride) * 4;
+        if (swap) copyRowSwapRB(dstRow, srcRow, (size_t)width);
+        else memcpy(dstRow, srcRow, copyAmount);
     }
 
     AHardwareBuffer_unlock(hardwareBuffer, NULL);
@@ -184,10 +222,14 @@ Java_com_winlator_cmod_xserver_Drawable_copyArea2(JNIEnv *env, jclass obj, jshor
         return;
     }
 
+    /* GetImage reply data is B,G,R,A: an RGBA buffer needs red and blue exchanged on the way out. */
+    const bool swap = isRgbaOrder(hardwareBuffer);
     const size_t copyAmount = (size_t)width * 4;
     for (int y = 0; y < height; y++) {
-        memcpy(dstDataAddr + ((size_t)dstX + (size_t)(y + dstY) * dstStride) * 4,
-               srcDataAddr + ((size_t)srcX + (size_t)(y + srcY) * srcStride) * 4, copyAmount);
+        uint8_t *dstRow = dstDataAddr + ((size_t)dstX + (size_t)(y + dstY) * dstStride) * 4;
+        const uint8_t *srcRow = srcDataAddr + ((size_t)srcX + (size_t)(y + srcY) * srcStride) * 4;
+        if (swap) copyRowSwapRB(dstRow, srcRow, (size_t)width);
+        else memcpy(dstRow, srcRow, copyAmount);
     }
 
     AHardwareBuffer_unlock(hardwareBuffer, NULL);
@@ -246,10 +288,15 @@ Java_com_winlator_cmod_xserver_Drawable_copyArea3(JNIEnv *env, jclass obj, jshor
      * and memmove within a row, so no row is overwritten before it has been read. */
     const size_t copyAmount = (size_t)width * 4;
     const bool bottomUp = srcHardwareBuffer == dstHardwareBuffer && dstY > srcY;
+    /* Two buffers of different channel order (never the same buffer, so no overlap) convert. */
+    const bool swap = srcHardwareBuffer != dstHardwareBuffer &&
+                      isRgbaOrder(srcHardwareBuffer) != isRgbaOrder(dstHardwareBuffer);
     for (int i = 0; i < height; i++) {
         const int y = bottomUp ? height - 1 - i : i;
-        memmove(dstDataAddr + ((size_t)dstX + (size_t)(y + dstY) * dstStride) * 4,
-                srcDataAddr + ((size_t)srcX + (size_t)(y + srcY) * srcStride) * 4, copyAmount);
+        uint8_t *dstRow = dstDataAddr + ((size_t)dstX + (size_t)(y + dstY) * dstStride) * 4;
+        const uint8_t *srcRow = srcDataAddr + ((size_t)srcX + (size_t)(y + srcY) * srcStride) * 4;
+        if (swap) copyRowSwapRB(dstRow, srcRow, (size_t)width);
+        else memmove(dstRow, srcRow, copyAmount);
     }
 
     unlockSrcDst(srcHardwareBuffer, dstHardwareBuffer);
@@ -274,13 +321,16 @@ Java_com_winlator_cmod_xserver_Drawable_copyAreaOp(JNIEnv *env, jclass obj, jsho
     const bool same = srcHardwareBuffer == dstHardwareBuffer;
     const bool bottomUp = same && dstY > srcY;
     const bool rightToLeft = same && dstY == srcY && dstX > srcX;
+    /* The raster operation combines colors, so the source must be in the destination's order. */
+    const bool swapSrc = !same && isRgbaOrder(srcHardwareBuffer) != isRgbaOrder(dstHardwareBuffer);
     for (int i = 0; i < height; i++) {
         const int y = bottomUp ? height - 1 - i : i;
         for (int k = 0; k < width; k++) {
             const int x = rightToLeft ? width - 1 - k : k;
             const size_t si = ((size_t)x + srcX + (size_t)(y + srcY) * srcStride) * 4;
             const size_t di = ((size_t)x + dstX + (size_t)(y + dstY) * dstStride) * 4;
-            int srcColor = (srcDataAddr[si] << 16) | (srcDataAddr[si+1] << 8) | srcDataAddr[si+2];
+            int srcColor = swapSrc ? (srcDataAddr[si+2] << 16) | (srcDataAddr[si+1] << 8) | srcDataAddr[si]
+                                   : (srcDataAddr[si] << 16) | (srcDataAddr[si+1] << 8) | srcDataAddr[si+2];
             int dstColor = (dstDataAddr[di] << 16) | (dstDataAddr[di+1] << 8) | dstDataAddr[di+2];
 
             dstColor = setPixelOp(srcColor, dstColor, gcFunction);
@@ -311,7 +361,7 @@ Java_com_winlator_cmod_xserver_Drawable_fillRect(JNIEnv *env, jclass obj, jshort
 
     /* Written in place: the per-call malloc'ed row is gone, and with it the path that returned
      * on a failed malloc with the buffer still locked. */
-    const uint32_t pixel = solidPixel(color);
+    const uint32_t pixel = isRgbaOrder(hardwareBuffer) ? swapRB32(solidPixel(color)) : solidPixel(color);
     for (int i = 0; i < height; i++) {
         uint32_t *row = (uint32_t *)(dataAddr + ((size_t)x + (size_t)(i + y) * stride) * 4);
         for (int k = 0; k < width; k++) row[k] = pixel;
@@ -365,7 +415,9 @@ Java_com_winlator_cmod_xserver_Drawable_drawLine(JNIEnv *env, jclass obj, jshort
         return;
     }
 
-    plotLine(dataAddr, x0, y0, x1, y1, solidPixel(color), lineWidth, stride);
+    plotLine(dataAddr, x0, y0, x1, y1,
+             isRgbaOrder(hardwareBuffer) ? swapRB32(solidPixel(color)) : solidPixel(color),
+             lineWidth, stride);
 
     AHardwareBuffer_unlock(hardwareBuffer, NULL);
 }
@@ -398,7 +450,7 @@ Java_com_winlator_cmod_xserver_Drawable_fillRects(JNIEnv *env, jclass obj, jshor
     AHardwareBuffer *hardwareBuffer = (AHardwareBuffer *)data;
     if (AHardwareBuffer_lock(hardwareBuffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, (void **)&dataAddr) == 0) {
         if (dataAddr) {
-            const uint32_t pixel = solidPixel(color);
+            const uint32_t pixel = isRgbaOrder(hardwareBuffer) ? swapRB32(solidPixel(color)) : solidPixel(color);
             for (int n = 0; n < count; n++) {
                 const int x = r[n*4], y = r[n*4+1], width = r[n*4+2], height = r[n*4+3];
                 for (int i = 0; i < height; i++) {
@@ -428,7 +480,7 @@ Java_com_winlator_cmod_xserver_Drawable_drawPolyLine(JNIEnv *env, jclass obj, js
     AHardwareBuffer *hardwareBuffer = (AHardwareBuffer *)data;
     if (AHardwareBuffer_lock(hardwareBuffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, (void **)&dataAddr) == 0) {
         if (dataAddr) {
-            const uint32_t pixel = solidPixel(color);
+            const uint32_t pixel = isRgbaOrder(hardwareBuffer) ? swapRB32(solidPixel(color)) : solidPixel(color);
             for (int n = 1; n < count; n++)
                 plotLine(dataAddr, p[n*2-2], p[n*2-1], p[n*2], p[n*2+1], pixel, lineWidth, stride);
         }
@@ -470,6 +522,10 @@ Java_com_winlator_cmod_xserver_Drawable_drawAlphaMaskedBitmap(JNIEnv *env, jclas
     if (srcDataAddr && maskDataAddr && dstDataAddr) {
         int foreColor = packColor(foreRed, foreGreen, foreBlue);
         int backColor = packColor(backRed, backGreen, backBlue);
+        if (isRgbaOrder(dstHardwareBuffer)) {
+            foreColor = (int)swapRB32((uint32_t)foreColor);
+            backColor = (int)swapRB32((uint32_t)backColor);
+        }
 
         for (int y = 0; y < height; y++) {
             int rowStart = y * stride;
@@ -524,6 +580,9 @@ Java_com_winlator_cmod_xserver_Pixmap_toBitmap(JNIEnv *env, jclass obj,
         goto unlock_mask;
     }
 
+    /* The Bitmap is R,G,B,A in memory. A BGRA source needs red and blue exchanged, an RGBA one
+     * (rgba8 surface format) is already in that order. */
+    const bool srcRgba = isRgbaOrder(colorHardwareBuffer);
     for (uint32_t y = 0; y < info.height; y++) {
         size_t srcStart = (size_t)y * colorStride;
         size_t dstStart = (size_t)y * info.width;
@@ -532,9 +591,9 @@ Java_com_winlator_cmod_xserver_Pixmap_toBitmap(JNIEnv *env, jclass obj,
             size_t srcIdx = (x + srcStart) * 4;
             size_t dstIdx = (x + dstStart) * 4;
             size_t maskIdx = (x + maskStart) * 4;
-            pixels[dstIdx + 2] = colorDataAddr[srcIdx + 0];
+            pixels[dstIdx + 2] = colorDataAddr[srcIdx + (srcRgba ? 2 : 0)];
             pixels[dstIdx + 1] = colorDataAddr[srcIdx + 1];
-            pixels[dstIdx + 0] = colorDataAddr[srcIdx + 2];
+            pixels[dstIdx + 0] = colorDataAddr[srcIdx + (srcRgba ? 0 : 2)];
             pixels[dstIdx + 3] = maskDataAddr ? maskDataAddr[maskIdx + 0] : colorDataAddr[srcIdx + 3];
         }
     }
