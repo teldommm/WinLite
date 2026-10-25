@@ -131,7 +131,7 @@
     <string name="ui_cache">Cache</string>
     <string name="ui_total">Total</string>
     <string name="ui_clearing">Clearing…</string>
-    <string name="ui_clear_cache">Clear cache</string>
+    <string name="ui_clear_cache">Clear</string>
     <string name="ui_ddraw_wrapper">DDraw Wrapper</string>
     <string name="ui_no_environment_variables_added">No environment variables added.</string>
     <string name="ui_add_variable">Add variable</string>
