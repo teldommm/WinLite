@@ -136,8 +136,17 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     private FrameRating classicHudRef = null;
     private volatile int fpsWindowId = -1;
     private volatile int fpsLimit = 0;
-    // Next free slot of the FPS limiter, System.nanoTime() base. Guarded by `lock`.
-    private long limiterNextSlotNs = 0;
+    // FPS limiter state per window (System.nanoTime() base). Guarded by `lock`.
+    private final java.util.HashMap<Integer, Pacer> pacers = new java.util.HashMap<>();
+
+    private static final class Pacer {
+        long idealNs;           // when the previous frame was meant to be presented (0 = no cadence yet)
+        long lastReleaseNs;     // when the last buffer was planned to go back to the guest
+        long lastPresentNs;
+        double guestMeanNs, guestDevNs;   // time the guest needs from getting a buffer to presenting it
+        boolean guestValid;
+        long recent0, recent1;  // the last two buffers presented (to tell how many the guest cycles through)
+    }
 
     public ASurfaceXServerView(Context context, XServer xServer) {
         super(context, xServer);
@@ -676,9 +685,15 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     }
 
     /**
-     * PresentPixmap: the layer shows the pixmap's buffer at once. Buffers go back to the guest
-     * when SurfaceFlinger has released them (isGuestBufferBusy), so the plan only carries the
-     * FPS limit: slots at the limit's rate, nothing otherwise.
+     * PresentPixmap: the layer shows the pixmap's buffer at once (the frame is not held back).
+     * Buffers go back to the guest when SurfaceFlinger has released them (isGuestBufferBusy), so
+     * the plan only carries the FPS limit. Like the Vulkan renderer's limiter it hands a buffer
+     * back JUST IN TIME - early enough that the guest, which needs about guestFrameNs from getting
+     * a buffer to presenting it, delivers its next frame at that frame's slot - and not at the slot
+     * itself, which would make CPU and GPU work of the guest run one after the other (a game that
+     * manages 70 fps with them overlapped drops to 40 under a 60 fps limit that way). Slots are
+     * on the display's vsync grid when the limit is a multiple of the refresh (or equals it),
+     * so presents keep one phase against SurfaceFlinger's latch instead of beating against it.
      */
     @Override
     public void onGuestPresent(Window window, Drawable pixmap, long guestFrameNs, long[] plan) {
@@ -693,18 +708,105 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
                     nativePresent(nativeHandle, window.id, did(pixmap), ahb, 0, 0, true);
                 }
             }
-            final int limit = fpsLimit;
-            if (limit > 0) {
-                final long period = 1_000_000_000L / limit;
-                final long now = System.nanoTime();
-                final long slot = Math.max(now, limiterNextSlotNs);
-                limiterNextSlotNs = slot + period;
-                plan[0] = slot;     // the previous frame is handed back for the next slot...
-                plan[1] = slot;     // ...and stays on screen until the new frame's slot
-                plan[2] = 2;        // at most two buffers out: the guest cannot run ahead
-                plan[3] = slot;     // Present completes when the slot comes
+            planPresent(window.id, did(pixmap), guestFrameNs, plan);
+        }
+    }
+
+    /** Fills the hand-back plan (see PresentExtension.planReleasesLocked). Called under `lock`. */
+    private void planPresent(int windowId, long srcId, long guestFrameNs, long[] plan) {
+        final long now = System.nanoTime();
+        if (pacers.size() > 1) {
+            java.util.Iterator<java.util.Map.Entry<Integer, Pacer>> it = pacers.entrySet().iterator();
+            while (it.hasNext()) {   // windows that stopped presenting drop their state
+                java.util.Map.Entry<Integer, Pacer> e = it.next();
+                if (e.getKey() != windowId && now - e.getValue().lastPresentNs > 2_000_000_000L) it.remove();
             }
         }
+        Pacer pc = pacers.get(windowId);
+        if (pc == null) { pc = new Pacer(); pacers.put(windowId, pc); }
+        pc.lastPresentNs = now;
+
+        if (guestFrameNs >= 0 && guestFrameNs < 1_000_000_000L) {
+            if (!pc.guestValid) {
+                pc.guestMeanNs = guestFrameNs;
+                pc.guestDevNs = guestFrameNs * 0.25;
+            } else {
+                final double d = guestFrameNs - pc.guestMeanNs;
+                pc.guestMeanNs += 0.1 * d;
+                pc.guestDevNs += 0.1 * (Math.abs(d) - pc.guestDevNs);
+            }
+            pc.guestValid = true;
+        }
+
+        // Two buffers may be out at once only if the guest has at least three (one stays here as
+        // the newest frame); a constant 2 would time a two-buffer guest's only free buffer for
+        // the slot after next.
+        int distinct = 1;
+        if (pc.recent0 != 0 && pc.recent0 != srcId) distinct++;
+        if (pc.recent1 != 0 && pc.recent1 != srcId && pc.recent1 != pc.recent0) distinct++;
+        pc.recent1 = pc.recent0;
+        pc.recent0 = srcId;
+        final int depth = distinct >= 3 ? 2 : 1;
+
+        final int limit = fpsLimit;
+        if (limit <= 0) {
+            pc.idealNs = 0;
+            pc.lastReleaseNs = 0;
+            return;     // plan stays zero: buffers go back at once, Present completes at once
+        }
+
+        long spacing = 1_000_000_000L / limit;
+
+        // Vsync grid: presents land half a refresh before a vsync, the most margin to either
+        // side of SurfaceFlinger's latch. Multiples of the refresh (60 on 120 Hz) and a limit at
+        // the refresh (within 5 %) use it; anything else (45 on 60 Hz) has no even cadence anyway.
+        boolean grid = false;
+        long period = 0, ust = 0;
+        final long[] vs = new long[3];
+        if (vsyncClock.sampleAt(now, vs) && vs[2] > 0) {
+            period = vs[2];
+            ust = vs[1];
+            final long ratio = Math.round((double) spacing / period);
+            if (ratio >= 1 && Math.abs(spacing - ratio * period) <= period / 20) {
+                grid = true;
+                spacing = ratio * period;
+            }
+        }
+        final long half = period / 2;
+
+        long ideal = pc.idealNs != 0 ? pc.idealNs + spacing : 0;
+        // A present later than its slot by up to a quarter slot keeps the cadence (the next slot
+        // comes sooner); only a real miss restarts it, from now.
+        final long tolerance = spacing / 4;
+        final boolean late = ideal != 0 && ideal + tolerance < now;
+        if (ideal == 0 || late) {
+            ideal = now;
+            if (grid) {
+                // First present time on the grid that is not in the past.
+                final long k = (long) Math.ceil((double) (now - ust + half) / period);
+                ideal = ust + k * period - half;
+            }
+        } else if (grid) {
+            // Follow the clock's drift: back onto the grid point nearest to the ideal.
+            final long k = Math.round((double) (ideal - ust + half) / period);
+            ideal = ust + k * period - half;
+        }
+        pc.idealNs = ideal;
+
+        final long guestEst = pc.guestValid
+                ? (long) (pc.guestMeanNs + 3.0 * pc.guestDevNs) : spacing / 2;
+        // The buffer handed back now is for the frame that is due at ideal + spacing * depth.
+        final long target = ideal + spacing * depth;
+        final long justInTime = target - guestEst - 2_000_000L;
+        final long release = Math.max(Math.max(justInTime, pc.lastReleaseNs + spacing * 95 / 100), now);
+        pc.lastReleaseNs = release;
+
+        plan[0] = release;
+        plan[1] = 0;        // the frame is shown at once; SurfaceFlinger's reads are isGuestBufferBusy's
+        plan[2] = depth;
+        // Present completes at its slot while the guest keeps up: it then reads input right
+        // after the frame is shown. A heavy or late guest completes at once and keeps overlapping.
+        if (!late && guestEst + 2_000_000L <= spacing) plan[3] = ideal;
     }
 
     private void countFrameForHud(Window window) {
@@ -885,7 +987,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
         this.fpsLimit = Math.max(0, Math.min(1000, limit));
         // Same cap for clients that draw with MIT-SHM blits and never reach the Present limiter.
         ShmFramePacer.setFrameRateLimit(this.fpsLimit);
-        synchronized (lock) { limiterNextSlotNs = 0; }
+        synchronized (lock) { pacers.clear(); }
     }
 
     public void setPipMode(boolean pip) { inPipMode = pip; }
