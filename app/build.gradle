@@ -102,8 +102,8 @@ tasks.register("downloadProton") {
     File protonARM64EC = new File(assetDir, "proton-9.0-arm64ec.tar.zst")
     File staleProtonARM64EC = new File(assetDir, "proton-10.0-5-arm64ec.tar.zst")
     String protonURL = sourceProp("protonUrl", "https://github.com/teldommm/WinLite/releases/download/Assest/proton-9.0-arm64ec.tar.zst")
-    String protonSHA256 = sourceProp("protonSha256", "939c1b00fa04a6c09ce04f2a8e2a00025311aad85373fdb3b1d38734add71a9f")
-    long protonSize = sourceProp("protonSize", "65426563") as long
+    String protonSHA256 = sourceProp("protonSha256", "0717b9ae483ca8c843ecdd218c2229385d6a91c0cc22759752c12735865c4145")
+    long protonSize = sourceProp("protonSize", "65419448") as long
 
     doLast {
         if (staleProtonARM64EC.exists()) staleProtonARM64EC.delete()
