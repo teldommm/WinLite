@@ -257,6 +257,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private int activeRendererWindowId = -1;
     private String lastRendererName = null;
+    private String lastGpuName = null;
     private boolean cursorLock;
     private final float[] xform = XForm.getInstance();
     private ContentsManager contentsManager;
@@ -624,6 +625,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (xServerView != null) xServerView.setFpsWindowId(window.id);
                     if (classicHud != null) classicHud.update();
                     if (modernHud != null) modernHud.onFrame();
+                    syncClassicHudRenderer();
+                    syncModernHudRenderer();
                 }
             }
 
@@ -1350,11 +1353,46 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
-    /** "+" after the renderer name in the HUD ("DXVK+") while the SurfaceFlinger renderer is active. */
+    /**
+     * Tells both HUDs which display path is active: "+" after the guest's engine name ("DXVK+")
+     * and, until the guest reports one, "SurfaceFlinger" instead of "Vulkan". Safe from any thread.
+     */
     private void applyHudRendererSuffix() {
-        final String suffix = xServerView instanceof ASurfaceXServerView ? "+" : "";
-        if (modernHud != null) modernHud.setRendererSuffix(suffix);
-        if (classicHud != null) classicHud.setRendererSuffix(suffix);
+        final boolean sf = xServerView instanceof ASurfaceXServerView;
+        final String suffix = sf ? "+" : "";
+        final String backend = sf ? "SurfaceFlinger" : "Vulkan";
+        if (modernHud != null) {
+            modernHud.setRendererSuffix(suffix);
+            modernHud.setBackendLabel(backend);
+        }
+        final FrameRating classic = classicHud;
+        if (classic != null) {
+            runOnUiThread(() -> {
+                classic.setRendererSuffix(suffix);
+                classic.setBackendLabel(backend);
+            });
+        }
+    }
+
+    /** Gives the classic HUD what the guest has already reported (a HUD armed after the fact). */
+    private void syncClassicHudRenderer() {
+        final FrameRating hud = classicHud;
+        if (hud == null) return;
+        final String name = lastRendererName, gpu = lastGpuName;
+        if (name == null && gpu == null) return;
+        runOnUiThread(() -> {
+            if (name != null) hud.setRenderer(name);
+            if (gpu != null) hud.setGpuName(gpu);
+        });
+    }
+
+    /** Same for the modern HUD. */
+    private void syncModernHudRenderer() {
+        final WinlatorHUD hud = modernHud;
+        if (hud == null) return;
+        final String name = lastRendererName, gpu = lastGpuName;
+        runOnUiThread(() -> hud.onRendererDetected(name));
+        if (gpu != null) hud.setGpuName(gpu);
     }
 
     private void configureVulkanRenderer(VulkanXServerView vkRenderer) {
@@ -1472,6 +1510,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 classicHud.setVisibility(View.GONE);
                 rootView.addView(classicHud);
                 renderer.setFrameRating(classicHud);
+                applyHudRendererSuffix();
             } else if (hudMode == 2) {
 
                 modernHud = new WinlatorHUD(this);
@@ -1479,6 +1518,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 rootView.addView(modernHud);
                 modernHud.enableByUser();
                 renderer.setFrameRating(modernHud);
+                applyHudRendererSuffix();
             }
         }
 
@@ -1875,8 +1915,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     frameRatingWindowId = activeRendererWindowId;
                     renderer.setFpsWindowId(frameRatingWindowId);
 
-                    final String name = lastRendererName;
-                    modernHud.onRendererDetected(name);
+                    syncModernHudRenderer();
                 }
             }
             modernHud.enableByUser();
@@ -1891,6 +1930,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     frameRatingWindowId = activeRendererWindowId;
                     renderer.setFpsWindowId(frameRatingWindowId);
                     runOnUiThread(() -> classicHud.update());
+                    syncClassicHudRenderer();
                 }
             }
             classicHud.enableByUser();
@@ -3383,10 +3423,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     && (activeRendererWindowId == -1 || window.id == activeRendererWindowId)) {
                 lastRendererName = property.toString();
             }
+            if (propName.contains("_MESA_DRV_GPU_NAME")
+                    && (activeRendererWindowId == -1 || window.id == activeRendererWindowId)) {
+                lastGpuName = property.toString();
+            }
         } else if (activeRendererWindowId != -1 && window.id == activeRendererWindowId) {
 
             activeRendererWindowId = -1;
             lastRendererName = null;
+            lastGpuName = null;
         }
 
         if (classicHud == null && modernHud == null) return;
@@ -3397,11 +3442,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (xServerView != null) xServerView.setFpsWindowId(window.id);
                 Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
                 if (classicHud != null) classicHud.update();
-
-                if (modernHud != null) {
-                    final String nameToPass = lastRendererName;
-                    runOnUiThread(() -> modernHud.onRendererDetected(nameToPass));
-                }
+                syncClassicHudRenderer();
+                syncModernHudRenderer();
             }
 
             if (propName.contains("_MESA_DRV_ENGINE_NAME") && window.id == frameRatingWindowId) {

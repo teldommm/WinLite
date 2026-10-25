@@ -122,26 +122,44 @@ public class FrameRating extends FrameLayout implements Runnable {
         return StringUtils.formatBytes(usedKb * 1024L, false);
     }
 
-    // Appended to the renderer name ("DXVK+"): marks the SurfaceFlinger display path.
+    // Appended to the guest's engine name ("DXVK+"): marks the SurfaceFlinger display path.
     private String rendererSuffix = "";
+    // Shown while the guest has not reported its engine name: the X server's own display path
+    // ("Vulkan", or "SurfaceFlinger" while that renderer is active).
+    private String backendLabel = "Vulkan";
 
+    /** Engine name + suffix once the guest reported it, the display path before that. */
+    private void refreshRendererText() {
+        tvRenderer.setText(lastKnownRenderer != null ? lastKnownRenderer + rendererSuffix : backendLabel);
+    }
+
+    // The three setters below run on the UI thread (the activity posts them there).
     public void setRenderer(String renderer) {
-        lastKnownRenderer = renderer; 
-        tvRenderer.setText(renderer + rendererSuffix);
+        final String clean = renderer != null ? renderer.trim() : "";
+        lastKnownRenderer = clean.isEmpty() ? null : clean;
+        refreshRendererText();
     }
 
     public void setRendererSuffix(String suffix) {
         rendererSuffix = suffix != null ? suffix : "";
-        tvRenderer.setText((lastKnownRenderer != null ? lastKnownRenderer : "Vulkan") + rendererSuffix);
+        refreshRendererText();
+    }
+
+    public void setBackendLabel(String label) {
+        backendLabel = label != null && !label.trim().isEmpty() ? label.trim() : "Vulkan";
+        refreshRendererText();
     }
 
     public void setGpuName (String gpuName) {
-        tvGPU.setText(gpuName);
+        if (gpuName == null || gpuName.trim().isEmpty()) return;
+        tvGPU.setText(gpuName.trim());
     }
 
+    // The renderer window is gone: back to the display path and the configured driver's GPU
+    // name, like the Modern HUD (the next window reports its own engine name).
     public void reset() {
-
-        tvRenderer.setText((lastKnownRenderer != null ? lastKnownRenderer : "Vulkan") + rendererSuffix);
+        lastKnownRenderer = null;
+        refreshRendererText();
         tvGPU.setText(GPUInformation.getRenderer(graphicsDriverConfig.get("version").toString(), context));
     }
 
