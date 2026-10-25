@@ -75,6 +75,7 @@ struct Api {
     void  (*txSetGeometry)(void*, void*, const ARect*, const ARect*, int32_t) = nullptr;
     void  (*txSetOnComplete)(void*, void*, void (*)(void*, void*)) = nullptr;
     void  (*txSetTransparency)(void*, void*, int8_t) = nullptr;
+    void  (*txSetDesiredPresentTime)(void*, int64_t) = nullptr;   // optional
     void  (*txReparent)(void*, void*, void*) = nullptr;
     void  (*statsGetControls)(void*, void***, size_t*) = nullptr;
     void  (*statsReleaseControls)(void**) = nullptr;
@@ -105,6 +106,7 @@ void loadApi() {
     LOAD(txSetGeometry, "ASurfaceTransaction_setGeometry");
     LOAD(txSetOnComplete, "ASurfaceTransaction_setOnComplete");
     LOAD(txSetTransparency, "ASurfaceTransaction_setBufferTransparency");
+    LOAD(txSetDesiredPresentTime, "ASurfaceTransaction_setDesiredPresentTime");
     LOAD(txReparent, "ASurfaceTransaction_reparent");
     LOAD(statsGetControls, "ASurfaceTransactionStats_getASurfaceControls");
     LOAD(statsReleaseControls, "ASurfaceTransactionStats_releaseASurfaceControls");
@@ -185,6 +187,7 @@ struct Layer {
     int64_t progressNs = 0;           // last time the in-flight count moved
     int64_t pendSource = 0;           // newest frame waiting for an in-flight slot
     AHardwareBuffer* pendAhb = nullptr;
+    int64_t pendDesiredNs = 0;        // its desired present time (0 = as soon as possible)
     bool bufDirty = false;            // the CPU drew into curAhb: submit it again at the next vsync
     // What SurfaceFlinger has been told, to skip redundant state.
     bool visApplied = false;
@@ -272,9 +275,12 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     void sendTx(Tx& tx);
     bool mapRect(float x, float y, int bufW, int bufH, ARect& src, ARect& dst) const;
     void applyLayerGeometry(Tx& tx, const std::shared_ptr<Layer>& L);
-    void submit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb);
-    Sub doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb);
-    void stashPending(const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb);
+    void submit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
+                int64_t desiredNs = 0);
+    Sub doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
+                 int64_t desiredNs = 0);
+    void stashPending(const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
+                      int64_t desiredNs);
     Sub acquireSlot(uint32_t w, uint32_t h, std::shared_ptr<Slot>& out, int& acquireFence);
     Sub convertToSlot(AHardwareBuffer* ahb, const AHardwareBuffer_Desc& desc,
                       std::shared_ptr<Slot>& slot, int& fenceFd);
@@ -358,6 +364,7 @@ void Ctx::dropPending(const std::shared_ptr<Layer>& L) {
     AHardwareBuffer_release(L->pendAhb);
     L->pendAhb = nullptr;
     L->pendSource = 0;
+    L->pendDesiredNs = 0;
 }
 
 bool Ctx::warnDue() {
@@ -468,29 +475,33 @@ Ctx::Sub Ctx::convertToSlot(AHardwareBuffer* ahb, const AHardwareBuffer_Desc& de
     return Sub::Ok;
 }
 
-void Ctx::stashPending(const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb) {
+void Ctx::stashPending(const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
+                       int64_t desiredNs) {
     dropPending(L);
     AHardwareBuffer_acquire(ahb);
     L->pendAhb = ahb;
     L->pendSource = source;
+    L->pendDesiredNs = desiredNs;
     bufs[source].shownRefs++;
 }
 
-void Ctx::submit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb) {
+void Ctx::submit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
+                 int64_t desiredNs) {
     if (L->inflight >= kMaxInflight && nowNs() - L->progressNs > kInflightStallNs) {
         LOGW("window %lld: no transaction completed for a while, resetting", (long long) L->id);
         L->inflight = 0;
     }
     if (L->inflight >= kMaxInflight) {
-        stashPending(L, source, ahb);
+        stashPending(L, source, ahb, desiredNs);
         return;
     }
     dropPending(L);
     // No converted buffer free (compat mode): the frame waits like one without an in-flight slot.
-    if (doSubmit(tx, L, source, ahb) == Sub::NoSlot) stashPending(L, source, ahb);
+    if (doSubmit(tx, L, source, ahb, desiredNs) == Sub::NoSlot) stashPending(L, source, ahb, desiredNs);
 }
 
-Ctx::Sub Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb) {
+Ctx::Sub Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, AHardwareBuffer* ahb,
+                       int64_t desiredNs) {
     AHardwareBuffer_Desc desc{};
     AHardwareBuffer_describe(ahb, &desc);
 
@@ -530,6 +541,9 @@ Ctx::Sub Ctx::doSubmit(Tx& tx, const std::shared_ptr<Layer>& L, int64_t source, 
     // Direct mode: no acquire fence, the guest finishes rendering before it sends PresentPixmap.
     // Compat mode: the fence of the copy.
     g_api.txSetBuffer(tx.raw, L->sc->sc, shown, fence);
+    // FPS limiter: SurfaceFlinger holds the frame back until its slot, so it is shown at a fixed
+    // phase of the refresh however the guest's present times jitter. Past times mean "now".
+    if (desiredNs > 0 && g_api.txSetDesiredPresentTime) g_api.txSetDesiredPresentTime(tx.raw, desiredNs);
 
     int64_t replaced = 0;
     std::shared_ptr<Slot> prevSlot;
@@ -560,10 +574,12 @@ bool Ctx::promotePending(Tx& tx, const std::shared_ptr<Layer>& L) {
     if (!L->pendAhb || L->inflight >= kMaxInflight) return false;
     AHardwareBuffer* ahb = L->pendAhb;
     const int64_t src = L->pendSource;
-    if (doSubmit(tx, L, src, ahb) == Sub::NoSlot) return false;   // stays pending
+    const int64_t desired = L->pendDesiredNs;
+    if (doSubmit(tx, L, src, ahb, desired) == Sub::NoSlot) return false;   // stays pending
     // Sent, or dropped for good: the pending reference goes.
     L->pendAhb = nullptr;
     L->pendSource = 0;
+    L->pendDesiredNs = 0;
     auto it = bufs.find(src);
     if (it != bufs.end()) { it->second.shownRefs--; gcBuf(src); }
     AHardwareBuffer_release(ahb);
@@ -1046,7 +1062,8 @@ Java_com_winlator_cmod_widget_ASurfaceXServerView_nativeSetTransform(JNIEnv*, jo
 JNIEXPORT jboolean JNICALL
 Java_com_winlator_cmod_widget_ASurfaceXServerView_nativePresent(JNIEnv*, jobject, jlong h, jlong windowId,
                                                                 jlong sourceUid, jlong ahbPtr,
-                                                                jint offX, jint offY, jboolean immediate) {
+                                                                jint offX, jint offY, jboolean immediate,
+                                                                jlong desiredPresentNs) {
     if (!h || !ahbPtr || sourceUid <= 0) return JNI_FALSE;
     std::shared_ptr<Ctx> ctx = *handleOf(h);
     std::lock_guard<std::mutex> lk(ctx->mu);
@@ -1065,7 +1082,7 @@ Java_com_winlator_cmod_widget_ASurfaceXServerView_nativePresent(JNIEnv*, jobject
     }
     Tx tx;
     if (!tx.raw) return JNI_FALSE;
-    ctx->submit(tx, L, sourceUid, ahb);
+    ctx->submit(tx, L, sourceUid, ahb, (int64_t) desiredPresentNs);
     ctx->sendTx(tx);
     return JNI_TRUE;
 }

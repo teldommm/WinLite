@@ -184,7 +184,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     private native void nativeSetTransform(long handle, float ox, float oy, float sx, float sy,
                                            boolean clip, int cx, int cy, int cw, int ch);
     private native boolean nativePresent(long handle, long windowId, long sourceUid, long ahb,
-                                         int offX, int offY, boolean immediate);
+                                         int offX, int offY, boolean immediate, long desiredPresentNs);
     private native void nativeFlush(long handle);
     private native void nativeSetPointer(long handle, int x, int y);
     private native void nativeSetCursorVisible(long handle, boolean visible);
@@ -678,7 +678,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
                 final long ahb = pixmap.backingAHB;
                 if (ahb != 0) {
                     shown.put(window.id, new Shown(pixmap, xOff, yOff));
-                    nativePresent(nativeHandle, window.id, did(pixmap), ahb, xOff, yOff, false);
+                    nativePresent(nativeHandle, window.id, did(pixmap), ahb, xOff, yOff, false, 0);
                 }
             }
         }
@@ -701,19 +701,23 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
         synchronized (lock) {
             if (nativeHandle == 0 || pixmap == null) return;
             if (window.getContent() == null) return;
+            final long desiredNs = planPresent(window.id, did(pixmap), guestFrameNs, plan);
             synchronized (pixmap.renderLock) {
                 final long ahb = pixmap.backingAHB;
                 if (ahb != 0) {
                     shown.put(window.id, new Shown(pixmap, 0, 0));
-                    nativePresent(nativeHandle, window.id, did(pixmap), ahb, 0, 0, true);
+                    nativePresent(nativeHandle, window.id, did(pixmap), ahb, 0, 0, true, desiredNs);
                 }
             }
-            planPresent(window.id, did(pixmap), guestFrameNs, plan);
         }
     }
 
-    /** Fills the hand-back plan (see PresentExtension.planReleasesLocked). Called under `lock`. */
-    private void planPresent(int windowId, long srcId, long guestFrameNs, long[] plan) {
+    /**
+     * Fills the hand-back plan (see PresentExtension.planReleasesLocked) and returns the time
+     * (System.nanoTime() base = CLOCK_MONOTONIC) SurfaceFlinger should hold the frame back to, 0 =
+     * show it as soon as possible. Called under `lock`.
+     */
+    private long planPresent(int windowId, long srcId, long guestFrameNs, long[] plan) {
         final long now = System.nanoTime();
         if (pacers.size() > 1) {
             java.util.Iterator<java.util.Map.Entry<Integer, Pacer>> it = pacers.entrySet().iterator();
@@ -752,7 +756,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
         if (limit <= 0) {
             pc.idealNs = 0;
             pc.lastReleaseNs = 0;
-            return;     // plan stays zero: buffers go back at once, Present completes at once
+            return 0;   // plan stays zero: buffers go back at once, Present completes at once
         }
 
         long spacing = 1_000_000_000L / limit;
@@ -804,9 +808,15 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
         plan[0] = release;
         plan[1] = 0;        // the frame is shown at once; SurfaceFlinger's reads are isGuestBufferBusy's
         plan[2] = depth;
-        // Present completes at its slot while the guest keeps up: it then reads input right
-        // after the frame is shown. A heavy or late guest completes at once and keeps overlapping.
-        if (!late && guestEst + 2_000_000L <= spacing) plan[3] = ideal;
+        // Present completes at once: the frame is not on screen until SurfaceFlinger latches it,
+        // and a completion at a time of our own would stack on the guest's own vsync waits.
+        plan[3] = 0;
+        // Held for its slot: SurfaceFlinger latches it at the vsync after that time, whatever the
+        // jitter of the guest's present. Frames that are late are shown at once; nothing is held
+        // for longer than a few refreshes (a stale clock, a restarted cadence).
+        if (late || ideal <= now) return 0;
+        if (ideal - now > Math.max(4 * spacing, 100_000_000L)) return 0;
+        return ideal;
     }
 
     private void countFrameForHud(Window window) {
@@ -835,7 +845,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
                 final long ahb = drawable.backingAHB;
                 if (ahb != 0) {
                     shown.remove(window.id);
-                    nativePresent(nativeHandle, window.id, did(drawable), ahb, 0, 0, false);
+                    nativePresent(nativeHandle, window.id, did(drawable), ahb, 0, 0, false, 0);
                 }
             }
         }
