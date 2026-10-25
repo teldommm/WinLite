@@ -163,8 +163,7 @@ private fun GraphicsSidebarPanel(
                         onCheckedChange = {
                             perfHintOn = it
                             callbacks.onPerformanceHintChanged(it)
-                        },
-                        labelStyle = SidebarText.section()
+                        }
                     )
                 }
             }
