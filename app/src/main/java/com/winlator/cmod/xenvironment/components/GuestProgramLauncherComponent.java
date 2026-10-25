@@ -20,11 +20,13 @@ import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.contents.ContentProfile;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.Callback;
+import com.winlator.cmod.core.DefaultVersion;
 import com.winlator.cmod.core.EnvVars;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.FrameGenManager;
 import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.KeyValueSet;
+import com.winlator.cmod.core.OnExtractFileListener;
 import com.winlator.cmod.core.ProcessHelper;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
@@ -103,8 +105,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         if (profile != null) return contentsManager.applyContent(profile);
         // WowBox64/FEXCore DLLs go into the container's system32: link them from the shared
         // component store. Box64 itself goes into the ImageFS, which is not per container.
-        if (type == ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64
-                || type == ContentProfile.ContentType.CONTENT_TYPE_FEXCORE) {
+        if (type == ContentProfile.ContentType.CONTENT_TYPE_FEXCORE) {
+            return SharedComponents.extractAndLink(context, bundledAsset, destination, fexcoreLayout(destination));
+        }
+        if (type == ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64) {
             return SharedComponents.extractAndLink(context, bundledAsset, destination, null);
         }
         return TarCompressorUtils.extract(
@@ -112,6 +116,61 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 context,
                 bundledAsset,
                 destination);
+    }
+
+    // ${libdir}/wine/aarch64-unix of the .wcp profiles (ContentsManager: ${libdir} = <ImageFs>/usr/lib).
+    private static final String FEXCORE_UNIX_LIB_DIR = "usr/lib/wine/aarch64-unix";
+    private static final String FEXCORE_UNIX_LIB_PROBE = "libwow64fex.so";
+
+    private File fexcoreUnixLibDir() {
+        return new File(environment.getImageFs().getRootDir(), FEXCORE_UNIX_LIB_DIR);
+    }
+
+    /**
+     * Bundled FEXCore archives keep the layout of the .wcp packages: {@code system32/*.dll} go to the
+     * prefix and {@code aarch64-unix/*.so} to the ImageFs. Files at the archive root (the old flat
+     * layout) still go to system32.
+     */
+    private OnExtractFileListener fexcoreLayout(File system32dir) {
+        final Path base = system32dir.toPath().toAbsolutePath().normalize();
+        final File unixLibDir = fexcoreUnixLibDir();
+        return (file, size) -> {
+            String name = base.relativize(file.toPath().toAbsolutePath().normalize()).toString();
+            if (name.equals("system32") || name.equals("aarch64-unix")) return null;
+            File target = file;
+            if (name.startsWith("system32/")) target = new File(system32dir, name.substring("system32/".length()));
+            else if (name.startsWith("aarch64-unix/")) target = new File(unixLibDir, name.substring("aarch64-unix/".length()));
+            else return file;
+            File parent = target.getParentFile();
+            if (parent != null && !parent.isDirectory()) parent.mkdirs();
+            return target;
+        };
+    }
+
+    /**
+     * A version whose bundled archive is no longer shipped (e.g. FEXCore 2601, Box64 0.4.2) and that
+     * is not installed as a content package would fail to apply: use the current default instead and
+     * store it where it was selected (shortcut or container).
+     */
+    private String resolveBundledVersion(ContentProfile.ContentType type, String version, String extraKey,
+                                         String assetDir, String assetPrefix, String fallback) {
+        if (version == null || version.isEmpty() || resolveInstalledRuntimeProfile(type, version) != null) return version;
+        try {
+            String[] shipped = environment.getContext().getAssets().list(assetDir);
+            if (shipped == null || java.util.Arrays.asList(shipped).contains(assetPrefix + "-" + version + ".tzst")) return version;
+        } catch (IOException e) {
+            return version;
+        }
+        Log.w("GuestProgramLauncherComponent", assetPrefix + " " + version + " is no longer bundled, using " + fallback);
+        if (shortcut != null && !shortcut.getExtra(extraKey).isEmpty()) {
+            shortcut.putExtra(extraKey, fallback);
+            shortcut.saveData();
+        } else {
+            if (extraKey.equals("fexcoreVersion")) container.setFEXCoreVersion(fallback);
+            else container.setBox64Version(fallback);
+            container.saveData();
+        }
+        return fallback;
     }
 
     private void extractBox64Files() {
@@ -123,6 +182,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         if (shortcut != null)
             box64Version = shortcut.getExtra("box64Version", shortcut.container.getBox64Version());
 
+        box64Version = resolveBundledVersion(ContentProfile.ContentType.CONTENT_TYPE_BOX64, box64Version,
+                "box64Version", "box64", "box64", DefaultVersion.BOX64);
         Log.d("GuestProgramLauncherComponent", "box64Version: " + box64Version);
 
         File rootDir = imageFs.getRootDir();
@@ -162,6 +223,11 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             fexcoreVersion = shortcut.getExtra("fexcoreVersion", shortcut.container.getFEXCoreVersion());
         }
 
+        wowbox64Version = resolveBundledVersion(ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64, wowbox64Version,
+                "box64Version", "wowbox64", "wowbox64", DefaultVersion.WOWBOX64);
+        fexcoreVersion = resolveBundledVersion(ContentProfile.ContentType.CONTENT_TYPE_FEXCORE, fexcoreVersion,
+                "fexcoreVersion", "fexcore", "fexcore", DefaultVersion.FEXCORE);
+
         Log.d("GuestProgramLauncherComponent", "box64Version in use: " + wowbox64Version);
         Log.d("GuestProgramLauncherComponent", "fexcoreVersion in use: " + fexcoreVersion);
 
@@ -184,7 +250,11 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 ContentProfile.ContentType.CONTENT_TYPE_FEXCORE, fexcoreVersion);
         boolean fexcoreFilesMissing = fexcoreProfile != null
                 && !contentsManager.isContentApplied(fexcoreProfile);
-        if (!fexcoreVersion.equals(container.getExtra("fexcoreVersion")) || fexcoreFilesMissing) {
+        // The unix libs live in the ImageFs, which a system-files reinstall wipes; the container
+        // keeps only the version it last applied, so remember that it needs them.
+        boolean fexcoreUnixLibsMissing = "1".equals(container.getExtra("fexcoreUnixLibs"))
+                && !new File(fexcoreUnixLibDir(), FEXCORE_UNIX_LIB_PROBE).isFile();
+        if (!fexcoreVersion.equals(container.getExtra("fexcoreVersion")) || fexcoreFilesMissing || fexcoreUnixLibsMissing) {
             if (fexcoreFilesMissing) {
                 Log.w("GuestProgramLauncherComponent",
                         "FEXCore files are missing or incomplete; reapplying " + fexcoreVersion);
@@ -197,6 +267,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                     system32dir);
             if (applied) {
                 container.putExtra("fexcoreVersion", fexcoreVersion);
+                container.putExtra("fexcoreUnixLibs", new File(fexcoreUnixLibDir(), FEXCORE_UNIX_LIB_PROBE).isFile() ? "1" : "0");
                 containerDataChanged = true;
             } else {
                 Log.e("GuestProgramLauncherComponent", "Unable to apply FEXCore version " + fexcoreVersion);

@@ -29,7 +29,7 @@
     <string-array name="wrapper_graphics_driver_version_entries">
         <item>System</item>
         <item>v863</item>
-        <item>turnip26.2.0</item>
+        <item>turnip26.2-v2</item>
     </string-array>
     <string-array name="audio_driver_entries">
         <item>ALSA</item>
@@ -51,6 +51,10 @@
         <item>1.10.3</item>
         <item>2.3.1</item>
         <item>2.3.1-arm64ec-gplasync</item>
+        <item>2.4.1-fix</item>
+        <item>2.4.1-arm64ec-gplasync</item>
+        <item>2.6-2-gplasync</item>
+        <item>2.6.2-arm64ec-gplasync</item>
     </string-array>
     <string-array name="vkd3d_version_entries">
         <item>None</item>

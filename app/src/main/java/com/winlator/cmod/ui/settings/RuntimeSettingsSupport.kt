@@ -340,7 +340,7 @@ private suspend fun loadSettingsCatalogUncached(
         ),
         fex = versions(
             ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
-            listOf(DefaultVersion.FEXCORE), selectedFex, false
+            DefaultVersion.FEXCORE_BUNDLED.toList(), selectedFex, false
         ),
         box = versions(
             ContentProfile.ContentType.CONTENT_TYPE_BOX64,
