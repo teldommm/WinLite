@@ -14,7 +14,7 @@ import java.util.List;
 public abstract class ProtonPackageManager {
     public static final String DEFAULT_IDENTIFIER = "proton-9.0-arm64ec";
     // Where the bundled runtime comes from at build time (see downloadProton in app/build.gradle).
-    private static final String BUNDLED_URL = "https://github.com/Other-backup/winlator-imagefs-v2/releases/download/c/proton-9.0-arm64ec.tar.zst";
+    private static final String BUNDLED_URL = "https://github.com/teldommm/WinLite/releases/download/Assest/proton-9.0-arm64ec.tar.zst";
 
     public static class PackageInfo {
         public final String identifier;
@@ -48,8 +48,8 @@ public abstract class ProtonPackageManager {
     // handled like any other catalog component - nothing else is hard-coded here.
     private static final List<PackageInfo> PACKAGES = Arrays.asList(
             new PackageInfo(DEFAULT_IDENTIFIER, "Proton 9 arm64ec", "proton-9.0-arm64ec.tar.zst",
-                    new long[]{73570637L}, BUNDLED_URL,
-                    "5f9375640479a5b2c4c3998fda689bb5085febc8fcdb7b6998c79d925392991a")
+                    new long[]{65426563L}, BUNDLED_URL,
+                    "939c1b00fa04a6c09ce04f2a8e2a00025311aad85373fdb3b1d38734add71a9f")
     );
 
     public static List<PackageInfo> getPackages() {

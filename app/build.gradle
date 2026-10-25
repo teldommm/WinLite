@@ -53,7 +53,7 @@ tasks.register("downloadImageFS") {
     File imageFS = new File(assetDir, "imagefs.tar.zst")
     int parts = 2
     // Pinned to a commit (not "main") so a later push to that repository cannot change what we build.
-    String urlBase = sourceProp("imagefsUrlBase", "https://raw.githubusercontent.com/Other-backup/winlator-imagefs-v2/6a08be6ea2d142c7739707a1aa5bbe1fac2c4c75/imagefs.tar.zst.")
+    String urlBase = sourceProp("imagefsUrlBase", "https://github.com/teldommm/WinLite/releases/download/Assest/imagefs.tar.zst.")
     String expectedSha = sourceProp("imagefsSha256", "7838756e6a05c91afff68f4bf12aa2780f815877753f8dd354e203e99b9caf8a").toLowerCase()
     long expectedSize = sourceProp("imagefsSize", "193425249") as long
 
@@ -101,9 +101,9 @@ tasks.register("downloadProton") {
     def assetDir = new File(project.rootDir, ["app","src","main","assets"].join(File.separator))
     File protonARM64EC = new File(assetDir, "proton-9.0-arm64ec.tar.zst")
     File staleProtonARM64EC = new File(assetDir, "proton-10.0-5-arm64ec.tar.zst")
-    String protonURL = sourceProp("protonUrl", "https://github.com/Other-backup/winlator-imagefs-v2/releases/download/c/proton-9.0-arm64ec.tar.zst")
-    String protonSHA256 = sourceProp("protonSha256", "5f9375640479a5b2c4c3998fda689bb5085febc8fcdb7b6998c79d925392991a")
-    long protonSize = sourceProp("protonSize", "73570637") as long
+    String protonURL = sourceProp("protonUrl", "https://github.com/teldommm/WinLite/releases/download/Assest/proton-9.0-arm64ec.tar.zst")
+    String protonSHA256 = sourceProp("protonSha256", "939c1b00fa04a6c09ce04f2a8e2a00025311aad85373fdb3b1d38734add71a9f")
+    long protonSize = sourceProp("protonSize", "65426563") as long
 
     doLast {
         if (staleProtonARM64EC.exists()) staleProtonARM64EC.delete()
