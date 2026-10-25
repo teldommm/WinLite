@@ -269,7 +269,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String vkbasaltConfig = "";
     PreloaderDialog preloaderDialog = null;
     private Runnable configChangedCallback = null;
+    // Manual pause from the sidebar. Outranks the background suspend: coming back to the app must
+    // not wake a game the player paused.
     private boolean isPaused = false;
+    // True only while onPause() actually froze the game (setting on, not PiP, not already paused),
+    // so onResume() thaws exactly what it froze.
+    private boolean backgroundSuspended = false;
     private boolean isRelativeMouseMovement = false;
     private boolean isMouseDisabled = false;
     // Like Relative/Disable Mouse: starts from the shortcut ("tapToClick", on unless "0"),
@@ -826,14 +831,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public void onResume() {
         super.onResume();
 
-        if (environment != null) {
-            xServerView.onResume();
-            environment.onResume();
-        }
+        if (environment != null) xServerView.onResume();
+
+        // Thaw only what onPause() froze, and never a game the player paused by hand.
+        if (backgroundSuspended && !isPaused) resumeGame();
+        backgroundSuspended = false;
+
         startTime = System.currentTimeMillis();
-        handler.postDelayed(savePlaytimeRunnable, SAVE_INTERVAL_MS);
-        if (!isInPictureInPictureMode())
-            ProcessHelper.resumeAllWineProcesses();
+        handler.removeCallbacks(savePlaytimeRunnable);
+        if (!isPaused) handler.postDelayed(savePlaytimeRunnable, SAVE_INTERVAL_MS);
     }
 
     @Override
@@ -842,18 +848,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
         super.onPause();
 
         if (!isInPictureInPictureMode()) {
-            if (environment != null) {
-                environment.onPause();
-                xServerView.onPause();
-            }
+            if (environment != null) xServerView.onPause();
 
-            ProcessHelper.pauseAllWineProcesses();
-            // The paused game can't send its rumble "stop" any more.
-            com.winlator.cmod.widget.TouchHaptics.shared(this).stopAllRumble();
+            // "Suspend Wine when app is in background" (Settings, on by default). Off = the game
+            // keeps running behind the app. Already paused by hand = already frozen.
+            if (!isPaused && preferences.getBoolean("pause_resume_wine", true)) {
+                suspendGame();
+                backgroundSuspended = true;
+            }
         }
 
         savePlaytimeData();
         handler.removeCallbacks(savePlaytimeRunnable);
+    }
+
+    // The one freeze path, used by both the background suspend and the sidebar Pause: guest
+    // process + audio (XEnvironment), every Wine process, and the controller rumble (a frozen
+    // game can't send its own rumble "stop").
+    private void suspendGame() {
+        if (environment != null) environment.onPause();
+        ProcessHelper.pauseAllWineProcesses();
+        com.winlator.cmod.widget.TouchHaptics.shared(this).stopAllRumble();
+    }
+
+    private void resumeGame() {
+        if (environment != null) environment.onResume();
+        ProcessHelper.resumeAllWineProcesses();
     }
 
     private void enterPipMode() {
@@ -890,7 +910,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void savePlaytimeData() {
         long endTime = System.currentTimeMillis();
-        long playtime = endTime - startTime;
+        long playtime = isPaused ? 0 : endTime - startTime;
 
         if (playtime < 0) {
             playtime = 0;
@@ -939,6 +959,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         Executors.newSingleThreadExecutor().execute(() -> {
 
+            // A SIGSTOPped process (paused by hand, or still frozen from the background) never
+            // acts on SIGTERM until it is continued: exiting from the pause menu used to wait out
+            // the whole 1.5 s and then SIGKILL Wine, with no chance to shut down cleanly.
+            ProcessHelper.resumeAllWineProcesses();
             ProcessHelper.terminateAllWineProcesses();
 
             long start = System.currentTimeMillis();
@@ -1649,11 +1673,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 @Override
                 public void onPauseToggle() {
                     if (isPaused) {
-                        ProcessHelper.resumeAllWineProcesses();
+                        isPaused = false;
+                        resumeGame();
+                        // Paused time is not play time.
+                        startTime = System.currentTimeMillis();
+                        handler.removeCallbacks(savePlaytimeRunnable);
+                        handler.postDelayed(savePlaytimeRunnable, SAVE_INTERVAL_MS);
                     } else {
-                        ProcessHelper.pauseAllWineProcesses();
+                        // Bank the time played so far, then stop counting (savePlaytimeData adds
+                        // nothing while isPaused).
+                        savePlaytimeData();
+                        handler.removeCallbacks(savePlaytimeRunnable);
+                        isPaused = true;
+                        // Let go of mouse buttons / fingers the touch surface holds: their
+                        // release events are swallowed while paused and would leave them stuck.
+                        if (touchpadView != null) touchpadView.resetInputState();
+                        suspendGame();
                     }
-                    isPaused = !isPaused;
                     if (sidebarRailState != null) sidebarRailState.setPaused(isPaused);
                     drawerLayout.closeDrawers();
                     WinToast.show(XServerDisplayActivity.this,
@@ -2822,6 +2858,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Physical controller sticks / triggers / HAT: WinHandler updates the pad and runs the
         // profile's bindings (InputControlsView) itself, so nothing depends on which view has
         // focus. Returning true also stops the framework from turning the stick into D-pad keys.
+        // Paused by hand: the game is frozen, so sticks / mouse must not pile up input that would
+        // hit it all at once on Resume. The framework still handles it (drawer, dialogs).
+        if (isPaused) return super.dispatchGenericMotionEvent(event);
+
         if (winHandler != null && winHandler.onGenericMotionEvent(event)) return true;
 
         boolean handledByTouchpadView = touchpadView != null && touchpadView.onExternalMouseEvent(event);
@@ -2846,6 +2886,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
                                 && (xServer != null && xServer.keyboard.onKeyEvent(event));
                 return true;
             }
+        }
+
+        // Paused by hand: new presses would queue up for the frozen game and all land on Resume.
+        // Releases (ACTION_UP) still go through below so a key held when the pause began does not
+        // stay stuck. Back, and anything while the drawer / a dialog is up, keep working.
+        if (isPaused && event.getAction() != KeyEvent.ACTION_UP) {
+            if (event.getKeyCode() == KeyEvent.KEYCODE_BACK || ThemedAlertHost.isShowing()
+                    || (drawerLayout != null && drawerLayout.isDrawerOpen(GravityCompat.START)))
+                return super.dispatchKeyEvent(event);
+            return true;
         }
 
         if (inputControlsView != null && inputControlsView.onKeyEvent(event)) return true;
