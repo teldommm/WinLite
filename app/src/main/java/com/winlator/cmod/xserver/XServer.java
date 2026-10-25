@@ -108,9 +108,28 @@ public class XServer {
         return this.xServerView;
     }
     
+    /**
+     * Touch Mode "Off": no mouse input reaches the game from any source (finger, physical mouse,
+     * layout elements, captured pointer, relative mouse). The X pointer is blocked in
+     * {@link Pointer}, the Windows-side mouse in {@link WinHandler#mouseEvent}. The drawn cursor
+     * is the caller's business (the activity hides it), so this does not touch the view.
+     */
     public void setMouseDisabled(boolean mouseDisabled) {
+        if (mouseDisabled && !this.disableMouse) {
+            // Release what is held first: once the flag is set these releases would be dropped
+            // and a button would stay pressed in the game.
+            for (Pointer.Button button : new Pointer.Button[]{Pointer.Button.BUTTON_LEFT,
+                    Pointer.Button.BUTTON_MIDDLE, Pointer.Button.BUTTON_RIGHT}) {
+                if (pointer.isButtonPressed(button)) injectPointerButtonRelease(button);
+            }
+            if (winHandler != null && relativeMouseMovement) {
+                winHandler.mouseEvent(com.winlator.cmod.winhandler.MouseEventFlags.LEFTUP, 0, 0, 0);
+                winHandler.mouseEvent(com.winlator.cmod.winhandler.MouseEventFlags.RIGHTUP, 0, 0, 0);
+                winHandler.mouseEvent(com.winlator.cmod.winhandler.MouseEventFlags.MIDDLEUP, 0, 0, 0);
+            }
+        }
         this.disableMouse = mouseDisabled;
-        xServerView.setCursorVisible(!mouseDisabled);
+        if (winHandler != null) winHandler.setMouseDisabled(mouseDisabled);
     }
     
     public boolean isMouseDisabled() {
@@ -123,6 +142,7 @@ public class XServer {
 
     public void setWinHandler(WinHandler winHandler) {
         this.winHandler = winHandler;
+        if (winHandler != null) winHandler.setMouseDisabled(disableMouse);
     }
 
     public SHMSegmentManager getSHMSegmentManager() {

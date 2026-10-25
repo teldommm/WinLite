@@ -233,8 +233,16 @@ public class WinHandler {
         });
     }
 
+    // Touch Mode "Off": every mouse event bound for Windows (relative mouse, stick/button mouse
+    // elements, physical mouse) is dropped here. Mirrors XServer.isMouseDisabled().
+    private volatile boolean mouseDisabled = false;
+
+    public void setMouseDisabled(boolean mouseDisabled) {
+        this.mouseDisabled = mouseDisabled;
+    }
+
     public void mouseEvent(int flags, int dx, int dy, int wheelDelta) {
-        if (!initReceived)
+        if (!initReceived || mouseDisabled)
             return;
         addAction(() -> {
             sendData.rewind();

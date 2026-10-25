@@ -598,6 +598,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer = new XServer(new ScreenInfo(screenSize), getSelectedSurfaceFormat());
         xServer.setWinHandler(winHandler);
         xServer.setRelativeMouseMovement(isRelativeMouseMovement);
+        // Touch Mode Off: no mouse input at all, from any source (see XServer.setMouseDisabled).
+        xServer.setMouseDisabled(isMouseDisabled);
         advertisePanelRefreshRates();
 
         boolean[] winStarted = { false };
@@ -741,10 +743,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return containerId;
     }
 
-    // Touchscreen: the finger is the cursor, so the drawn one is hidden. Trackpad and Off show it
-    // (with the touch surface off, the cursor is moved by layout elements or a physical mouse).
+    // The drawn cursor is only shown in Trackpad mode, where it is the thing the finger moves
+    // indirectly. Touchscreen: the finger is the cursor, so the drawn one is hidden. Off: mouse
+    // input is disabled altogether (XServer.setMouseDisabled), so there is no cursor to show.
+    // isMouseDisabled wins over simulateTouchScreen: Off keeps the last Touchscreen/Trackpad
+    // choice in simulateTouchScreen, and a shortcut can store both disableMouse and simTouchScreen.
     private boolean isDrawnCursorVisible() {
-        return !(simulateTouchScreen && !isMouseDisabled);
+        return !isMouseDisabled && !simulateTouchScreen;
     }
 
     private void handleCapturedPointer(MotionEvent event) {
@@ -2426,9 +2431,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // Touch surface off; the last Trackpad/Touchscreen choice is kept for when a
                     // mode is picked again.
                     isMouseDisabled = true;
+                    // First the touch view (releases whatever the finger holds), then the
+                    // server-wide block, which also releases held buttons before it closes.
                     if (touchpadView != null) touchpadView.setMouseEnabled(false);
+                    xServer.setMouseDisabled(true);
                 } else {
                     isMouseDisabled = false;
+                    xServer.setMouseDisabled(false);
                     touchMode = mode == TouchpadView.MODE_TOUCHSCREEN ? TouchpadView.MODE_TOUCHSCREEN : TouchpadView.MODE_TRACKPAD;
                     simulateTouchScreen = touchMode == TouchpadView.MODE_TOUCHSCREEN;
                     if (touchpadView != null) {
