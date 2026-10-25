@@ -12,6 +12,8 @@ import java.util.ArrayList;
 
 public class XClient implements XResourceManager.OnResourceLifecycleListener {
     public final XServer xServer;
+    /** The connector-level client behind this X client (null if not set); used to pace SHM clients. */
+    public com.winlator.cmod.xconnector.Client connectorClient;
     private boolean authenticated = false;
     public final Integer resourceIDBase;
     private short sequenceNumber = 0;

@@ -8,6 +8,7 @@ import com.winlator.cmod.xconnector.XStreamLock;
 import com.winlator.cmod.xserver.Drawable;
 import com.winlator.cmod.xserver.GraphicsContext;
 import com.winlator.cmod.xserver.SHMSegmentManager;
+import com.winlator.cmod.xserver.ShmFramePacer;
 import com.winlator.cmod.xserver.XClient;
 import com.winlator.cmod.xserver.XLock;
 import com.winlator.cmod.xserver.XServer;
@@ -105,6 +106,21 @@ public class MITSHMExtension implements Extension {
         }
 
         drawable.drawImage(srcX, srcY, dstX, dstY, srcWidth, srcHeight, depth, data, totalWidth, totalHeight);
+
+        // FPS limit for clients that present with SHM blits instead of the Present extension
+        // (those never reach PresentExtension's limiter). Only a blit whose clipped destination
+        // covers >= 80% of the drawable counts as a frame; the frame itself is shown at once, the
+        // client is then held back by suspending its socket reads.
+        int clippedW = Math.min((int) srcWidth, drawable.width - Math.max(0, (int) dstX));
+        int clippedH = Math.min((int) srcHeight, drawable.height - Math.max(0, (int) dstY));
+        if (clippedW > 0 && clippedH > 0
+                && (long) clippedW * clippedH * 5 >= (long) drawable.width * drawable.height * 4
+                && client.connectorClient != null) {
+            long delayNs = ShmFramePacer.framePresented(drawableId);
+            if (delayNs > 0) {
+                client.connectorClient.getConnector().pauseClientReads(client.connectorClient, delayNs);
+            }
+        }
     }
 
     /* Xlib does not detach a process's segments when it exits; the mappings stayed for the rest

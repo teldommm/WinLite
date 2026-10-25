@@ -24,7 +24,14 @@ import com.winlator.cmod.xserver.errors.BadWindow;
 import com.winlator.cmod.xserver.errors.XRequestError;
 import com.winlator.cmod.xserver.events.RawEvent;
 
+import com.winlator.cmod.xserver.Atom;
+import com.winlator.cmod.xserver.ScreenInfo;
+import com.winlator.cmod.xserver.XServer;
+
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.List;
 
 public abstract class WindowRequests {
@@ -437,6 +444,15 @@ public abstract class WindowRequests {
 
     public static void sendEvent(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int windowId = inputStream.readInt();
+        // The event is read before the destination is looked at: this server's root window has
+        // id 1, which is also SendEvent's InputFocus special value, so the id check below cannot
+        // tell "to the root" from "to the focus" - and Wine's window-state requests are
+        // ClientMessages addressed to the root.
+        Bitmask eventMask = new Bitmask(inputStream.readInt());
+
+        byte[] data = new byte[32];
+        inputStream.read(data);
+        if (applyNetWmState(client.xServer, data)) return;
 
         if (windowId == 0 || windowId == 1) {
             client.skipRequest();
@@ -446,16 +462,58 @@ public abstract class WindowRequests {
         Window destination = client.xServer.windowManager.getWindow(windowId);
         if (destination == null) throw new BadWindow(windowId);
 
-        Bitmask eventMask = new Bitmask(inputStream.readInt());
-
-        byte[] data = new byte[32];
-        inputStream.read(data);
         Event event = new RawEvent(data);
 
         if (eventMask.isEmpty()) {
             destination.originClient.sendEvent(event);
         }
         else destination.sendEvent(eventMask, event);
+    }
+
+    private static final byte CLIENT_MESSAGE = 33;
+    private static final int NET_WM_STATE_ADD = 1;
+    private static final int NET_WM_STATE_TOGGLE = 2;
+
+    /**
+     * There is no window manager: a _NET_WM_STATE ClientMessage (what Wine sends to ask for
+     * fullscreen and the like) is applied here. The window's _NET_WM_STATE property is updated and,
+     * when fullscreen is newly added, the window is sized to the screen. Returns true when the
+     * event was such a request and has been consumed.
+     */
+    private static boolean applyNetWmState(XServer xServer, byte[] data) {
+        if ((data[0] & 0x7f) != CLIENT_MESSAGE || data[1] != 32) return false;
+        ByteBuffer event = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+        int stateAtom = Atom.getId("_NET_WM_STATE");
+        if (event.getInt(8) != stateAtom) return false;
+        Window window = xServer.windowManager.getWindow(event.getInt(4));
+        if (window == null || window.getParent() != xServer.windowManager.rootWindow) return false;
+
+        int action = event.getInt(12);
+        ArrayList<Integer> states = new ArrayList<>();
+        Property current = window.getProperty(stateAtom);
+        if (current != null && current.format == Property.Format.INT_ARRAY) {
+            for (int i = 0; i < current.data.limit() / 4; i++) states.add(current.getInt(i));
+        }
+        int fullscreenAtom = Atom.getId("_NET_WM_STATE_FULLSCREEN");
+        boolean wasFullscreen = states.contains(fullscreenAtom);
+        for (int index = 16; index <= 20; index += 4) {
+            int atom = event.getInt(index);
+            if (atom == 0) continue;
+            boolean present = states.contains(atom);
+            boolean wanted = action == NET_WM_STATE_ADD || (action == NET_WM_STATE_TOGGLE && !present);
+            if (wanted && !present) states.add(atom);
+            else if (!wanted && present) states.remove(Integer.valueOf(atom));
+        }
+
+        ByteBuffer values = ByteBuffer.allocate(states.size() * 4).order(ByteOrder.LITTLE_ENDIAN);
+        for (int atom : states) values.putInt(atom);
+        window.modifyProperty(stateAtom, Atom.getId("ATOM"), Property.Format.INT_ARRAY, Property.Mode.REPLACE, values.array());
+
+        if (!wasFullscreen && states.contains(fullscreenAtom)) {
+            ScreenInfo screen = xServer.screenInfo;
+            xServer.windowManager.setWindowGeometry(window, (short)0, (short)0, screen.width, screen.height);
+        }
+        return true;
     }
 
     public static void getScreenSaver(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {

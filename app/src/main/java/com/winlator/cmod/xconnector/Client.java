@@ -13,6 +13,12 @@ public class Client {
     protected Thread pollThread;
     protected int shutdownFd;
     protected boolean connected;
+    // Frame-pacing back-pressure state (see XConnectorEpoll.pauseClientReads); guarded by this.
+    protected java.util.concurrent.ScheduledFuture<?> pauseTask;
+    protected long pauseDeadlineNs;
+    protected int pauseGeneration;
+    protected int pacedSupersedes;
+    protected boolean pacingExempt;
 
     public Client(XConnectorEpoll connector, ClientSocket clientSocket) {
         this.connector = connector;
@@ -25,6 +31,10 @@ public class Client {
         outputStream = new XOutputStream(clientSocket, connector.getInitialOutputBufferCapacity());
         inputStream.setByteOrder(ByteOrder.LITTLE_ENDIAN);
         outputStream.setByteOrder(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    public XConnectorEpoll getConnector() {
+        return connector;
     }
 
     public XInputStream getInputStream() {

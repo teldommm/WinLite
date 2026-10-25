@@ -276,4 +276,49 @@ public class XServer {
     public synchronized boolean isGrabbedBy(XClient client) {
         return isGrabbed && grabbingClient == client;
     }
+
+    /** Wine's virtual desktop: a top-level, non-override-redirect window of explorer.exe. */
+    public boolean isDesktopWindow(Window window) {
+        return window != null && window.getParent() == windowManager.rootWindow
+            && !window.attributes.isOverrideRedirect()
+            && window.getClassName().contains("explorer.exe");
+    }
+
+    /**
+     * The size of the screen as it is actually shown. When a game sets a mode smaller than the
+     * container screen, Wine resizes its virtual desktop window and the rest of the root window
+     * stays empty; renderers and touch mapping then use the desktop's size so the desktop fills
+     * the display instead of sitting in a corner. {@link #screenInfo} when there is no such window.
+     */
+    public ScreenInfo getEffectiveScreenInfo() {
+        try (XLock lock = lock(Lockable.WINDOW_MANAGER)) {
+            for (Window child : windowManager.rootWindow.getChildren()) {
+                if (!child.attributes.isMapped() || !isDesktopWindow(child)) continue;
+                short width = child.getWidth(), height = child.getHeight();
+                boolean fits = width >= 320 && height >= 200
+                    && width <= screenInfo.width && height <= screenInfo.height;
+                if (fits && (width < screenInfo.width || height < screenInfo.height)) {
+                    return new ScreenInfo(width, height);
+                }
+                break;
+            }
+        }
+        return screenInfo;
+    }
+
+    // Told by the renderer when the effective screen size changed, so input mapping follows it.
+    private final java.util.concurrent.CopyOnWriteArrayList<Runnable> effectiveScreenListeners =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public void addOnEffectiveScreenChangedListener(Runnable listener) {
+        effectiveScreenListeners.addIfAbsent(listener);
+    }
+
+    public void removeOnEffectiveScreenChangedListener(Runnable listener) {
+        effectiveScreenListeners.remove(listener);
+    }
+
+    public void notifyEffectiveScreenChanged() {
+        for (Runnable listener : effectiveScreenListeners) listener.run();
+    }
 }

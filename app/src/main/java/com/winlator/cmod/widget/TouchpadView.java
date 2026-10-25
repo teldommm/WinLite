@@ -31,6 +31,7 @@ import com.winlator.cmod.renderer.ViewTransformation;
 import com.winlator.cmod.winhandler.MouseEventFlags;
 import com.winlator.cmod.winhandler.WinHandler;
 import com.winlator.cmod.xserver.Pointer;
+import com.winlator.cmod.xserver.ScreenInfo;
 import com.winlator.cmod.xserver.XServer;
 
 public class TouchpadView extends View {
@@ -126,7 +127,8 @@ public class TouchpadView extends View {
         setFocusable(true);
         setFocusableInTouchMode(false);
         setPointerIcon(PointerIcon.load(getResources(), R.drawable.hidden_pointer_arrow));
-        updateXform(AppUtils.getScreenWidth(), AppUtils.getScreenHeight(), xServer.screenInfo.width, xServer.screenInfo.height);
+        ScreenInfo initialScreen = xServer.getEffectiveScreenInfo();
+        updateXform(AppUtils.getScreenWidth(), AppUtils.getScreenHeight(), initialScreen.width, initialScreen.height);
         // Initialize SharedPreferences here
         this.preferences = PreferenceManager.getDefaultSharedPreferences(context);
 
@@ -145,7 +147,31 @@ public class TouchpadView extends View {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        updateXform(w, h, xServer.screenInfo.width, xServer.screenInfo.height);
+        ScreenInfo screenInfo = xServer.getEffectiveScreenInfo();
+        updateXform(w, h, screenInfo.width, screenInfo.height);
+    }
+
+    // The renderer shows only the shrunken Wine desktop when a game sets a smaller mode (see
+    // XServer.getEffectiveScreenInfo); touches have to be mapped onto that part, not the whole screen.
+    private final Runnable effectiveScreenListener = () -> post(this::refreshTransform);
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        xServer.addOnEffectiveScreenChangedListener(effectiveScreenListener);
+        refreshTransform();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        xServer.removeOnEffectiveScreenChangedListener(effectiveScreenListener);
+        super.onDetachedFromWindow();
+    }
+
+    public void refreshTransform() {
+        if (getWidth() <= 0 || getHeight() <= 0) return;
+        ScreenInfo screenInfo = xServer.getEffectiveScreenInfo();
+        updateXform(getWidth(), getHeight(), screenInfo.width, screenInfo.height);
     }
 
     private void updateXform(int outerWidth, int outerHeight, int innerWidth, int innerHeight) {
@@ -941,8 +967,7 @@ public class TouchpadView extends View {
     }
 
     public void toggleFullscreen() {
-        new Handler().postDelayed(() -> updateXform(getWidth(), getHeight(), xServer.screenInfo.width, xServer.screenInfo.height),
-                UPDATE_FORM_DELAYED_TIME);
+        new Handler().postDelayed(this::refreshTransform, UPDATE_FORM_DELAYED_TIME);
     }
     
     public void setMouseEnabled(boolean enabled) {
