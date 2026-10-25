@@ -133,6 +133,14 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     private Cursor lastCursor = null;
     private volatile boolean inPipMode = false;
 
+    /** Told (on the UI thread, outside every lock) that the native side could not start. */
+    public interface OnStartFailedListener { void onStartFailed(); }
+    private volatile OnStartFailedListener startFailedListener;
+
+    public void setOnStartFailedListener(OnStartFailedListener listener) {
+        startFailedListener = listener;
+    }
+
     private WinlatorHUD hudRef = null;
     private FrameRating classicHudRef = null;
     private volatile int fpsWindowId = -1;
@@ -219,6 +227,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
 
     public void onSurfaceCreated(Surface surface) {
         if (!gpuImageChecked) { GPUImage.checkIsSupported(); gpuImageChecked = true; }
+        boolean started;
         synchronized (lock) {
             if (nativeHandle != 0) {
                 if (!nativeReattachSurface(nativeHandle, surface)) {
@@ -229,14 +238,20 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
             if (nativeHandle == 0) {
                 nativeHandle = nativeInit(surface, xServer.screenInfo.width, xServer.screenInfo.height, compatMode);
             }
-            if (nativeHandle == 0) {
-                Log.e(TAG, "SurfaceFlinger renderer could not be started");
-                return;
+            started = nativeHandle != 0;
+            if (started) {
+                pushDisplayRefreshRateLocked();
+                vsyncClock.start();
+                updateTransform();
+                restoreCursorStateLocked();
             }
-            pushDisplayRefreshRateLocked();
-            vsyncClock.start();
-            updateTransform();
-            restoreCursorStateLocked();
+        }
+        if (!started) {
+            // Nothing would ever be drawn: let the owner fall back to another renderer.
+            Log.e(TAG, "SurfaceFlinger renderer could not be started");
+            final OnStartFailedListener listener = startFailedListener;
+            if (listener != null) listener.onStartFailed();
+            return;
         }
         // The native side starts without layers after (re)creation: send the whole tree.
         requestWindowLayout();
@@ -512,8 +527,7 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
                 final int screenW = xServer.screenInfo.width, screenH = xServer.screenInfo.height;
                 int start = 0;
                 for (int i = collected.size() - 1; i >= 0; i--) {
-                    final Window w = collected.get(i);
-                    if (w.getWidth() >= screenW && w.getHeight() >= screenH) { start = i; break; }
+                    if (coversScreenLocked(collected.get(i), screenW, screenH)) { start = i; break; }
                 }
                 layoutCount = 0;
                 for (int i = start; i < collected.size(); i++) {
@@ -541,6 +555,20 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
         }
         final List<Window> children = window.getChildren();
         for (int i = 0; i < children.size(); i++) collectLocked(children.get(i), false);
+    }
+
+    /**
+     * Whether the window's layer is opaque and, as it will be drawn (its Present pixmap at its
+     * offset, or its own content), covers the whole screen: what lies below it cannot be seen.
+     */
+    private boolean coversScreenLocked(Window window, int screenW, int screenH) {
+        final Shown s = shown.get(window.id);
+        final Drawable d = s != null ? s.drawable : window.getContent();
+        if (d == null || d.backingAHB == 0) return false;     // nothing (known) to show: covers nothing
+        if (d.visual != null && d.visual.depth == 32) return false;   // translucent
+        final int x = window.getRootX() + (s != null ? s.xOff : 0);
+        final int y = window.getRootY() + (s != null ? s.yOff : 0);
+        return x <= 0 && y <= 0 && x + d.width >= screenW && y + d.height >= screenH;
     }
 
     private void addLayerLocked(Window window, Drawable content) {

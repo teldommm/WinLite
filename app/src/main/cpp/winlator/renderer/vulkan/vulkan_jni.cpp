@@ -277,14 +277,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPerformanceHintThreads(
     r->setPerformanceHintThreads(list.data(), list.size());
 }
 
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativePerformanceHintStatus(
-    JNIEnv* env, jobject, jlong handle)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    return env->NewStringUTF(r ? r->performanceHintStatus().c_str() : "off");
-}
-
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeOnVsync(
     JNIEnv*, jobject, jlong handle, jlong frameTimeNs, jlong deadlineNs, jlong presentNs)

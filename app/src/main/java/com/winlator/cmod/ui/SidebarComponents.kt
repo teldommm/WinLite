@@ -176,7 +176,12 @@ internal fun SidebarActionRow(label: String, accent: Boolean = false, onClick: (
 
 // Toggle row that lives inside a SidebarCard next to other rows.
 @Composable
-internal fun SidebarInlineToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+internal fun SidebarInlineToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    labelStyle: TextStyle = SidebarText.row()
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -187,7 +192,7 @@ internal fun SidebarInlineToggle(label: String, checked: Boolean, onCheckedChang
         Text(
             text = label,
             modifier = Modifier.weight(1f).padding(end = 8.dp),
-            style = SidebarText.row(),
+            style = labelStyle,
             color = MaterialTheme.colorScheme.onSurface
         )
         Switch(checked = checked, onCheckedChange = null, colors = accentSwitchColors())

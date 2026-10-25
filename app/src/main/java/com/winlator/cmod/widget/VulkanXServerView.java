@@ -152,7 +152,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native int nativePerformanceHintLevel();
     private native void nativeSetPerformanceHint(long handle, boolean enabled);
     private native void nativeSetPerformanceHintThreads(long handle, int[] tids);
-    private native String nativePerformanceHintStatus(long handle);
     private native boolean nativeSourceBusy(long handle, long sourceId);
     private native long nativeBeginSourceIdleWait(long handle, long sourceId);
     private native void nativeEndSourceIdleWait(long handle, long serial, long timeoutNs);
@@ -1167,13 +1166,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             com.winlator.cmod.core.PerfHintThreads.setListener(perfHintListener);
         } else if (perfHintListener != null) {
             com.winlator.cmod.core.PerfHintThreads.clearListener(perfHintListener);
-        }
-    }
-
-    @Override
-    public String getPerformanceHintStatus() {
-        synchronized (lock) {
-            return nativeHandle != 0 ? nativePerformanceHintStatus(nativeHandle) : "off";
         }
     }
 

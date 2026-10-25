@@ -22,7 +22,6 @@ static int64_t adpfNowNs() {   // CLOCK_MONOTONIC, the clock the work durations 
 
 void VulkanRendererContext::setPerformanceHint(bool enabled) {
     if (adpfWanted_.exchange(enabled, std::memory_order_acq_rel) == enabled) return;
-    if (enabled) adpfSetStatus("starting");
     adpfDirty_.store(true, std::memory_order_release);
     wakeRender();
 }
@@ -40,16 +39,6 @@ void VulkanRendererContext::setPerformanceHintThreads(const int32_t* tids, size_
     if (!adpfWanted_.load(std::memory_order_relaxed)) return;
     adpfDirty_.store(true, std::memory_order_release);
     wakeRender();
-}
-
-std::string VulkanRendererContext::performanceHintStatus() {
-    std::lock_guard<std::mutex> lk(adpfMutex_);
-    return adpfStatus_;
-}
-
-void VulkanRendererContext::adpfSetStatus(const std::string& text) {
-    std::lock_guard<std::mutex> lk(adpfMutex_);
-    adpfStatus_ = text;
 }
 
 void VulkanRendererContext::adpfNote(uint32_t bits) {
@@ -87,7 +76,6 @@ void VulkanRendererContext::adpfService() {
         }
         adpfOpenTried_ = false;
         adpfNotifyBits_.store(0, std::memory_order_relaxed);
-        adpfSetStatus("off");
         return;
     }
 
@@ -111,9 +99,7 @@ void VulkanRendererContext::adpfService() {
         const int64_t cycle = adpfCycleNs();
         if (adpfSession_.open(tids, cycle, win)) {
             adpfTargetNs_ = cycle;
-            adpfSetStatus(adpfSession_.describe());
         } else {
-            adpfSetStatus("unavailable: " + adpfSession_.reason());
             RLOG_E("adpf: unavailable: %s", adpfSession_.reason().c_str());
         }
         return;
@@ -121,7 +107,6 @@ void VulkanRendererContext::adpfService() {
 
     if (companionsChanged) {
         adpfSession_.setThreads(tids);
-        adpfSetStatus(adpfSession_.describe());
     }
 
     const uint32_t bits = adpfNotifyBits_.exchange(0, std::memory_order_relaxed);
@@ -147,11 +132,10 @@ void VulkanRendererContext::adpfFrameEnd(int64_t startNs, int64_t blockedNs) {
     if (std::llabs(cycle - adpfTargetNs_) * 20 > cycle) {
         adpfSession_.setTarget(cycle);
         adpfTargetNs_ = cycle;
-        adpfSetStatus(adpfSession_.describe());
     }
 
     // No GPU duration: see the note at the top of this file.
     adpfSession_.reportCycle(startNs, cpuNs, cpuNs, 0);
     if (!adpfSession_.isOpen())   // dropped after repeated errors
-        adpfSetStatus("unavailable: " + adpfSession_.reason());
+        RLOG_E("adpf: dropped: %s", adpfSession_.reason().c_str());
 }

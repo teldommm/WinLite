@@ -177,6 +177,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public static int NOTIFICATION_ID = -1;
     private XServerRendererView xServerView;
     private boolean screenOffsetYRelativeToCursor = false;
+    private boolean softStretch = false;   // sidebar "stretch" switch; only the Vulkan renderer can honour it
     private boolean rendererSwapping = false;
     private InputControlsView inputControlsView;
     private TouchpadView touchpadView;
@@ -1263,7 +1264,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private XServerRendererView createRendererView(boolean surfaceFlinger) {
         final XServerRendererView view;
         if (surfaceFlinger) {
-            view = new ASurfaceXServerView(this, xServer);
+            final ASurfaceXServerView sfView = new ASurfaceXServerView(this, xServer);
+            // Supported on paper, but the native side could not start (no layers could be created):
+            // nothing would ever be drawn, so go back to Vulkan.
+            sfView.setOnStartFailedListener(() -> handler.post(() -> onSurfaceFlingerStartFailed(sfView)));
+            view = sfView;
         }
         else {
             VulkanXServerView.loadNativeLibrary();
@@ -1296,6 +1301,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * whole window tree from scratch. The choice is saved for the next launch as well.
      */
     private void swapRenderer(boolean toSurfaceFlinger) {
+        swapRenderer(toSurfaceFlinger, true);
+    }
+
+    /** The SurfaceFlinger view could not start: fall back to Vulkan for this session (the saved choice stays). */
+    private void onSurfaceFlingerStartFailed(ASurfaceXServerView failed) {
+        if (xServerView != failed) return;   // already replaced
+        WinToast.show(this, "SurfaceFlinger renderer could not start; using Vulkan.", Toast.LENGTH_LONG);
+        swapRenderer(false, false);
+    }
+
+    /** persist = false: the switch is for this session only (a fallback), the saved renderer is left as it is. */
+    private void swapRenderer(boolean toSurfaceFlinger, boolean persist) {
         if (rendererSwapping || xServerView == null) return;
         if ((xServerView instanceof ASurfaceXServerView) == toSurfaceFlinger) return;
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
@@ -1325,6 +1342,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             for (int windowId : redirected) view.nativeSetCompositeRedirected(windowId, true);
             if (wasFullscreen) view.toggleFullscreen();
+            // Stretch is a Vulkan shader mode: a view created for it starts unstretched.
+            if (view instanceof VulkanXServerView && softStretch)
+                ((VulkanXServerView) view).setStretchMode(1);
             if (zoom != 1.0f) view.setMagnifierZoom(zoom);
             if (screenOffsetYRelativeToCursor) view.setScreenOffsetYRelativeToCursor(true);
             view.setCursorVisible(isDrawnCursorVisible());
@@ -1336,12 +1356,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             applyHudRendererSuffix();
             if (frameRatingWindowId != -1) view.setFpsWindowId(frameRatingWindowId);
 
-            if (shortcut != null) {
-                shortcut.setRenderer(toSurfaceFlinger ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN);
-                shortcut.saveData();
-            } else if (container != null) {
-                container.setRenderer(toSurfaceFlinger ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN);
-                container.saveData();
+            if (persist) {
+                if (shortcut != null) {
+                    shortcut.setRenderer(toSurfaceFlinger ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN);
+                    shortcut.saveData();
+                } else if (container != null) {
+                    container.setRenderer(toSurfaceFlinger ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN);
+                    container.saveData();
+                }
             }
 
             // Applies the saved FPS limit and (Vulkan only) upscaler/post-processing settings to
@@ -1694,6 +1716,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
                 @Override
                 public void onSoftStretch(boolean enabled) {
+                    softStretch = enabled;
                     if (xServerView != null) {
                         XServerRendererView rendererRef = xServerView;
                         if (enabled && !rendererRef.isFullscreen()) {
@@ -2012,8 +2035,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final boolean perfHintAvailable = vkRenderer != null && vkRenderer.isPerformanceHintSupported();
         final boolean perfHintOn = perfHintAvailable && loadPerformanceHint();
         if (vkRenderer != null) vkRenderer.setPerformanceHint(perfHintOn);
-        final kotlin.jvm.functions.Function0<String> perfHintStatus =
-                vkRenderer != null ? () -> vkRenderer.getPerformanceHintStatus() : null;
 
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
@@ -2030,8 +2051,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ASurfaceXServerView.isSupported(),
                 renderer instanceof ASurfaceXServerView,
                 perfHintAvailable,
-                perfHintOn,
-                perfHintStatus
+                perfHintOn
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {

@@ -12,7 +12,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,9 +23,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 
 // ---------- Graphics panel ----------
 
@@ -49,9 +45,7 @@ data class GraphicsPanelState(
     val rendererSwitchAvailable: Boolean = false,  // SurfaceFlinger renderer usable on this device
     val surfaceFlinger: Boolean = false,           // the SurfaceFlinger renderer is the active one
     val perfHintAvailable: Boolean = false,        // the active renderer and the device support ADPF
-    val perfHintEnabled: Boolean = false,          // saved switch position (off unless chosen)
-    // One line about the live hint session; called off the main thread. Null = no status line.
-    val perfHintStatus: (() -> String)? = null
+    val perfHintEnabled: Boolean = false           // saved switch position (off unless chosen)
 )
 
 interface GraphicsPanelCallbacks {
@@ -146,30 +140,41 @@ private fun GraphicsSidebarPanel(
     ) {
         SidebarPanelTitle(uiStr(R.string.ui_rendering))
 
+        val showAdpf = state.perfHintAvailable && !sfActive
+        if (state.rendererSwitchAvailable || sfActive || showAdpf) {
+            SidebarCard {
+                if (state.rendererSwitchAvailable || sfActive) {
+                    SidebarSectionTitle("Renderer")
+                    Spacer(Modifier.height(10.dp))
+                    SidebarDropdownField(
+                        caption = null,
+                        options = RENDERER_LABELS,
+                        selectedIndex = if (sfActive) 1 else 0,
+                        onSelect = { index ->
+                            if ((index == 1) != sfActive) callbacks.onRendererChanged(index == 1)
+                        }
+                    )
+                }
+                if (showAdpf) {
+                    if (state.rendererSwitchAvailable || sfActive) Spacer(Modifier.height(10.dp))
+                    SidebarInlineToggle(
+                        label = "ADPF",
+                        checked = perfHintOn,
+                        onCheckedChange = {
+                            perfHintOn = it
+                            callbacks.onPerformanceHintChanged(it)
+                        },
+                        labelStyle = SidebarText.section()
+                    )
+                }
+            }
+            SidebarGap()
+        }
+
         FpsLimiterCard(
             initialFps = state.fpsLimit,
             onFpsChanged = callbacks::onFpsLimitChanged
         )
-
-        if (state.rendererSwitchAvailable || sfActive) {
-            SidebarGap()
-            SidebarCard {
-                SidebarSectionTitle("Renderer")
-                Spacer(Modifier.height(10.dp))
-                SidebarDropdownField(
-                    caption = null,
-                    options = RENDERER_LABELS,
-                    selectedIndex = if (sfActive) 1 else 0,
-                    onSelect = { index ->
-                        if ((index == 1) != sfActive) callbacks.onRendererChanged(index == 1)
-                    }
-                )
-                if (sfActive) {
-                    Spacer(Modifier.height(8.dp))
-                    SidebarCaption("Upscalers, post-processing, ReShade and frame generation need the Vulkan renderer.")
-                }
-            }
-        }
 
         if (!sfActive) {
         SidebarGap()
@@ -318,39 +323,6 @@ private fun GraphicsSidebarPanel(
                         valueRange = 0.25f..1.0f
                     )
                 }
-            }
-        }
-
-        if (state.perfHintAvailable && !sfActive) {
-            SidebarGap()
-            SidebarCard {
-                SidebarInlineToggle(
-                    label = "Performance hint (ADPF)",
-                    checked = perfHintOn,
-                    onCheckedChange = {
-                        perfHintOn = it
-                        callbacks.onPerformanceHintChanged(it)
-                    }
-                )
-                Spacer(Modifier.height(8.dp))
-                var hintStatus by remember { mutableStateOf("") }
-                val statusProvider = state.perfHintStatus
-                // The session is opened by the render thread a moment after the switch flips, so
-                // the line is refreshed a few times; reading it can wait on the renderer's lock.
-                LaunchedEffect(perfHintOn) {
-                    if (!perfHintOn || statusProvider == null) {
-                        hintStatus = ""
-                    } else {
-                        repeat(8) {
-                            hintStatus = withContext(Dispatchers.IO) { statusProvider() }
-                            delay(500)
-                        }
-                    }
-                }
-                SidebarCaption(
-                    if (perfHintOn && hintStatus.isNotEmpty()) hintStatus
-                    else "Tells the system how much CPU/GPU time a frame needs, so it picks clocks to match."
-                )
             }
         }
 

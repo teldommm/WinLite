@@ -895,32 +895,35 @@ private fun ContainerCategoryV2(
                     if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
                     listOf("RGBA", "BGRA")
                 ) { s.surfaceFormat = if (it == "BGRA") "bgra8" else "rgba8" }
-                SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_present_mode), s.rendererPresentMode, listOf("fifo", "mailbox")) {
-                    s.rendererPresentMode = it
-                }
-                catalog?.let { c ->
+                // Present mode, renderer driver and the upscaling filter belong to the Vulkan renderer only.
+                if (s.renderer != "SurfaceFlinger") {
                     SettingsDivider()
-                    SettingMappedChoice(uiStr(R.string.ui_renderer_driver), s.rendererDriver, c.rendererDrivers) {
-                        s.rendererDriver = it
+                    SettingChoice(uiStr(R.string.ui_present_mode), s.rendererPresentMode, listOf("fifo", "mailbox")) {
+                        s.rendererPresentMode = it
                     }
-                }
-                SettingsDivider()
-                // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
-                // Display order: SGSR HQ right after SGSR, NIS right after FSR.
-                val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
-                val filters = listOf(
-                    uiStr(R.string.ui_bilinear),
-                    uiStr(R.string.ui_nearest_neighbor),
-                    uiStr(R.string.ui_snapdragon_super_resolution),
-                    uiStr(R.string.ui_snapdragon_super_resolution_hq),
-                    uiStr(R.string.ui_amd_fidelityfx_super_resolution),
-                    uiStr(R.string.ui_nvidia_image_scaling_nis),
-                    uiStr(R.string.ui_lanczos_2_16_tap),
-                    uiStr(R.string.ui_color_boost)
-                )
-                SettingChoice(uiStr(R.string.ui_texture_filter), filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
-                    s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
+                    catalog?.let { c ->
+                        SettingsDivider()
+                        SettingMappedChoice(uiStr(R.string.ui_renderer_driver), s.rendererDriver, c.rendererDrivers) {
+                            s.rendererDriver = it
+                        }
+                    }
+                    SettingsDivider()
+                    // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
+                    // Display order: SGSR HQ right after SGSR, NIS right after FSR.
+                    val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
+                    val filters = listOf(
+                        uiStr(R.string.ui_bilinear),
+                        uiStr(R.string.ui_nearest_neighbor),
+                        uiStr(R.string.ui_snapdragon_super_resolution),
+                        uiStr(R.string.ui_snapdragon_super_resolution_hq),
+                        uiStr(R.string.ui_amd_fidelityfx_super_resolution),
+                        uiStr(R.string.ui_nvidia_image_scaling_nis),
+                        uiStr(R.string.ui_lanczos_2_16_tap),
+                        uiStr(R.string.ui_color_boost)
+                    )
+                    SettingChoice(uiStr(R.string.ui_texture_filter), filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
+                        s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
+                    }
                 }
             }
             SettingsCard {

@@ -17,7 +17,7 @@ public class Pointer {
         }
     }
     public static final byte MAX_BUTTONS = 7;
-    private final ArrayList<OnPointerMotionListener> onPointerMotionListeners = new ArrayList<>();
+    private final java.util.concurrent.CopyOnWriteArrayList<OnPointerMotionListener> onPointerMotionListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final Bitmask buttonMask = new Bitmask();
     private final XServer xServer;
     private short x;
@@ -88,16 +88,23 @@ public class Pointer {
         return buttonMask.isSet(button.flag());
     }
 
+    // See WindowManager.addOnWindowModificationListener: copy-on-write, removed slots are reused.
     public void addOnPointerMotionListener(OnPointerMotionListener onPointerMotionListener) {
-        onPointerMotionListeners.add(onPointerMotionListener);
+        synchronized (onPointerMotionListeners) {
+            int free = onPointerMotionListeners.indexOf(REMOVED_LISTENER);
+            if (free >= 0) onPointerMotionListeners.set(free, onPointerMotionListener);
+            else onPointerMotionListeners.add(onPointerMotionListener);
+        }
     }
 
     private static final OnPointerMotionListener REMOVED_LISTENER = new OnPointerMotionListener() {};
 
     // See WindowManager.removeOnWindowModificationListener: the slot is blanked, not removed.
     public void removeOnPointerMotionListener(OnPointerMotionListener onPointerMotionListener) {
-        int index = onPointerMotionListeners.indexOf(onPointerMotionListener);
-        if (index >= 0) onPointerMotionListeners.set(index, REMOVED_LISTENER);
+        synchronized (onPointerMotionListeners) {
+            int index = onPointerMotionListeners.indexOf(onPointerMotionListener);
+            if (index >= 0) onPointerMotionListeners.set(index, REMOVED_LISTENER);
+        }
     }
 
     private void triggerOnPointerButtonPress(Button button) {

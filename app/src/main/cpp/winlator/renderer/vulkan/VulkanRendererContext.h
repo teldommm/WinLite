@@ -232,8 +232,6 @@ public:
     void setPerformanceHint(bool enabled);
     // The companion threads' ids (app threads only); the render thread is always in the session.
     void setPerformanceHintThreads(const int32_t* tids, size_t count);
-    // "off", "starting", "unavailable: <why>" or the session's one-line description.
-    std::string performanceHintStatus();
 
     // Choreographer timing from Java, once per vsync. deadlineNs/presentNs are the preferred
     // frame timeline (API 33+); 0 when unavailable.
@@ -692,10 +690,9 @@ public:
     std::atomic<bool>     adpfDirty_{false};     // something for adpfService()
     std::atomic<uint32_t> adpfNotifyBits_{0};
     std::atomic<int>      renderTid_{0};
-    std::mutex            adpfMutex_;            // companions + status text
+    std::mutex            adpfMutex_;            // companions
     std::vector<int32_t>  adpfCompanions_;
     bool                  adpfCompanionsDirty_ = false;
-    std::string           adpfStatus_ = "off";
     bool                  adpfOpenTried_ = false;   // render thread: gave it a go since the last toggle
     int64_t               adpfTargetNs_ = 0;        // render thread: the target the session has
     adpf::Session         adpfSession_;
@@ -705,7 +702,6 @@ public:
     void adpfShutdown();                             // render thread, on its way out
     int64_t adpfCycleNs() const;                     // what one cycle of work should fit in
     void adpfFrameEnd(int64_t startNs, int64_t blockedNs);   // renderFrame, success path
-    void adpfSetStatus(const std::string& text);
 
     // Limiter state. Atomics are written from Java threads; the rest is renderMutex.
     std::atomic<int>     fpsLimit_{0};

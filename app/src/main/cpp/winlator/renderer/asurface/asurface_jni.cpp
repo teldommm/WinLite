@@ -1305,9 +1305,11 @@ Java_com_winlator_cmod_widget_ASurfaceXServerView_nativeEndWait(JNIEnv*, jobject
         }
         if (fenceFd >= 0) {
             lk.unlock();
+            // Short slices: a destroy waiting for this wait (it holds the view's lock) must not
+            // sit out a long fence; `closing` is looked at again after each slice.
             const int64_t ms = std::max<int64_t>(1, (deadline - now) / 1'000'000);
             pollfd pfd{fenceFd, POLLIN, 0};
-            poll(&pfd, 1, (int) std::min<int64_t>(ms, 1000));
+            poll(&pfd, 1, (int) std::min<int64_t>(ms, 20));
             close(fenceFd);
             lk.lock();
         } else {
