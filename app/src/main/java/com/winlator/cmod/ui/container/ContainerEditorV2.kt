@@ -607,13 +607,14 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         },
         bottomBar = {
             if (editing == null) {
-                // Transparent holder: only the button is drawn. The list scrolls under it (its
-                // bottom padding is the bar's height), so no rectangle is painted around the button.
-                Surface(color = Color.Transparent) {
+                Surface(
+                    modifier = Modifier.navigationBarsPadding(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     Button(
                         onClick = ::createContainer,
                         enabled = state.runtime.isNotBlank() && !creating,
-                        modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp),
                         shape = WinZShapes.Medium,
                         colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
                     ) {
@@ -623,22 +624,13 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
             }
         }
     ) { padding ->
-        // The bar's height is not applied as content padding: the lists run behind the floating
-        // button and reserve that height inside their own content padding instead.
-        val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
-        val bottomInset = padding.calculateBottomPadding()
-        val contentInsets = PaddingValues.Absolute(
-            left = padding.calculateLeftPadding(layoutDirection),
-            top = padding.calculateTopPadding(),
-            right = padding.calculateRightPadding(layoutDirection)
-        )
         if (landscape) {
             Row(
-                Modifier.fillMaxSize().padding(contentInsets).padding(start = 18.dp, end = 18.dp, top = 10.dp),
+                Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Surface(
-                    Modifier.width(220.dp).fillMaxHeight().padding(bottom = bottomInset + 10.dp),
+                    Modifier.width(220.dp).fillMaxHeight(),
                     shape = WinZShapes.Medium,
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, hairlineColor())
@@ -661,7 +653,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 }
                 LazyColumn(
                     Modifier.weight(1f).fillMaxHeight(),
-                    contentPadding = PaddingValues(bottom = bottomInset + 14.dp),
+                    contentPadding = PaddingValues(bottom = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item(category) {
@@ -674,7 +666,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 }
             }
         } else {
-            Column(Modifier.fillMaxSize().padding(contentInsets)) {
+            Column(Modifier.fillMaxSize().padding(padding)) {
                 LazyRow(
                     Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -684,7 +676,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 }
                 LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 14.dp),
-                    contentPadding = PaddingValues(bottom = bottomInset + 14.dp),
+                    contentPadding = PaddingValues(bottom = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item(category) {
