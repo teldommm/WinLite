@@ -330,14 +330,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetCursorVisible(
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateCursorImage(
     JNIEnv* env, jobject, jlong handle, jobject buf,
-    jshort w, jshort h, jshort stride, jshort hotX, jshort hotY)
+    jshort w, jshort h, jshort stride, jshort hotX, jshort hotY, jboolean rgba)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (!r || !buf) return;
     void* px = env->GetDirectBufferAddress(buf);
     jlong required = (jlong)std::max((int)stride, (int)w) * h * 4;
     if (px && env->GetDirectBufferCapacity(buf) >= required)
-        r->updateCursorImage(px, w, h, stride, hotX, hotY);
+        r->updateCursorImage(px, w, h, stride, hotX, hotY, rgba == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT void JNICALL

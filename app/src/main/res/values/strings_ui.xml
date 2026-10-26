@@ -411,7 +411,6 @@
     <string name="ui_amd_fidelityfx_super_resolution">AMD FidelityFX Super Resolution</string>
     <string name="ui_texture_filter">Texture Filter</string>
     <string name="ui_screen_size">Screen Size</string>
-    <string name="ui_vulkan_wrapper">Vulkan Wrapper</string>
     <string name="ui_vulkan_version">Vulkan Version</string>
     <string name="ui_max_device_memory">Max Device Memory</string>
     <string name="ui_driver_present_mode">Driver Present Mode</string>
@@ -470,6 +469,7 @@
     <string name="ui_change">Change</string>
     <string name="ui_choose">Choose</string>
     <string name="ui_surface_format">Surface format</string>
+    <string name="ui_surface_ubwc">UBWC compression (Adreno)</string>
     <string name="ui_snapdragon_super_resolution_hq">Snapdragon Super Resolution HQ</string>
     <string name="ui_nvidia_image_scaling_nis">NVIDIA Image Scaling (NIS)</string>
     <string name="ui_lanczos_2_16_tap">Lanczos 2 (16-tap)</string>

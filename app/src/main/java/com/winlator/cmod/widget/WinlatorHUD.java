@@ -191,16 +191,6 @@ public class WinlatorHUD extends View {
     private volatile boolean snapCharging = false;
 
     private volatile String rendererLabel = "Vulkan";
-    // Shown while the guest has not reported its engine name: the X server's own display path
-    // ("Vulkan", or "SurfaceFlinger" while that renderer is active).
-    private volatile String backendLabel = "Vulkan";
-    // Appended to the guest's engine name ("DXVK+"): marks the SurfaceFlinger display path.
-    private volatile String rendererSuffix = "";
-
-    /** The line the HUD shows: engine name + suffix once reported, the display path before that. */
-    private String composeRendererText() {
-        return mesaRendererActive ? rendererLabel + rendererSuffix : rendererLabel;
-    }
     private boolean isNative = false;
     private boolean mesaRendererActive = false;
 
@@ -361,7 +351,7 @@ public class WinlatorHUD extends View {
     }
 
     private String resolveBackendRenderer() {
-        return backendLabel;
+        return "Vulkan";
     }
 
     private String readShortcutExtra(String path, String key) {
@@ -388,7 +378,7 @@ public class WinlatorHUD extends View {
     private void refreshBackendRenderer(boolean relayout) {
         if (mesaRendererActive) return;
         rendererLabel = resolveBackendRenderer();
-        strRend = composeRendererText();
+        strRend = rendererLabel;
         wDynRend = pRend.measureText(strRend);
         if (relayout) requestRelayout();
     }
@@ -1648,7 +1638,7 @@ public class WinlatorHUD extends View {
             if (name != null && !name.trim().isEmpty()) {
                 mesaRendererActive = true;
                 rendererLabel = name.trim();
-                strRend = composeRendererText();
+                strRend = rendererLabel;
                 wDynRend = pRend.measureText(strRend);
                 requestRelayout();
             } else {
@@ -1661,28 +1651,6 @@ public class WinlatorHUD extends View {
                 setVisibility(VISIBLE);
                 scheduleRedraw();
             }
-        });
-    }
-
-    public void setRendererSuffix(String suffix) {
-        final String clean = suffix != null ? suffix : "";
-        uiHandler.post(() -> {
-            rendererSuffix = clean;
-            strRend = composeRendererText();
-            wDynRend = pRend.measureText(strRend);
-            requestRelayout();
-        });
-    }
-
-    /**
-     * What to show before the guest reports its engine name: the X server's display path
-     * ("Vulkan" / "SurfaceFlinger"). Does not touch an engine name that is already shown.
-     */
-    public void setBackendLabel(String label) {
-        final String clean = label != null && !label.trim().isEmpty() ? label.trim() : "Vulkan";
-        uiHandler.post(() -> {
-            backendLabel = clean;
-            if (!mesaRendererActive) refreshBackendRenderer(true);
         });
     }
 
@@ -1723,7 +1691,7 @@ public class WinlatorHUD extends View {
         uiHandler.post(() -> {
             mesaRendererActive = true;
             rendererLabel = clean;
-            strRend = composeRendererText();
+            strRend = rendererLabel;
             wDynRend = pRend.measureText(strRend);
             requestRelayout();
 

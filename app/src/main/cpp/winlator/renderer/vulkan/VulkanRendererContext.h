@@ -239,7 +239,8 @@ public:
     // The Java drawable with this uid is gone: drop it as window content and as a buffer source.
     // Its import is destroyed once no window shows it and the GPU has finished with it.
     void releaseDrawable(int64_t id);
-    void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY);
+    // The cursor texture is R8G8B8A8; rgba=false means the source is B8G8R8A8 and gets swapped.
+    void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY, bool rgba);
     void setCursorVisible(bool visible);
     void removeWindow(int64_t id);
     void beginBatch() {}

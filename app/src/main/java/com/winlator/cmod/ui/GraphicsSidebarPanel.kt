@@ -42,7 +42,6 @@ data class GraphicsPanelState(
     val frameGenMultiplierIndex: Int,
     val frameGenFlowScale: Float,
     val frameGenTargetFps: Int,      // Adaptive target FPS shown in the field (last entered/saved)
-    val surfaceFlinger: Boolean = false,           // the SurfaceFlinger renderer is the active one
     val perfHintAvailable: Boolean = false,        // the active renderer and the device support ADPF
     val perfHintEnabled: Boolean = false           // saved switch position (off unless chosen)
 )
@@ -127,7 +126,6 @@ private fun GraphicsSidebarPanel(
     // reads it. Under an upscaler DLS no longer sharpens (contrast/saturation only), so the
     // slider drives a single sharpening stage.
     val sharpnessVisible = fsrEnabled || postFxIndex == 1
-    val sfActive = state.surfaceFlinger
 
     Column(
         modifier = Modifier
@@ -139,7 +137,7 @@ private fun GraphicsSidebarPanel(
         FpsLimiterCard(
             initialFps = state.fpsLimit,
             onFpsChanged = callbacks::onFpsLimitChanged,
-            perfHintVisible = state.perfHintAvailable && !sfActive,
+            perfHintVisible = state.perfHintAvailable,
             perfHintChecked = perfHintOn,
             onPerfHintChanged = {
                 perfHintOn = it
@@ -147,7 +145,6 @@ private fun GraphicsSidebarPanel(
             }
         )
 
-        if (!sfActive) {
         SidebarGap()
         SidebarCard {
             SidebarInlineToggle(
@@ -246,8 +243,6 @@ private fun GraphicsSidebarPanel(
                     valueRange = 0f..100f
                 )
             }
-        }
-
         }
 
         if (state.frameGenAvailable) {

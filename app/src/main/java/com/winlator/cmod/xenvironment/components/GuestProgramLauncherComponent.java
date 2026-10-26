@@ -554,11 +554,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             execEnvVars.putAll(this.envVars);
         }
 
-        String surfaceFormat = shortcut != null
-                ? shortcut.getSurfaceFormat()
-                : container != null ? container.getSurfaceFormat() : "bgra8";
-
-        execEnvVars.put("WRAPPER_SURFACE_FORMAT", surfaceFormat);
+        // WRAPPER_SURFACE_FORMAT / WRAPPER_AHB_UBWC come in with this.envVars: XServerDisplayActivity
+        // sets them once, from the format the X server actually runs with.
 
         // DisplayX has been removed (Vulkan is the only renderer), so its guest-side
         // present layer must never be injected; strip it out if an old saved config

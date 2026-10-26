@@ -12,7 +12,6 @@
 #define WHITE 0xffffff
 #define BLACK 0x000000
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "Drawable", __VA_ARGS__);
-#define HAL_PIXEL_FORMAT_BGRA_8888 5
 
 enum GCFunction {GCF_CLEAR, GCF_AND, GCF_AND_REVERSE, GCF_COPY, GCF_AND_INVERTED, GCF_NO_OP, GCF_XOR, GCF_OR, GCF_NOR, GCF_EQUIV, GCF_INVERT, GCF_OR_REVERSE, GCF_COPY_INVERTED, GCF_OR_INVERTED, GCF_NAND, GCF_SET};
 
@@ -68,12 +67,6 @@ static int setPixelOp(int srcColor, int dstColor, enum GCFunction gcFunction) {
     }
 }
 
-/* Solid ARGB pixel for an X color (0xRRGGBB): the buffers are BGRA in memory, i.e. this value
- * stored little-endian - as BGRA bytes with alpha 255. */
-static inline uint32_t solidPixel(int color) {
-    return ((uint32_t)color & 0xffffffu) | 0xff000000u;
-}
-
 /*
  * Channel order of a drawable's buffer.
  *
@@ -95,6 +88,14 @@ static inline bool isRgbaOrder(AHardwareBuffer *hardwareBuffer) {
 /* Exchanges the first and the third byte of a 32-bit pixel (B,G,R,A <-> R,G,B,A in memory). */
 static inline uint32_t swapRB32(uint32_t p) {
     return (p & 0xff00ff00u) | ((p & 0x000000ffu) << 16) | ((p >> 16) & 0x000000ffu);
+}
+
+/* Opaque pixel for an X color (0xRRGGBB), in the byte order of the given buffer. As a
+ * little-endian value 0xAARRGGBB is B,G,R,A in memory (what a BGRA buffer takes as it is); an
+ * RGBA buffer needs red and blue exchanged. */
+static inline uint32_t solidPixel(AHardwareBuffer *hardwareBuffer, int color) {
+    const uint32_t p = ((uint32_t)color & 0xffffffu) | 0xff000000u;
+    return isRgbaOrder(hardwareBuffer) ? swapRB32(p) : p;
 }
 
 /* Copies count pixels, exchanging red and blue. memcpy-sized accesses: the source may be client
@@ -361,7 +362,7 @@ Java_com_winlator_cmod_xserver_Drawable_fillRect(JNIEnv *env, jclass obj, jshort
 
     /* Written in place: the per-call malloc'ed row is gone, and with it the path that returned
      * on a failed malloc with the buffer still locked. */
-    const uint32_t pixel = isRgbaOrder(hardwareBuffer) ? swapRB32(solidPixel(color)) : solidPixel(color);
+    const uint32_t pixel = solidPixel(hardwareBuffer, color);
     for (int i = 0; i < height; i++) {
         uint32_t *row = (uint32_t *)(dataAddr + ((size_t)x + (size_t)(i + y) * stride) * 4);
         for (int k = 0; k < width; k++) row[k] = pixel;
@@ -416,7 +417,7 @@ Java_com_winlator_cmod_xserver_Drawable_drawLine(JNIEnv *env, jclass obj, jshort
     }
 
     plotLine(dataAddr, x0, y0, x1, y1,
-             isRgbaOrder(hardwareBuffer) ? swapRB32(solidPixel(color)) : solidPixel(color),
+             solidPixel(hardwareBuffer, color),
              lineWidth, stride);
 
     AHardwareBuffer_unlock(hardwareBuffer, NULL);
@@ -450,7 +451,7 @@ Java_com_winlator_cmod_xserver_Drawable_fillRects(JNIEnv *env, jclass obj, jshor
     AHardwareBuffer *hardwareBuffer = (AHardwareBuffer *)data;
     if (AHardwareBuffer_lock(hardwareBuffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, (void **)&dataAddr) == 0) {
         if (dataAddr) {
-            const uint32_t pixel = isRgbaOrder(hardwareBuffer) ? swapRB32(solidPixel(color)) : solidPixel(color);
+            const uint32_t pixel = solidPixel(hardwareBuffer, color);
             for (int n = 0; n < count; n++) {
                 const int x = r[n*4], y = r[n*4+1], width = r[n*4+2], height = r[n*4+3];
                 for (int i = 0; i < height; i++) {
@@ -480,7 +481,7 @@ Java_com_winlator_cmod_xserver_Drawable_drawPolyLine(JNIEnv *env, jclass obj, js
     AHardwareBuffer *hardwareBuffer = (AHardwareBuffer *)data;
     if (AHardwareBuffer_lock(hardwareBuffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, (void **)&dataAddr) == 0) {
         if (dataAddr) {
-            const uint32_t pixel = isRgbaOrder(hardwareBuffer) ? swapRB32(solidPixel(color)) : solidPixel(color);
+            const uint32_t pixel = solidPixel(hardwareBuffer, color);
             for (int n = 1; n < count; n++)
                 plotLine(dataAddr, p[n*2-2], p[n*2-1], p[n*2], p[n*2+1], pixel, lineWidth, stride);
         }

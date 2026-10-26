@@ -119,7 +119,6 @@ import com.winlator.cmod.widget.MagnifierView;
 import com.winlator.cmod.widget.TouchpadView;
 import com.winlator.cmod.widget.XServerRendererView;
 import com.winlator.cmod.widget.VulkanXServerView;
-import com.winlator.cmod.widget.ASurfaceXServerView;
 import com.winlator.cmod.winhandler.GamepadMode;
 import com.winlator.cmod.winhandler.MouseEventFlags;
 import com.winlator.cmod.winhandler.ProcessInfo;
@@ -135,10 +134,10 @@ import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
 import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;
 import com.winlator.cmod.xenvironment.components.XServerComponent;
-import com.winlator.cmod.xserver.Drawable;
 import com.winlator.cmod.xserver.Pointer;
 import com.winlator.cmod.xserver.Property;
 import com.winlator.cmod.xserver.ScreenInfo;
+import com.winlator.cmod.xserver.SurfaceFormat;
 import com.winlator.cmod.xserver.Window;
 import com.winlator.cmod.xserver.WindowManager;
 import com.winlator.cmod.xserver.XServer;
@@ -176,7 +175,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public static String NOTIFICATION_CHANNEL_ID = "Winlator";
     public static int NOTIFICATION_ID = -1;
     private XServerRendererView xServerView;
-    private boolean screenOffsetYRelativeToCursor = false;
     private InputControlsView inputControlsView;
     private TouchpadView touchpadView;
     private XEnvironment environment;
@@ -211,8 +209,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private int graphicsPostFxModeIndex;
     private int graphicsSharpnessPercent = 50;
     private int graphicsReshadeStrength = 65;
+    // Id of the bundled assets/graphics_driver/wrapper_wl.tzst; bump it with every new wrapper build.
+    private static final String WRAPPER_BUILD_ID = "becf2a03";
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
-    private String graphicsWrapper = Container.DEFAULT_GRAPHICS_WRAPPER;
     private HashMap<String, String> graphicsDriverConfig;
     private String audioDriver = Container.DEFAULT_AUDIO_DRIVER;
     private String emulator = Container.DEFAULT_EMULATOR;
@@ -533,7 +532,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         graphicsDriver = container.getGraphicsDriver();
-        graphicsWrapper = container.getGraphicsWrapper();
         String graphicsDriverConfig = container.getGraphicsDriverConfig();
         audioDriver = Container.normalizeAudioDriver(container.getAudioDriver());
         emulator = container.getEmulator();
@@ -554,8 +552,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             shortcut.saveData();
 
             graphicsDriver = shortcut.getExtra("graphicsDriver", container.getGraphicsDriver());
-            graphicsWrapper = Container.normalizeGraphicsWrapper(
-                    shortcut.getExtra("graphicsWrapper", container.getGraphicsWrapper()));
             graphicsDriverConfig = shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig());
             audioDriver = Container.normalizeAudioDriver(shortcut.getExtra("audioDriver", container.getAudioDriver()));
             emulator = shortcut.getExtra("emulator", container.getEmulator());
@@ -1235,6 +1231,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.d("XServerDisplayActivity", "DirectAudio: micRequested=" + micRequested + " micExposed=" + micExposed);
         }
 
+        // The wrapper must hand out swapchain images in the order of the X server's buffers.
+        envVars.put("WRAPPER_SURFACE_FORMAT", xServer.getSurfaceFormat().id);
+        // UBWC-compressed swapchain buffers (proprietary Adreno only; the wrapper checks that).
+        if (xServer.getSurfaceFormat() == SurfaceFormat.RGBA && isSelectedSurfaceUbwc()) {
+            envVars.put("WRAPPER_AHB_UBWC", "1");
+        }
+
         guestProgramLauncherComponent.setEnvVars(envVars);
         guestProgramLauncherComponent.setTerminationCallback((status) -> runOnUiThread(this::exit));
 
@@ -1262,87 +1265,28 @@ public class XServerDisplayActivity extends AppCompatActivity {
         scriptFile.setExecutable(true);
     }
 
-    private String getSelectedSurfaceFormat() {
+    private SurfaceFormat getSelectedSurfaceFormat() {
         if (shortcut != null) return shortcut.getSurfaceFormat();
-        return container != null ? container.getSurfaceFormat() : "bgra8";
+        return container != null ? container.getSurfaceFormat() : SurfaceFormat.DEFAULT;
     }
 
-    /**
-     * Whether the container/shortcut asks for the SurfaceFlinger renderer and this device can run
-     * it; otherwise (or when the library is unusable) the Vulkan renderer is used.
-     */
-    private boolean isSurfaceFlingerRenderer() {
-        String wanted = shortcut != null ? shortcut.getRenderer()
-                : (container != null ? container.getRenderer() : Container.RENDERER_VULKAN);
-        if (!Container.RENDERER_SURFACEFLINGER.equals(wanted)) return false;
-        if (!ASurfaceXServerView.isSupported()) {
-            Log.w("XServerDisplayActivity", "SurfaceFlinger renderer requested but unavailable; using Vulkan");
-            WinToast.show(this, "SurfaceFlinger renderer needs Android 10+; using Vulkan.", Toast.LENGTH_LONG);
-            return false;
-        }
-        return true;
+    private boolean isSelectedSurfaceUbwc() {
+        if (shortcut != null) return shortcut.isSurfaceUbwc();
+        return container != null && container.isSurfaceUbwc();
     }
 
-    /**
-     * Builds the renderer view and makes it the activity's and the X server's. The Vulkan one
-     * also gets its driver, present mode, filter and frame generation set up; the SurfaceFlinger
-     * one has no swapchain, shaders or frame generation.
-     */
-    private XServerRendererView createRendererView(boolean surfaceFlinger) {
-        final XServerRendererView view;
-        if (surfaceFlinger) {
-            final ASurfaceXServerView sfView = new ASurfaceXServerView(this, xServer);
-            // Supported on paper, but the native side could not start (no layers could be created):
-            // nothing will be drawn. The renderer is chosen in the container/shortcut settings.
-            sfView.setOnStartFailedListener(() -> handler.post(() -> WinToast.show(this,
-                    "SurfaceFlinger renderer could not start. Choose Vulkan in the container settings.",
-                    Toast.LENGTH_LONG)));
-            view = sfView;
-        }
-        else {
-            VulkanXServerView.loadNativeLibrary();
-            view = new VulkanXServerView(this, xServer);
-        }
+    /** Builds the Vulkan renderer view (driver, present mode, filter, frame generation) and makes it the activity's. */
+    private XServerRendererView createRendererView() {
+        VulkanXServerView.loadNativeLibrary();
+        final VulkanXServerView view = new VulkanXServerView(this, xServer);
         xServerView = view;
         view.setCursorVisible(false);
-
-        if (view instanceof VulkanXServerView) configureVulkanRenderer((VulkanXServerView) view);
-        else {
-            stopFrameGenRefreshTracking();
-            frameGenRenderer = null;
-            // Effects are Vulkan shaders: with SurfaceFlinger they are all off. Only the running
-            // state is cleared - the saved settings stay for when Vulkan is chosen again.
-            activeLsfgMultiplier = 0;
-            activeLsfgTargetRate = 0;
-            graphicsFsrEnabled = false;
-            graphicsPostFxModeIndex = 0;
-        }
+        configureVulkanRenderer(view);
 
         if (shortcut != null) {
             view.setUnviewableWMClasses("explorer.exe");
         }
         return view;
-    }
-
-    /**
-     * Tells both HUDs which display path is active: "+" after the guest's engine name ("DXVK+")
-     * and, until the guest reports one, "SurfaceFlinger" instead of "Vulkan". Safe from any thread.
-     */
-    private void applyHudRendererSuffix() {
-        final boolean sf = xServerView instanceof ASurfaceXServerView;
-        final String suffix = sf ? "+" : "";
-        final String backend = sf ? "SurfaceFlinger" : "Vulkan";
-        if (modernHud != null) {
-            modernHud.setRendererSuffix(suffix);
-            modernHud.setBackendLabel(backend);
-        }
-        final FrameRating classic = classicHud;
-        if (classic != null) {
-            runOnUiThread(() -> {
-                classic.setRendererSuffix(suffix);
-                classic.setBackendLabel(backend);
-            });
-        }
     }
 
     /** Gives the classic HUD what the guest has already reported (a HUD armed after the fact). */
@@ -1434,7 +1378,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void setupUI() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
 
-        xServerView = createRendererView(isSurfaceFlingerRenderer());
+        xServerView = createRendererView();
         final XServerRendererView renderer = xServerView;
 
         rootView.addView(xServerView);
@@ -1481,7 +1425,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 classicHud.setVisibility(View.GONE);
                 rootView.addView(classicHud);
                 renderer.setFrameRating(classicHud);
-                applyHudRendererSuffix();
             } else if (hudMode == 2) {
 
                 modernHud = new WinlatorHUD(this);
@@ -1489,7 +1432,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 rootView.addView(modernHud);
                 modernHud.enableByUser();
                 renderer.setFrameRating(modernHud);
-                applyHudRendererSuffix();
             }
         }
 
@@ -1532,10 +1474,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         }
 
-        AppUtils.observeSoftKeyboardVisibility(drawerLayout, relative -> {
-            screenOffsetYRelativeToCursor = relative;
-            if (xServerView != null) xServerView.setScreenOffsetYRelativeToCursor(relative);
-        });
+        AppUtils.observeSoftKeyboardVisibility(drawerLayout, renderer::setScreenOffsetYRelativeToCursor);
 
         setupSidebarHudControls();
         setupSidebarGraphicsControls();
@@ -1683,9 +1622,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                             rendererRef.toggleFullscreen();
                             if (touchpadView != null) touchpadView.toggleFullscreen();
                         }
-                        // Stretch is a Vulkan shader mode; the SurfaceFlinger renderer just stays fullscreen.
-                        if (rendererRef instanceof VulkanXServerView)
-                            ((VulkanXServerView) rendererRef).setStretchMode(enabled ? 1 : 0);
+                        ((VulkanXServerView) rendererRef).setStretchMode(enabled ? 1 : 0);
                     }
                     drawerLayout.closeDrawers();
                 }
@@ -1892,7 +1829,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 modernHud.setVisibility(View.GONE);
                 rootView.addView(modernHud);
                 renderer.setFrameRating(modernHud);
-                applyHudRendererSuffix();
                 if (rendererAlreadyActive) {
 
                     frameRatingWindowId = activeRendererWindowId;
@@ -1908,7 +1844,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 classicHud.setVisibility(View.GONE);
                 rootView.addView(classicHud);
                 renderer.setFrameRating(classicHud);
-                applyHudRendererSuffix();
                 if (rendererAlreadyActive) {
                     frameRatingWindowId = activeRendererWindowId;
                     renderer.setFpsWindowId(frameRatingWindowId);
@@ -1952,14 +1887,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void setupSidebarGraphicsControls() {
         if (ingameSidebar == null) return;
 
-        // The shader features (upscalers, post-processing, frame generation) exist only in the
-        // Vulkan renderer: vkRenderer is null when the SurfaceFlinger one is active. The FPS limit
-        // works in both.
+        // Vulkan is the only renderer now, so renderer (when set) is always a VulkanXServerView.
         final XServerRendererView renderer = xServerView;
-        final VulkanXServerView vkRenderer = renderer instanceof VulkanXServerView ? (VulkanXServerView) renderer : null;
+        final VulkanXServerView vkRenderer = renderer != null ? (VulkanXServerView) renderer : null;
 
         int initialFpsLimit = loadFpsLimit();
-        if (renderer != null) renderer.setFpsLimit(initialFpsLimit);
+        if (vkRenderer != null) vkRenderer.setFpsLimit(initialFpsLimit);
         // Frame generation picks its own display mode; an FPS limit wants one it divides evenly.
         if ((frameGenRenderer != null && activeLsfgMultiplier >= 2) || initialFpsLimit > 0)
             applyFrameGenDisplayMode();
@@ -1970,7 +1903,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // container-based read had already shown). Doing the shortcut-aware read here up
         // front avoids that startup flicker instead of reproducing it.
         String savedFilter = readGraphicsExtra("graphicsFilterMode");
-        boolean fsrOn = vkRenderer != null && !savedFilter.isEmpty() && Integer.parseInt(savedFilter) > 0;
+        boolean fsrOn = !savedFilter.isEmpty() && Integer.parseInt(savedFilter) > 0;
         int upscalerModeIndex = !savedFilter.isEmpty() ? Math.max(0, Integer.parseInt(savedFilter) - 2) : 0;
         graphicsFsrEnabled = fsrOn;
         graphicsUpscalerModeIndex = upscalerModeIndex;
@@ -1981,7 +1914,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         String savedPFX = readGraphicsExtra("graphicsPostFXMode");
         int initPFX = savedPFX.isEmpty() ? 0 : Integer.parseInt(savedPFX);
-        if (initPFX < 0 || initPFX >= 5 || vkRenderer == null) initPFX = 0;
+        if (initPFX < 0 || initPFX >= 5) initPFX = 0;
         graphicsPostFxModeIndex = initPFX;
 
         if (vkRenderer != null) {
@@ -2008,7 +1941,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 frameGenSpinnerIndex(),
                 activeLsfgFlowScale,
                 rememberedLsfgTargetRate,
-                renderer instanceof ASurfaceXServerView,
                 perfHintAvailable,
                 perfHintOn
         );
@@ -2017,7 +1949,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onFpsLimitChanged(int fps) {
                 saveFpsLimit(fps);
-                if (renderer != null) renderer.setFpsLimit(fps);
+                if (vkRenderer != null) vkRenderer.setFpsLimit(fps);
                 // A fixed multiplier with an FPS limit picks its display mode from the limit, and
                 // so does a plain limit: 30/40/60 on 144 Hz cannot be shown evenly, on 120 Hz they can.
                 if (activeLsfgMultiplier < 2 || activeLsfgTargetRate == 0) applyFrameGenDisplayMode();
@@ -2500,12 +2432,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         winHandler.sendGamepadState();
     }
 
-    static String resolveGraphicsWrapperArchiveName(String graphicsWrapper) {
-        // assets/graphics_driver/<name>.tzst; the name is also stored in the ImageFS variant marker.
-        if (Container.LEGACY_GRAPHICS_WRAPPER.equals(graphicsWrapper)) return "wrapper_legacy";
-        return "wrapper_wl";
-    }
-
     private String getSelectedOpenGLDriver() {
         return "freedreno".equalsIgnoreCase(graphicsDriver) ? "freedreno" : "zink";
     }
@@ -2651,30 +2577,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir() + "/vulkan/icd.d/wrapper_icd.aarch64.json");
 
+        // The marker name carries the id of the bundled wrapper (the first 8 hex digits of
+        // assets/graphics_driver/wrapper_wl.tzst's SHA-256) and of extra_libs: a new build changes
+        // the name, so every ImageFS gets it once. There is a single wrapper (mesa26 based).
         File graphicsRuntimeMarker = new File(rootDir,
-                "usr/lib/.winlator-graphics-runtime-c7474f7e-25b50a11-v2");
-        // The wrapper libs live in the ImageFS, which is shared by every container, so the
-        // installed variant is tracked in the ImageFS itself (not in per-container extras).
-        File wrapperVariantMarker = new File(rootDir, "usr/lib/.winlator-graphics-wrapper-variant");
-        String wrapperArchive = resolveGraphicsWrapperArchiveName(graphicsWrapper);
+                "usr/lib/.winlator-graphics-runtime-" + WRAPPER_BUILD_ID + "-25b50a11-v2");
+        // Left by the removed Wrapper Legacy option.
+        File obsoleteVariantMarker = new File(rootDir, "usr/lib/.winlator-graphics-wrapper-variant");
+        if (obsoleteVariantMarker.isFile()) obsoleteVariantMarker.delete();
         boolean installCommonRuntime = firstTimeBoot || !graphicsRuntimeMarker.isFile();
-        // ImageFS that predates variant selection always carries the current wrapper.
-        String installedWrapper = wrapperVariantMarker.isFile()
-                ? FileUtils.readString(wrapperVariantMarker).trim() : "wrapper";
-        boolean wrapperChanged = !wrapperArchive.equals(installedWrapper);
-        if (installCommonRuntime || wrapperChanged) {
-            Log.d("XServerDisplayActivity", "Installing graphics wrapper " + wrapperArchive);
+        if (installCommonRuntime) {
+            Log.d("XServerDisplayActivity", "Installing graphics wrapper " + WRAPPER_BUILD_ID);
             boolean installed = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
-                    "graphics_driver/" + wrapperArchive + ".tzst", rootDir);
-            if (installed) FileUtils.writeString(wrapperVariantMarker, wrapperArchive);
-            if (installCommonRuntime) {
-                installed &= TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "layers" + ".tzst",
-                        rootDir);
-                installed &= TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
-                        "graphics_driver/extra_libs" + ".tzst", rootDir);
-                if (installed) FileUtils.writeString(graphicsRuntimeMarker,
-                        "wrapper=c7474f7e;extra_libs=25b50a11;layers=9d57736d;opengl=split-v1");
-            }
+                    "graphics_driver/wrapper_wl.tzst", rootDir);
+            installed &= TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "layers" + ".tzst",
+                    rootDir);
+            installed &= TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+                    "graphics_driver/extra_libs" + ".tzst", rootDir);
+            if (installed) FileUtils.writeString(graphicsRuntimeMarker,
+                    "wrapper=" + WRAPPER_BUILD_ID + ";extra_libs=25b50a11;layers=9d57736d;opengl=split-v1");
         }
 
         extractOpenGLDriver(rootDir);
@@ -2744,10 +2665,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         String bcnEmulationCache = graphicsDriverConfig.get("bcnEmulationCache");
         envVars.put("WRAPPER_USE_BCN_CACHE", bcnEmulationCache);
-
-        if (xServer.getSurfaceFormat() == Drawable.HAL_PIXEL_FORMAT_RGBA_8888) {
-            envVars.put("WRAPPER_SURFACE_FORMAT", "rgba8");
-        }
 
         if (!vkbasaltConfig.isEmpty()) {
             envVars.put("ENABLE_VKBASALT", "1");
@@ -3252,7 +3169,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         android.view.Display display = getWindowManager().getDefaultDisplay();
         if (window == null || display == null) return;
         android.view.WindowManager.LayoutParams params = window.getAttributes();
-        boolean frameGenOn = activeLsfgMultiplier >= 2 && frameGenRenderer != null;
+        boolean frameGenOn = activeLsfgMultiplier >= 2;
         if (baseRefreshHz <= 0f) baseRefreshHz = display.getMode().getRefreshRate();
 
         if (!frameGenOn) {
@@ -3281,7 +3198,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             return;
         }
 
-        int fpsLimit = xServerView != null ? xServerView.getFpsLimit() : 0;
+        int fpsLimit = frameGenRenderer != null ? frameGenRenderer.getFpsLimit() : 0;
         int wanted;
         if (activeLsfgTargetRate > 0) wanted = activeLsfgTargetRate;
         else if (fpsLimit > 0) wanted = activeLsfgMultiplier * fpsLimit;

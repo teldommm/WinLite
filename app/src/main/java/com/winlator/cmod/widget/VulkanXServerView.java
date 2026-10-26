@@ -25,6 +25,7 @@ import com.winlator.cmod.xserver.Drawable;
 import com.winlator.cmod.xserver.Pointer;
 import com.winlator.cmod.xserver.Property;
 import com.winlator.cmod.xserver.ScreenInfo;
+import com.winlator.cmod.xserver.SurfaceFormat;
 import com.winlator.cmod.xserver.Window;
 import com.winlator.cmod.xserver.WindowAttributes;
 import com.winlator.cmod.xserver.WindowManager;
@@ -110,19 +111,19 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             ViewGroup.LayoutParams.MATCH_PARENT));
         getHolder().addCallback(this);
 
-        rootCursorDrawable = createRootCursorDrawable();
+        rootCursorDrawable = createRootCursorDrawable(xServer.getSurfaceFormat());
         xServer.setXServerView(this);
         effectiveScreen = xServer.getEffectiveScreenInfo();
         xServer.windowManager.addOnWindowModificationListener(this);
         xServer.pointer.addOnPointerMotionListener(this);
     }
 
-    private Drawable createRootCursorDrawable() {
+    private Drawable createRootCursorDrawable(SurfaceFormat format) {
         try {
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inScaled = false;
             Bitmap bitmap = BitmapFactory.decodeResource(getContext().getResources(), R.drawable.cursor, options);
-            return Drawable.fromBitmap(bitmap);
+            return Drawable.fromBitmap(bitmap, format);
         } catch (Exception e) { return null; }
     }
 
@@ -162,7 +163,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeSetPointerPos(long handle, short x, short y);
     @FastNative private native void nativeSetCursorVisible(long handle, boolean visible);
     private native void nativeUpdateCursorImage(long handle,
-        ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY);
+        ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY,
+        boolean rgba);
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
 
@@ -521,19 +523,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         sendCursorToNative(lastCursor);
     }
 
-    /** R,G,B,A bytes to B,G,R,A bytes, in a new direct buffer (the cursor is a few KB). */
-    private static ByteBuffer rgbaToBgra(ByteBuffer src) {
-        final int size = src.capacity();
-        ByteBuffer dst = ByteBuffer.allocateDirect(size);
-        for (int i = 0; i + 3 < size; i += 4) {
-            dst.put(i, src.get(i + 2));
-            dst.put(i + 1, src.get(i + 1));
-            dst.put(i + 2, src.get(i));
-            dst.put(i + 3, src.get(i + 3));
-        }
-        return dst;
-    }
-
     private void sendCursorToNative(Cursor cursor) {
         if (nativeHandle == 0) return;
         Drawable cd; short hotX = 0, hotY = 0;
@@ -551,12 +540,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 ByteBuffer pixels = cd.lockBuffer(ahb);
                 if (pixels != null) {
                     try {
-                        // The renderer's cursor texture is B8G8R8A8; an RGBA drawable (rgba8
-                        // surface format) is converted first.
-                        ByteBuffer image = cd.format == Drawable.HAL_PIXEL_FORMAT_BGRA_8888
-                                ? pixels : rgbaToBgra(pixels);
-                        nativeUpdateCursorImage(nativeHandle, image, cd.width, cd.height,
-                            cd.getStride(), hotX, hotY);
+                        // The renderer's cursor texture is always RGBA; the native side swaps
+                        // R and B when the cursor drawable is BGRA.
+                        nativeUpdateCursorImage(nativeHandle, pixels, cd.width, cd.height,
+                            cd.getStride(), hotX, hotY, cd.format == SurfaceFormat.RGBA);
                     } finally {
                         cd.unlockBuffer(ahb);
                     }

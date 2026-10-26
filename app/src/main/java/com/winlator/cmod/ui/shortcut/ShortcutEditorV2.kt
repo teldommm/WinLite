@@ -92,6 +92,7 @@ import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.container.SaveProfiles
 import com.winlator.cmod.container.Shortcut
+import com.winlator.cmod.xserver.SurfaceFormat
 import com.winlator.cmod.ui.library.HomeShortcuts
 import com.winlator.cmod.core.GameSaveManager
 import com.winlator.cmod.core.DefaultVersion
@@ -198,15 +199,13 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var name by mutableStateOf(shortcut.name)
     var saveProfileMode by mutableStateOf(SaveProfiles.getMode(shortcut))
     var screen by mutableStateOf(normalizeResolution(shortcut.getExtra("screenSize", container.getScreenSize())))
-    var renderer by mutableStateOf(if (shortcut.getRenderer() == Container.RENDERER_SURFACEFLINGER) "SurfaceFlinger" else "Vulkan")
+    var renderer by mutableStateOf("Vulkan")
     var presentMode by mutableStateOf(shortcut.getRendererPresentMode())
     var rendererDriver by mutableStateOf(shortcut.getRendererDriverId())
     var filterMode by mutableIntStateOf(shortcut.getRendererFilterMode())
-    var surfaceFormat by mutableStateOf(shortcut.getSurfaceFormatSetting())
+    var surfaceFormat by mutableStateOf(shortcut.getSurfaceFormat())
+    var surfaceUbwc by mutableStateOf(shortcut.isSurfaceUbwc())
     var graphicsDriver by mutableStateOf(StringUtils.parseIdentifier(shortcut.getExtra("graphicsDriver", container.getGraphicsDriver())))
-    var graphicsWrapper by mutableStateOf(Container.normalizeGraphicsWrapper(
-        shortcut.getExtra("graphicsWrapper", container.getGraphicsWrapper())
-    ))
     private val defaultDriverVersion = runCatching {
         val context = container.manager.context
         if (GPUInformation.isDriverSupported(DefaultVersion.WRAPPER_ADRENO, context)) DefaultVersion.WRAPPER_ADRENO else DefaultVersion.WRAPPER
@@ -473,11 +472,11 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     }
 
     fun saveRenderer() {
-        shortcut.setRenderer(renderer)
         shortcut.setRendererPresentMode(presentMode)
         shortcut.setRendererDriverId(rendererDriver)
         shortcut.setRendererFilterMode(filterMode)
         shortcut.setSurfaceFormat(surfaceFormat)
+        shortcut.setSurfaceUbwc(surfaceUbwc)
         save()
     }
 
@@ -537,7 +536,6 @@ internal fun ShortcutEditorV2(
 
     val screenEntries = remember { context.resources.getStringArray(R.array.screen_size_entries).toList() }
     val graphicsEntries = remember { context.resources.getStringArray(R.array.graphics_driver_entries).toList() }
-    val graphicsWrapperEntries = remember { context.resources.getStringArray(R.array.graphics_wrapper_entries).toList() }
     val audioEntries = remember { context.resources.getStringArray(R.array.audio_driver_entries).toList() }
     val wrapperEntries = remember { context.resources.getStringArray(R.array.dxwrapper_entries).toList() }
     val localeEntries = remember { listOf("Default") + context.resources.getStringArray(R.array.some_lc_all).toList() }
@@ -710,7 +708,7 @@ internal fun ShortcutEditorV2(
                 ) {
                     item(category) {
                         ShortcutCategoryV2(
-                            category, state, catalog, screenEntries, graphicsEntries, graphicsWrapperEntries, audioEntries,
+                            category, state, catalog, screenEntries, graphicsEntries, audioEntries,
                             wrapperEntries, localeEntries, soundFonts, fexPresets, boxPresets,
                             profiles, containers, ::environmentLabel, ::changeContainer, ::enterContainer,
                             ::installRuntime, ::installDriver, context
@@ -736,7 +734,7 @@ internal fun ShortcutEditorV2(
                 ) {
                     item(category) {
                         ShortcutCategoryV2(
-                            category, state, catalog, screenEntries, graphicsEntries, graphicsWrapperEntries, audioEntries,
+                            category, state, catalog, screenEntries, graphicsEntries, audioEntries,
                             wrapperEntries, localeEntries, soundFonts, fexPresets, boxPresets,
                             profiles, containers, ::environmentLabel, ::changeContainer, ::enterContainer,
                             ::installRuntime, ::installDriver, context
@@ -779,7 +777,6 @@ private fun ShortcutCategoryV2(
     catalog: SettingsCatalog?,
     screenEntries: List<String>,
     graphicsEntries: List<String>,
-    graphicsWrapperEntries: List<String>,
     audioEntries: List<String>,
     wrapperEntries: List<String>,
     localeEntries: List<String>,
@@ -934,62 +931,52 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, if (android.os.Build.VERSION.SDK_INT >= 29) listOf("Vulkan", "SurfaceFlinger") else listOf("Vulkan")) {
+                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan")) {
                     s.renderer = it
                     s.saveRenderer()
                 }
-                // The SurfaceFlinger renderer only takes RGBA buffers: its surface format is fixed to
-                // rgba8 (Shortcut.getSurfaceFormat()), so the choice only exists for Vulkan.
-                if (s.renderer != "SurfaceFlinger") {
+                SettingsDivider()
+                SettingChoice(
+                    uiStr(R.string.ui_surface_format),
+                    s.surfaceFormat.label,
+                    SurfaceFormat.values().map { it.label }
+                ) {
+                    s.surfaceFormat = SurfaceFormat.fromLabel(it)
+                    s.saveRenderer()
+                }
+                // UBWC compression only works with RGBA buffers (and only on proprietary Adreno).
+                if (s.surfaceFormat == SurfaceFormat.RGBA) {
                     SettingsDivider()
-                    SettingChoice(
-                        uiStr(R.string.ui_surface_format),
-                        if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
-                        listOf("BGRA", "RGBA")
-                    ) {
-                        s.surfaceFormat = if (it == "BGRA") "bgra8" else "rgba8"
+                    SettingToggle(uiStr(R.string.ui_surface_ubwc), s.surfaceUbwc) {
+                        s.surfaceUbwc = it
                         s.saveRenderer()
                     }
                 }
-                // Present mode, renderer driver and the upscaling filter belong to the Vulkan renderer only.
-                if (s.renderer != "SurfaceFlinger") {
+                SettingsDivider()
+                SettingChoice(uiStr(R.string.ui_present_mode), s.presentMode, listOf("fifo", "mailbox")) {
+                    s.presentMode = it
+                    s.saveRenderer()
+                }
+                catalog?.let { c ->
                     SettingsDivider()
-                    SettingChoice(uiStr(R.string.ui_present_mode), s.presentMode, listOf("fifo", "mailbox")) {
-                        s.presentMode = it
+                    SettingMappedChoice(uiStr(R.string.ui_renderer_driver), s.rendererDriver, c.rendererDrivers) {
+                        s.rendererDriver = it
                         s.saveRenderer()
                     }
-                    catalog?.let { c ->
-                        SettingsDivider()
-                        SettingMappedChoice(uiStr(R.string.ui_renderer_driver), s.rendererDriver, c.rendererDrivers) {
-                            s.rendererDriver = it
-                            s.saveRenderer()
-                        }
-                    }
-                    SettingsDivider()
-                    // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
-                    // Display order: SGSR HQ right after SGSR, NIS right after FSR.
-                    val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
-                    val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "Snapdragon Super Resolution HQ", "AMD FidelityFX Super Resolution", "NVIDIA Image Scaling (NIS)", "Lanczos 2 (16-tap)", "Color Boost")
-                    SettingChoice(uiStr(R.string.ui_texture_filter), filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
-                        s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
-                        s.saveRenderer()
-                    }
+                }
+                SettingsDivider()
+                // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
+                // Display order: SGSR HQ right after SGSR, NIS right after FSR.
+                val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
+                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "Snapdragon Super Resolution HQ", "AMD FidelityFX Super Resolution", "NVIDIA Image Scaling (NIS)", "Lanczos 2 (16-tap)", "Color Boost")
+                SettingChoice(uiStr(R.string.ui_texture_filter), filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
+                    s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
+                    s.saveRenderer()
                 }
             }
             SettingsCard {
                 SettingChoice("Graphics Driver", graphicsEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.graphicsDriver, true) } ?: s.graphicsDriver, graphicsEntries) {
                     s.selectGraphicsDriver(StringUtils.parseIdentifier(it))
-                }
-                SettingsDivider()
-                SettingChoice(
-                    uiStr(R.string.ui_vulkan_wrapper),
-                    graphicsWrapperEntries.firstOrNull {
-                        Container.normalizeGraphicsWrapper(StringUtils.parseIdentifier(it)).equals(s.graphicsWrapper, true)
-                    } ?: s.graphicsWrapper,
-                    graphicsWrapperEntries
-                ) {
-                    s.graphicsWrapper = Container.normalizeGraphicsWrapper(StringUtils.parseIdentifier(it))
-                    s.extra("graphicsWrapper", s.graphicsWrapper)
                 }
                 catalog?.let { c ->
                     SettingsDivider()

@@ -7,6 +7,7 @@ import android.util.Log;
 
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.StringUtils;
+import com.winlator.cmod.xserver.SurfaceFormat;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -334,29 +335,24 @@ public class Shortcut {
         return exe;
     }
 
-    /** The surface format the user chose for this shortcut (the container's when it has none). */
-    public String getSurfaceFormatSetting() {
+    /** Pixel order of the X server's buffers for this shortcut (the container's when it has none). */
+    public SurfaceFormat getSurfaceFormat() {
         String v = getExtra("surfaceFormat", null);
-        if (v == null || v.isEmpty()) return container.getSurfaceFormatSetting();
-        return "bgra8".equalsIgnoreCase(v) ? "bgra8" : "rgba8";
+        if (v == null || v.isEmpty()) return container.getSurfaceFormat();
+        return SurfaceFormat.fromId(v);
     }
-    /** What the X server and the guest actually use: always rgba8 with the SurfaceFlinger renderer. */
-    public String getSurfaceFormat() {
-        return Container.RENDERER_SURFACEFLINGER.equals(getRenderer()) ? "rgba8" : getSurfaceFormatSetting();
-    }
-    public void setSurfaceFormat(String value) {
-        putExtra("surfaceFormat", "bgra8".equalsIgnoreCase(value) ? "bgra8" : "rgba8");
+    public void setSurfaceFormat(SurfaceFormat format) {
+        putExtra("surfaceFormat", (format != null ? format : SurfaceFormat.DEFAULT).id);
     }
 
-    public String getRenderer() {
-        String v = getExtra("renderer", null);
-        if (v == null || v.isEmpty()) return container.getRenderer();
-        return Container.RENDERER_SURFACEFLINGER.equalsIgnoreCase(v)
-                ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN;
+    /** UBWC-compressed swapchain buffers (the container's setting when the shortcut has none). */
+    public boolean isSurfaceUbwc() {
+        String v = getExtra("surfaceUbwc", null);
+        if (v == null || v.isEmpty()) return container.isSurfaceUbwc();
+        return "1".equals(v);
     }
-    public void setRenderer(String value) {
-        putExtra("renderer", value != null && value.equalsIgnoreCase(Container.RENDERER_SURFACEFLINGER)
-                ? Container.RENDERER_SURFACEFLINGER : Container.RENDERER_VULKAN);
+    public void setSurfaceUbwc(boolean enabled) {
+        putExtra("surfaceUbwc", enabled ? "1" : "0");
     }
 
     public String getRendererPresentMode() {

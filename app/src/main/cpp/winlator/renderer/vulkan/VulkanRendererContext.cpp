@@ -1032,6 +1032,9 @@ void VulkanRendererContext::transition(VkCommandBuffer cb, VkImage img,
     vk_.CmdPipelineBarrier(cb,ss,dss,0,0,nullptr,0,nullptr,1,&b);
 }
 
+// HAL_PIXEL_FORMAT_BGRA_8888: not part of the public NDK AHardwareBuffer formats.
+static constexpr uint32_t kHalPixelFormatBgra8888 = 5;
+
 bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) {
     if (!vk_.GetAndroidHardwareBufferPropertiesANDROID)
         return false;
@@ -1051,7 +1054,7 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     if (imageFormat == VK_FORMAT_UNDEFINED) {
         if (desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM)
             imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
-        else if (desc.format == 5u)
+        else if (desc.format == kHalPixelFormatBgra8888)
             imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
         else {
             RLOG_E("importAHBToWinTex: unsupported external-only AHB format=%u externalFormat=%" PRIu64,
@@ -1148,14 +1151,14 @@ void VulkanRendererContext::ensureCursorTex(short w, short h) {
     if (cursorImg!=VK_NULL_HANDLE && cursorTexW==w && cursorTexH==h) return;
     cleanupCursorTex();
     VkImageCreateInfo ii{}; ii.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; ii.imageType=VK_IMAGE_TYPE_2D;
-    ii.extent={(uint32_t)w,(uint32_t)h,1}; ii.mipLevels=1; ii.arrayLayers=1; ii.format=VK_FORMAT_B8G8R8A8_UNORM;
+    ii.extent={(uint32_t)w,(uint32_t)h,1}; ii.mipLevels=1; ii.arrayLayers=1; ii.format=VK_FORMAT_R8G8B8A8_UNORM;
     ii.tiling=VK_IMAGE_TILING_OPTIMAL; ii.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
     ii.usage=VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT; ii.samples=VK_SAMPLE_COUNT_1_BIT; ii.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
     vk_.CreateImage(device,&ii,nullptr,&cursorImg);
     VkMemoryRequirements req; vk_.GetImageMemoryRequirements(device,cursorImg,&req);
     VkMemoryAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ai.allocationSize=req.size; ai.memoryTypeIndex=findMemType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     vk_.AllocateMemory(device,&ai,nullptr,&cursorMem); vk_.BindImageMemory(device,cursorImg,cursorMem,0);
-    VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; vi.image=cursorImg; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=VK_FORMAT_B8G8R8A8_UNORM; vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; vi.image=cursorImg; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=VK_FORMAT_R8G8B8A8_UNORM; vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
     vk_.CreateImageView(device,&vi,nullptr,&cursorView);
     VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; dii.imageView=cursorView; dii.sampler=sampler;
     VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wr.dstSet=cursorDS; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr.descriptorCount=1; wr.pImageInfo=&dii;
@@ -1903,7 +1906,7 @@ void VulkanRendererContext::setCursorVisible(bool v) {
     cursorVisible.store(v); cursorMoved.store(true); wakeRender();
 }
 
-void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short stride, short hotX, short hotY) {
+void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short stride, short hotX, short hotY, bool rgba) {
     if (!px||w<=0||h<=0) return;
     std::lock_guard<std::mutex> lk(renderMutex);
     cursorPixels.resize((size_t)w*h);
@@ -1911,7 +1914,12 @@ void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short 
     const size_t rowBytes=(size_t)w*4;
     const uint8_t* src=static_cast<const uint8_t*>(px);
     uint8_t* dst=reinterpret_cast<uint8_t*>(cursorPixels.data());
-    for (int y=0;y<h;y++) memcpy(dst+(size_t)y*rowBytes,src+(size_t)y*srcStrideBytes,rowBytes);
+    for (int y=0;y<h;y++) {
+        const uint8_t* s=src+(size_t)y*srcStrideBytes;
+        uint8_t* d=dst+(size_t)y*rowBytes;
+        if (rgba) { memcpy(d,s,rowBytes); continue; }
+        for (size_t x=0;x<rowBytes;x+=4) { d[x]=s[x+2]; d[x+1]=s[x+1]; d[x+2]=s[x]; d[x+3]=s[x+3]; }
+    }
     cursorPendingW=w; cursorPendingH=h;
     cursorHotX=hotX; cursorHotY=hotY;
     isCursorImageDirty.store(true); needsRender.store(true); wakeRender();

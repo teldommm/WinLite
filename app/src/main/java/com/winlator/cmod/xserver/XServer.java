@@ -1,6 +1,5 @@
 package com.winlator.cmod.xserver;
 
-import android.hardware.HardwareBuffer;
 import android.util.SparseArray;
 
 import com.winlator.cmod.core.CursorLocker;
@@ -47,7 +46,7 @@ public class XServer {
     private boolean simulateTouchScreen = false;
     private boolean disableMouse = false;
     private boolean isGrabbed = false;
-    private int surfaceFormat = Drawable.HAL_PIXEL_FORMAT_BGRA_8888;
+    private final SurfaceFormat surfaceFormat;
     private XServerRendererView xServerView;
     private XClient grabbingClient = null;
     private XInputExtension xInputExtension;
@@ -58,12 +57,9 @@ public class XServer {
     private int absolutePointerX;
     private int absolutePointerY;
 
-    public XServer(ScreenInfo screenInfo, String surfaceFormat) {
+    public XServer(ScreenInfo screenInfo, SurfaceFormat surfaceFormat) {
         this.screenInfo = screenInfo;
-        if ("rgba8".equals(surfaceFormat))
-            this.surfaceFormat = HardwareBuffer.RGBA_8888;
-        else
-            this.surfaceFormat = Drawable.HAL_PIXEL_FORMAT_BGRA_8888;
+        this.surfaceFormat = surfaceFormat != null ? surfaceFormat : SurfaceFormat.DEFAULT;
 
         /* locks first: CursorLocker's timer starts immediately and takes them */
         for (Lockable lockable : Lockable.values()) locks.put(lockable, new ReentrantLock());
@@ -81,7 +77,7 @@ public class XServer {
         setupExtensions();
     }
     
-    public int getSurfaceFormat() {
+    public SurfaceFormat getSurfaceFormat() {
         return this.surfaceFormat;
     }
 

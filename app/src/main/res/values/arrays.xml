@@ -22,10 +22,6 @@
     <string-array name="graphics_driver_entries">
         <item>Wrapper</item>
     </string-array>
-    <string-array name="graphics_wrapper_entries">
-        <item>Wrapper WL</item>
-        <item>Wrapper Legacy</item>
-    </string-array>
     <string-array name="wrapper_graphics_driver_version_entries">
         <item>System</item>
         <item>v863</item>

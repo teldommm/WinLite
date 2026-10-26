@@ -38,9 +38,6 @@ public final class OpenGLDriverDefaults {
             data.put("graphicsDriver", freedreno ? "freedreno" : Container.DEFAULT_GRAPHICS_DRIVER);
             data.put("graphicsDriverConfig", putConfigValue(config, "version", selectedVersion));
             data.put("envVars", environment.toString());
-            if (!extraData.has("surfaceFormat")) {
-                extraData.put("surfaceFormat", "bgra8");
-            }
             extraData.put(INITIALIZED, "1");
             extraData.put(AUTO_MESA_OVERRIDE, automaticOverride ? "1" : "0");
             data.put("extraData", extraData);

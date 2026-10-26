@@ -181,28 +181,3 @@ target_link_libraries(vulkan_renderer
         dl
         atomic
 )
-
-# SurfaceFlinger renderer: an optional alternative to the Vulkan renderer. Every viewable X
-# window is an ASurfaceControl layer fed with the window's own AHardwareBuffer. The ASurface*
-# entry points (API 29) are resolved with dlsym, so the library loads on the app's minSdk 28 too.
-# Window buffers must be RGBA8888/RGBX8888 (the surface format is forced to rgba8 for this renderer),
-# so there is no copy pass and no EGL/GLES here.
-add_library(asurface_renderer SHARED
-        winlator/renderer/asurface/asurface_jni.cpp
-)
-
-set_target_properties(asurface_renderer PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-)
-
-target_compile_options(asurface_renderer PRIVATE
-        -Wall -Wextra -fvisibility=hidden
-)
-
-target_link_libraries(asurface_renderer
-        log
-        android
-        dl
-)

@@ -72,6 +72,7 @@ import com.winlator.cmod.box64.Box64Preset
 import com.winlator.cmod.box64.Box64PresetManager
 import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
+import com.winlator.cmod.xserver.SurfaceFormat
 import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.core.DefaultVersion
 import com.winlator.cmod.core.FileUtils
@@ -187,18 +188,18 @@ private class ContainerEditorStateV2(
     var mouseWarp by mutableStateOf(editing?.getExtra("mouseWarpOverride", "disable") ?: "disable")
     var drives by mutableStateOf(editing?.drives ?: Container.DEFAULT_DRIVES)
 
-    var renderer by mutableStateOf(if (editing?.getRenderer() == Container.RENDERER_SURFACEFLINGER) "SurfaceFlinger" else "Vulkan")
+    var renderer by mutableStateOf("Vulkan")
     var rendererPresentMode by mutableStateOf(editing?.rendererPresentMode ?: "fifo")
     var rendererDriver by mutableStateOf(editing?.rendererDriverId ?: "system")
     var filterMode by mutableIntStateOf(editing?.rendererFilterMode ?: 0)
-    var surfaceFormat by mutableStateOf(editing?.getSurfaceFormatSetting() ?: "bgra8")
+    var surfaceFormat by mutableStateOf(editing?.getSurfaceFormat() ?: SurfaceFormat.DEFAULT)
+    var surfaceUbwc by mutableStateOf(editing?.isSurfaceUbwc() ?: false)
 
     var graphicsDriver by mutableStateOf(
         editing?.graphicsDriver ?: if (preferredDriver == DefaultVersion.WRAPPER_ADRENO) {
             "freedreno"
         } else Container.DEFAULT_GRAPHICS_DRIVER
     )
-    var graphicsWrapper by mutableStateOf(editing?.getGraphicsWrapper() ?: Container.DEFAULT_GRAPHICS_WRAPPER)
     var graphicsConfig by mutableStateOf(
         (editing?.graphicsDriverConfig ?: Container.DEFAULT_GRAPHICSDRIVERCONFIG).let { original ->
             if (readConfig(original, "version", ';').isBlank()) writeConfig(original, "version", preferredDriver, ';') else original
@@ -322,8 +323,8 @@ private class ContainerEditorStateV2(
     fun fingerprint(): String = listOf(
         name, screen, audio, oboeProfile, oboeApi, oboeAdaptive, oboeExclusive, directAudioMic, hudMode, locale, soundFont,
         fullscreen, desktopTheme, desktopBackground, wallpaperStamp, mouseWarp, drives,
-        renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat,
-        graphicsDriver, graphicsWrapper, graphicsConfig,
+        renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat, surfaceUbwc,
+        graphicsDriver, graphicsConfig,
         wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, forceSsbs, boxPreset, exclusive, xinput, dinput,
         syncCpu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
         cpu64.joinToString(), cpu32.joinToString(), components.entries.sortedBy { it.key }.joinToString()
@@ -378,7 +379,6 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
 
     val screenEntries = remember { context.resources.getStringArray(R.array.screen_size_entries).toList() }
     val graphicsEntries = remember { context.resources.getStringArray(R.array.graphics_driver_entries).toList() }
-    val graphicsWrapperEntries = remember { context.resources.getStringArray(R.array.graphics_wrapper_entries).toList() }
     val wrapperEntries = remember { context.resources.getStringArray(R.array.dxwrapper_entries).toList() }
     val audioEntries = remember { context.resources.getStringArray(R.array.audio_driver_entries).toList() }
     val localeEntries = remember { listOf("Default") + context.resources.getStringArray(R.array.some_lc_all).toList() }
@@ -471,13 +471,12 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.setCPUListWoW64(state.cpu32.indices.filter { state.cpu32[it] }.joinToString(","))
         container.setSyncCpuTopology(state.syncCpu)
         container.setGraphicsDriver(state.graphicsDriver)
-        container.setGraphicsWrapper(state.graphicsWrapper)
         container.setGraphicsDriverConfig(state.graphicsConfig)
-        container.setRenderer(state.renderer)
         container.setRendererPresentMode(state.rendererPresentMode)
         container.setRendererDriverId(state.rendererDriver)
         container.setRendererFilterMode(state.filterMode)
         container.setSurfaceFormat(state.surfaceFormat)
+        container.setSurfaceUbwc(state.surfaceUbwc)
         container.setDXWrapper(state.wrapper)
         container.setDXWrapperConfig(state.wrapperConfig)
         container.setAudioDriver(state.audio)
@@ -562,11 +561,10 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 put("midiSoundFont", state.soundFont)
                 put("lc_all", state.locale)
                 put("extraData", JSONObject()
-                    .put("graphicsWrapper", state.graphicsWrapper)
                     .put("hudMode", state.hudMode.toString())
                     .put("mouseWarpOverride", state.mouseWarp)
-                    .put("surfaceFormat", state.surfaceFormat)
-                    .put("renderer", if (state.renderer == "SurfaceFlinger") Container.RENDERER_SURFACEFLINGER else Container.RENDERER_VULKAN)
+                    .put("surfaceFormat", state.surfaceFormat.id)
+                    .put("surfaceUbwc", if (state.surfaceUbwc) "1" else "0")
                     .put("oboeProfile", state.oboeProfile)
                     .put("oboeApi", state.oboeApi)
                     .put("oboeAdaptive", if (state.oboeAdaptive) "1" else "0")
@@ -658,7 +656,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 ) {
                     item(category) {
                         ContainerCategoryV2(
-                            category, state, runtimeChoices, arm64, screenEntries, graphicsEntries, graphicsWrapperEntries,
+                            category, state, runtimeChoices, arm64, screenEntries, graphicsEntries,
                             wrapperEntries, audioEntries, localeEntries, soundFonts, fexPresets,
                             boxPresets, catalog, installing, ::installWine, ::installDriver, ::installRuntime
                         )
@@ -681,7 +679,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 ) {
                     item(category) {
                         ContainerCategoryV2(
-                            category, state, runtimeChoices, arm64, screenEntries, graphicsEntries, graphicsWrapperEntries,
+                            category, state, runtimeChoices, arm64, screenEntries, graphicsEntries,
                             wrapperEntries, audioEntries, localeEntries, soundFonts, fexPresets,
                             boxPresets, catalog, installing, ::installWine, ::installDriver, ::installRuntime
                         )
@@ -731,7 +729,6 @@ private fun ContainerCategoryV2(
     arm64: Boolean,
     screenEntries: List<String>,
     graphicsEntries: List<String>,
-    graphicsWrapperEntries: List<String>,
     wrapperEntries: List<String>,
     audioEntries: List<String>,
     localeEntries: List<String>,
@@ -886,48 +883,46 @@ private fun ContainerCategoryV2(
                     ResolutionField(s.screen) { s.screen = it }
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, if (android.os.Build.VERSION.SDK_INT >= 29) listOf("Vulkan", "SurfaceFlinger") else listOf("Vulkan")) {
+                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan")) {
                     s.renderer = it
                 }
-                // The SurfaceFlinger renderer only takes RGBA buffers: its surface format is fixed to
-                // rgba8 (Container.getSurfaceFormat()), so the choice only exists for Vulkan.
-                if (s.renderer != "SurfaceFlinger") {
+                SettingsDivider()
+                SettingChoice(
+                    uiStr(R.string.ui_surface_format),
+                    s.surfaceFormat.label,
+                    SurfaceFormat.values().map { it.label }
+                ) { s.surfaceFormat = SurfaceFormat.fromLabel(it) }
+                // UBWC compression only works with RGBA buffers (and only on proprietary Adreno).
+                if (s.surfaceFormat == SurfaceFormat.RGBA) {
                     SettingsDivider()
-                    SettingChoice(
-                        uiStr(R.string.ui_surface_format),
-                        if (s.surfaceFormat == "bgra8") "BGRA" else "RGBA",
-                        listOf("BGRA", "RGBA")
-                    ) { s.surfaceFormat = if (it == "BGRA") "bgra8" else "rgba8" }
+                    SettingToggle(uiStr(R.string.ui_surface_ubwc), s.surfaceUbwc) { s.surfaceUbwc = it }
                 }
-                // Present mode, renderer driver and the upscaling filter belong to the Vulkan renderer only.
-                if (s.renderer != "SurfaceFlinger") {
+                SettingsDivider()
+                SettingChoice(uiStr(R.string.ui_present_mode), s.rendererPresentMode, listOf("fifo", "mailbox")) {
+                    s.rendererPresentMode = it
+                }
+                catalog?.let { c ->
                     SettingsDivider()
-                    SettingChoice(uiStr(R.string.ui_present_mode), s.rendererPresentMode, listOf("fifo", "mailbox")) {
-                        s.rendererPresentMode = it
+                    SettingMappedChoice(uiStr(R.string.ui_renderer_driver), s.rendererDriver, c.rendererDrivers) {
+                        s.rendererDriver = it
                     }
-                    catalog?.let { c ->
-                        SettingsDivider()
-                        SettingMappedChoice(uiStr(R.string.ui_renderer_driver), s.rendererDriver, c.rendererDrivers) {
-                            s.rendererDriver = it
-                        }
-                    }
-                    SettingsDivider()
-                    // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
-                    // Display order: SGSR HQ right after SGSR, NIS right after FSR.
-                    val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
-                    val filters = listOf(
-                        uiStr(R.string.ui_bilinear),
-                        uiStr(R.string.ui_nearest_neighbor),
-                        uiStr(R.string.ui_snapdragon_super_resolution),
-                        uiStr(R.string.ui_snapdragon_super_resolution_hq),
-                        uiStr(R.string.ui_amd_fidelityfx_super_resolution),
-                        uiStr(R.string.ui_nvidia_image_scaling_nis),
-                        uiStr(R.string.ui_lanczos_2_16_tap),
-                        uiStr(R.string.ui_color_boost)
-                    )
-                    SettingChoice(uiStr(R.string.ui_texture_filter), filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
-                        s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
-                    }
+                }
+                SettingsDivider()
+                // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
+                // Display order: SGSR HQ right after SGSR, NIS right after FSR.
+                val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
+                val filters = listOf(
+                    uiStr(R.string.ui_bilinear),
+                    uiStr(R.string.ui_nearest_neighbor),
+                    uiStr(R.string.ui_snapdragon_super_resolution),
+                    uiStr(R.string.ui_snapdragon_super_resolution_hq),
+                    uiStr(R.string.ui_amd_fidelityfx_super_resolution),
+                    uiStr(R.string.ui_nvidia_image_scaling_nis),
+                    uiStr(R.string.ui_lanczos_2_16_tap),
+                    uiStr(R.string.ui_color_boost)
+                )
+                SettingChoice(uiStr(R.string.ui_texture_filter), filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
+                    s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
                 }
             }
             SettingsCard {
@@ -936,14 +931,6 @@ private fun ContainerCategoryV2(
                     graphicsEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.graphicsDriver, true) } ?: s.graphicsDriver,
                     graphicsEntries
                 ) { s.selectGraphicsDriver(StringUtils.parseIdentifier(it)) }
-                SettingsDivider()
-                SettingChoice(
-                    uiStr(R.string.ui_vulkan_wrapper),
-                    graphicsWrapperEntries.firstOrNull {
-                        Container.normalizeGraphicsWrapper(StringUtils.parseIdentifier(it)).equals(s.graphicsWrapper, true)
-                    } ?: s.graphicsWrapper,
-                    graphicsWrapperEntries
-                ) { s.graphicsWrapper = Container.normalizeGraphicsWrapper(StringUtils.parseIdentifier(it)) }
                 catalog?.let { c ->
                     SettingsDivider()
                     SettingDriverChoice("Driver Version", s.driverVersion, c.drivers, installing, installDriver) {

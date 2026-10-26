@@ -15,9 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class Drawable extends XResource {
-    public static final int HAL_PIXEL_FORMAT_RGBA_8888 = 1;
-    public static final int HAL_PIXEL_FORMAT_BGRA_8888 = 5;
-
     private static final AtomicLong UID_GENERATOR = new AtomicLong();
 
     /**
@@ -32,7 +29,8 @@ public class Drawable extends XResource {
     public volatile long backingAHB;
     public final short height;
     public final Visual visual;
-    public int format = HAL_PIXEL_FORMAT_BGRA_8888;
+    /** Pixel order of this drawable's buffer. */
+    public final SurfaceFormat format;
 
     private GPUImage gpuImage = null;
     private boolean directScanout;
@@ -46,13 +44,13 @@ public class Drawable extends XResource {
         System.loadLibrary("winlator");
     }
 
-    public Drawable(int id, int width, int height, Visual visual, int format) {
+    public Drawable(int id, int width, int height, Visual visual, SurfaceFormat format) {
         super(id);
         this.width = (short)width;
         this.height = (short)height;
         this.visual = visual;
         this.format = format;
-        long ahb = allocate(width, height, format);
+        long ahb = allocate(width, height, format.halFormat);
         if (ahb == 0) {
             throw new IllegalStateException("Drawable data initialized as null!");
         }
@@ -74,16 +72,15 @@ public class Drawable extends XResource {
         this.height = (short)height;
         this.visual = visual;
         this.gpuImage = gpuImage;
-        this.format = gpuImage.format;
+        this.format = SurfaceFormat.fromHalFormat(gpuImage.format);
         this.backingAHB = gpuImage.hardwareBufferPtr;
         this.backing = Backing.track(this, gpuImage.hardwareBufferPtr);
     }
 
-    public static Drawable fromBitmap(Bitmap bitmap) {
+    public static Drawable fromBitmap(Bitmap bitmap, SurfaceFormat format) {
         if (bitmap == null || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) return null;
 
-        Drawable drawable = new Drawable(0, bitmap.getWidth(), bitmap.getHeight(), null,
-                HAL_PIXEL_FORMAT_BGRA_8888);
+        Drawable drawable = new Drawable(0, bitmap.getWidth(), bitmap.getHeight(), null, format);
         ByteBuffer dst = drawable.lockBuffer(drawable.backingAHB);
         if (dst == null) return null;
 
@@ -91,6 +88,7 @@ public class Drawable extends XResource {
             int width = bitmap.getWidth();
             int height = bitmap.getHeight();
             int dstStride = drawable.getStride();
+            final boolean rgba = format == SurfaceFormat.RGBA;
             int[] row = new int[width];
             for (int y = 0; y < height; y++) {
                 bitmap.getPixels(row, 0, width, 0, y, width, 1);
@@ -98,9 +96,12 @@ public class Drawable extends XResource {
                 for (int x = 0; x < width; x++) {
                     int color = row[x];
                     int offset = dstOffset + x * 4;
-                    dst.put(offset, (byte)(color & 0xff));
+                    // Bitmap pixels are ARGB: R at bits 16..23, B at bits 0..7.
+                    byte r = (byte)((color >> 16) & 0xff);
+                    byte b = (byte)(color & 0xff);
+                    dst.put(offset, rgba ? r : b);
                     dst.put(offset + 1, (byte)((color >> 8) & 0xff));
-                    dst.put(offset + 2, (byte)((color >> 16) & 0xff));
+                    dst.put(offset + 2, rgba ? b : r);
                     dst.put(offset + 3, (byte)((color >>> 24) & 0xff));
                 }
             }

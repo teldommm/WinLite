@@ -15,7 +15,6 @@
 
 #define LOG_TAG "System.out"
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#define HAL_PIXEL_FORMAT_BGRA_8888 5
 
 AHardwareBuffer* createHardwareBuffer(int width, int height) {
     AHardwareBuffer_Desc buffDesc = {};
@@ -23,7 +22,7 @@ AHardwareBuffer* createHardwareBuffer(int width, int height) {
     buffDesc.height = height;
     buffDesc.layers = 1;
     buffDesc.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN;
-    buffDesc.format = HAL_PIXEL_FORMAT_BGRA_8888;
+    buffDesc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
 
     AHardwareBuffer *hardwareBuffer = NULL;
     if (AHardwareBuffer_allocate(&buffDesc, &hardwareBuffer) != 0) {

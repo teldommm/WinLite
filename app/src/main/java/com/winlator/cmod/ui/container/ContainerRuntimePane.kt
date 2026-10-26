@@ -58,7 +58,6 @@ internal fun ContainerRuntimePane(
     val arm64 = remember(container.getWineVersion()) { container.getWineVersion().contains("arm64ec", true) }
     val screenEntries = remember { context.resources.getStringArray(R.array.screen_size_entries).toList() }
     val graphicsEntries = remember { context.resources.getStringArray(R.array.graphics_driver_entries).toList() }
-    val graphicsWrapperEntries = remember { context.resources.getStringArray(R.array.graphics_wrapper_entries).toList() }
     val audioEntries = remember(container.getWineVersion()) {
         DirectAudioDriver.audioEntriesFor(context.resources.getStringArray(R.array.audio_driver_entries).toList(), container.getWineVersion())
     }
@@ -72,13 +71,6 @@ internal fun ContainerRuntimePane(
         mutableStateOf(screenEntries.firstOrNull { normalizeResolution(it).equals(screen, true) } ?: "Custom")
     }
     var graphics by remember { mutableStateOf(graphicsEntries.firstOrNull() ?: "Wrapper") }
-    var graphicsWrapper by remember {
-        mutableStateOf(
-            graphicsWrapperEntries.firstOrNull {
-                com.winlator.cmod.container.Container.normalizeGraphicsWrapper(StringUtils.parseIdentifier(it)).equals(container.getGraphicsWrapper(), true)
-            } ?: graphicsWrapperEntries.first()
-        )
-    }
     var graphicsConfig by remember { mutableStateOf(container.getGraphicsDriverConfig()) }
     var driverVersion by remember { mutableStateOf(readConfig(graphicsConfig, "version", ';').ifBlank { "System" }) }
     var vulkanVersion by remember { mutableStateOf(readConfig(graphicsConfig, "vulkanVersion", ';').ifBlank { "1.3" }) }
@@ -233,9 +225,6 @@ internal fun ContainerRuntimePane(
             SettingsCard {
                 SettingChoice("Graphics Driver", graphics, graphicsEntries) {
                     graphics = it; container.setGraphicsDriver(StringUtils.parseIdentifier(it)); container.saveData()
-                }
-                SettingsDivider(); SettingChoice(uiStr(R.string.ui_vulkan_wrapper), graphicsWrapper, graphicsWrapperEntries) {
-                    graphicsWrapper = it; container.setGraphicsWrapper(com.winlator.cmod.container.Container.normalizeGraphicsWrapper(StringUtils.parseIdentifier(it))); container.saveData()
                 }
                 catalog?.let { c ->
                     SettingsDivider(); SettingDriverChoice("Driver Version", driverVersion, c.drivers, installing, ::installDriver) {

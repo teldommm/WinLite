@@ -10,6 +10,7 @@ import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineThemeManager;
 import com.winlator.cmod.fexcore.FEXCorePreset;
 import com.winlator.cmod.winhandler.WinHandler;
+import com.winlator.cmod.xserver.SurfaceFormat;
 import com.winlator.cmod.xenvironment.ImageFs;
 
 import org.json.JSONException;
@@ -54,7 +55,6 @@ public class Container {
         return DEFAULT_SCREEN_SIZE;             // 16:9 and wider
     }
     public static final String DEFAULT_GRAPHICS_DRIVER = "wrapper";
-    public static final String DEFAULT_GRAPHICS_WRAPPER = "wrapper";
     public static final String DEFAULT_AUDIO_DRIVER = "pulse-audio-gn";
     public static final String DEFAULT_EMULATOR = "FEXCore";
     public static final String DEFAULT_DXWRAPPER = "dxvk+vkd3d";
@@ -172,56 +172,20 @@ public class Container {
     public int getRendererFilterMode() { return rendererFilterMode; }
     public void setRendererFilterMode(int v) { this.rendererFilterMode = v; }
 
-    public String getGraphicsWrapper() {
-        return normalizeGraphicsWrapper(getExtra("graphicsWrapper", DEFAULT_GRAPHICS_WRAPPER));
+    /** Pixel order of the X server's buffers for this container (RGBA unless BGRA was chosen). */
+    public SurfaceFormat getSurfaceFormat() {
+        return SurfaceFormat.fromId(getExtra("surfaceFormat", null));
+    }
+    public void setSurfaceFormat(SurfaceFormat format) {
+        putExtra("surfaceFormat", (format != null ? format : SurfaceFormat.DEFAULT).id);
     }
 
-    public void setGraphicsWrapper(String graphicsWrapper) {
-        putExtra("graphicsWrapper", normalizeGraphicsWrapper(graphicsWrapper));
+    /** UBWC-compressed swapchain buffers (proprietary Adreno, RGBA only). Off by default. */
+    public boolean isSurfaceUbwc() {
+        return "1".equals(getExtra("surfaceUbwc", "0"));
     }
-
-    // graphics_wrapper_entries -> StringUtils.parseIdentifier():
-    //   "Wrapper WL"     -> "wrapper-wl" (stored as "wrapper"; the default, mesa26 based wrapper,
-    //                       assets/graphics_driver/wrapper_wl.tzst),
-    //   "Wrapper Legacy"  -> "wrapper-legacy" (assets/graphics_driver/wrapper_legacy.tzst).
-    // Anything else, including the removed "wrapper-adreno", falls back to the default wrapper.
-    public static final String LEGACY_GRAPHICS_WRAPPER = "wrapper-legacy";
-
-    public static String normalizeGraphicsWrapper(String graphicsWrapper) {
-        if (graphicsWrapper == null) return DEFAULT_GRAPHICS_WRAPPER;
-        String id = graphicsWrapper.toLowerCase(java.util.Locale.ENGLISH);
-        if (LEGACY_GRAPHICS_WRAPPER.equals(id)) return LEGACY_GRAPHICS_WRAPPER;
-        return DEFAULT_GRAPHICS_WRAPPER;
-    }
-
-    /** The surface format the user chose ("bgra8" by default). What the editors show and save. */
-    public String getSurfaceFormatSetting() {
-        String value = getExtra("surfaceFormat", null);
-        if (value == null || value.isEmpty()) value = "bgra8";
-        return "bgra8".equalsIgnoreCase(value) ? "bgra8" : "rgba8";
-    }
-    /**
-     * The surface format the X server and the guest actually use: always rgba8 with the
-     * SurfaceFlinger renderer (it only takes RGBA buffers), the chosen one with Vulkan.
-     */
-    public String getSurfaceFormat() {
-        return RENDERER_SURFACEFLINGER.equals(getRenderer()) ? "rgba8" : getSurfaceFormatSetting();
-    }
-    public void setSurfaceFormat(String value) {
-        putExtra("surfaceFormat", "bgra8".equalsIgnoreCase(value) ? "bgra8" : "rgba8");
-    }
-
-    public static final String RENDERER_VULKAN = "vulkan";
-    public static final String RENDERER_SURFACEFLINGER = "surfaceflinger";
-
-    /** Which X server renderer shows the container: RENDERER_VULKAN (default) or RENDERER_SURFACEFLINGER. */
-    public String getRenderer() {
-        return RENDERER_SURFACEFLINGER.equalsIgnoreCase(getExtra("renderer", RENDERER_VULKAN))
-                ? RENDERER_SURFACEFLINGER : RENDERER_VULKAN;
-    }
-    public void setRenderer(String value) {
-        putExtra("renderer", value != null && value.equalsIgnoreCase(RENDERER_SURFACEFLINGER)
-                ? RENDERER_SURFACEFLINGER : RENDERER_VULKAN);
+    public void setSurfaceUbwc(boolean enabled) {
+        putExtra("surfaceUbwc", enabled ? "1" : "0");
     }
 
     public int getLsfgMultiplier() {
