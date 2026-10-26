@@ -18,9 +18,11 @@ import java.util.zip.ZipInputStream
  * Host side of DirectAudio (Wine mmdevapi -> Android AAudio driver, by The412Banner,
  * LGPL-2.1-or-later: https://github.com/The412Banner/directaudio).
  *
- * Offered only for Proton 11 arm64ec: the bundled build is the Wine 11 one (its mmdevapi
- * unixlib table does not match Proton 9/10), and it is 16 KB-aligned, so it loads on both
- * 4 KB and 16 KB page kernels. assets/directaudio/directaudio-wine11-arm64ec.zip holds:
+ * Offered for Proton 9 and Proton 11 arm64ec. The two Wine majors have different mmdevapi
+ * unixlib tables (36 slots in Wine 9, 37 with midi_get_driver in Wine 11) and different wow64
+ * structs, so each has its own build and a driver of one major must never be loaded by the
+ * other. Both are 16 KB-aligned, so they load on 4 KB and 16 KB page kernels. Each bundle,
+ * assets/directaudio/directaudio-wine<N>-arm64ec.zip, holds:
  *   aarch64-windows/winedirectaudio.drv  arm64ec PE (64-bit guests)
  *   i386-windows/winedirectaudio.drv     32-bit PE (wow64 guests)
  *   aarch64-unix/winedirectaudio.so      bionic unixlib, the AAudio backend
@@ -33,7 +35,6 @@ object DirectAudioDriver {
     const val ENV_MIC = "WINLITE_AUDIO_DIRECT_MIC"
     const val REQUEST_RECORD_AUDIO = 4120
 
-    private const val BUNDLE = "directaudio/directaudio-wine11-arm64ec.zip"
     private const val DRV_NAME = "winedirectaudio.drv"
     private const val SO_NAME = "winedirectaudio.so"
 
@@ -44,14 +45,27 @@ object DirectAudioDriver {
         "aarch64-unix/$SO_NAME" to "aarch64-unix",
     )
 
-    // Wine identifiers are "proton-<version>-<arch>"; installed contents may append "-<code>".
-    private val PROTON_11_ARM64EC = Regex("^proton-11([.-].*)?-arm64ec(-.*)?$", RegexOption.IGNORE_CASE)
+    /** One driver build per Wine major: the asset holding it and the identifiers it serves. */
+    enum class Flavor(val bundle: String, private val pattern: Regex) {
+        // Wine identifiers are "proton-<version>-<arch>"; installed contents may append "-<code>".
+        PROTON_9("directaudio/directaudio-wine9-arm64ec.zip",
+            Regex("^proton-9([.-].*)?-arm64ec(-.*)?$", RegexOption.IGNORE_CASE)),
+        PROTON_11("directaudio/directaudio-wine11-arm64ec.zip",
+            Regex("^proton-11([.-].*)?-arm64ec(-.*)?$", RegexOption.IGNORE_CASE));
+
+        fun matches(wineVersion: String): Boolean = pattern.matches(wineVersion)
+    }
+
+    /** The driver build for [wineVersion], or null when DirectAudio does not support it. */
+    fun flavorOf(wineVersion: String?): Flavor? {
+        val id = wineVersion?.trim() ?: return null
+        return Flavor.values().firstOrNull { it.matches(id) }
+    }
 
     fun isSelected(audioDriver: String?): Boolean = IDENTIFIER == audioDriver
 
-    /** DirectAudio is offered only when the container runs Proton 11 arm64ec. */
-    fun isSupportedWine(wineVersion: String?): Boolean =
-        wineVersion != null && PROTON_11_ARM64EC.matches(wineVersion.trim())
+    /** DirectAudio is offered only when the container runs Proton 9 or 11 arm64ec. */
+    fun isSupportedWine(wineVersion: String?): Boolean = flavorOf(wineVersion) != null
 
     /** The audio driver list for [wineVersion]: without DirectAudio unless it is supported. */
     fun audioEntriesFor(entries: List<String>, wineVersion: String?): List<String> =
@@ -61,25 +75,23 @@ object DirectAudioDriver {
     fun isMicEnabled(value: String?): Boolean = value == "1" || value.equals("true", true)
 
     /**
-     * Unpacks the driver into the Wine layer (once per install: every app update reinstalls
-     * the layers) and stages both PE halves into the prefix. Must run after the prefix is
-     * ready and before the registry names "directaudio".
+     * Brings the driver build matching the Wine major into the Wine layer and stages both PE
+     * halves into the prefix. Files already identical to the bundle are left alone, but a
+     * layer holding an older (or the other major's) build is refreshed. Must run after the
+     * prefix is ready and before the registry names "directaudio".
      */
     fun install(context: Context, imageFs: ImageFs, wineInfo: WineInfo?): Boolean {
-        if (wineInfo == null || wineInfo.path.isNullOrEmpty() || !isSupportedWine(wineInfo.identifier())) {
+        val flavor = if (wineInfo == null || wineInfo.path.isNullOrEmpty()) null else flavorOf(wineInfo.identifier())
+        if (wineInfo == null || flavor == null) {
             Log.e(TAG, "DirectAudio selected for unsupported Wine ${wineInfo?.identifier()}")
             return false
         }
         val wineLibDir = File(wineInfo.path, "lib/wine")
-        val installed = LAYOUT.all { (entry, dir) -> File(wineLibDir, "$dir/${File(entry).name}").isFile }
-        if (!installed) {
-            try {
-                if (!unzipBundle(context, wineLibDir)) return false
-                Log.i(TAG, "installed $BUNDLE into $wineLibDir")
-            } catch (e: Exception) {
-                Log.e(TAG, "failed to install $BUNDLE", e)
-                return false
-            }
+        try {
+            if (!unzipBundle(context, flavor, wineLibDir)) return false
+        } catch (e: Exception) {
+            Log.e(TAG, "failed to install ${flavor.bundle}", e)
+            return false
         }
         return mirrorIntoPrefix(imageFs, wineLibDir)
     }
@@ -112,10 +124,10 @@ object DirectAudioDriver {
         }
     }
 
-    private fun unzipBundle(context: Context, wineLibDir: File): Boolean {
+    private fun unzipBundle(context: Context, flavor: Flavor, wineLibDir: File): Boolean {
         val wanted = LAYOUT.toMap()
         val written = mutableSetOf<String>()
-        context.assets.open(BUNDLE).use { raw ->
+        context.assets.open(flavor.bundle).use { raw ->
             ZipInputStream(raw.buffered()).use { zip ->
                 while (true) {
                     val entry = zip.nextEntry ?: break
@@ -123,8 +135,12 @@ object DirectAudioDriver {
                     if (!entry.isDirectory && dir != null) {
                         // Destination comes from the known layout, never from the entry path.
                         val dest = File(wineLibDir, "$dir/${File(entry.name).name}")
-                        dest.parentFile?.mkdirs()
-                        dest.outputStream().use { zip.copyTo(it) }
+                        val data = zip.readBytes()
+                        if (!(dest.isFile && dest.length() == data.size.toLong() && dest.readBytes().contentEquals(data))) {
+                            dest.parentFile?.mkdirs()
+                            dest.outputStream().use { it.write(data) }
+                            Log.i(TAG, "installed ${entry.name} from ${flavor.bundle} into $wineLibDir")
+                        }
                         dest.setExecutable(true, false)
                         written += entry.name
                     }
@@ -133,7 +149,7 @@ object DirectAudioDriver {
             }
         }
         val missing = wanted.keys - written
-        if (missing.isNotEmpty()) Log.e(TAG, "$BUNDLE is missing ${missing.joinToString()}")
+        if (missing.isNotEmpty()) Log.e(TAG, "${flavor.bundle} is missing ${missing.joinToString()}")
         return missing.isEmpty()
     }
 

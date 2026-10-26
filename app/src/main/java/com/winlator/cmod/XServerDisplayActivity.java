@@ -3085,7 +3085,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return overrideEnvVars;
     }
 
-    // DirectAudio is only offered for Proton 11 arm64ec; it must be on disk (Wine layer + prefix)
+    // DirectAudio is only offered for Proton 9 / 11 arm64ec; it must be on disk (Wine layer + prefix)
     // before the registry names it.
     private void installDirectAudio() {
         if (!DirectAudioDriver.INSTANCE.isSelected(audioDriver)) return;

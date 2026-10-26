@@ -2,8 +2,8 @@ package com.winlator.cmod.ssbs
 
 /**
  * Force SSBS (keep PSTATE.SSBS set across Wine's arm64 signal returns) exists only in the Proton 11
- * arm64ec build, which carries the ntdll patch. Same gate as DirectAudio: other Wine builds neither
- * show the switch nor get WINE_FORCE_SSBS / libssbs.so.
+ * arm64ec build, which carries the ntdll patch. Other Wine builds (Proton 9 included, unlike DirectAudio)
+ * neither show the switch nor get WINE_FORCE_SSBS / libssbs.so.
  */
 object ForceSsbs {
     // Wine identifiers are "proton-<version>-<arch>"; installed contents may append "-<code>".

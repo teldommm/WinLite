@@ -768,7 +768,7 @@ private fun ContainerCategoryV2(
                 SettingsDivider()
                 SettingWineRuntimeChoice(uiStr(R.string.ui_wine_proton), s.runtime, runtimes, installing, installWine) { s.runtime = it }
             }
-            // DirectAudio exists only for Proton 11 arm64ec; switching away clears the choice.
+            // DirectAudio exists only for Proton 9 / 11 arm64ec; switching away clears the choice.
             LaunchedEffect(s.runtime) {
                 if (DirectAudioDriver.isSelected(s.audio) && !DirectAudioDriver.isSupportedWine(s.runtime)) {
                     s.audio = Container.DEFAULT_AUDIO_DRIVER

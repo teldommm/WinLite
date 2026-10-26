@@ -18,7 +18,7 @@ Fork of [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) by Ste
 | ⏱️ **Renderer-side frame pacing** | FPS limiter and presents aligned to the display's vsync grid, minimal input latency, no cursor-induced frame spam. |
 | 🔍 **More upscalers** | Adds SGSR HQ (edge-directed) and NVIDIA Image Scaling (NIS). |
 | 🎨 **Compose UI** | Whole app rewritten in Jetpack Compose (no Fragments left), plus a new in-game sidebar. |
-| 🔊 **DirectAudio** | Wine → AAudio driver for low-latency sound (Proton 11 Arm64EC). |
+| 🔊 **DirectAudio** | Wine → AAudio driver for low-latency sound (Proton 9 / 11 Arm64EC). |
 | 🧩 **2 Vulkan wrappers** | *Wrapper WL* (Mesa 26 based, default) and *Wrapper Legacy*, plus GPU identity spoofing. |
 | 💾 **Thin containers** | Much smaller containers via a shared base prefix and shared components. |
 | 🗂️ **Save profiles** | Saves live in `Winlator/saves` and survive any container change. |
@@ -52,7 +52,7 @@ Vulkan is the only renderer in WinLite (the OpenGL/EGL one from Ludashi is remov
 - **Vulkan wrappers:** *Wrapper WL* (default, Mesa 26 based) and *Wrapper Legacy*. Ludashi ships a single wrapper.
 - **GPU identity spoofing** for both wrappers: vendor / device ID, device name, driver name / info / version (also feeds WineD3D's PCI IDs).
 - Turnip/Adreno drivers (`turnip26.2.0`, `v863`) are bundled as before; the Turnip driver is preselected when the device supports it. OpenGL via Zink or freedreno.
-- **Audio drivers:** ALSA, PulseAudio-GN and **DirectAudio** (Proton 11 Arm64EC): AAudio output, optional microphone, 64- and 32-bit guests. Based on [The412Banner/directaudio](https://github.com/The412Banner/directaudio). The legacy PulseAudio build from Ludashi was dropped; PulseAudio-GN stays.
+- **Audio drivers:** ALSA, PulseAudio-GN and **DirectAudio** (Proton 9 / 11 Arm64EC): AAudio output, optional microphone, 64- and 32-bit guests. Based on [The412Banner/directaudio](https://github.com/The412Banner/directaudio). The legacy PulseAudio build from Ludashi was dropped; PulseAudio-GN stays.
 - **Force SSBS** (Proton 11 Arm64EC): keeps the CPU's speculative-store-bypass-safe state set across Wine's arm64 signal returns, avoiding a slow mode after exceptions and thread suspends.
 
 ### 💾 Thin containers
@@ -110,7 +110,7 @@ Package: `com.winlite.bionic` · Arm64 only · Android 9+ (`minSdk 28`)
 ## Tips
 - Frame generation: import `Lossless.dll` in Settings, then choose LSFG in sidebar → Rendering.
 - For the smoothest result with the FPS limiter, set it to a value that divides your panel's refresh rate evenly (e.g. 30 / 40 / 60 on 120 Hz); other values still work, with an alternating cadence.
-- DirectAudio and Force SSBS need a Proton 11 Arm64EC container.
+- DirectAudio needs a Proton 9 or 11 Arm64EC container; Force SSBS needs Proton 11 Arm64EC.
 - Slow `x86_64` container: set the Box86/Box64 preset to **Performance** (Container → Advanced); use **Intermediate** for installers.
 - `Arm64EC` container: try other FEXCore versions.
 - .NET apps: install Wine Mono (Start Menu → System Tools).
