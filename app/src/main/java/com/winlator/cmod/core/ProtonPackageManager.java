@@ -48,8 +48,8 @@ public abstract class ProtonPackageManager {
     // handled like any other catalog component - nothing else is hard-coded here.
     private static final List<PackageInfo> PACKAGES = Arrays.asList(
             new PackageInfo(DEFAULT_IDENTIFIER, "Proton 9 arm64ec", "proton-9.0-arm64ec.tar.zst",
-                    new long[]{65419448L}, BUNDLED_URL,
-                    "0717b9ae483ca8c843ecdd218c2229385d6a91c0cc22759752c12735865c4145")
+                    new long[]{65421756L}, BUNDLED_URL,
+                    "2483eed26069968f5221295b7975a65bb1320d30fced8d0cd4458eeb93dd7b8b")
     );
 
     public static List<PackageInfo> getPackages() {
