@@ -71,6 +71,10 @@ struct Api {
     void  (*txSetOnComplete)(void*, void*, void (*)(void*, void*)) = nullptr;
     void  (*txSetTransparency)(void*, void*, int8_t) = nullptr;
     void  (*txSetDesiredPresentTime)(void*, int64_t) = nullptr;   // optional
+    // Optional: a buffer-less solid colour layer for the letterbox background.
+    void  (*txSetColor)(void*, void*, float, float, float, float, int32_t) = nullptr;   // API 29
+    void  (*txSetCrop)(void*, void*, const ARect*) = nullptr;                         // API 31
+    void  (*txSetPosition)(void*, void*, int32_t, int32_t) = nullptr;                 // API 31
     void  (*txReparent)(void*, void*, void*) = nullptr;
     void  (*statsGetControls)(void*, void***, size_t*) = nullptr;
     void  (*statsReleaseControls)(void**) = nullptr;
@@ -103,6 +107,9 @@ void loadApi() {
     LOAD(txSetTransparency, "ASurfaceTransaction_setBufferTransparency");
     LOAD(txSetDesiredPresentTime, "ASurfaceTransaction_setDesiredPresentTime");
     LOAD(txReparent, "ASurfaceTransaction_reparent");
+    LOAD(txSetColor, "ASurfaceTransaction_setColor");
+    LOAD(txSetCrop, "ASurfaceTransaction_setCrop");
+    LOAD(txSetPosition, "ASurfaceTransaction_setPosition");
     LOAD(statsGetControls, "ASurfaceTransactionStats_getASurfaceControls");
     LOAD(statsReleaseControls, "ASurfaceTransactionStats_releaseASurfaceControls");
     LOAD(statsPrevReleaseFence, "ASurfaceTransactionStats_getPreviousReleaseFenceFd");
@@ -119,6 +126,19 @@ bool apiAvailable() {
     std::call_once(g_apiOnce, loadApi);
     return g_api.ok;
 }
+
+// The letterbox background as a solid colour layer: no buffer, so nothing is read from memory
+// and the hardware composer takes it as SOLID_COLOR, which needs no rotation. A buffer of the
+// screen's size, linear (the CPU fills it), is rotated on every portrait-native panel shown in
+// landscape - the display controller cannot do that inline, so it alone sent the whole layer
+// stack to GPU composition. A buffer-less layer fills with its colour only since Android 14
+// (before, only effect layers did): older systems keep the buffer.
+bool colorBackgroundAvailable() {
+    return g_api.txSetColor && g_api.txSetCrop && g_api.txSetPosition &&
+           android_get_device_api_level() >= 34;
+}
+
+constexpr int32_t kDataspaceSrgb = 142671872;   // ADATASPACE_SRGB
 
 constexpr int8_t kVisHide = 0, kVisShow = 1;
 constexpr int8_t kTranslucent = 1, kOpaque = 2;
@@ -217,8 +237,9 @@ struct Ctx : std::enable_shared_from_this<Ctx> {
     int cx = 0, cy = 0, cw = 0, ch = 0;
     bool xformDirty = true;
 
-    // letterbox background
+    // letterbox background: a solid colour layer (bgColor) or, before Android 14, a buffer
     std::shared_ptr<SCRef> bgSc;
+    bool bgColor = false;
     AHardwareBuffer* bgBuf = nullptr;
     uint32_t bgBufW = 0, bgBufH = 0;
     bool bgBufPending = false;        // bgBuf is not on the control yet
@@ -496,8 +517,19 @@ void Ctx::createFixedLayers() {
     if (cur) curSc = std::make_shared<SCRef>(cur);
     else LOGE("cursor control not created");
 
-    if (bgSc) ensureBgBuffer();
-    if (bgSc && bgBuf) {
+    bgColor = bgSc && colorBackgroundAvailable();
+    if (bgColor) {
+        Tx tx;
+        if (tx.raw) {
+            g_api.txSetColor(tx.raw, bgSc->sc, 0.f, 0.f, 0.f, 1.f, kDataspaceSrgb);
+            g_api.txSetZOrder(tx.raw, bgSc->sc, INT_MIN);
+            sendTx(tx);
+        }
+        // Crop, position and visibility follow in applyBackground (surface size).
+    }
+    if (bgSc && !bgColor) ensureBgBuffer();
+    if (bgSc && !bgColor && bgBuf) {
+        LOGI("background: screen-sized buffer (no colour layers before Android 14)");
         Tx tx;
         if (tx.raw) {
             g_api.txSetTransparency(tx.raw, bgSc->sc, kOpaque);
@@ -585,6 +617,14 @@ void Ctx::ensureBgBuffer() {
 
 void Ctx::applyBackground(Tx& tx) {
     if (!bgDirty || !bgSc || surfW <= 0 || surfH <= 0) return;
+    if (bgColor) {
+        const ARect crop{0, 0, surfW, surfH};
+        g_api.txSetCrop(tx.raw, bgSc->sc, &crop);
+        g_api.txSetPosition(tx.raw, bgSc->sc, 0, 0);
+        g_api.txSetVisibility(tx.raw, bgSc->sc, kVisShow);
+        bgDirty = false;
+        return;
+    }
     ensureBgBuffer();
     if (!bgBuf) return;
     if (bgBufPending) {

@@ -542,23 +542,30 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
     }
 
     /**
-     * Whether the window's layer is opaque and, as it will be drawn (its Present pixmap at its
-     * offset, or its own content), covers the whole screen: what lies below it cannot be seen.
+     * Whether the window's layer, as it will be drawn (its Present pixmap at its offset, or its
+     * own content), covers the whole screen: what lies below it cannot be seen. Every layer is
+     * opaque (see addLayerLocked), so coverage alone decides.
      */
     private boolean coversScreenLocked(Window window, int screenW, int screenH) {
         final Shown s = shown.get(window.id);
         final Drawable d = s != null ? s.drawable : window.getContent();
         if (d == null || d.backingAHB == 0) return false;     // nothing (known) to show: covers nothing
-        if (d.visual != null && d.visual.depth == 32) return false;   // translucent
         final int x = window.getRootX() + (s != null ? s.xOff : 0);
         final int y = window.getRootY() + (s != null ? s.yOff : 0);
         return x <= 0 && y <= 0 && x + d.width >= screenW && y + d.height >= screenH;
     }
 
+    /**
+     * Windows are opaque, as the Vulkan renderer draws them (opaque pipeline, texture alpha
+     * ignored; only the cursor blends). The visual cannot tell otherwise: the X server's only
+     * displayable visual is depth 32, so every window and pixmap has it. Marking layers
+     * translucent from it made SurfaceFlinger blend every layer and keep every window below the
+     * game (and the background) in the composition, and showed whatever alpha the guest left in
+     * its buffers.
+     */
     private void addLayerLocked(Window window, Drawable content) {
         long uid, ahb;
         int offX = 0, offY = 0;
-        boolean alpha;
         final Shown s = shown.get(window.id);
         if (s != null) {
             synchronized (s.drawable.renderLock) { ahb = s.drawable.backingAHB; }
@@ -566,17 +573,15 @@ public class ASurfaceXServerView extends XServerRendererView implements SurfaceH
                 uid = did(s.drawable);
                 offX = s.xOff;
                 offY = s.yOff;
-                alpha = s.drawable.visual != null && s.drawable.visual.depth == 32;
             } else {
                 // The pixmap is gone: the layer keeps the last frame it was given.
                 uid = -1;
-                alpha = false;
             }
         } else {
             synchronized (content.renderLock) { ahb = content.backingAHB; }
             uid = ahb != 0 ? did(content) : 0;
-            alpha = content.visual != null && content.visual.depth == 32;
         }
+        final boolean alpha = false;
         if (layoutCount * 3 + 3 > layoutL.length) {
             layoutL = java.util.Arrays.copyOf(layoutL, layoutL.length * 2);
             layoutV = java.util.Arrays.copyOf(layoutV, layoutV.length * 2);
