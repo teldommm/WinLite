@@ -138,22 +138,14 @@ private fun GraphicsSidebarPanel(
 
         FpsLimiterCard(
             initialFps = state.fpsLimit,
-            onFpsChanged = callbacks::onFpsLimitChanged
-        )
-
-        if (state.perfHintAvailable && !sfActive) {
-            SidebarGap()
-            SidebarCard {
-                SidebarInlineToggle(
-                    label = "ADPF",
-                    checked = perfHintOn,
-                    onCheckedChange = {
-                        perfHintOn = it
-                        callbacks.onPerformanceHintChanged(it)
-                    }
-                )
+            onFpsChanged = callbacks::onFpsLimitChanged,
+            perfHintVisible = state.perfHintAvailable && !sfActive,
+            perfHintChecked = perfHintOn,
+            onPerfHintChanged = {
+                perfHintOn = it
+                callbacks.onPerformanceHintChanged(it)
             }
-        }
+        )
 
         if (!sfActive) {
         SidebarGap()
@@ -350,7 +342,14 @@ private fun TargetFpsField(initialFps: Int, onFpsChanged: (Int) -> Unit) {
 }
 
 @Composable
-private fun FpsLimiterCard(initialFps: Int, onFpsChanged: (Int) -> Unit) {
+private fun FpsLimiterCard(
+    initialFps: Int,
+    onFpsChanged: (Int) -> Unit,
+    // ADPF (Android Performance Hint) switch, shown inside this card under the slider.
+    perfHintVisible: Boolean,
+    perfHintChecked: Boolean,
+    onPerfHintChanged: (Boolean) -> Unit
+) {
     val initialPosition = when {
         initialFps <= 0 -> 0
         initialFps > FPS_SLIDER_MAX_FPS || initialFps % FPS_STEP != 0 -> FPS_CUSTOM_POSITION
@@ -433,6 +432,14 @@ private fun FpsLimiterCard(initialFps: Int, onFpsChanged: (Int) -> Unit) {
                             apply()
                         }
                     }
+            )
+        }
+        if (perfHintVisible) {
+            Spacer(Modifier.height(8.dp))
+            SidebarInlineToggle(
+                label = "ADPF",
+                checked = perfHintChecked,
+                onCheckedChange = onPerfHintChanged
             )
         }
     }
