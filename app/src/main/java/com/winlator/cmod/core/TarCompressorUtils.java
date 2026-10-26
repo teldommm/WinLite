@@ -249,7 +249,6 @@ public abstract class TarCompressorUtils {
                         FileUtils.symlink(entry.getLinkName(), file.getAbsolutePath());
                     }
                     else {
-                        FileUtils.unshareForWrite(file);
                         try (BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(file), StreamUtils.BUFFER_SIZE)) {
                             if (!StreamUtils.copy(tar, outStream)) return false;
                         }
@@ -345,7 +344,6 @@ public abstract class TarCompressorUtils {
                     if (entry.isSymbolicLink()) {
                         FileUtils.symlink(entry.getLinkName(), file.getAbsolutePath());
                     } else {
-                        FileUtils.unshareForWrite(file);
                         try (BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(file), StreamUtils.BUFFER_SIZE)) {
                             if (!StreamUtils.copy(tar, outStream)) return false;
                         }

@@ -11,8 +11,6 @@ import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.system.ErrnoException;
 import android.system.Os;
-import android.system.OsConstants;
-import android.system.StructStat;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
@@ -83,23 +81,7 @@ public abstract class FileUtils {
         }
     }
 
-    /**
-     * If file is a regular file that shares its inode with other names (hard links, e.g. a
-     * component linked from {@code SharedComponents} into a container), removes this name so the
-     * write that follows creates a fresh inode instead of modifying every linked copy.
-     * Symlinks and files with a single link are left alone. Call before opening for write.
-     */
-    public static void unshareForWrite(File file) {
-        if (file == null) return;
-        try {
-            StructStat st = Os.lstat(file.getAbsolutePath());
-            if (OsConstants.S_ISREG(st.st_mode) && st.st_nlink > 1) Os.remove(file.getAbsolutePath());
-        }
-        catch (ErrnoException ignored) {}
-    }
-
     public static boolean write(File file, byte[] data) {
-        unshareForWrite(file);
         try (OutputStream os = new FileOutputStream(file)) {
             os.write(data, 0, data.length);
             return true;
@@ -111,7 +93,6 @@ public abstract class FileUtils {
     }
 
     public static boolean writeString(File file, String data) {
-        unshareForWrite(file);
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
             bw.write(data);
             bw.flush();
@@ -190,7 +171,6 @@ public abstract class FileUtils {
         } else {
             File parent = dstFile.getParentFile();
             if (!srcFile.exists() || (parent != null && !parent.exists() && !parent.mkdirs())) return false;
-            unshareForWrite(dstFile);
 
             try (FileChannel inChannel = (new FileInputStream(srcFile)).getChannel();
                  FileChannel outChannel = (new FileOutputStream(dstFile)).getChannel()) {
@@ -226,7 +206,6 @@ public abstract class FileUtils {
             } else {
                 File parent = dstFile.getParentFile();
                 if (!sourceFile.exists() || (parent != null && !parent.exists() && !parent.mkdirs())) return false;
-                unshareForWrite(dstFile);
 
                 try (FileChannel inChannel = (new FileInputStream(sourceFile)).getChannel();
                      FileChannel outChannel = (new FileOutputStream(dstFile)).getChannel()) {
@@ -244,7 +223,6 @@ public abstract class FileUtils {
                 throw new IllegalArgumentException("Context is required for Uri to File copying");
             }
             Uri srcUri = (Uri) src;
-            unshareForWrite(dstFile);
             try (InputStream inputStream = context.getContentResolver().openInputStream(srcUri);
                  OutputStream outputStream = new FileOutputStream(dstFile)) {
                 byte[] buffer = new byte[1024];
@@ -284,7 +262,6 @@ public abstract class FileUtils {
             if (dstFile.isDirectory()) dstFile = new File(dstFile, FileUtils.getName(assetFile));
             File parent = dstFile.getParentFile();
             if (!parent.isDirectory()) parent.mkdirs();
-            unshareForWrite(dstFile);
             try (InputStream inStream = context.getAssets().open(assetFile);
                  BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(dstFile), StreamUtils.BUFFER_SIZE)) {
                 StreamUtils.copy(inStream, outStream);
@@ -294,7 +271,6 @@ public abstract class FileUtils {
     }
 
     public static boolean copy(Context context, Uri uri, File dest) {
-        unshareForWrite(dest);
         try (InputStream inputStream = context.getContentResolver().openInputStream(uri);
              OutputStream outputStream = new FileOutputStream(dest)) {
             byte[] buffer = new byte[1024];

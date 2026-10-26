@@ -20,7 +20,6 @@ Fork of [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) by Ste
 | 🎨 **Compose UI** | Whole app rewritten in Jetpack Compose (no Fragments left), plus a new in-game sidebar. |
 | 🔊 **DirectAudio** | Wine → AAudio driver for low-latency sound (Proton 9 / 11 Arm64EC). |
 | 🧩 **2 Vulkan wrappers** | *Wrapper WL* (Mesa 26 based, default) and *Wrapper Legacy*, plus GPU identity spoofing. |
-| 💾 **Thin containers** | Much smaller containers via a shared base prefix and shared components. |
 | 🗂️ **Save profiles** | Saves live in `Winlator/saves` and survive any container change. |
 | 🕹️ **Dynamic Stick** | On-screen stick that appears under your finger and follows it. |
 | 📦 **Component catalog** | One place for Proton, drivers and runtimes, with editable download sources. |
@@ -55,11 +54,6 @@ Vulkan is the only renderer in WinLite (the OpenGL/EGL one from Ludashi is remov
 - **Audio drivers:** ALSA, PulseAudio-GN and **DirectAudio** (Proton 9 / 11 Arm64EC): AAudio output, optional microphone, 64- and 32-bit guests. Based on [The412Banner/directaudio](https://github.com/The412Banner/directaudio). The legacy PulseAudio build from Ludashi was dropped; PulseAudio-GN stays.
 - **Force SSBS** (Proton 9 / 11 Arm64EC): keeps the CPU's speculative-store-bypass-safe state set across Wine's arm64 signal returns, avoiding a slow mode after exceptions and thread suspends.
 
-### 💾 Thin containers
-- Each container stores only its own changes on top of one shared **base prefix** per Wine/Proton version (copy-on-write overlay via an `LD_PRELOAD` library; Wine is not modified).
-- DXVK, VKD3D, FEXCore and other components are stored once and shared (e.g. the 228 MB Direct3D pack exists once, not per container).
-- Result: small containers, fast creation.
-
 ### 🗂️ Save profiles & backups
 Normally saves die with the container. A save profile keeps them in Android storage and links them into whichever container you launch from.
 
@@ -90,7 +84,6 @@ Inherited from Ludashi: gamepad mode per container/shortcut (XInput, DInput, bot
 | UI | XML Views + Fragments, partly Compose | Jetpack Compose only |
 | Audio | ALSA, PulseAudio, PulseAudio-GN | ALSA, PulseAudio-GN, DirectAudio |
 | Vulkan wrapper | 1 | 2 (WL / Legacy) + GPU identity spoofing |
-| Containers | Full copy each | Thin overlay + shared components |
 | Saves | In container | Save profiles + backups |
 | On-screen stick | Fixed | Optional Dynamic Stick |
 | Touch / mouse | Basic | Pointer acceleration, Tap to Click, XInput2 |

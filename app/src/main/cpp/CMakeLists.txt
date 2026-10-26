@@ -60,31 +60,6 @@ target_link_libraries(ssbs
         dl
 )
 
-# Copy-on-write Wine prefix overlay (loaded via LD_PRELOAD). A per-container "upper" prefix is
-# layered over one shared read-only base prefix per Wine/Proton version, so containers only
-# store what is theirs. See containeroverlay/README.md. Must NOT be built with FORTIFY.
-add_library(containeroverlay SHARED
-        containeroverlay/containeroverlay_core.c
-        containeroverlay/containeroverlay_hooks.c
-)
-
-target_compile_options(containeroverlay PRIVATE
-        -fvisibility=hidden
-        -U_FORTIFY_SOURCE
-        -D_FORTIFY_SOURCE=0
-        -O2
-)
-
-target_link_libraries(containeroverlay
-        log
-        dl
-)
-
-target_link_options(containeroverlay PRIVATE
-        "-Wl,-z,max-page-size=16384"
-        "-Wl,-z,common-page-size=16384"
-)
-
 # Vulkan renderer: the sole X-server presentation path (see note above the
 # `winlator` target). Still built as its own JNI library (vulkan_renderer.so).
 set(VULKAN_RENDERER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/winlator/renderer/vulkan)

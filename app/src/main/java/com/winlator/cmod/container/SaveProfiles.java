@@ -46,10 +46,9 @@ import java.util.UUID;
  * A profile whose shortcut is gone (removed with its saves kept, or the app reinstalled) is taken
  * over by the next shortcut of the same game (same exe, else same name) instead of starting empty.
  *
- * Links are made in the container's physical upper layer (drive_c/users/...). Wine reaches
- * shared storage directly (native launch, all-files access); libcontaineroverlay passes paths
- * that resolve outside the overlay straight through. Desktop stays in the container: Winlator
- * keeps its shortcuts there.
+ * Links are made in the container's prefix (drive_c/users/...). Wine reaches shared storage
+ * directly (native launch, all-files access). Desktop stays in the container: Winlator keeps its
+ * shortcuts there.
  *
  * The container's own folders are never moved out of it: before linking, they are set aside in
  * &lt;container&gt;/.save-profile-local/ (a rename on the same file system) and put back by the next
@@ -209,7 +208,7 @@ public final class SaveProfiles {
     public static void apply(Context context, Container container, Shortcut shortcut) {
         // A game session that never finished (killed, crashed): save its registry keys first.
         SaveRegistry.finishSession(context);
-        File users = new File(ContainerFiles.upperDir(container), "drive_c/users");
+        File users = new File(container.getRootDir(), ".wine/drive_c/users");
         File stash = new File(container.getRootDir(), LOCAL_STASH_DIR);
         if (!isEnabled(shortcut)) {
             restoreLocal(users, stash);
@@ -222,7 +221,6 @@ public final class SaveProfiles {
             return;
         }
 
-        File lowerUsers = container.getBasePrefix().isEmpty() ? null : new File(container.getBasePrefix(), "drive_c/users");
         for (String[] link : LINKS) {
             File point = new File(users, link[0]);
             File target = new File(profile, link[1]);
@@ -230,7 +228,10 @@ public final class SaveProfiles {
                 Log.e(TAG, "Could not create " + target);
                 continue;
             }
-            if (lowerUsers != null) mirrorDirs(new File(lowerUsers, link[0]), target, 0);
+            // Keep the container's own folder skeleton (My Games, ...) in the profile: it is still in
+            // the container's folder, or already in the stash when an earlier launch linked it.
+            File own = Files.isSymbolicLink(point.toPath()) ? new File(stash, link[0]) : point;
+            mirrorDirs(own, target, 0);
             linkPoint(point, target, new File(stash, link[0]));
         }
         File temp = new File(profile, TEMP_DIR);
@@ -244,7 +245,7 @@ public final class SaveProfiles {
      * app can read the saves of a game without a profile. Only while Wine is not running.
      */
     public static synchronized void prepareLocal(Container container) {
-        restoreLocal(new File(ContainerFiles.upperDir(container), "drive_c/users"),
+        restoreLocal(new File(container.getRootDir(), ".wine/drive_c/users"),
                 new File(container.getRootDir(), LOCAL_STASH_DIR));
     }
 
@@ -555,7 +556,7 @@ public final class SaveProfiles {
         return ok;
     }
 
-    /** Recreates the folder skeleton of the base prefix (folders only) inside the profile. */
+    /** Recreates the folder skeleton of the container's own folder (folders only) inside the profile. */
     private static void mirrorDirs(File src, File dst, int depth) {
         if (depth > MIRROR_MAX_DEPTH) return;
         File[] children = src.listFiles();

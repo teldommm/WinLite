@@ -22,8 +22,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.concurrent.Executors;
@@ -159,8 +157,7 @@ public class ContainerManager {
 
             container.setWineVersion(data.getString("wineVersion"));
 
-            if (!createThinPrefix(container, contentsManager)) {
-                Log.w("ContainerManager", "Failed to create the container prefix, deleting container directory...");
+            if (!extractContainerPatternFile(container, container.getWineVersion(), contentsManager, containerDir, null)) {
                 FileUtils.delete(containerDir);
                 return null;
             }
@@ -183,25 +180,14 @@ public class ContainerManager {
     }
 
 
-    /** Layers a new container over the shared base prefix of its Wine version. */
-    private boolean createThinPrefix(Container container, ContentsManager contentsManager) {
-        if (!ContainerOverlay.isLibraryAvailable(context)) return false;
-        File baseWine = BasePrefix.ensure(context, contentsManager, container.getWineVersion());
-        if (baseWine == null || !ContainerOverlay.createThinPrefix(baseWine, new File(container.getRootDir(), ".wine"))) return false;
-        container.setBasePrefix(ContainerOverlay.canonicalHostPath(baseWine));
-        new File(container.getRootDir(), ".cache").mkdirs();
-        new File(container.getRootDir(), ".config").mkdirs();
-        return true;
-    }
-
     private void duplicateContainer(Container srcContainer) {
         int id = findNextContainerId();
 
         File dstDir = new File(homeDir, ImageFs.USER + "-" + id);
         if (!dstDir.mkdirs()) return;
 
-        // Keep component files hard-linked to the shared store instead of copying them.
-        if (!SharedComponents.copyTreePreservingLinks(srcContainer.getRootDir(), dstDir)) {
+        // Use the refactored copy method that doesn't require a Context for File operations
+        if (!FileUtils.copy(srcContainer.getRootDir(), dstDir, file -> FileUtils.chmod(file, 0771))) {
             FileUtils.delete(dstDir);
             return;
         }
@@ -224,7 +210,6 @@ public class ContainerManager {
         dstContainer.setBox64Preset(srcContainer.getBox64Preset());
         dstContainer.setDesktopTheme(srcContainer.getDesktopTheme());
         dstContainer.setWineVersion(srcContainer.getWineVersion());
-        dstContainer.setBasePrefix(srcContainer.getBasePrefix());
         dstContainer.saveData();
 
         maxContainerId = Math.max(maxContainerId, id);
@@ -294,30 +279,8 @@ public class ContainerManager {
                 dstFile = onExtractFileListener.onExtractFile(dstFile, 0);
                 if (dstFile == null) continue;
             }
-            linkOrCopy(file, dstFile);
+            FileUtils.copy(file, dstFile);
         }
-    }
-
-    /**
-     * The common DLLs are identical to the Wine build's own files, so the base prefix hard-links
-     * them instead of storing a second copy. Containers never write to the base (the overlay
-     * copies up into the container), so sharing the inode is safe. Falls back to a copy.
-     */
-    private static void linkOrCopy(File src, File dst) {
-        File parent = dst.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return;
-        try {
-            if (Files.isSymbolicLink(src.toPath())) throw new IOException("symlink");
-            Files.createLink(dst.toPath(), src.toPath());
-        }
-        catch (IOException | UnsupportedOperationException | SecurityException e) {
-            FileUtils.copy(src, dst);
-        }
-    }
-
-    /** Extracts container_pattern_common.tzst (laid out as home/xuser/...) into the destination. */
-    public boolean extractContainerPatternCommon(File destination, OnExtractFileListener onExtractFileListener) {
-        return TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, "container_pattern_common.tzst", destination, onExtractFileListener);
     }
 
     public boolean extractContainerPatternFile(Container container, String wineVersion, ContentsManager contentsManager, File containerDir, OnExtractFileListener onExtractFileListener) {

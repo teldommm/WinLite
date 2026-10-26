@@ -81,7 +81,6 @@ public class Container {
     private String audioDriver = DEFAULT_AUDIO_DRIVER;
     private String drives = DEFAULT_DRIVES;
     private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
-    private String basePrefix = "";
     private boolean showFPS;
     private String rendererPresentMode = "fifo";
     private String rendererDriverId = "system";
@@ -441,14 +440,6 @@ public class Container {
         this.wineVersion = wineVersion;
     }
 
-    /** Host path of the shared base prefix this container is layered over (copy-on-write overlay). */
-    public String getBasePrefix() {
-        return basePrefix != null ? basePrefix : "";
-    }
-
-    public void setBasePrefix(String basePrefix) {
-        this.basePrefix = basePrefix != null ? basePrefix : "";
-    }
 
     public File getConfigFile() {
         return new File(rootDir, ".container");
@@ -560,7 +551,6 @@ public class Container {
             data.put("lc_all", lc_all);
             data.put("exclusiveXInput", exclusiveXInput);
             if (!WineInfo.isMainWineVersion(wineVersion)) data.put("wineVersion", wineVersion);
-            if (!getBasePrefix().isEmpty()) data.put("basePrefix", basePrefix);
             FileUtils.writeString(getConfigFile(), data.toString());
         }
         catch (JSONException e) {}
@@ -569,7 +559,6 @@ public class Container {
 
     public void loadData(JSONObject data) throws JSONException {
         wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
-        basePrefix = "";
         dxwrapperConfig = "";
         checkObsoleteOrMissingProperties(data);
 
@@ -642,9 +631,6 @@ public class Container {
                 }
                 case "wineVersion" :
                     setWineVersion(data.getString(key));
-                    break;
-                case "basePrefix" :
-                    setBasePrefix(data.optString(key, ""));
                     break;
                 case "box64Version":
                     setBox64Version(data.getString(key));

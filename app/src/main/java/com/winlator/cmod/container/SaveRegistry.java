@@ -89,7 +89,7 @@ public final class SaveRegistry {
      * user.reg and opens a session. Call {@link #finishSession} first for any earlier session.
      */
     static void beforeLaunch(Context context, Container container, File profile) {
-        File userReg = new File(ContainerFiles.upperDir(container), USER_REG);
+        File userReg = new File(new File(container.getRootDir(), ".wine"), USER_REG);
         if (!userReg.isFile()) {
             Log.w(TAG, "No user.reg in container " + container.id + ", registry not synced");
             return;

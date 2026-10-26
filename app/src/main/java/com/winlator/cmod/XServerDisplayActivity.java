@@ -45,12 +45,9 @@ import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.cmod.container.Container;
-import com.winlator.cmod.container.ContainerFiles;
 import com.winlator.cmod.container.ContainerManager;
-import com.winlator.cmod.container.ContainerOverlay;
 import com.winlator.cmod.container.SaveProfiles;
 import com.winlator.cmod.container.SaveRegistry;
-import com.winlator.cmod.container.SharedComponents;
 import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.contentdialog.DXVKConfig;
 import com.winlator.cmod.contentdialog.DebugDialog;
@@ -699,7 +696,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 simulateConfirmInputControlsDialog();
             }
             Executors.newSingleThreadExecutor().execute(() -> {
-                if (!prepareContainerOverlay()) return;
                 // Before Wine starts: link this game's save profile (Winlator/saves) into the container.
                 SaveProfiles.apply(this, container, shortcut);
                 setupWineSystemFiles();
@@ -1056,16 +1052,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             touchpadView.requestPointerCapture();
         else if (!hasFocus)
             touchpadView.releasePointerCapture();
-    }
-
-    /** Builds the shared base prefix of the container's Wine version if needed. Runs before anything touches the prefix. */
-    private boolean prepareContainerOverlay() {
-        if (ContainerOverlay.prepare(this, contentsManager, container)) return true;
-        runOnUiThread(() -> {
-            Toast.makeText(this, UiStrings.get(R.string.ui_container_cannot_start), Toast.LENGTH_LONG).show();
-            exit();
-        });
-        return false;
     }
 
     private void setupWineSystemFiles() {
@@ -2762,11 +2748,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 contentsManager.applyContent(dxvkProfile);
             } else {
                 Log.d(TAG, "Extracting fallback DXVK .tzst archive: " + dxvkWrapper);
-                SharedComponents.extractAndLink(this, "dxwrapper/" + dxvkWrapper + ".tzst", windowsDir, onExtractFileListener);
+                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/" + dxvkWrapper + ".tzst", windowsDir, onExtractFileListener);
 
                 if (compareVersion(dxvkWrapper, "2.4") < 0) {
                     Log.d(TAG, "Extracting d8vk as part of DXVK version " + dxvkWrapper);
-                    SharedComponents.extractAndLink(this, "dxwrapper/d8vk-" + DefaultVersion.D8VK + ".tzst", windowsDir, onExtractFileListener);
+                    TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d8vk-" + DefaultVersion.D8VK + ".tzst", windowsDir, onExtractFileListener);
                 }
             }
 
@@ -2780,12 +2766,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     contentsManager.applyContent(vkd3dProfile);
                 } else {
                     Log.d(TAG, "Extracting fallback VKD3D .tzst archive: " + vkd3dWrapper);
-                    SharedComponents.extractAndLink(this, "dxwrapper/" + vkd3dWrapper + ".tzst", windowsDir, onExtractFileListener);
+                    TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/" + vkd3dWrapper + ".tzst", windowsDir, onExtractFileListener);
                 }
             }
 
             Log.d(TAG, "Extracting nglide wrapper");
-            SharedComponents.extractAndLink(this, "ddrawrapper/nglide.tzst", windowsDir, onExtractFileListener);
+            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/nglide.tzst", windowsDir, onExtractFileListener);
 
             if (ddrawrapper.equalsIgnoreCase("none")) {
                 Log.d(TAG, "No DDRaw wrapper has been selected, restoring original ddraw files");
@@ -2795,7 +2781,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\windows\\syswow64\\ddraw.ini");
 
                 Log.d(TAG, "Extracting ddrawrapper " + ddrawrapper);
-                SharedComponents.extractAndLink(this, "ddrawrapper/" + ddrawrapper + ".tzst", windowsDir, onExtractFileListener);
+                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "ddrawrapper/" + ddrawrapper + ".tzst", windowsDir, onExtractFileListener);
             }
 
             Log.d(TAG, "Finished extraction of DXVK wrapper files, version: " + dxwrapper);
@@ -2874,7 +2860,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 boolean useNative = wincomponent[1].equals("1");
 
                 if (useNative) {
-                    SharedComponents.extractAndLink(this, "wincomponents/" + identifier + ".tzst", windowsDir, onExtractFileListener);
+                    TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "wincomponents/" + identifier + ".tzst", windowsDir, onExtractFileListener);
                 } else {
                     JSONArray dlnames = wincomponentsJSONObject.getJSONArray(identifier);
                     for (int i = 0; i < dlnames.length(); i++) {
@@ -2894,12 +2880,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
-    /** The originals live in the base prefix: dropping the container's override makes them show through again. */
     private void restoreOriginalDllFiles(final String... dlls) {
-        File upperWine = ContainerFiles.upperDir(container);
+        File rootDir = imageFs.getRootDir();
+        File windowsDir = new File(rootDir, ImageFs.WINEPREFIX + "/drive_c/windows");
+        File system32dlls = null;
+        File syswow64dlls = null;
+
+        if (wineInfo.isArm64EC())
+            system32dlls = new File(imageFs.getWinePath() + "/lib/wine/aarch64-windows");
+        else
+            system32dlls = new File(imageFs.getWinePath() + "/lib/wine/x86_64-windows");
+
+        syswow64dlls = new File(imageFs.getWinePath() + "/lib/wine/i386-windows");
+
         for (String dll : dlls) {
-            ContainerFiles.removeOverride(upperWine, "drive_c/windows/system32/" + dll);
-            ContainerFiles.removeOverride(upperWine, "drive_c/windows/syswow64/" + dll);
+            File srcFile = new File(system32dlls, dll);
+            File dstFile = new File(windowsDir, "system32/" + dll);
+            FileUtils.copy(srcFile, dstFile);
+            srcFile = new File(syswow64dlls, dll);
+            dstFile = new File(windowsDir, "syswow64/" + dll);
+            FileUtils.copy(srcFile, dstFile);
         }
     }
 
@@ -3115,7 +3115,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void applyGeneralPatches(Container container) {
-        // container_pattern_common lives in the shared base prefix, nothing to extract per container.
+        File rootDir = imageFs.getRootDir();
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "container_pattern_common.tzst", rootDir);
         WineUtils.applySystemTweaks(this, wineInfo);
         container.putExtra("graphicsDriver", null);
         container.putExtra("desktopTheme", null);

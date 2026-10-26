@@ -13,9 +13,7 @@ import androidx.preference.PreferenceManager;
 import com.winlator.cmod.box64.Box64Preset;
 import com.winlator.cmod.box64.Box64PresetManager;
 import com.winlator.cmod.container.Container;
-import com.winlator.cmod.container.ContainerOverlay;
 import com.winlator.cmod.ssbs.ForceSsbs;
-import com.winlator.cmod.container.SharedComponents;
 import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.contents.ContentProfile;
 import com.winlator.cmod.contents.ContentsManager;
@@ -102,13 +100,14 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             File destination) {
         ContentProfile profile = resolveInstalledRuntimeProfile(type, version);
         if (profile != null) return contentsManager.applyContent(profile);
-        // WowBox64/FEXCore DLLs go into the container's system32: link them from the shared
-        // component store. Box64 itself goes into the ImageFS, which is not per container.
+        // Bundled FEXCore archives carry the .wcp layout (system32/ + aarch64-unix/): route each part.
         if (type == ContentProfile.ContentType.CONTENT_TYPE_FEXCORE) {
-            return SharedComponents.extractAndLink(context, bundledAsset, destination, fexcoreLayout(destination));
-        }
-        if (type == ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64) {
-            return SharedComponents.extractAndLink(context, bundledAsset, destination, null);
+            return TarCompressorUtils.extract(
+                    TarCompressorUtils.Type.ZSTD,
+                    context,
+                    bundledAsset,
+                    destination,
+                    fexcoreLayout(destination));
         }
         return TarCompressorUtils.extract(
                 TarCompressorUtils.Type.ZSTD,
@@ -527,16 +526,6 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 }
             }
             execEnvVars.put("WINE_FORCE_SSBS", forceSsbs ? "1" : "0");
-        }
-
-        // Thin containers run on the copy-on-write prefix overlay: preload libcontaineroverlay.so and
-        // tell it which layer is the container's and which is the shared base prefix.
-        try {
-            ld_preload = ContainerOverlay.applyLaunchEnv(context, imageFs, container, execEnvVars, ld_preload);
-        }
-        catch (IllegalStateException e) {
-            Log.e("GuestLauncher", "Refusing to launch: " + e.getMessage());
-            return -1;
         }
 
         Log.d("GuestLauncher", "Final LD_PRELOAD: " + ld_preload);
