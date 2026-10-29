@@ -170,9 +170,6 @@
     <string name="ui_create_and_manage_windows_environments">Create and manage Windows environments</string>
     <string name="ui_components">Components</string>
     <string name="ui_wine_proton_dxvk_vkd3d_and_runtimes">Wine, Proton, DXVK, VKD3D and runtimes</string>
-    <string name="ui_import_lossless_dll">Import Lossless.dll</string>
-    <string name="ui_lossless_dll_imported_lsfg_native_ready">Lossless.dll imported - LSFG Native ready</string>
-    <string name="ui_required_for_lsfg_native">Required for LSFG Native</string>
     <string name="ui_path_settings">PATH SETTINGS</string>
     <string name="ui_winlator_path">Winlator Path</string>
     <string name="ui_shortcut_export_path">Shortcut Export Path</string>
@@ -213,8 +210,6 @@
     <string name="ui_unable_to_install_soundfont">Unable to install soundfont</string>
     <string name="ui_remove_soundfont">Remove SoundFont?</string>
     <string name="ui_do_you_want_to_remove_this_soundfont">Do you want to remove this soundfont?</string>
-    <string name="ui_lossless_dll_imported">Lossless.dll imported</string>
-    <string name="ui_unable_to_import_lossless_dll">Unable to import Lossless.dll</string>
     <string name="ui_this_option_will_take_effect_at_the_next">This option will take effect at the next startup.</string>
     <string name="ui_preset_added">Preset added</string>
     <string name="ui_preset_saved">Preset saved</string>
@@ -516,8 +511,7 @@
     <string name="ui_effect">Effect</string>
     <string name="ui_strength">Strength</string>
     <string name="ui_frame_generation">Frame Generation</string>
-    <string name="ui_flow_scale">Flow Scale</string>
-    <string name="ui_target_fps">Target FPS</string>
+    <string name="ui_frame_generation_unavailable">Unavailable</string>
     <string name="ui_fps_limit">FPS Limit</string>
     <string name="ui_max_fps">Max FPS</string>
     <string name="ui_enable_hud">Enable HUD</string>

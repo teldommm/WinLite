@@ -312,9 +312,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             (uint32_t)ahbTransitions.size(), ahbTransitions.data());
     }
 
-    cursorOverlay_ = {curVis && cursorImg != VK_NULL_HANDLE && cursorDS != VK_NULL_HANDLE,
-                      ox, oy, sx, sy, cw, ch, ptrX, ptrY, curHotX, curHotY, curW, curH};
-    const bool cursorDrawn = cursorOverlay_.draw && !cursorDrawnPerPresent();
+    const bool cursorDrawn = curVis && cursorImg != VK_NULL_HANDLE && cursorDS != VK_NULL_HANDLE;
     const bool hasCursorCopy = hasCursorUpload && cursorImg != VK_NULL_HANDLE &&
                                cursorUpload != VK_NULL_HANDLE;
     if (hasCursorCopy) {
@@ -354,11 +352,11 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             (uint32_t)postUpload.size(), postUpload.data());
     }
 
-    const VkExtent2D targetExt = renderExtent();
+    const VkExtent2D targetExt = swapchainExt;
     VkRenderPassBeginInfo rpi{};
     rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpi.renderPass = targetRenderPass();
-    rpi.framebuffer = targetFramebuffer(imgIdx);
+    rpi.renderPass = renderPass;
+    rpi.framebuffer = swapchainFBs[imgIdx];
     rpi.renderArea = {{0, 0}, targetExt};
     VkClearValue clear = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
     rpi.clearValueCount = 1;
@@ -368,15 +366,13 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     VkViewport viewport{0, 0, (float)targetExt.width, (float)targetExt.height, 0, 1};
     vk_.CmdSetViewport(cb, 0, 1, &viewport);
 
-    const float scaleX = (float)targetExt.width / (float)std::max(1u, swapchainExt.width);
-    const float scaleY = (float)targetExt.height / (float)std::max(1u, swapchainExt.height);
-    int32_t scX = std::max(0, (int32_t)std::lround(scissorRect.offset.x * scaleX));
-    int32_t scY = std::max(0, (int32_t)std::lround(scissorRect.offset.y * scaleY));
+    int32_t scX = std::max(0, scissorRect.offset.x);
+    int32_t scY = std::max(0, scissorRect.offset.y);
     uint32_t maxW = targetExt.width > (uint32_t)scX ? targetExt.width - (uint32_t)scX : 0u;
     uint32_t maxH = targetExt.height > (uint32_t)scY ? targetExt.height - (uint32_t)scY : 0u;
     VkRect2D scissor{{scX, scY},
-        {std::min((uint32_t)std::lround(scissorRect.extent.width * scaleX), maxW),
-         std::min((uint32_t)std::lround(scissorRect.extent.height * scaleY), maxH)}};
+        {std::min(scissorRect.extent.width,  maxW),
+         std::min(scissorRect.extent.height, maxH)}};
     vk_.CmdSetScissor(cb, 0, 1, &scissor);
 
     float rotCosR, rotSinR;
@@ -507,9 +503,8 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         vk_.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout,
                                   0, 1, &cursorDS, 0, nullptr);
         // The image goes at pointer - hot spot even when that is off the top or left edge, as
-        // the frame-gen overlay (recordCursorOverlay) and an X server draw it; clamping it to 0
-        // moved a cursor whose hot spot is not its corner (I-beam, crosshair) away from the
-        // pointer near those edges.
+        // an X server draws it; clamping it to 0 moved a cursor whose hot spot is not its corner
+        // (I-beam, crosshair) away from the pointer near those edges.
         float cx = (float)((int)ptrX - curHotX);
         float cy = (float)((int)ptrY - curHotY);
         WindowPushConstants pc{};
@@ -541,11 +536,6 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
             (uint32_t)ahbTransitions.size(), ahbTransitions.data());
-    }
-    if (compositeActive()) {
-        recordFrameGenProcess(cb);
-        if (fgPlan_.generations > 0) recordFrameGenGeneration(cb, 0);
-        else copyCompositeToSwapchain(cb, imgIdx);
     }
 
     VkResult endStatus = vk_.EndCommandBuffer(cb);

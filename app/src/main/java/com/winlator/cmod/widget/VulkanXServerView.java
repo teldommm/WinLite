@@ -13,7 +13,6 @@ import android.widget.FrameLayout;
 import androidx.annotation.NonNull;
 
 import com.winlator.cmod.R;
-import com.winlator.cmod.core.LsfgNative;
 import java.io.File;
 import android.widget.Toast;
 import com.winlator.cmod.ui.toast.WinToast;
@@ -78,12 +77,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private int     pendingFilterMode     = 0;
     private int     pendingPostFXMode     = 0;
     private float   pendingSharpness      = 0.5f;
-    private int pendingLsfgMultiplier = 0;
-    private float pendingLsfgFlowScale = 0.80f;
-    private int pendingLsfgTargetRate = 0;
-    private File pendingLsfgDll;
-    private float pendingFrameGenRefreshHz;
-    private volatile String frameGenError = "";
 
     private WinlatorHUD hudRef = null;
     private FrameRating classicHudRef = null;
@@ -168,12 +161,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
 
-    private native String nativeConfigureFrameGen(long handle, String cachePath,
-                                                   int multiplier, float flowScale, float refreshHz,
-                                                   int targetRate);
-    private native float nativeGetFrameGenPresentedRate(long handle);
-    private native boolean nativeFrameGenSupportsFp16(long handle);
-
     private native void nativeDumpRendererInfo(long handle);
     private native void nativeSetFilterMode(long handle, int mode);
     private native void nativeSetStretchMode(long handle, int mode);
@@ -247,8 +234,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         pushDisplayRefreshRateLocked();
                         nativeSetFpsLimit(nativeHandle, fpsLimit);
                         vsyncClock.start();
-                        // Frame gen setup may build/verify the shader cache: never under lock.
-                        queueEvent(this::applyFrameGenNative);
                         initComplete = true;
                         return;
                     }
@@ -297,7 +282,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (nativeHandle != 0) {
                     nativeSetVerboseLog(nativeHandle, validationEnabled);
                     nativeDumpRendererInfo(nativeHandle);
-                    queueEvent(this::applyFrameGenNative);
                 }
             }
             initComplete = true;
@@ -791,20 +775,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             // Under the lock, like every other native call: nativeDestroy runs under it, and this
             // used to read nativeHandle and call in without it - into a renderer that could be
             // being deleted on another thread. The HUD updates below stay outside.
-            float frameGenRate = 0f;
-            if (pendingLsfgMultiplier >= 2 && frameGenError.isEmpty()) {
-                synchronized (lock) {
-                    if (nativeHandle != 0) frameGenRate = nativeGetFrameGenPresentedRate(nativeHandle);
-                }
-            }
-            if (hudRef != null) {
-                hudRef.setFrameGenPresentedRate(frameGenRate);
-                hudRef.onFrame();
-            }
-            if (classicHudRef != null) {
-                classicHudRef.setFrameGenPresentedRate(frameGenRate);
-                classicHudRef.update();
-            }
+            if (hudRef != null) hudRef.onFrame();
+            if (classicHudRef != null) classicHudRef.update();
         }
     }
 
@@ -967,108 +939,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void setFilterMode(int mode) {
         pendingFilterMode = mode;
         synchronized (lock) { if (nativeHandle != 0) nativeSetFilterMode(nativeHandle, mode); }
-    }
-
-    /**
-     * @param targetRate adaptive target in Hz; 0 keeps the fixed multiplier. In
-     *                   adaptive mode the multiplier only sets the ceiling (pass 4).
-     */
-    public void setFrameGenNative(File dll, int multiplier, float flowScale, int targetRate) {
-        synchronized (lock) {
-            pendingLsfgDll = dll;
-            pendingLsfgMultiplier = multiplier < 2 ? 0 : Math.min(multiplier, 4);
-            pendingLsfgFlowScale = flowScale;
-            pendingLsfgTargetRate = pendingLsfgMultiplier < 2 ? 0 : Math.max(0, targetRate);
-        }
-        queueEvent(this::applyFrameGenNative);
-    }
-
-    public void setFrameGenRefreshRate(float refreshHz) {
-        pendingFrameGenRefreshHz = refreshHz;
-        synchronized (lock) { pushDisplayRefreshRateLocked(); }
-        queueEvent(this::applyFrameGenNative);
-    }
-
-    // Last successful cache check, so a refresh-rate change or surface re-attach does not hash
-    // the DLL again. Event-executor thread only.
-    private String verifiedCacheKey = null;
-    private String verifiedCachePath = null;
-
-    /**
-     * Runs on eventExecutor (serial: a later request always applies after an earlier one), and
-     * NOT under {@code lock}: building or verifying the shader cache can take from a DLL hash up
-     * to a full translation, and every X request that shows content, plus pointer motion from the
-     * UI thread, needs {@code lock}. Only the snapshot and the native configure call hold it.
-     */
-    private void applyFrameGenNative() {
-        final long handle;
-        final int requestedMultiplier;
-        final File dll;
-        final float flowScale;
-        final int targetRate;
-        final boolean preferFp16;
-        synchronized (lock) {
-            handle = nativeHandle;
-            if (handle == 0) return;
-            requestedMultiplier = pendingLsfgMultiplier;
-            dll = pendingLsfgDll;
-            flowScale = pendingLsfgFlowScale;
-            targetRate = pendingLsfgTargetRate;
-            // Prefer the fp16 shader set when the device enabled shaderFloat16.
-            // Only DLLs with precompiled SPIR-V carry it; others fall back to fp32 or
-            // the DXBC-translated set on their own (see lsfg_dll selectVariant).
-            preferFp16 = requestedMultiplier >= 2 && nativeFrameGenSupportsFp16(handle);
-        }
-
-        int multiplier = requestedMultiplier;
-        String error = null;
-        String cachePath = null;
-        if (multiplier >= 2) {
-            String key = dll == null ? null : dll.getAbsolutePath() + '|' + dll.length() + '|'
-                    + dll.lastModified() + '|' + preferFp16;
-            if (key != null && key.equals(verifiedCacheKey)) {
-                cachePath = verifiedCachePath;
-            } else {
-                int status = LsfgNative.ensureCache(getContext(), dll, preferFp16);
-                if (status == LsfgNative.STATUS_OK) {
-                    cachePath = LsfgNative.cacheFile(getContext(), preferFp16).getAbsolutePath();
-                    verifiedCacheKey = key;
-                    verifiedCachePath = cachePath;
-                } else {
-                    error = LsfgNative.explain(status);
-                    multiplier = 0;
-                }
-            }
-        }
-        float refreshHz = pendingFrameGenRefreshHz > 0f ? pendingFrameGenRefreshHz
-                : getDisplay() != null ? getDisplay().getRefreshRate() : 0f;
-
-        String nativeError;
-        synchronized (lock) {
-            // The renderer may have been destroyed or re-created while the cache was checked.
-            if (nativeHandle != handle) return;
-            nativeError = nativeConfigureFrameGen(handle, cachePath,
-                    multiplier, flowScale, refreshHz, targetRate);
-        }
-        if (error == null) error = nativeError;
-        if (error != null) {
-            boolean oldDriver = error.contains("Vulkan version below") || error.contains("storage images")
-                    || error.contains("shader") || error.contains("feature") || error.contains("vulkanMemoryModel");
-            // Vulkan 1.2 / vulkanMemoryModel are only needed by the DXBC-translated
-            // shaders (DXBC-only DLLs); DLLs with precompiled SPIR-V do not need them.
-            boolean translationOnly = error.contains("Vulkan version below") || error.contains("vulkanMemoryModel");
-            frameGenError = "LSFG Native can't run: "
-                    + (oldDriver ? (error.contains("Vulkan version below")
-                            ? "this Renderer Driver lacks Vulkan 1.2. " : "this Renderer Driver lacks a required Vulkan feature. ")
-                            + (translationOnly
-                                    ? "Import a Lossless.dll with precompiled SPIR-V shaders, or set Renderer Driver to a Turnip driver, then relaunch the game."
-                                    : "Set Renderer Driver to a Turnip driver, then relaunch the game.")
-                            : error + (error.endsWith(".") ? "" : "."));
-            final String message = frameGenError;
-            post(() -> WinToast.show(getContext(), message, Toast.LENGTH_LONG));
-        } else {
-            frameGenError = "";
-        }
     }
 
     public void setVkPresentMode(int mode) {

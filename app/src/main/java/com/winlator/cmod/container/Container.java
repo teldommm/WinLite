@@ -187,64 +187,6 @@ public class Container {
         putExtra("surfaceUbwc", enabled ? "1" : "0");
     }
 
-    public int getLsfgMultiplier() {
-        try {
-            int value = Integer.parseInt(getExtra("lsfgMultiplier", "0"));
-            return value < 2 ? 0 : Math.max(2, Math.min(4, value));
-        } catch (NumberFormatException ignored) {
-            return 0;
-        }
-    }
-
-    public void setLsfgMultiplier(int multiplier) {
-        putExtra("lsfgMultiplier", String.valueOf(multiplier < 2 ? 0 : Math.max(2, Math.min(4, multiplier))));
-    }
-
-    /** Adaptive frame-gen target in Hz; 0 = fixed multiplier (lsfgMultiplier). */
-    public int getLsfgTargetRate() {
-        try {
-            int value = Integer.parseInt(getExtra("lsfgTargetRate", "0"));
-            return Math.max(0, Math.min(1000, value));
-        } catch (NumberFormatException ignored) {
-            return 0;
-        }
-    }
-
-    public void setLsfgTargetRate(int hz) {
-        putExtra("lsfgTargetRate", String.valueOf(Math.max(0, Math.min(1000, hz))));
-    }
-
-    /** Used for "LSFG Adaptive FPS" when no target has been entered yet. */
-    public static final int DEFAULT_LSFG_TARGET_RATE = 60;
-
-    /**
-     * Last Adaptive target in Hz, kept even while a fixed multiplier is selected
-     * (lsfgTargetRate is 0 then). 0 = never set.
-     */
-    public int getLsfgTargetMemo() {
-        try {
-            return Math.max(0, Math.min(1000, Integer.parseInt(getExtra("lsfgTargetMemo", "0"))));
-        } catch (NumberFormatException ignored) {
-            return 0;
-        }
-    }
-
-    public void setLsfgTargetMemo(int hz) {
-        putExtra("lsfgTargetMemo", String.valueOf(Math.max(0, Math.min(1000, hz))));
-    }
-
-    public float getLsfgFlowScale() {
-        try {
-            return Math.max(0.25f, Math.min(1.0f, Float.parseFloat(getExtra("lsfgFlowScale", "0.80"))));
-        } catch (NumberFormatException ignored) {
-            return 0.80f;
-        }
-    }
-
-    public void setLsfgFlowScale(float flowScale) {
-        putExtra("lsfgFlowScale", String.format(java.util.Locale.US, "%.2f", Math.max(0.25f, Math.min(1.0f, flowScale))));
-    }
-
     public String getDXWrapper() {
         return dxwrapper;
     }

@@ -177,7 +177,6 @@ public class WinlatorHUD extends View {
     private final AtomicInteger frameAccum = new AtomicInteger(0);
     private long lastFpsNs = 0;
     private float snapFps = 0;
-    private volatile float frameGenPresentedRate = 0f;
 
     private int snapGpu = -1, snapCpu = -1, snapCpuTemp = -1;
     // Battery power magnitude in mW; PWR_NA when unavailable.
@@ -221,11 +220,6 @@ public class WinlatorHUD extends View {
     private int battConsecutiveFailures;
     // After this many failed reads in a row the metric shows N/A (and keeps being retried).
     private static final int FAILURES_BEFORE_NA = 3;
-
-    // Frame-generation rate is only trusted while it is fresh and real frames are arriving;
-    // otherwise a stalled game kept showing the last generated rate (e.g. 120) instead of 0.
-    private static final long FRAME_GEN_RATE_MAX_AGE_NS = 500_000_000L;
-    private volatile long frameGenRateAtNs = 0L;
 
     // Set on the stats thread when a value string changed; widths are then measured on the UI
     // thread (Paint isn't thread-safe, and the UI thread draws with the same Paints).
@@ -445,13 +439,6 @@ public class WinlatorHUD extends View {
 
     public void update() {
         onFrame();
-    }
-
-    /** Presents/sec incl. generated frames, pushed once per real frame while frame gen is
-     *  actually running; 0 means "not generating right now", so the plain measured FPS shows. */
-    public void setFrameGenPresentedRate(float rate) {
-        frameGenPresentedRate = rate;
-        frameGenRateAtNs = System.nanoTime();
     }
 
     public void setIsNative(boolean n) {
@@ -872,10 +859,7 @@ public class WinlatorHUD extends View {
 
         int frames = frameAccum.getAndSet(0);
         float measuredFps = frames * 1_000_000_000f / dt;
-        float genRate = frameGenPresentedRate;
-        boolean genFresh = frames > 0 && genRate > 0f
-                && now - frameGenRateAtNs < FRAME_GEN_RATE_MAX_AGE_NS;
-        snapFps = genFresh ? genRate : measuredFps;
+        snapFps = measuredFps;
         lastFpsNs = now;
 
         String value = String.format(Locale.US, "%.0f", snapFps);

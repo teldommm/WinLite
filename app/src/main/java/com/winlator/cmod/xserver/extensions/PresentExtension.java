@@ -455,8 +455,8 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ustNs / 1000, msc);
     }
 
-    // One renderer call per present: shows the pixmap in the window and counts the present (the
-    // exact frame clock frame generation paces on) together, waking the render thread once.
+    // One renderer call per present: shows the pixmap in the window and counts the present
+    // together, waking the render thread once.
     private static void presentToRenderer(XClient client, Window window, Pixmap pixmap,
                                           long guestFrameNs, long[] plan) {
         com.winlator.cmod.widget.XServerRendererView view = client.xServer.getXServerView();

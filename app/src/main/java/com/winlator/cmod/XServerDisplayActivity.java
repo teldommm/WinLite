@@ -65,7 +65,6 @@ import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.GameSaveManager;
 import com.winlator.cmod.core.KeyValueSet;
-import com.winlator.cmod.core.LosslessDll;
 import com.winlator.cmod.core.OnExtractFileListener;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.core.ProcessHelper;
@@ -188,19 +187,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private int editorResultProfileId = -1;
     private Runnable refreshInputPanel;
     private Shortcut shortcut;
-    private int activeLsfgMultiplier;
-    private java.io.File activeLsfgDll;
-    private float activeLsfgFlowScale = 0.80f;
-    // Adaptive frame gen: target Hz, 0 = fixed multiplier. Stored with
-    // lsfgMultiplier = 4 (the ceiling the pacer may use to reach the target).
-    private int activeLsfgTargetRate = 0;
-    // The display's refresh rate before this activity pinned any mode for an FPS limit or frame
-    // generation: the ceiling for a cadence mode without the high refresh preference.
+    // The display's refresh rate before this activity pinned any mode for an FPS limit: the ceiling for a cadence mode without the high refresh preference.
     private float baseRefreshHz = 0f;
-    // Last Adaptive target, kept while a fixed multiplier is selected (activeLsfgTargetRate is 0
-    // then, which is what gets passed to native) so switching back restores it. Persisted
-    // separately as lsfgTargetMemo; never 0 (falls back to DEFAULT_LSFG_TARGET_RATE).
-    private int rememberedLsfgTargetRate = Container.DEFAULT_LSFG_TARGET_RATE;
     private boolean graphicsFsrEnabled;
     private int graphicsUpscalerModeIndex;
     private int graphicsPostFxModeIndex;
@@ -235,12 +223,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // from in-game (its editor's Input tab stays the one place that sets the default).
     private int touchMode = TouchpadView.MODE_TRACKPAD;
     private float refreshRate = 60.0f;
-    // Feeds the panel's ACTUAL refresh rate to native frame generation and keeps
-    // it current when the system switches display modes. The adaptive pacer clamps
-    // its target to this, so it must never be a mode the window is not running in.
-    private android.hardware.display.DisplayManager.DisplayListener frameGenDisplayListener;
-    private float frameGenRefreshHz = 0f;
-    private VulkanXServerView frameGenRenderer;
     private MagnifierView magnifierView;
     private DebugDialog debugDialog;
     private WinlatorLogcatLogger winlatorLogcatLogger;
@@ -332,12 +314,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         randr.setRefreshRates(rates, activeRate);
         Log.d("XServerDisplayActivity", "RandR advertising refresh rates "
                 + java.util.Arrays.toString(rates) + ", active=" + activeRate);
-    }
-
-    private int frameGenSpinnerIndex() {
-        if (activeLsfgMultiplier < 2) return 0;
-        if (activeLsfgTargetRate > 0) return GraphicsSidebarPanelKt.FRAMEGEN_TARGET_INDEX;
-        return Math.min(3, activeLsfgMultiplier - 1);
     }
 
     private float pickHighestRefreshRate() {
@@ -996,7 +972,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             winlatorLogcatLogger = null;
         }
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
-        stopFrameGenRefreshTracking();
         super.onDestroy();
     }
 
@@ -1261,7 +1236,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return container != null && container.isSurfaceUbwc();
     }
 
-    /** Builds the Vulkan renderer view (driver, present mode, filter, frame generation) and makes it the activity's. */
+    /** Builds the Vulkan renderer view (driver, present mode, filter) and makes it the activity's. */
     private XServerRendererView createRendererView() {
         VulkanXServerView.loadNativeLibrary();
         final VulkanXServerView view = new VulkanXServerView(this, xServer);
@@ -1335,30 +1310,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         vkRenderer.setFilterMode(shortcut != null ? shortcut.getRendererFilterMode()
                 : (container != null ? container.getRendererFilterMode() : 0));
 
-        int lsfgMultiplier = shortcut != null ? shortcut.getLsfgMultiplier()
-                : container != null ? container.getLsfgMultiplier() : 0;
-        java.io.File lsfgDll = LosslessDll.isGlobalDllAvailable(this) ? LosslessDll.globalDllFile(this)
-                : shortcut != null ? LosslessDll.containerDllFile(shortcut)
-                : LosslessDll.containerDllFile(container);
-        float lsfgFlowScale = shortcut != null ? shortcut.getLsfgFlowScale()
-                : container != null ? container.getLsfgFlowScale() : 0.80f;
-        int lsfgTargetRate = shortcut != null ? shortcut.getLsfgTargetRate()
-                : container != null ? container.getLsfgTargetRate() : 0;
-        activeLsfgMultiplier = lsfgMultiplier;
-        activeLsfgDll = lsfgDll;
-        activeLsfgFlowScale = lsfgFlowScale;
-        activeLsfgTargetRate = lsfgMultiplier < 2 ? 0 : lsfgTargetRate;
-        int lsfgTargetMemo = shortcut != null ? shortcut.getLsfgTargetMemo()
-                : container != null ? container.getLsfgTargetMemo() : 0;
-        // Saves from before the memo existed only stored the target while Adaptive was on.
-        rememberedLsfgTargetRate = lsfgTargetMemo > 0 ? lsfgTargetMemo
-                : activeLsfgTargetRate > 0 ? activeLsfgTargetRate
-                : Container.DEFAULT_LSFG_TARGET_RATE;
-        // Was pickHighestRefreshRate(): the highest mode the panel SUPPORTS, sent even when
-        // high_refresh_rate_mode is off and the window never asked for it. Start from the
-        // rate this activity actually runs at (requested or current) and follow mode changes.
-        startFrameGenRefreshTracking(vkRenderer);
-        vkRenderer.setFrameGenNative(lsfgDll, lsfgMultiplier, lsfgFlowScale, activeLsfgTargetRate);
+        // Pick the display mode: the user's refresh preference, or one an FPS limit divides evenly.
+        applyDisplayMode();
     }
 
     private void setupUI() {
@@ -1879,9 +1832,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         int initialFpsLimit = loadFpsLimit();
         if (vkRenderer != null) vkRenderer.setFpsLimit(initialFpsLimit);
-        // Frame generation picks its own display mode; an FPS limit wants one it divides evenly.
-        if ((frameGenRenderer != null && activeLsfgMultiplier >= 2) || initialFpsLimit > 0)
-            applyFrameGenDisplayMode();
+        // An FPS limit wants a display mode it divides evenly.
+        if (initialFpsLimit > 0) applyDisplayMode();
 
         // FSR/Upscaler/PostFX/Sharpness prefer the per-shortcut value over the container-wide
         // one, exactly like SidebarCleanupView's bolted-on autosave used to (it re-read these
@@ -1923,10 +1875,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 initPFX,
                 0,  // ReShade never persisted anything in the original either — always starts Off
                 graphicsReshadeStrength,
-                vkRenderer != null,
-                frameGenSpinnerIndex(),
-                activeLsfgFlowScale,
-                rememberedLsfgTargetRate,
                 perfHintAvailable,
                 perfHintOn
         );
@@ -1936,9 +1884,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             public void onFpsLimitChanged(int fps) {
                 saveFpsLimit(fps);
                 if (vkRenderer != null) vkRenderer.setFpsLimit(fps);
-                // A fixed multiplier with an FPS limit picks its display mode from the limit, and
-                // so does a plain limit: 30/40/60 on 144 Hz cannot be shown evenly, on 120 Hz they can.
-                if (activeLsfgMultiplier < 2 || activeLsfgTargetRate == 0) applyFrameGenDisplayMode();
+                // The display mode follows the limit: 30/40/60 on 144 Hz cannot be shown evenly,
+                // on 120 Hz they can.
+                applyDisplayMode();
             }
 
             @Override
@@ -2012,76 +1960,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             public void onReshadeStrengthChanged(int percent) {
                 graphicsReshadeStrength = percent;
                 if (vkRenderer != null) vkRenderer.setSharpness(percent / 100f);
-            }
-
-            @Override
-            public void onFrameGenChanged(int multiplierIndex) {
-                // 0 = Off, 1..3 = fixed 2x..4x, 4 = LSFG Adaptive FPS. Adaptive keeps frame
-                // generation armed at the largest multiplier (the pacer decides per frame how
-                // many to generate to hit the target); the other modes clear the target.
-                if (multiplierIndex == GraphicsSidebarPanelKt.FRAMEGEN_TARGET_INDEX) {
-                    activeLsfgMultiplier = 4;
-                    activeLsfgTargetRate = rememberedLsfgTargetRate;
-                } else {
-                    activeLsfgMultiplier = multiplierIndex < 1 ? 0 : multiplierIndex + 1;
-                    activeLsfgTargetRate = 0;
-                }
-                if (shortcut != null) {
-                    shortcut.setLsfgMultiplier(activeLsfgMultiplier);
-                    shortcut.setLsfgTargetRate(activeLsfgTargetRate);
-                    shortcut.setLsfgTargetMemo(rememberedLsfgTargetRate);
-                    shortcut.saveData();
-                } else if (container != null) {
-                    container.setLsfgMultiplier(activeLsfgMultiplier);
-                    container.setLsfgTargetRate(activeLsfgTargetRate);
-                    container.setLsfgTargetMemo(rememberedLsfgTargetRate);
-                    container.saveData();
-                }
-                if (vkRenderer != null)
-                    vkRenderer.setFrameGenNative(activeLsfgDll, activeLsfgMultiplier,
-                            activeLsfgFlowScale, activeLsfgTargetRate);
-                applyFrameGenDisplayMode();
-            }
-
-            @Override
-            public void onFrameGenTargetFpsChanged(int fps) {
-                int clamped = Math.max(0, Math.min(fps, 1000));
-                if (clamped <= 0) return;
-                if (clamped == rememberedLsfgTargetRate) return;
-                rememberedLsfgTargetRate = clamped;
-                // Always persist the memo; only the effective target (and native) follow while
-                // Adaptive is the active mode.
-                boolean adaptive = activeLsfgTargetRate > 0;
-                if (adaptive) activeLsfgTargetRate = clamped;
-                if (shortcut != null) {
-                    if (adaptive) shortcut.setLsfgTargetRate(activeLsfgTargetRate);
-                    shortcut.setLsfgTargetMemo(rememberedLsfgTargetRate);
-                    shortcut.saveData();
-                } else if (container != null) {
-                    if (adaptive) container.setLsfgTargetRate(activeLsfgTargetRate);
-                    container.setLsfgTargetMemo(rememberedLsfgTargetRate);
-                    container.saveData();
-                }
-                if (adaptive && vkRenderer != null)
-                    vkRenderer.setFrameGenNative(activeLsfgDll, activeLsfgMultiplier,
-                            activeLsfgFlowScale, activeLsfgTargetRate);
-                if (adaptive) applyFrameGenDisplayMode();
-            }
-
-            @Override
-            public void onFrameGenFlowScaleChanged(float scale) {
-                if (Math.abs(scale - activeLsfgFlowScale) < 0.001f) return;
-                activeLsfgFlowScale = scale;
-                if (shortcut != null) {
-                    shortcut.setLsfgFlowScale(activeLsfgFlowScale);
-                    shortcut.saveData();
-                } else if (container != null) {
-                    container.setLsfgFlowScale(activeLsfgFlowScale);
-                    container.saveData();
-                }
-                if (vkRenderer != null)
-                    vkRenderer.setFrameGenNative(activeLsfgDll, activeLsfgMultiplier,
-                            activeLsfgFlowScale, activeLsfgTargetRate);
             }
 
         };
@@ -3126,123 +3004,37 @@ public class XServerDisplayActivity extends AppCompatActivity {
         this.refreshRate = refreshRate;
     }
 
-    private void startFrameGenRefreshTracking(final VulkanXServerView vkRenderer) {
-        stopFrameGenRefreshTracking();
-        frameGenRenderer = vkRenderer;
-        // Pick a display mode that suits frame generation and hand the
-        // native pacer the rate the panel is being moved to; the listener below then follows
-        // the mode the system actually runs, including changes the app did not ask for.
-        applyFrameGenDisplayMode();
-
-        android.hardware.display.DisplayManager dm =
-                (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
-        if (dm == null) return;
-        frameGenDisplayListener = new android.hardware.display.DisplayManager.DisplayListener() {
-            @Override public void onDisplayAdded(int displayId) {}
-            @Override public void onDisplayRemoved(int displayId) {}
-            @Override
-            public void onDisplayChanged(int displayId) {
-                android.view.Display display = getWindowManager().getDefaultDisplay();
-                if (display == null || display.getDisplayId() != displayId) return;
-                pushFrameGenRefreshRate(display.getMode().getRefreshRate());
-            }
-        };
-        dm.registerDisplayListener(frameGenDisplayListener, handler);
-    }
-
-    private void pushFrameGenRefreshRate(float hz) {
-        if (hz <= 1f || frameGenRenderer == null) return;
-        if (Math.abs(hz - frameGenRefreshHz) < 0.5f) return;
-        Log.d("XServerDisplayActivity", "Frame gen refresh rate " + frameGenRefreshHz + " -> " + hz);
-        frameGenRefreshHz = hz;
-        frameGenRenderer.setFrameGenRefreshRate(hz);
-    }
-
     /**
-     * Display mode for frame generation. Adaptive wants a mode of at
-     * least the target rate; a fixed multiplier with an FPS limit wants multiplier x limit;
-     * otherwise the fastest mode. Among modes that meet the goal the slowest one wins (no
-     * presents wasted above the target), preferring modes the FPS limit divides evenly. With
-     * frame generation off the window goes back to the user's own refresh preference.
+     * Display mode for the window: one the FPS limit divides evenly when there is such a mode,
+     * otherwise the user's own refresh preference.
      */
-    private void applyFrameGenDisplayMode() {
+    private void applyDisplayMode() {
         android.view.Window window = getWindow();
         android.view.Display display = getWindowManager().getDefaultDisplay();
         if (window == null || display == null) return;
         android.view.WindowManager.LayoutParams params = window.getAttributes();
-        boolean frameGenOn = activeLsfgMultiplier >= 2;
         if (baseRefreshHz <= 0f) baseRefreshHz = display.getMode().getRefreshRate();
 
-        if (!frameGenOn) {
-            boolean highRefresh = preferences.getBoolean("high_refresh_rate_mode", false);
-            int limit = xServerView != null ? xServerView.getFpsLimit() : 0;
-            android.view.Display.Mode cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh, baseRefreshHz) : null;
-            if (cadence != null) {
-                // Every limited frame then stays on screen for the same number of refreshes.
-                if (params.preferredDisplayModeId != cadence.getModeId() || params.preferredRefreshRate != 0f) {
-                    params.preferredDisplayModeId = cadence.getModeId();
-                    params.preferredRefreshRate = 0f;
-                    window.setAttributes(params);
-                    Log.i("XServerDisplayActivity", "FPS limit " + limit + ": display mode "
-                            + Math.round(cadence.getRefreshRate()) + "Hz (mode " + cadence.getModeId() + ")");
-                }
-                pushFrameGenRefreshRate(cadence.getRefreshRate());
-                return;
-            }
-            float userRate = highRefresh ? pickHighestRefreshRate() : 0f;
-            if (params.preferredDisplayModeId != 0 || params.preferredRefreshRate != userRate) {
-                params.preferredDisplayModeId = 0;
-                params.preferredRefreshRate = userRate;
+        boolean highRefresh = preferences.getBoolean("high_refresh_rate_mode", false);
+        int limit = xServerView != null ? xServerView.getFpsLimit() : 0;
+        android.view.Display.Mode cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh, baseRefreshHz) : null;
+        if (cadence != null) {
+            // Every limited frame then stays on screen for the same number of refreshes.
+            if (params.preferredDisplayModeId != cadence.getModeId() || params.preferredRefreshRate != 0f) {
+                params.preferredDisplayModeId = cadence.getModeId();
+                params.preferredRefreshRate = 0f;
                 window.setAttributes(params);
+                Log.i("XServerDisplayActivity", "FPS limit " + limit + ": display mode "
+                        + Math.round(cadence.getRefreshRate()) + "Hz (mode " + cadence.getModeId() + ")");
             }
-            pushFrameGenRefreshRate(display.getMode().getRefreshRate());
             return;
         }
-
-        int fpsLimit = frameGenRenderer != null ? frameGenRenderer.getFpsLimit() : 0;
-        int wanted;
-        if (activeLsfgTargetRate > 0) wanted = activeLsfgTargetRate;
-        else if (fpsLimit > 0) wanted = activeLsfgMultiplier * fpsLimit;
-        else wanted = Integer.MAX_VALUE;
-
-        android.view.Display.Mode active = display.getMode();
-        android.view.Display.Mode best = null;
-        for (android.view.Display.Mode mode : display.getSupportedModes()) {
-            if (mode.getPhysicalWidth() != active.getPhysicalWidth()
-                    || mode.getPhysicalHeight() != active.getPhysicalHeight()) continue;
-            if (best == null || betterFrameGenMode(mode, best, wanted, fpsLimit)) best = mode;
-        }
-        if (best == null) {
-            pushFrameGenRefreshRate(active.getRefreshRate());
-            return;
-        }
-        if (params.preferredDisplayModeId != best.getModeId() || params.preferredRefreshRate != 0f) {
-            params.preferredDisplayModeId = best.getModeId();
-            params.preferredRefreshRate = 0f;
+        float userRate = highRefresh ? pickHighestRefreshRate() : 0f;
+        if (params.preferredDisplayModeId != 0 || params.preferredRefreshRate != userRate) {
+            params.preferredDisplayModeId = 0;
+            params.preferredRefreshRate = userRate;
             window.setAttributes(params);
-            Log.i("XServerDisplayActivity", "Frame gen display mode: wanted "
-                    + (wanted == Integer.MAX_VALUE ? "highest" : wanted + "Hz") + ", selected "
-                    + Math.round(best.getRefreshRate()) + "Hz (mode " + best.getModeId() + ")");
         }
-        // The switch lands a moment later; the listener corrects this if the system refuses it.
-        pushFrameGenRefreshRate(best.getRefreshRate());
-    }
-
-    private static boolean betterFrameGenMode(android.view.Display.Mode candidate,
-                                              android.view.Display.Mode current, int wanted,
-                                              int fpsLimit) {
-        float a = candidate.getRefreshRate();
-        float b = current.getRefreshRate();
-        boolean aMeets = a + 0.5f >= wanted;
-        boolean bMeets = b + 0.5f >= wanted;
-        if (aMeets != bMeets) return aMeets;
-        if (!aMeets) return a > b;
-        if (fpsLimit > 0) {
-            boolean aCadence = isFrameCadenceCompatible(a, fpsLimit);
-            boolean bCadence = isFrameCadenceCompatible(b, fpsLimit);
-            if (aCadence != bCadence) return aCadence;
-        }
-        return a < b;
     }
 
     /**
@@ -3274,14 +3066,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         float ratio = refreshRate / fpsLimit;
         int nearest = Math.round(ratio);
         return nearest >= 1 && Math.abs(ratio - nearest) <= 0.01f;
-    }
-
-    private void stopFrameGenRefreshTracking() {
-        if (frameGenDisplayListener == null) return;
-        android.hardware.display.DisplayManager dm =
-                (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
-        if (dm != null) dm.unregisterDisplayListener(frameGenDisplayListener);
-        frameGenDisplayListener = null;
     }
 
     private float currentDisplayRefreshRate() {

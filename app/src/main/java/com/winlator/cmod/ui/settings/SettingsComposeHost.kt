@@ -111,7 +111,6 @@ data class SettingsModel(
     val fexPresets: List<SettingChoice>,
     val selectedFexPreset: String,
     val soundFonts: List<SettingChoice>,
-    val losslessDllAvailable: Boolean,
     val winlatorPath: String,
     val shortcutPath: String,
     val cursorSpeedPercent: Int, // Cursor speed (pref "cursor_speed"): touch and captured mouse
@@ -145,7 +144,6 @@ interface SettingsCallbacks {
     fun onFexPresetSelected(id: String)
     fun onInstallSoundFont()
     fun onRemoveSoundFont(name: String)
-    fun onImportLosslessDll()
     fun onChooseWinlatorPath()
     fun onChooseShortcutPath()
     fun onBooleanChanged(key: String, value: Boolean)
@@ -192,14 +190,6 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
             }
             item("components") {
                 NavigationRow(Icons.Outlined.Apps, uiStr(R.string.ui_components), uiStr(R.string.ui_wine_proton_dxvk_vkd3d_and_runtimes), callbacks::onOpenComponents)
-            }
-            item("lossless-dll") {
-                NavigationRow(
-                    Icons.Outlined.FolderOpen,
-                    uiStr(R.string.ui_import_lossless_dll),
-                    if (model.losslessDllAvailable) uiStr(R.string.ui_lossless_dll_imported_lsfg_native_ready) else uiStr(R.string.ui_required_for_lsfg_native),
-                    callbacks::onImportLosslessDll
-                )
             }
 
             item("presets-title") { SectionTitle("PRESETS") }

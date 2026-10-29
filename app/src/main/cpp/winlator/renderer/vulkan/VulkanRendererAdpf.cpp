@@ -7,9 +7,9 @@
 // fence, on a swapchain image, on an older image's fence. That time is waiting for the GPU or the
 // display, not work; reporting it would tell the system the thread needs more clock when it
 // needs none. The GPU side is not reported from here: a timestamp span around a submit that waits
-// for a swapchain image also measures that wait (the frame-generation chain timing says the same),
-// so the GPU is timed only by the framework where the device offers it (API 36 graphics-pipeline
-// session) and otherwise left unmeasured, which the API allows.
+// for a swapchain image also measures that wait, so the GPU is timed only by the framework where
+// the device offers it (API 36 graphics-pipeline session) and otherwise left unmeasured, which
+// the API allows.
 #include "VulkanRendererContext.h"
 
 #include <cstdlib>
@@ -50,14 +50,11 @@ void VulkanRendererContext::adpfNote(uint32_t bits) {
 
 int64_t VulkanRendererContext::adpfCycleNs() const {
     // One cycle = one guest frame's trip through the compositor. It is as long as the display's
-    // refresh, stretched by an FPS limit (the guest delivers no faster) and, with frame
-    // generation, by the measured source interval (one source frame is composited, then its
-    // generated frames follow).
+    // refresh, stretched by an FPS limit (the guest delivers no faster).
     int64_t cycle = refreshPeriodNs_.load(std::memory_order_relaxed);
     if (cycle <= 0) cycle = 16666667;   // refresh rate not known yet: 60 Hz
     const int fps = fpsLimit_.load(std::memory_order_relaxed);
     if (fps > 0) cycle = std::max<int64_t>(cycle, 1000000000LL / fps);
-    if (fgArmed_.load(std::memory_order_relaxed)) cycle = std::max(cycle, fgSourceIntervalNs());
     return std::clamp<int64_t>(cycle, 2000000, 200000000);
 }
 
@@ -112,7 +109,6 @@ void VulkanRendererContext::adpfService() {
     const uint32_t bits = adpfNotifyBits_.exchange(0, std::memory_order_relaxed);
     if (bits & kAdpfResetAll)         adpfSession_.notify(adpf::Hint::Reset, true, true, "winlite-reset");
     else if (bits & kAdpfResetGpu)    adpfSession_.notify(adpf::Hint::Reset, false, true, "winlite-gpu-effect");
-    if (bits & kAdpfIncreaseGpu)      adpfSession_.notify(adpf::Hint::Increase, false, true, "winlite-frame-gen");
     if (bits & kAdpfSpikeAll)         adpfSession_.notify(adpf::Hint::Spike, true, true, "winlite-rebuild");
 }
 
@@ -126,8 +122,8 @@ void VulkanRendererContext::adpfFrameEnd(int64_t startNs, int64_t blockedNs) {
     if (!adpfSession_.isOpen() || startNs <= 0) return;
     const int64_t cpuNs = std::max<int64_t>(adpfNowNs() - startNs - blockedNs, 1);
 
-    // The target follows the refresh rate, the FPS limit and frame generation. A dead band keeps
-    // it from being rewritten for every wobble of the measured source rate.
+    // The target follows the refresh rate and the FPS limit. A dead band keeps it from being
+    // rewritten for every small change.
     const int64_t cycle = adpfCycleNs();
     if (std::llabs(cycle - adpfTargetNs_) * 20 > cycle) {
         adpfSession_.setTarget(cycle);
