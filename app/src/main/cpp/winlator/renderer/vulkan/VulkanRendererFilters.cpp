@@ -355,8 +355,8 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     const VkExtent2D targetExt = swapchainExt;
     VkRenderPassBeginInfo rpi{};
     rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpi.renderPass = renderPass;
-    rpi.framebuffer = swapchainFBs[imgIdx];
+    rpi.renderPass = recordPass_ != VK_NULL_HANDLE ? recordPass_ : renderPass;
+    rpi.framebuffer = recordFB_ != VK_NULL_HANDLE ? recordFB_ : swapchainFBs[imgIdx];
     rpi.renderArea = {{0, 0}, targetExt};
     VkClearValue clear = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
     rpi.clearValueCount = 1;
@@ -538,6 +538,8 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             (uint32_t)ahbTransitions.size(), ahbTransitions.data());
     }
 
+    // WFG appends its own passes and ends the buffer itself.
+    if (recordLeaveOpen_) return;
     VkResult endStatus = vk_.EndCommandBuffer(cb);
     if (endStatus != VK_SUCCESS) {
         RLOG_E("recordCmdBuf: EndCommandBuffer failed status=%d draws=%zu mode=%d",

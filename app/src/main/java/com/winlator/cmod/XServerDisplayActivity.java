@@ -87,7 +87,6 @@ import com.winlator.cmod.midi.MidiManager;
 import com.winlator.cmod.ui.GraphicsPanelCallbacks;
 import com.winlator.cmod.ui.GraphicsPanelState;
 import com.winlator.cmod.ui.GraphicsSidebarPanelHost;
-import com.winlator.cmod.ui.GraphicsSidebarPanelKt;
 import com.winlator.cmod.ui.HudPanelCallbacks;
 import com.winlator.cmod.ui.toast.WinToast;
 import com.winlator.cmod.ui.HudPanelState;
@@ -189,6 +188,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private Shortcut shortcut;
     // The display's refresh rate before this activity pinned any mode for an FPS limit: the ceiling for a cadence mode without the high refresh preference.
     private float baseRefreshHz = 0f;
+    // WFG frame generation: the display mode follows the target rate, not the user's base refresh.
+    private boolean wfgOn = false;
+    private int wfgTargetHz = 0;   // 0 = the display's fastest mode
+    private static final int[] WFG_FLOW_SIDES = {180, 252};
+    private static final int[] WFG_TARGET_HZ = {0, 60, 90, 120, 144};
     private boolean graphicsFsrEnabled;
     private int graphicsUpscalerModeIndex;
     private int graphicsPostFxModeIndex;
@@ -1867,6 +1871,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final boolean perfHintOn = perfHintAvailable && loadPerformanceHint();
         if (vkRenderer != null) vkRenderer.setPerformanceHint(perfHintOn);
 
+        // WFG: the same shortcut-first storage; only on the Vulkan renderer.
+        final boolean wfgAvailable = vkRenderer != null;
+        final int wfgQuality = wfgAvailable ? loadWfgInt("wfgQuality", WFG_FLOW_SIDES.length) : 0;
+        final int wfgTarget = wfgAvailable ? loadWfgInt("wfgTarget", WFG_TARGET_HZ.length) : 0;
+        final boolean wfgEnabledSaved = wfgAvailable && "1".equals(loadWfgExtra("wfgEnabled"));
+        if (wfgAvailable) {
+            applyWfg(wfgEnabledSaved, wfgQuality, wfgTarget);
+        }
+
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
                 fsrOn,
@@ -1876,7 +1889,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 0,  // ReShade never persisted anything in the original either — always starts Off
                 graphicsReshadeStrength,
                 perfHintAvailable,
-                perfHintOn
+                perfHintOn,
+                wfgAvailable,
+                wfgEnabledSaved,
+                wfgQuality,
+                wfgTarget
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
@@ -1887,6 +1904,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // The display mode follows the limit: 30/40/60 on 144 Hz cannot be shown evenly,
                 // on 120 Hz they can.
                 applyDisplayMode();
+            }
+
+            @Override
+            public void onFrameGenChanged(boolean enabled, int qualityIndex, int targetIndex) {
+                saveWfgExtra("wfgEnabled", enabled ? "1" : "0");
+                saveWfgExtra("wfgQuality", String.valueOf(qualityIndex));
+                saveWfgExtra("wfgTarget", String.valueOf(targetIndex));
+                applyWfg(enabled, qualityIndex, targetIndex);
             }
 
             @Override
@@ -2028,6 +2053,43 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         if ("0".equals(oldEnabled)) limit = 0;
         return limit;
+    }
+
+    private String loadWfgExtra(String key) {
+        String saved = "";
+        if (shortcut != null) saved = shortcut.getExtra(key, "");
+        if (saved.isEmpty() && container != null) saved = container.getExtra(key, "");
+        return saved;
+    }
+
+    private int loadWfgInt(String key, int count) {
+        try {
+            int v = Integer.parseInt(loadWfgExtra(key));
+            return v >= 0 && v < count ? v : 0;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private void saveWfgExtra(String key, String value) {
+        if (shortcut != null) {
+            shortcut.putExtra(key, value);
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra(key, value);
+            container.saveData();
+        }
+    }
+
+    private void applyWfg(boolean enabled, int qualityIndex, int targetIndex) {
+        qualityIndex = Math.max(0, Math.min(WFG_FLOW_SIDES.length - 1, qualityIndex));
+        targetIndex = Math.max(0, Math.min(WFG_TARGET_HZ.length - 1, targetIndex));
+        wfgOn = enabled;
+        wfgTargetHz = WFG_TARGET_HZ[targetIndex];
+        if (xServerView instanceof VulkanXServerView)
+            ((VulkanXServerView) xServerView).setWfg(enabled, WFG_FLOW_SIDES[qualityIndex], wfgTargetHz);
+        // The refresh rate the output runs at is the display mode's: choose it for the target.
+        applyDisplayMode();
     }
 
     private boolean loadPerformanceHint() {
@@ -3017,7 +3079,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         boolean highRefresh = preferences.getBoolean("high_refresh_rate_mode", false);
         int limit = xServerView != null ? xServerView.getFpsLimit() : 0;
-        android.view.Display.Mode cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh, baseRefreshHz) : null;
+        android.view.Display.Mode cadence;
+        if (wfgOn) cadence = pickWfgMode(display, limit, wfgTargetHz);
+        else cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh, baseRefreshHz) : null;
         if (cadence != null) {
             // Every limited frame then stays on screen for the same number of refreshes.
             if (params.preferredDisplayModeId != cadence.getModeId() || params.preferredRefreshRate != 0f) {
@@ -3059,6 +3123,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (best == null || mode.getRefreshRate() > best.getRefreshRate()) best = mode;
         }
         return best;
+    }
+
+    /**
+     * Display mode for WFG: the output rate is the display's, so the pin of the user's base
+     * refresh does not apply. The ceiling is the target rate (none for "max refresh"). With an FPS
+     * limit the fastest mode that is a whole multiple (2x or more) of it, so every game frame is
+     * followed by generated ones in even steps; otherwise the fastest mode within the ceiling,
+     * else the slowest mode of the same resolution.
+     */
+    private static android.view.Display.Mode pickWfgMode(android.view.Display display, int limit, int targetHz) {
+        android.view.Display.Mode active = display.getMode();
+        final float ceiling = targetHz > 0 ? targetHz + 0.5f : Float.MAX_VALUE;
+        android.view.Display.Mode multiple = null, fastest = null, slowest = null;
+        for (android.view.Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() != active.getPhysicalWidth()
+                    || mode.getPhysicalHeight() != active.getPhysicalHeight()) continue;
+            float hz = mode.getRefreshRate();
+            if (slowest == null || hz < slowest.getRefreshRate()) slowest = mode;
+            if (hz > ceiling) continue;
+            if (fastest == null || hz > fastest.getRefreshRate()) fastest = mode;
+            if (limit > 0 && hz >= limit * 2f - 0.5f && isFrameCadenceCompatible(hz, limit)
+                    && (multiple == null || hz > multiple.getRefreshRate())) multiple = mode;
+        }
+        if (multiple != null) return multiple;
+        return fastest != null ? fastest : slowest;
     }
 
     private static boolean isFrameCadenceCompatible(float refreshRate, int fpsLimit) {

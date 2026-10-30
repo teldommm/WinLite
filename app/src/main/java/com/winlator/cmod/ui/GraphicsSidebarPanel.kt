@@ -38,7 +38,11 @@ data class GraphicsPanelState(
     val reshadeEffectIndex: Int,
     val reshadeStrengthPercent: Int,
     val perfHintAvailable: Boolean = false,        // the active renderer and the device support ADPF
-    val perfHintEnabled: Boolean = false           // saved switch position (off unless chosen)
+    val perfHintEnabled: Boolean = false,          // saved switch position (off unless chosen)
+    val frameGenAvailable: Boolean = false,        // the active renderer is Vulkan (WFG lives there)
+    val frameGenEnabled: Boolean = false,
+    val frameGenQualityIndex: Int = 0,             // index into FRAMEGEN_QUALITY_LABELS
+    val frameGenTargetIndex: Int = 0               // index into FRAMEGEN_TARGET_LABELS
 )
 
 interface GraphicsPanelCallbacks {
@@ -52,6 +56,8 @@ interface GraphicsPanelCallbacks {
     fun onReshadeStrengthChanged(percent: Int)
     // ADPF (Android Performance Hint) switch of the Vulkan renderer.
     fun onPerformanceHintChanged(enabled: Boolean)
+    // WFG frame generation: switch, quality (analysis size) and output target.
+    fun onFrameGenChanged(enabled: Boolean, qualityIndex: Int, targetIndex: Int)
 }
 
 object GraphicsSidebarPanelHost {
@@ -68,6 +74,9 @@ object GraphicsSidebarPanelHost {
 
 // Index = filterMode - 2 (saved/native numbering, never reorder). NIS (mode 7) is appended here but
 // shown right after SGSR (HQ) and after FSR (NIS) in the dropdown through UPSCALER_DISPLAY_ORDER.
+// Index order is saved in the container/shortcut extras: never reorder.
+private val FRAMEGEN_QUALITY_LABELS = listOf("Fast", "Balanced")
+private val FRAMEGEN_TARGET_LABELS = listOf("Max refresh", "60", "90", "120", "144")
 private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost", "SGSR HQ", "NIS")
 private val UPSCALER_DISPLAY_ORDER = listOf(0, 4, 1, 5, 2, 3)
 private val POSTFX_LABELS = listOf("None", "DLS", "CRT", "HDR", "Natural")
@@ -103,6 +112,9 @@ private fun GraphicsSidebarPanel(
     var reshadeIndex by remember { mutableStateOf(state.reshadeEffectIndex) }
     var reshadeStrength by remember { mutableStateOf(state.reshadeStrengthPercent) }
     var perfHintOn by remember { mutableStateOf(state.perfHintEnabled) }
+    var frameGenOn by remember { mutableStateOf(state.frameGenEnabled) }
+    var frameGenQuality by remember { mutableStateOf(state.frameGenQualityIndex) }
+    var frameGenTarget by remember { mutableStateOf(state.frameGenTargetIndex) }
 
     // Same visibility rule as the original updateSharpnessVis(): shown while Super Resolution
     // is on (any upscaler mode — SGSR/SGSR HQ/FSR/NIS/Lanczos2/Color Boost all read pc.sharpness
@@ -229,12 +241,46 @@ private fun GraphicsSidebarPanel(
             }
         }
 
-        // Frame generation is not available: placeholder only, nothing to configure.
         SidebarGap()
         SidebarCard {
             SidebarSectionTitle(uiStr(R.string.ui_frame_generation))
             Spacer(Modifier.height(10.dp))
-            Text(uiStr(R.string.ui_frame_generation_unavailable))
+            if (!state.frameGenAvailable) {
+                Text(uiStr(R.string.ui_frame_generation_unavailable))
+            } else {
+                SidebarInlineToggle(
+                    label = uiStr(R.string.ui_frame_generation_enable),
+                    checked = frameGenOn,
+                    onCheckedChange = {
+                        frameGenOn = it
+                        callbacks.onFrameGenChanged(frameGenOn, frameGenQuality, frameGenTarget)
+                    }
+                )
+                if (frameGenOn) {
+                    Spacer(Modifier.height(12.dp))
+                    SidebarDropdownField(
+                        caption = uiStr(R.string.ui_frame_generation_quality),
+                        options = FRAMEGEN_QUALITY_LABELS,
+                        selectedIndex = frameGenQuality,
+                        onSelect = {
+                            frameGenQuality = it
+                            callbacks.onFrameGenChanged(frameGenOn, frameGenQuality, frameGenTarget)
+                        }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    SidebarDropdownField(
+                        caption = uiStr(R.string.ui_frame_generation_target),
+                        options = FRAMEGEN_TARGET_LABELS,
+                        selectedIndex = frameGenTarget,
+                        onSelect = {
+                            frameGenTarget = it
+                            callbacks.onFrameGenChanged(frameGenOn, frameGenQuality, frameGenTarget)
+                        }
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(uiStr(R.string.ui_frame_generation_hint))
+                }
+            }
         }
 
         // Settings on this panel are saved as they change (per shortcut, or to the container when

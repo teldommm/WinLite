@@ -13,9 +13,6 @@ import android.widget.FrameLayout;
 import androidx.annotation.NonNull;
 
 import com.winlator.cmod.R;
-import java.io.File;
-import android.widget.Toast;
-import com.winlator.cmod.ui.toast.WinToast;
 import com.winlator.cmod.renderer.GPUImage;
 import com.winlator.cmod.xserver.Atom;
 import com.winlator.cmod.xserver.Bitmask;
@@ -44,7 +41,8 @@ import dalvik.annotation.optimization.FastNative;
 
 @SuppressLint("ViewConstructor")
 public class VulkanXServerView extends XServerRendererView implements SurfaceHolder.Callback,
-        WindowManager.OnWindowModificationListener, Pointer.OnPointerMotionListener {
+        WindowManager.OnWindowModificationListener, Pointer.OnPointerMotionListener,
+        OutputFrameSource {
 
     private long nativeHandle = 0;
     private final Object lock = new Object();
@@ -77,6 +75,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private int     pendingFilterMode     = 0;
     private int     pendingPostFXMode     = 0;
     private float   pendingSharpness      = 0.5f;
+    // WFG frame generation; applied to the renderer once it exists.
+    private boolean pendingWfgEnabled     = false;
+    private int     pendingWfgFlowSide    = 180;
+    private int     pendingWfgTargetFps   = 0;
 
     private WinlatorHUD hudRef = null;
     private FrameRating classicHudRef = null;
@@ -141,6 +143,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativePresentFrame(long handle, long contentId, long sourceId,
         long ahbPtr, long guestFrameNs, long[] plan);
     private native void nativeSetFpsLimit(long handle, int fps);
+    private native void nativeSetWfg(long handle, boolean enabled, int flowSide, int targetFps);
+    @FastNative private native void nativeGetFrameCounts(long handle, long[] out);
     // ADPF. Plain natives on purpose: they take the renderer's locks or a mutex.
     private native int nativePerformanceHintLevel();
     private native void nativeSetPerformanceHint(long handle, boolean enabled);
@@ -233,6 +237,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         restoreCursorStateLocked();
                         pushDisplayRefreshRateLocked();
                         nativeSetFpsLimit(nativeHandle, fpsLimit);
+                        applyWfgLocked();
                         vsyncClock.start();
                         initComplete = true;
                         return;
@@ -253,6 +258,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     updateTransform();
                     pushDisplayRefreshRateLocked();
                     nativeSetFpsLimit(nativeHandle, fpsLimit);
+                    applyWfgLocked();
                     if (perfHint) {
                         // Threads first: the session is opened with them in one go.
                         nativeSetPerformanceHintThreads(nativeHandle,
@@ -978,8 +984,47 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     public void setFpsWindowId(int id) { fpsWindowId = id; }
     public void setFrameRating(Object fr) {
-        if (fr instanceof WinlatorHUD) hudRef = (WinlatorHUD) fr;
-        else if (fr instanceof FrameRating) classicHudRef = (FrameRating) fr;
+        if (fr instanceof WinlatorHUD) {
+            hudRef = (WinlatorHUD) fr;
+            hudRef.setOutputFrameSource(this);
+        } else if (fr instanceof FrameRating) {
+            classicHudRef = (FrameRating) fr;
+            classicHudRef.setOutputFrameSource(this);
+        }
+    }
+
+    private final long[] frameCounts = new long[3];
+
+    private long frameCount(int which) {
+        synchronized (lock) {
+            if (nativeHandle == 0) return 0;
+            nativeGetFrameCounts(nativeHandle, frameCounts);
+            return frameCounts[which];
+        }
+    }
+
+    @Override
+    public long getPresentedFrameCount() { return frameCount(0); }
+
+    @Override
+    public long getGeneratedFrameCount() { return frameCount(1); }
+
+    /** Frame generation: flowSide = analysed short side in px (180 fast / 252 balanced),
+     *  targetFps = output rate, 0 = the display's refresh rate. */
+    public void setWfg(boolean enabled, int flowSide, int targetFps) {
+        synchronized (lock) {
+            pendingWfgEnabled = enabled;
+            pendingWfgFlowSide = flowSide;
+            pendingWfgTargetFps = Math.max(0, targetFps);
+            applyWfgLocked();
+        }
+    }
+
+    public boolean isWfgEnabled() { return pendingWfgEnabled; }
+
+    private void applyWfgLocked() {
+        if (nativeHandle == 0) return;
+        nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgTargetFps);
     }
     public int getFpsLimit() {
         return fpsLimit;

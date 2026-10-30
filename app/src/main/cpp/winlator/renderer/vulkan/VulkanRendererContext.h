@@ -9,6 +9,7 @@
 #include "view_transformation.hpp"
 #include "xform.hpp"
 #include "adpf/adpf_session.h"
+#include "vkr_dis.h"
 
 struct VkTable {
     PFN_vkCreateInstance CreateInstance;
@@ -205,6 +206,32 @@ public:
     void presentFrame(int64_t contentId, int64_t sourceId, AHardwareBuffer* ahb,
                       int64_t guestFrameNs, int64_t out[4]);
     void setFpsLimit(int fps);
+
+    // --- WFG frame generation (VulkanRendererWfg.cpp) ------------------------------------------
+    // With WFG on, the scene is drawn into a composite instead of the swapchain image. Each game
+    // frame (a content update of the game window) goes to WFG, which interpolates the frames
+    // between the previous composite and this one straight into extra swapchain images; those are
+    // presented first, then the composite is copied into the real image and presented. FIFO paces
+    // the output, so the game's frame is shown (generated frames) later than without WFG.
+    // It works with the machinery above, not beside it:
+    //  * the limiter's display slot is the slot of the first image of the batch, and the distance
+    //    to the next frame's slot (3,3,2 for 45 on 120 Hz) is the number of images the batch holds;
+    //  * the FIFO queue model counts every image presented (presentSlotEndNs_), gates the next
+    //    frame on it and trims the generated frames when the queue has grown;
+    //  * a render that carries no new game frame (cursor motion, a transform change) rides along
+    //    with the next game frame while the game is drawing, instead of queueing one more image;
+    //  * the ADPF cycle is the batch interval, and the hint session is told when the load changes.
+    // flowSide: pixels on the shorter side of the frame the motion is analysed at; targetFps: the
+    // output rate to reach (0: the display's refresh rate, which is also the ceiling).
+    void setWfgEnabled(bool enabled);
+    void setWfgConfig(int flowSide, int targetFps);
+    // 0 off, 1 running, 2 asked for but unavailable on this device.
+    int getWfgState() const {
+        if (!wfgRequested_.load(std::memory_order_relaxed)) return 0;
+        return wfgUnavailable_.load(std::memory_order_relaxed) ? 2 : 1;
+    }
+    uint64_t getWfgGeneratedFrames() const { return wfgMadeFrames_.load(std::memory_order_relaxed); }
+    uint64_t getPresentedFrames() const { return presentedFrames_.load(std::memory_order_relaxed); }
 
     // --- ADPF (Android Performance Hint), opt-in ----------------------------------------------
     // One hint session over the render thread and the companion threads Java registers (the X
@@ -464,8 +491,13 @@ public:
     int64_t pacingWaitNs(bool content) const;
     void    notePresentedForPacing(uint32_t presents);
     // How long before a refresh's queue deadline a composite is started (GPU work + submit).
-    static int64_t queueLeadNs(int64_t periodNs) {
-        return std::clamp<int64_t>(periodNs * 2 / 5, 3000000LL, 8000000LL);
+    // With WFG the composite also carries the flow and interpolation compute, which has to be done
+    // before the queue deadline too.
+    int64_t queueLeadNs(int64_t periodNs) const {
+        int64_t lead = std::clamp<int64_t>(periodNs * 2 / 5, 3000000LL, 8000000LL);
+        if (wfgActive_.load(std::memory_order_relaxed))
+            lead += std::clamp<int64_t>(periodNs / 4, 1000000LL, 3000000LL);
+        return lead;
     }
     // The Choreographer clock has ticked recently (a stopped clock is not a grid to pace on).
     bool vsyncClockFresh(int64_t nowNs) const {
@@ -504,7 +536,9 @@ public:
     std::atomic<int64_t> vsyncDeadlineNs_{0};   // a recent point of the queue-deadline grid
     std::atomic<int64_t> vsyncSeenNs_{0};       // when the clock last ticked
 
-    struct PendingPresent { int64_t srcId; int64_t dueNs; int64_t slotNs; };
+    // outputs: with WFG, how many display refreshes the batch of this frame spans (the distance to
+    // the next frame's slot); 0 when the cadence is not known (no slot grid, or a late frame).
+    struct PendingPresent { int64_t srcId; int64_t dueNs; int64_t slotNs; int outputs = 0; };
     std::unordered_map<int64_t, std::deque<PendingPresent>> pendingPresents_;  // by content
     std::atomic<int64_t> nextPendingDueNs_{0};  // earliest dueNs, 0 = none
     // Limiter/pacing state of one presenting window (content). Two windows presenting at the
@@ -523,7 +557,7 @@ public:
     };
     std::unordered_map<int64_t, Pacer> pacers_;   // by content, under renderMutex
     bool    acquireSourceLocked(int64_t srcId, AHardwareBuffer* ahb);
-    void    showSourceLocked(int64_t contentId, int64_t srcId);
+    void    showSourceLocked(int64_t contentId, int64_t srcId, int outputs = 0);
     void    dropPendingLocked(int64_t contentId);
     void    applyDuePresentsLocked(int64_t nowNs);
     void    updateNextPendingDueLocked();
@@ -547,6 +581,72 @@ public:
     void     endSourceIdleWait(uint64_t serial, uint64_t timeoutNs);
     std::atomic<int> idleWaiters_{0};
     void releaseIdleWaiters();
+
+    // --- WFG state (VulkanRendererWfg.cpp) ---------------------------------------------------
+    struct WfgFrame {
+        bool     active   = false;   // the scene goes to the composite this frame
+        bool     newFrame = false;   // the composite is a new game frame for WFG
+        uint32_t genCount = 0;
+        uint32_t genIdx[VKR_DIS_MAX_GENERATIONS] = {};
+        int64_t  acquireWaitNs = 0;  // blocked on the generated images' acquires
+    };
+    std::atomic<bool>     wfgRequested_{false};
+    std::atomic<uint32_t> wfgFlowSide_{180};
+    std::atomic<uint32_t> wfgTargetFps_{0};
+    std::atomic<bool>     wfgUnavailable_{false};
+    std::atomic<bool>     wfgActive_{false};        // the last frame went through WFG
+    std::atomic<uint32_t> wfgOutputs_{0};           // images per game frame while generating, else 0
+    std::atomic<uint64_t> wfgMadeFrames_{0};
+    std::atomic<uint64_t> presentedFrames_{0};      // real and generated frames shown
+    // The game window: the largest window whose content changed lately. Updates of other windows
+    // (launchers, tooltips, the desktop) are not game frames for WFG.
+    struct ContentRate { int64_t area = 0; int64_t lastNs = 0; };
+    std::unordered_map<int64_t, ContentRate> contentRates_;   // under renderMutex
+    std::atomic<uint64_t> gameFrames_{0};           // the game window's content updates
+    std::atomic<int64_t>  lastGameFrameNs_{0};
+    std::atomic<int32_t>  wfgSlotOutputs_{0};       // the limiter's batch length for the newest game frame
+    // A render without a new game frame was left to the next game frame; if none comes by then it
+    // is done anyway (the render loop wakes for it). 0 = none.
+    std::atomic<int64_t>  wfgRetryAtNs_{0};
+    void     noteContentUpdateLocked(int64_t contentId, int w, int h, int outputs);   // renderMutex held
+    bool     wfgShouldSkipRender();
+    void     wfgNotePresented(uint32_t presents, int64_t acquireWaitNs);
+    bool     wfgSync();
+    void     wfgCreateSems();
+    void     wfgDestroySems();
+    bool     wfgEnsureComposite();
+    void     wfgDestroyComposite();
+    void     wfgDestroy();
+    bool     waitImageFence(uint32_t imgIdx, uint64_t timeoutNs);
+    VkrDisContentRect wfgContentRect(const std::vector<DrawEntry>& draws,
+                                     float ox, float oy, float sx, float sy, float cw, float ch) const;
+    WfgFrame wfgBeginFrame(const std::vector<DrawEntry>& draws,
+                           float ox, float oy, float sx, float sy, float cw, float ch);
+    void     wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFrame& wf);
+    VkrDis*          wfg_             = nullptr;     // render thread
+    bool             wfgSwapchain_    = false;       // the swapchain was built for generation
+    bool             swapchainTransferDst_ = false;
+    uint32_t         swapchainMinImages_ = 0;
+    uint64_t         wfgSeenFrames_   = 0;
+    uint64_t         wfgRealFrames_   = 0;
+    uint64_t         wfgLogReal_      = 0;
+    uint64_t         wfgLogMade_      = 0;
+    uint64_t         wfgAcquireMisses_ = 0;
+    uint64_t         wfgSkippedRenders_ = 0;
+    uint64_t         wfgTrimmedFrames_ = 0;
+    uint64_t         wfgAheadSum_     = 0;
+    VkRenderPass     wfgPass_         = VK_NULL_HANDLE;
+    VkImage          wfgComposite_    = VK_NULL_HANDLE;
+    VkDeviceMemory   wfgCompositeMem_ = VK_NULL_HANDLE;
+    VkImageView      wfgCompositeView_ = VK_NULL_HANDLE;
+    VkFramebuffer    wfgCompositeFB_  = VK_NULL_HANDLE;
+    VkExtent2D       wfgCompositeExt_ = {0, 0};
+    VkSemaphore      wfgGenSems_[MAX_FRAMES_IN_FLIGHT][VKR_DIS_MAX_GENERATIONS] = {};
+    // recordCmdBuf targets the swapchain image unless these name another pass/framebuffer;
+    // recordLeaveOpen keeps the command buffer open for the WFG passes.
+    VkRenderPass     recordPass_      = VK_NULL_HANDLE;
+    VkFramebuffer    recordFB_        = VK_NULL_HANDLE;
+    bool             recordLeaveOpen_ = false;
 
     std::thread       renderThread;
     std::atomic<bool> isRunning{false};

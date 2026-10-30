@@ -55,6 +55,10 @@ int64_t VulkanRendererContext::adpfCycleNs() const {
     if (cycle <= 0) cycle = 16666667;   // refresh rate not known yet: 60 Hz
     const int fps = fpsLimit_.load(std::memory_order_relaxed);
     if (fps > 0) cycle = std::max<int64_t>(cycle, 1000000000LL / fps);
+    // With WFG one render serves a whole batch of images, one refresh each.
+    const uint32_t outputs = wfgOutputs_.load(std::memory_order_relaxed);
+    if (outputs > 1)
+        cycle = std::max<int64_t>(cycle, (int64_t)outputs * refreshPeriodNs_.load(std::memory_order_relaxed));
     return std::clamp<int64_t>(cycle, 2000000, 200000000);
 }
 

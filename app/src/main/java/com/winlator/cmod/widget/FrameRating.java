@@ -28,6 +28,15 @@ public class FrameRating extends FrameLayout implements Runnable {
     private long lastTime = 0;
     private int frameCount = 0;
     private float lastFPS = 0;
+    private float outputFPS = 0;
+    private volatile OutputFrameSource outputSource;
+    private long lastPresented = -1, lastGenerated = -1;
+
+    public void setOutputFrameSource(OutputFrameSource source) {
+        outputSource = source;
+        lastPresented = -1;
+        lastGenerated = -1;
+    }
     private String totalRAM = null;
     private final TextView tvFPS;
     private final TextView tvRenderer;
@@ -223,6 +232,16 @@ public class FrameRating extends FrameLayout implements Runnable {
         long time = SystemClock.elapsedRealtime();
         if (time >= lastTime + 500) {
             lastFPS = ((float)(frameCount * 1000) / (time - lastTime));
+            outputFPS = 0;
+            OutputFrameSource source = outputSource;
+            if (source != null) {
+                long presented = source.getPresentedFrameCount();
+                long generated = source.getGeneratedFrameCount();
+                if (lastPresented >= 0 && generated > lastGenerated && presented >= lastPresented)
+                    outputFPS = (float)((presented - lastPresented) * 1000) / (time - lastTime);
+                lastPresented = presented;
+                lastGenerated = generated;
+            }
             post(this);
             lastTime = time;
             frameCount = 0;
@@ -234,7 +253,9 @@ public class FrameRating extends FrameLayout implements Runnable {
     public void run() {
         if (!userEnabled) return;
         if (getVisibility() == GONE) setVisibility(View.VISIBLE);
-        tvFPS.setText(String.format(Locale.ENGLISH, "%.1f", lastFPS));
+        tvFPS.setText(outputFPS > 0
+                ? String.format(Locale.ENGLISH, "%.1f → %.0f", lastFPS, outputFPS)
+                : String.format(Locale.ENGLISH, "%.1f", lastFPS));
         tvRAM.setText(getAvailableRAM() + " GB Used / " + totalRAM + " Total");
     }
 }

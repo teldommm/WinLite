@@ -99,6 +99,21 @@ vulkan_shader(window_fsr1.frag    window_fsr1_frag    USES_POSTFX)
 vulkan_shader(window_lanczos.frag window_lanczos_frag USES_POSTFX)
 vulkan_shader(window_postfx.frag  window_postfx_frag  USES_POSTFX)
 
+# WFG frame generation (wfg/): compute shaders built to SPIR-V headers with the NDK's glslc when it
+# is there, else glslangValidator, as above. Linked into vulkan_renderer.
+if(CMAKE_HOST_WIN32)
+    set(GLSLC_HOST_TAG "windows-x86_64")
+    set(GLSLC_EXE_NAME "glslc.exe")
+elseif(CMAKE_HOST_APPLE)
+    set(GLSLC_HOST_TAG "darwin-x86_64")
+    set(GLSLC_EXE_NAME "glslc")
+else()
+    set(GLSLC_HOST_TAG "linux-x86_64")
+    set(GLSLC_EXE_NAME "glslc")
+endif()
+set(GLSLC "${ANDROID_NDK}/shader-tools/${GLSLC_HOST_TAG}/${GLSLC_EXE_NAME}")
+add_subdirectory(wfg)
+
 include_directories(
         ${CMAKE_CURRENT_BINARY_DIR}
         ${VULKAN_RENDERER_DIR}
@@ -111,6 +126,7 @@ add_library(vulkan_renderer SHARED
         winlator/renderer/vulkan/adpf/adpf_session.cpp
         winlator/renderer/vulkan/VulkanRendererFilters.cpp
         winlator/renderer/vulkan/VulkanRendererPipelineOpt.cpp
+        winlator/renderer/vulkan/VulkanRendererWfg.cpp
 
         winlator/renderer/vulkan/view_transformation.cpp
         winlator/renderer/vulkan/xform.cpp
@@ -135,4 +151,5 @@ target_link_libraries(vulkan_renderer
         adrenotools
         dl
         atomic
+        wfg
 )

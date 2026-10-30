@@ -512,6 +512,10 @@
     <string name="ui_strength">Strength</string>
     <string name="ui_frame_generation">Frame Generation</string>
     <string name="ui_frame_generation_unavailable">Unavailable</string>
+    <string name="ui_frame_generation_enable">Generate frames (WFG)</string>
+    <string name="ui_frame_generation_quality">Quality</string>
+    <string name="ui_frame_generation_target">Output FPS</string>
+    <string name="ui_frame_generation_hint">Set the game FPS limit to a divisor of the output rate (e.g. 30 or 40 for 120): the display mode follows the limit.</string>
     <string name="ui_fps_limit">FPS Limit</string>
     <string name="ui_max_fps">Max FPS</string>
     <string name="ui_enable_hud">Enable HUD</string>
