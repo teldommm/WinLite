@@ -193,6 +193,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
         onSurfaceCreated(holder.getSurface());
+        applySurfaceFrameRate();
     }
 
     @Override
@@ -1028,6 +1029,33 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
     public int getFpsLimit() {
         return fpsLimit;
+    }
+
+    // Refresh rate the surface asks SurfaceFlinger for (0 = no request). preferredDisplayModeId
+    // alone is only a "base mode" vote that vendor ROMs (and Android 15+, which ignores the
+    // preferred refresh rate of apps) are free to override; the frame rate of the surface is
+    // what SurfaceFlinger actually picks the panel mode from.
+    private volatile float surfaceFrameRateHz = 0f;
+
+    public void setSurfaceFrameRate(float hz) {
+        surfaceFrameRateHz = Math.max(0f, hz);
+        post(this::applySurfaceFrameRate);
+    }
+
+    private void applySurfaceFrameRate() {
+        Surface surface = getHolder().getSurface();
+        if (surface == null || !surface.isValid()) return;
+        final float hz = surfaceFrameRateHz;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                surface.setFrameRate(hz, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                        Surface.CHANGE_FRAME_RATE_ALWAYS);
+            } else if (android.os.Build.VERSION.SDK_INT >= 30) {
+                surface.setFrameRate(hz, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+            }
+        } catch (RuntimeException ignored) {
+            // A surface released between the check and the call.
+        }
     }
     public void setFpsLimit(int limit) {
         this.fpsLimit = Math.max(0, Math.min(1000, limit));

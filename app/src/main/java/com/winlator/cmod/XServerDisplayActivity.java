@@ -3082,6 +3082,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         android.view.Display.Mode cadence;
         if (wfgOn) cadence = pickWfgMode(display, limit, wfgTargetHz);
         else cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh, baseRefreshHz) : null;
+        if (xServerView instanceof VulkanXServerView)
+            ((VulkanXServerView) xServerView).setSurfaceFrameRate(cadence != null ? cadence.getRefreshRate() : 0f);
         if (cadence != null) {
             // Every limited frame then stays on screen for the same number of refreshes.
             if (params.preferredDisplayModeId != cadence.getModeId() || params.preferredRefreshRate != 0f) {
