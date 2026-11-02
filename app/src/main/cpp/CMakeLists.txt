@@ -89,6 +89,19 @@ function(vulkan_shader SOURCE BASE)
     set(VULKAN_SHADER_HEADERS ${VULKAN_SHADER_HEADERS} ${_out} PARENT_SCOPE)
 endfunction()
 
+# WFG's compute shaders (wfg/CMakeLists.txt): glslc from the NDK's shader-tools or PATH, else
+# glslangValidator, the same tool the window shaders above use.
+set(GLSLC "${ANDROID_NDK}/shader-tools/${ANDROID_HOST_TAG}/glslc")
+if(NOT EXISTS "${GLSLC}")
+    unset(GLSLC)
+    find_program(GLSLC glslc)
+endif()
+find_program(GLSLANG_VALIDATOR glslangValidator)
+if(NOT GLSLC AND NOT GLSLANG_VALIDATOR)
+    message(FATAL_ERROR "WFG shaders need glslc (NDK shader-tools) or glslangValidator")
+endif()
+add_subdirectory(wfg)
+
 vulkan_shader(window.vert         window_vert)
 vulkan_shader(window.frag         window_frag)
 vulkan_shader(window_stretch.frag window_stretch_frag)
@@ -109,6 +122,7 @@ add_library(vulkan_renderer SHARED
         winlator/renderer/vulkan/VulkanRendererContext.cpp
         winlator/renderer/vulkan/VulkanRendererFilters.cpp
         winlator/renderer/vulkan/VulkanRendererPipelineOpt.cpp
+        winlator/renderer/vulkan/VulkanRendererWfg.cpp
 
         winlator/renderer/vulkan/view_transformation.cpp
         winlator/renderer/vulkan/xform.cpp
@@ -133,4 +147,5 @@ target_link_libraries(vulkan_renderer
         adrenotools
         dl
         atomic
+        wfg
 )

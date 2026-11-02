@@ -6,6 +6,7 @@
 
 #include "view_transformation.hpp"
 #include "xform.hpp"
+#include "vkr_dis.h"
 
 struct VkTable {
 
@@ -207,6 +208,13 @@ public:
     std::vector<int> getSupportedPresentModes() const;
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
+    // WFG frame generation (VulkanRendererWfg.cpp). flowSide: pixels on the shorter side of
+    // the frame the motion is analysed at; targetFps 0 follows the display refresh rate.
+    void setWfgEnabled(bool enabled);
+    void setWfgConfig(int flowSide, int targetFps, float refreshHz);
+    uint64_t getWfgGeneratedFrames() const { return wfgMadeFrames.load(std::memory_order_relaxed); }
+    uint64_t getPresentedFrames() const { return presentedFrames.load(std::memory_order_relaxed); }
+
     void setCustomScissor(int x, int y, int w, int h);
     void clearCustomScissor();
     inline void setTransformAndScissor(float ox, float oy, float sx, float sy,
@@ -387,6 +395,9 @@ public:
     std::thread       renderThread;
     std::atomic<bool> isRunning{false};
     std::atomic<bool> fbResized{false};
+    // The last swapchain rebuild in renderFrame failed: renderLoop retries after a pause
+    // instead of spinning on a swapchain that is gone. Render thread only.
+    bool              swapchainRebuildFailed = false;
     std::mutex        renderMutex;
     std::mutex        dirtyMutex;
     std::condition_variable dirtyCV;
@@ -407,6 +418,63 @@ public:
 
     VkRect2D          customScissor    = {{0,0},{0,0}};
     bool              hasCustomScissor = false;
+
+    // WFG: the scene goes to a composite, WFG interpolates frames between the previous and this
+    // composite straight into extra swapchain images, which are presented before the real one.
+    struct WfgFrame {
+        bool     active   = false;   // the scene goes to the composite this frame
+        bool     newFrame = false;   // the composite is a new game frame for WFG
+        uint32_t genCount = 0;
+        uint32_t genIdx[VKR_DIS_MAX_GENERATIONS] = {};
+    };
+    std::atomic<bool>     wfgRequested{false};
+    std::atomic<uint32_t> wfgFlowSide{180};
+    std::atomic<uint32_t> wfgTargetFps{0};
+    std::atomic<uint32_t> wfgRefreshMhz{0};
+    std::atomic<uint64_t> contentFrames{0};       // the game window's content updates
+    std::atomic<uint64_t> wfgMadeFrames{0};
+    std::atomic<uint64_t> presentedFrames{0};     // real and generated frames shown
+    // The game window: the largest window whose content changed lately. Updates of other
+    // windows (launchers, tooltips, the desktop) are not game frames for WFG's pacing.
+    struct ContentRate { int64_t area = 0; uint64_t lastNs = 0; };
+    std::unordered_map<int64_t, ContentRate> contentRates;   // under renderMutex
+    void noteContentUpdate(int64_t id, int w, int h);
+    std::atomic<uint64_t> lastGameFrameNs{0};
+    // While the game drives the frames, a render without a new game frame is not presented:
+    // its extra image would only grow the FIFO queue in front of the display (latency).
+    std::atomic<bool>     wfgDeferredRender{false};
+    uint64_t              wfgSkippedRenders = 0;
+    // Model of the FIFO queue: when the last presented image reaches the display. Generated
+    // frames are dropped while more than one image would wait ahead of this pair's own.
+    uint64_t              wfgQueueEndNs = 0;
+    uint64_t              wfgTrimmedFrames = 0;
+    uint64_t              wfgAheadSum = 0;
+    bool     wfgSkipRender();
+    uint64_t wfgPeriodNs() const;
+    void     wfgNotePresented(uint32_t count, uint64_t acquireWaitNs);
+    VkrDis*          wfg              = nullptr;
+    bool             wfgUnavailable   = false;
+    bool             wfgSwapchain     = false;    // the swapchain was built for generation
+    bool             swapchainTransferDst = false;
+    uint32_t         swapchainMinImages = 0;
+    uint64_t         wfgSeenFrames    = 0;
+    uint64_t         wfgRealFrames    = 0;
+    uint64_t         wfgLogReal       = 0;
+    uint64_t         wfgLogMade       = 0;
+    uint64_t         wfgAcquireMisses = 0;
+    VkRenderPass     wfgPass          = VK_NULL_HANDLE;
+    VkImage          wfgComposite     = VK_NULL_HANDLE;
+    VkDeviceMemory   wfgCompositeMem  = VK_NULL_HANDLE;
+    VkImageView      wfgCompositeView = VK_NULL_HANDLE;
+    VkFramebuffer    wfgCompositeFB   = VK_NULL_HANDLE;
+    VkExtent2D       wfgCompositeExt  = {0, 0};
+    VkSemaphore      wfgGenSems[MAX_FRAMES_IN_FLIGHT][VKR_DIS_MAX_GENERATIONS] = {};
+
+    // recordCmdBuf targets the swapchain image unless these name another pass/framebuffer;
+    // recordLeaveOpen keeps the command buffer open for the WFG passes.
+    VkRenderPass     recordPass       = VK_NULL_HANDLE;
+    VkFramebuffer    recordFB         = VK_NULL_HANDLE;
+    bool             recordLeaveOpen  = false;
 
     void getPreRotationCosSin(float& cosR, float& sinR) const {
         switch (surfaceTransform) {
@@ -487,6 +555,18 @@ public:
         VkRect2D scissorRect);
     void renderLoop();
     void renderFrame();
+
+    bool     wfgSync();
+    void     wfgCreateSems();
+    void     wfgDestroySems();
+    bool     wfgEnsureComposite();
+    void     wfgDestroyComposite();
+    void     wfgDestroy();
+    VkrDisContentRect wfgContentRect(const std::vector<DrawEntry>& draws,
+                                     float ox, float oy, float sx, float sy, float cw, float ch) const;
+    WfgFrame wfgBeginFrame(const std::vector<DrawEntry>& draws,
+                           float ox, float oy, float sx, float sy, float cw, float ch);
+    void     wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFrame& wf);
 
     uint32_t        findMemType(uint32_t filter, VkMemoryPropertyFlags props);
     void            createBuffer(VkDeviceSize sz, VkBufferUsageFlags usage,

@@ -45,7 +45,8 @@ import dalvik.annotation.optimization.FastNative;
 
 @SuppressLint("ViewConstructor")
 public class VulkanXServerView extends XServerRendererView implements SurfaceHolder.Callback,
-        WindowManager.OnWindowModificationListener, Pointer.OnPointerMotionListener {
+        WindowManager.OnWindowModificationListener, Pointer.OnPointerMotionListener,
+        OutputFrameSource {
 
     private long nativeHandle = 0;
     private final Object lock = new Object();
@@ -75,6 +76,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private int     pendingFilterMode     = 0;
     private int     pendingPostFXMode     = 0;
     private float   pendingSharpness      = 0.5f;
+    private boolean pendingWfgEnabled     = false;
+    private int     pendingWfgFlowSide    = 180;
+    private int     pendingWfgTargetFps   = 0;
+    private int     savedDisplayModeId    = -1;   // the window's mode before WFG raised it
+    private android.hardware.display.DisplayManager.DisplayListener displayListener;
 
     private WinlatorHUD hudRef = null;
     private FrameRating classicHudRef = null;
@@ -141,6 +147,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeReleaseBuffer(long handle, long ahbPtr);
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
+    private native void nativeSetWfg(long handle, boolean enabled, int flowSide, int targetFps,
+                                     float refreshHz);
+    private native void nativeGetFrameCounts(long handle, long[] out);
 
     private native void nativeDumpRendererInfo(long handle);
     private native void nativeSetFilterMode(long handle, int mode);
@@ -170,6 +179,34 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
         onSurfaceCreated(holder.getSurface());
+        if (pendingWfgEnabled) requestWfgRefreshRate(true);
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
+                getContext().getSystemService(Context.DISPLAY_SERVICE);
+        if (dm != null && displayListener == null) {
+            // WFG paces its generated frames to the panel's rate, which changes with the mode.
+            displayListener = new android.hardware.display.DisplayManager.DisplayListener() {
+                @Override public void onDisplayAdded(int displayId) {}
+                @Override public void onDisplayRemoved(int displayId) {}
+                @Override public void onDisplayChanged(int displayId) {
+                    synchronized (lock) { applyWfg(); }
+                }
+            };
+            dm.registerDisplayListener(displayListener, getHandler());
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
+                getContext().getSystemService(Context.DISPLAY_SERVICE);
+        if (dm != null && displayListener != null) dm.unregisterDisplayListener(displayListener);
+        displayListener = null;
+        super.onDetachedFromWindow();
     }
 
     @Override
@@ -207,6 +244,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetStretchMode(nativeHandle, pendingStretchMode);
                         nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                         nativeSetSharpness(nativeHandle, pendingSharpness);
+                        applyWfg();
                         updateTransform();
                         // Not nativeSetCursorVisible(cursorVisible): that ignores an X cursor the
                         // game made invisible (empty mask), and lastCursor is unchanged after the
@@ -228,6 +266,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetStretchMode(nativeHandle, pendingStretchMode);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
+                    applyWfg();
                     updateTransform();
                     nativeSetCursorVisible(nativeHandle, false);
 
@@ -755,6 +794,92 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         synchronized (lock) { if (nativeHandle != 0) nativeSetSharpness(nativeHandle, s); }
     }
 
+    /**
+     * WFG (WinNative/Winlator Frame Generator) frame interpolation.
+     * @param flowSide  pixels on the shorter side of the frame the motion is analysed at
+     * @param targetFps output rate to reach; 0 follows the display refresh rate
+     */
+    public void setWfg(boolean enabled, int flowSide, int targetFps) {
+        pendingWfgEnabled = enabled;
+        pendingWfgFlowSide = flowSide;
+        pendingWfgTargetFps = targetFps;
+        requestWfgRefreshRate(enabled);
+        synchronized (lock) { applyWfg(); }
+    }
+
+    /**
+     * Generated frames need display refresh slots above the game's rate: with WFG on, ask for the
+     * panel's fastest mode (the window otherwise stays at the system's default, often 60 Hz).
+     */
+    private void requestWfgRefreshRate(boolean on) {
+        post(() -> {
+            if (!(getContext() instanceof android.app.Activity)) return;
+            android.view.Window window = ((android.app.Activity) getContext()).getWindow();
+            android.view.Display display = getDisplay();
+            if (window == null || display == null) return;
+            android.view.WindowManager.LayoutParams lp = window.getAttributes();
+            Surface surface = getHolder().getSurface();
+            if (on) {
+                android.view.Display.Mode current = display.getMode();
+                android.view.Display.Mode best = current;
+                for (android.view.Display.Mode m : display.getSupportedModes()) {
+                    if (m.getPhysicalWidth() == current.getPhysicalWidth()
+                            && m.getPhysicalHeight() == current.getPhysicalHeight()
+                            && m.getRefreshRate() > best.getRefreshRate()) best = m;
+                }
+                if (savedDisplayModeId < 0) savedDisplayModeId = lp.preferredDisplayModeId;
+                lp.preferredDisplayModeId = best.getModeId();
+                window.setAttributes(lp);
+                setSurfaceFrameRate(surface, best.getRefreshRate());
+            } else if (savedDisplayModeId >= 0) {
+                lp.preferredDisplayModeId = savedDisplayModeId;
+                savedDisplayModeId = -1;
+                window.setAttributes(lp);
+                setSurfaceFrameRate(surface, 0f);
+            }
+        });
+    }
+
+    private static void setSurfaceFrameRate(Surface surface, float hz) {
+        if (surface == null || !surface.isValid()) return;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                surface.setFrameRate(hz, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                        Surface.CHANGE_FRAME_RATE_ALWAYS);
+            } else if (android.os.Build.VERSION.SDK_INT >= 30) {
+                surface.setFrameRate(hz, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+            }
+        } catch (RuntimeException ignored) {
+            // A surface released between the check and the call.
+        }
+    }
+
+    public boolean isWfgEnabled() { return pendingWfgEnabled; }
+
+    private final long[] frameCounts = new long[2];
+
+    private long frameCount(int which) {
+        synchronized (lock) {
+            if (nativeHandle == 0) return 0;
+            nativeGetFrameCounts(nativeHandle, frameCounts);
+            return frameCounts[which];
+        }
+    }
+
+    @Override
+    public long getPresentedFrameCount() { return frameCount(0); }
+
+    @Override
+    public long getGeneratedFrameCount() { return frameCount(1); }
+
+    private void applyWfg() {
+        if (nativeHandle == 0) return;
+        float refreshHz = 60f;
+        android.view.Display display = getDisplay();
+        if (display != null && display.getRefreshRate() > 1f) refreshHz = display.getRefreshRate();
+        nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgTargetFps, refreshHz);
+    }
+
     public void setFilterMode(int mode) {
         pendingFilterMode = mode;
         synchronized (lock) { if (nativeHandle != 0) nativeSetFilterMode(nativeHandle, mode); }
@@ -797,8 +922,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     public void setFpsWindowId(int id) { fpsWindowId = id; }
     public void setFrameRating(Object fr) {
-        if (fr instanceof WinlatorHUD) hudRef = (WinlatorHUD) fr;
-        else if (fr instanceof FrameRating) classicHudRef = (FrameRating) fr;
+        if (fr instanceof WinlatorHUD) {
+            hudRef = (WinlatorHUD) fr;
+            hudRef.setOutputFrameSource(this);
+        } else if (fr instanceof FrameRating) {
+            classicHudRef = (FrameRating) fr;
+            classicHudRef.setOutputFrameSource(this);
+        }
     }
     public int getFpsLimit() {
         return fpsLimit;

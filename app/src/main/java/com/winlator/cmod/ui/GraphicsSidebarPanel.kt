@@ -36,7 +36,10 @@ data class GraphicsPanelState(
     val sharpnessPercent: Int,
     val postFxModeIndex: Int,
     val reshadeEffectIndex: Int,
-    val reshadeStrengthPercent: Int
+    val reshadeStrengthPercent: Int,
+    val wfgEnabled: Boolean,
+    val wfgQualityIndex: Int,
+    val wfgTargetIndex: Int
 )
 
 interface GraphicsPanelCallbacks {
@@ -48,6 +51,7 @@ interface GraphicsPanelCallbacks {
     fun onPostFxModeChanged(index: Int)
     fun onReshadeEffectChanged(index: Int)
     fun onReshadeStrengthChanged(percent: Int)
+    fun onWfgChanged(enabled: Boolean, qualityIndex: Int, targetIndex: Int)
 }
 
 object GraphicsSidebarPanelHost {
@@ -77,6 +81,11 @@ private val RESHADE_EFFECTS = listOf(
     "Vibrance", "Curves", "CAS Lite", "Technicolor", "Levels"
 )
 
+// WFG frame generation. Positions match XServerDisplayActivity's WFG_FLOW_SIDES / WFG_TARGET_FPS
+// (saved as indices, never reorder): quality = pixels analysed on the frame's shorter side.
+private val WFG_QUALITY_LABELS = listOf("Fast", "Balanced")
+private val WFG_TARGET_LABELS = listOf("Max refresh", "60 FPS", "90 FPS", "120 FPS", "144 FPS")
+
 // FPS Limit slider: position 0 = Off, positions 1..24 = 5..120 FPS in 5 FPS steps, position 25
 // ("Custom") shows a numeric field for any other value (e.g. 40, 72, 144). 0 is what
 // VulkanXServerView / PresentExtension treat as "no limit".
@@ -98,6 +107,9 @@ private fun GraphicsSidebarPanel(
     var postFxIndex by remember { mutableStateOf(state.postFxModeIndex) }
     var reshadeIndex by remember { mutableStateOf(state.reshadeEffectIndex) }
     var reshadeStrength by remember { mutableStateOf(state.reshadeStrengthPercent) }
+    var wfgEnabled by remember { mutableStateOf(state.wfgEnabled) }
+    var wfgQualityIndex by remember { mutableStateOf(state.wfgQualityIndex) }
+    var wfgTargetIndex by remember { mutableStateOf(state.wfgTargetIndex) }
 
     // Same visibility rule as the original updateSharpnessVis(): shown while Super Resolution
     // is on (any upscaler mode — SGSR/SGSR HQ/FSR/NIS/Lanczos2/Color Boost all read pc.sharpness
@@ -218,12 +230,40 @@ private fun GraphicsSidebarPanel(
             }
         }
 
-        // Frame generation is not available: placeholder only, nothing to configure.
         SidebarGap()
         SidebarCard {
             SidebarSectionTitle(uiStr(R.string.ui_frame_generation))
             Spacer(Modifier.height(10.dp))
-            Text(uiStr(R.string.ui_frame_generation_unavailable))
+            SidebarInlineToggle(
+                label = uiStr(R.string.ui_wfg_frame_generator),
+                checked = wfgEnabled,
+                onCheckedChange = {
+                    wfgEnabled = it
+                    callbacks.onWfgChanged(wfgEnabled, wfgQualityIndex, wfgTargetIndex)
+                }
+            )
+            if (wfgEnabled) {
+                Spacer(Modifier.height(8.dp))
+                SidebarDropdownField(
+                    caption = uiStr(R.string.ui_wfg_motion_quality),
+                    options = WFG_QUALITY_LABELS,
+                    selectedIndex = wfgQualityIndex.coerceIn(0, WFG_QUALITY_LABELS.lastIndex),
+                    onSelect = {
+                        wfgQualityIndex = it
+                        callbacks.onWfgChanged(wfgEnabled, wfgQualityIndex, wfgTargetIndex)
+                    }
+                )
+                Spacer(Modifier.height(12.dp))
+                SidebarDropdownField(
+                    caption = uiStr(R.string.ui_wfg_target_fps),
+                    options = WFG_TARGET_LABELS,
+                    selectedIndex = wfgTargetIndex.coerceIn(0, WFG_TARGET_LABELS.lastIndex),
+                    onSelect = {
+                        wfgTargetIndex = it
+                        callbacks.onWfgChanged(wfgEnabled, wfgQualityIndex, wfgTargetIndex)
+                    }
+                )
+            }
         }
 
         // Settings on this panel are saved as they change (per shortcut, or to the container when

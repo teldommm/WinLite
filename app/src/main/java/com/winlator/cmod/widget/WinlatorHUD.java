@@ -176,6 +176,10 @@ public class WinlatorHUD extends View {
 
     private final AtomicInteger frameAccum = new AtomicInteger(0);
     private long lastFpsNs = 0;
+    // While WFG generates frames the FPS reads "game → output", as in WinNative.
+    private static final String FPS_ARROW = " → ";
+    private volatile OutputFrameSource outputSource;
+    private long lastPresented = -1, lastGenerated = -1;
     private float snapFps = 0;
 
     private int snapGpu = -1, snapCpu = -1, snapCpuTemp = -1;
@@ -863,6 +867,17 @@ public class WinlatorHUD extends View {
         lastFpsNs = now;
 
         String value = String.format(Locale.US, "%.0f", snapFps);
+        OutputFrameSource source = outputSource;
+        if (source != null) {
+            long presented = source.getPresentedFrameCount();
+            long generated = source.getGeneratedFrameCount();
+            if (lastPresented >= 0 && generated > lastGenerated && presented >= lastPresented) {
+                value += FPS_ARROW + String.format(Locale.US, "%.0f",
+                        (presented - lastPresented) * 1_000_000_000f / dt);
+            }
+            lastPresented = presented;
+            lastGenerated = generated;
+        }
         if (!value.equals(strFps)) {
             strFps = value;
             wDynFps = pVal.measureText(strFps);
@@ -981,8 +996,30 @@ public class WinlatorHUD extends View {
             if (hasGroup) x += drawSep(canvas, x, baseline);
             canvas.drawText("FPS ", x, baseline, pFps);
             x += wLabelFps;
-            canvas.drawText(strFps, x, baseline, pVal);
+            drawFpsValue(canvas, x, baseline);
         }
+    }
+
+    public void setOutputFrameSource(OutputFrameSource source) {
+        outputSource = source;
+        lastPresented = -1;
+        lastGenerated = -1;
+    }
+
+    /** The game's fps, then the output fps in the FPS colour while WFG generates frames. */
+    private void drawFpsValue(Canvas canvas, float x, float baseline) {
+        String value = strFps;
+        int arrow = value.indexOf(FPS_ARROW);
+        if (arrow < 0) {
+            canvas.drawText(value, x, baseline, pVal);
+            return;
+        }
+        String game = value.substring(0, arrow);
+        canvas.drawText(game, x, baseline, pVal);
+        x += pVal.measureText(game);
+        canvas.drawText(FPS_ARROW, x, baseline, pSep);
+        x += pVal.measureText(FPS_ARROW);
+        canvas.drawText(value.substring(arrow + FPS_ARROW.length()), x, baseline, pFps);
     }
 
     private void drawVertical(Canvas canvas) {
@@ -1057,7 +1094,7 @@ public class WinlatorHUD extends View {
 
         if ((showMask & SHOW_FPS) != 0) {
             canvas.drawText("FPS ", PAD, y + TS, pFps);
-            canvas.drawText(strFps, PAD + wLabelFps, y + TS, pVal);
+            drawFpsValue(canvas, PAD + wLabelFps, y + TS);
         }
     }
 

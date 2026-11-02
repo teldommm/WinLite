@@ -403,3 +403,25 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeReattachSurface(
     return (jboolean)ok;
 }
 
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfg(
+    JNIEnv*, jobject, jlong handle, jboolean enabled, jint flowSide, jint targetFps,
+    jfloat refreshHz)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r) return;
+    r->setWfgConfig((int)flowSide, (int)targetFps, (float)refreshHz);
+    r->setWfgEnabled(enabled == JNI_TRUE);
+}
+
+// {presented frames (real and generated), WFG-generated frames}
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetFrameCounts(
+    JNIEnv* env, jobject, jlong handle, jlongArray out)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || !out || env->GetArrayLength(out) < 2) return;
+    jlong vals[2] = { (jlong)r->getPresentedFrames(), (jlong)r->getWfgGeneratedFrames() };
+    env->SetLongArrayRegion(out, 0, 2, vals);
+}

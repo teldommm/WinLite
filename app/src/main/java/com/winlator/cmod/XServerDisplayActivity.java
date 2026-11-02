@@ -192,6 +192,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private int graphicsPostFxModeIndex;
     private int graphicsSharpnessPercent = 50;
     private int graphicsReshadeStrength = 65;
+    // WFG frame generation: the quality/target indices are what gets saved (never reorder);
+    // GraphicsSidebarPanel lists the same positions.
+    private static final int[] WFG_FLOW_SIDES = {180, 252};
+    private static final int[] WFG_TARGET_FPS = {0, 60, 90, 120, 144};
     // Id of the bundled assets/graphics_driver/wrapper_wl.tzst; bump it with every new wrapper build.
     private static final String WRAPPER_BUILD_ID = "becf2a03";
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
@@ -1854,6 +1858,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (initPFX > 0) vkRenderer.setPostFXMode(initPFX);
         }
 
+        final boolean wfgOn = readWfgInt("wfgEnabled", 0, 1) == 1;
+        final int wfgQuality = readWfgInt("wfgQuality", 0, WFG_FLOW_SIDES.length - 1);
+        final int wfgTarget = readWfgInt("wfgTarget", 0, WFG_TARGET_FPS.length - 1);
+        if (vkRenderer != null) {
+            vkRenderer.setWfg(wfgOn, WFG_FLOW_SIDES[wfgQuality], WFG_TARGET_FPS[wfgTarget]);
+        }
+
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
                 fsrOn,
@@ -1861,7 +1872,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 initSharp,
                 initPFX,
                 0,  // ReShade never persisted anything in the original either — always starts Off
-                graphicsReshadeStrength
+                graphicsReshadeStrength,
+                wfgOn,
+                wfgQuality,
+                wfgTarget
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
@@ -1938,9 +1952,42 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (vkRenderer != null) vkRenderer.setSharpness(percent / 100f);
             }
 
+            @Override
+            public void onWfgChanged(boolean enabled, int qualityIndex, int targetIndex) {
+                int q = Math.max(0, Math.min(WFG_FLOW_SIDES.length - 1, qualityIndex));
+                int t = Math.max(0, Math.min(WFG_TARGET_FPS.length - 1, targetIndex));
+                if (vkRenderer != null) vkRenderer.setWfg(enabled, WFG_FLOW_SIDES[q], WFG_TARGET_FPS[t]);
+                saveWfgSettings(enabled, q, t);
+            }
+
         };
 
         GraphicsSidebarPanelHost.attach(ingameSidebar, R.id.LLSubGraphics, state, callbacks);
+    }
+
+    private int readWfgInt(String key, int fallback, int max) {
+        String value = readGraphicsExtra(key);
+        if (value.isEmpty()) return fallback;
+        try {
+            return Math.max(0, Math.min(max, Integer.parseInt(value)));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    // Saved where the other graphics settings are: the shortcut when launched from one, else the container.
+    private void saveWfgSettings(boolean enabled, int quality, int target) {
+        if (shortcut != null) {
+            shortcut.putExtra("wfgEnabled", enabled ? "1" : "0");
+            shortcut.putExtra("wfgQuality", String.valueOf(quality));
+            shortcut.putExtra("wfgTarget", String.valueOf(target));
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra("wfgEnabled", enabled ? "1" : "0");
+            container.putExtra("wfgQuality", String.valueOf(quality));
+            container.putExtra("wfgTarget", String.valueOf(target));
+            container.saveData();
+        }
     }
 
     // Shortcut-preferred, Container-fallback read — same priority SidebarCleanupView's
