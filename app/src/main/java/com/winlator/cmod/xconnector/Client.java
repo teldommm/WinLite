@@ -13,6 +13,11 @@ public class Client {
     protected Thread pollThread;
     protected int shutdownFd;
     protected boolean connected;
+    /* FPS-limiter back-pressure state (see XConnectorEpoll.pauseClientReads). */
+    protected java.util.concurrent.ScheduledFuture<?> pauseTask;
+    protected long pauseDeadlineNs;
+    protected int pacedSupersedes;
+    protected boolean pacingExempt;
 
     public Client(XConnectorEpoll connector, ClientSocket clientSocket) {
         this.connector = connector;
