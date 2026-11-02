@@ -88,6 +88,10 @@ VulkanRendererContext::~VulkanRendererContext() {
     vk_.DestroyRenderPass(device, renderPass, nullptr);
     vk_.DestroyDevice(device, nullptr);
     vk_.DestroySurfaceKHR(instance, surface, nullptr);
+    // The reference taken by nativeInit or reattachSurface (ANativeWindow_fromSurface). Only
+    // detachSurface() released it, so a renderer destroyed while attached - after a failed
+    // re-attach, Java re-creates it - kept the window's native Surface alive.
+    if (window) { ANativeWindow_release(window); window = nullptr; }
     if (validationMessenger != VK_NULL_HANDLE) {
         auto destroyMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
             gipa(instance, "vkDestroyDebugUtilsMessengerEXT"));
@@ -1063,6 +1067,10 @@ void VulkanRendererContext::renderFrame() {
 
     if (fbResized.load()) {
         for (auto& f:inFlightFences) vk_.WaitForFences(device,1,&f,VK_TRUE,UINT64_MAX);
+        // The fences cover the GPU work, not the presents still queued on the old swapchain
+        // (WFG queues several per frame): their semaphores and images must not be destroyed
+        // while the presentation engine can still use them.
+        vk_.DeviceWaitIdle(device);
         cleanupSwapchain();
         wfgDestroySems(); // wfgSync recreates them
         bool ok=false;
@@ -1469,6 +1477,10 @@ void VulkanRendererContext::reapDeadAhbsLocked() {
 
 void VulkanRendererContext::initRootWindow(int64_t rootId, int64_t contentId, int width, int height) {
     std::lock_guard<std::mutex> lk(renderMutex);
+    // Only called on a fresh renderer and by the Java window-tree replay, which re-sends every
+    // window right after: start from an empty tree, so nodes created by window events queued
+    // ahead of the replay are rebuilt from the X server's current state, not merged with it.
+    windowTree.clear();
     rootWindowId = rootId;
     treeScreenW = width; treeScreenH = height;
     WinNode node;
@@ -1482,6 +1494,11 @@ void VulkanRendererContext::initRootWindow(int64_t rootId, int64_t contentId, in
 void VulkanRendererContext::createWindowNode(int64_t id, int64_t parentId, int64_t contentId,
                                               int x, int y, int width, int height) {
     std::lock_guard<std::mutex> lk(renderMutex);
+    // An X id is only reused after DestroyWindow, which erases the node first. A node that
+    // already exists therefore means a CreateWindow queued behind the window-tree replay, which
+    // already built it from newer state: re-creating it would wipe its children and map state
+    // and list it twice in its parent.
+    if (windowTree.count(id)) return;
     WinNode node;
     node.id = id; node.parentId = parentId; node.contentId = contentId;
     node.x = x; node.y = y; node.width = width; node.height = height;
@@ -1593,7 +1610,11 @@ void VulkanRendererContext::collectWindowNodes(int64_t id, int absX, int absY,
     if (id != rootWindowId) {
         myAbsX = absX + node.x;
         myAbsY = absY + node.y;
-        if (node.viewable) {
+        // Only 1x1 helper windows are skipped; a 1xN or Nx1 window is real content. Their
+        // children still get collected below.
+        const bool renderable = node.width >= 1 && node.height >= 1 &&
+                                !(node.width == 1 && node.height == 1);
+        if (node.viewable && renderable) {
             out.push_back({node.contentId, myAbsX, myAbsY});
             outSizes.push_back({node.width, node.height});
         }

@@ -534,8 +534,11 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         vk_.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         vk_.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout,
                                   0, 1, &cursorDS, 0, nullptr);
-        float cx = (float)std::max(0, (int)ptrX - curHotX);
-        float cy = (float)std::max(0, (int)ptrY - curHotY);
+        // The image goes at pointer - hot spot even when that is off the top or left edge, as
+        // an X server draws it; clamping it to 0 moved a cursor whose hot spot is not its corner
+        // (I-beam, crosshair) away from the pointer near those edges.
+        float cx = (float)((int)ptrX - curHotX);
+        float cy = (float)((int)ptrY - curHotY);
         WindowPushConstants pc{};
         pc.ndcX0 = (ox + cx * sx) / cw * 2.0f - 1.0f;
         pc.ndcY0 = (oy + cy * sy) / ch * 2.0f - 1.0f;

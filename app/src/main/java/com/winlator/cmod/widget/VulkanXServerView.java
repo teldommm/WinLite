@@ -53,6 +53,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private final Set<Integer> compositeRedirectedWindows = ConcurrentHashMap.newKeySet();
 
+    // The part of the X screen that is shown (see XServer.getEffectiveScreenInfo): the Wine
+    // desktop's size when a game shrank it below the container screen, else the screen itself.
+    private volatile ScreenInfo effectiveScreen;
     private boolean fullscreen = false;
     private float magnifierZoom = 1.0f;
     private boolean screenOffsetYRelativeToCursor = false;
@@ -105,6 +108,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
         rootCursorDrawable = createRootCursorDrawable(xServer.getSurfaceFormat());
         xServer.setXServerView(this);
+        effectiveScreen = xServer.getEffectiveScreenInfo();
         xServer.windowManager.addOnWindowModificationListener(this);
         xServer.pointer.addOnPointerMotionListener(this);
     }
@@ -299,7 +303,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void onSurfaceChanged(int width, int height) {
         if (inPipMode) return;
         surfaceWidth = width; surfaceHeight = height;
-        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height);
+        ScreenInfo inner = effectiveScreen;
+        viewTransformation.update(width, height, inner.width, inner.height);
         synchronized (lock) {
             if (nativeHandle != 0) { nativeResize(nativeHandle, width, height); updateTransform(); }
         }
@@ -352,28 +357,34 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         final float ptrX = xServer.pointer.getX();
         final float ptrY = xServer.pointer.getY();
 
+        // The native scene is laid out in container (screen) coordinates; when only the top-left
+        // part of it (the shrunken Wine desktop) is shown, the scene scale and offset are
+        // computed for that part and then stretched by screen/effective. fx = fy = 1 normally.
+        final ScreenInfo inner = effectiveScreen;
+        final float fx = (float) xServer.screenInfo.width / inner.width;
+        final float fy = (float) xServer.screenInfo.height / inner.height;
+
         final float ox, oy, sx, sy;
         if (fullscreen) {
-            viewTransformation.update(surfaceWidth, surfaceHeight,
-                xServer.screenInfo.width, xServer.screenInfo.height);
+            viewTransformation.update(surfaceWidth, surfaceHeight, inner.width, inner.height);
             if (zoom != 1.0f) {
-                ox = viewTransformation.sceneOffsetX + ptrX * viewTransformation.sceneScaleX * (1f - zoom);
-                oy = viewTransformation.sceneOffsetY + ptrY * viewTransformation.sceneScaleY * (1f - zoom);
-                sx = viewTransformation.sceneScaleX * zoom;
-                sy = viewTransformation.sceneScaleY * zoom;
+                ox = (viewTransformation.sceneOffsetX + ptrX * viewTransformation.sceneScaleX * (1f - zoom)) * fx;
+                oy = (viewTransformation.sceneOffsetY + ptrY * viewTransformation.sceneScaleY * (1f - zoom)) * fy;
+                sx = viewTransformation.sceneScaleX * zoom * fx;
+                sy = viewTransformation.sceneScaleY * zoom * fy;
             } else {
-                ox = 0f; oy = 0f; sx = 1f; sy = 1f;
+                ox = 0f; oy = 0f; sx = fx; sy = fy;
             }
         } else {
             float py = 0;
             if (screenOffsetYRelativeToCursor) {
-                short halfH = (short)(xServer.screenInfo.height / 2);
+                short halfH = (short)(inner.height / 2);
                 py = Math.max(0, Math.min(ptrY - halfH / 2.0f, halfH));
             }
-            ox = viewTransformation.sceneOffsetX + ptrX * viewTransformation.sceneScaleX * (1f - zoom);
-            oy = viewTransformation.sceneOffsetY - py + ptrY * viewTransformation.sceneScaleY * (1f - zoom);
-            sx = viewTransformation.sceneScaleX * zoom;
-            sy = viewTransformation.sceneScaleY * zoom;
+            ox = (viewTransformation.sceneOffsetX + ptrX * viewTransformation.sceneScaleX * (1f - zoom)) * fx;
+            oy = (viewTransformation.sceneOffsetY - py + ptrY * viewTransformation.sceneScaleY * (1f - zoom)) * fy;
+            sx = viewTransformation.sceneScaleX * zoom * fx;
+            sy = viewTransformation.sceneScaleY * zoom * fy;
         }
 
         final boolean needScissor = !(fullscreen && zoom == 1.0f);
@@ -381,6 +392,29 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             needScissor,
             viewTransformation.viewOffsetX, viewTransformation.viewOffsetY,
             viewTransformation.viewWidth,   viewTransformation.viewHeight);
+    }
+
+    private boolean isRootChild(Window window) {
+        return window != null && window.getParent() == xServer.windowManager.rootWindow;
+    }
+
+    /**
+     * Re-reads the effective screen size and re-applies the transform. Runs on eventExecutor:
+     * the X server locks are taken (inside getEffectiveScreenInfo) before {@code lock}, as
+     * everywhere else.
+     */
+    private void refreshDesktopTransform() {
+        final ScreenInfo inner = xServer.getEffectiveScreenInfo();
+        final ScreenInfo old = effectiveScreen;
+        final boolean changed = old == null || old.width != inner.width || old.height != inner.height;
+        synchronized (lock) {
+            effectiveScreen = inner;
+            if (surfaceWidth > 0 && surfaceHeight > 0) {
+                viewTransformation.update(surfaceWidth, surfaceHeight, inner.width, inner.height);
+            }
+            updateTransform();
+        }
+        if (changed) xServer.notifyEffectiveScreenChanged();
     }
 
     /**
@@ -523,6 +557,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onMapWindow(Window window) {
+        if (isRootChild(window)) queueEvent(this::refreshDesktopTransform);
         final long id = window.id;
         queueEvent(() -> {
             synchronized (lock) {
@@ -534,6 +569,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onUnmapWindow(Window window) {
+        if (isRootChild(window)) queueEvent(this::refreshDesktopTransform);
         final long id = window.id;
         queueEvent(() -> {
             synchronized (lock) {
@@ -575,6 +611,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onUpdateWindowGeometry(Window window, boolean resized) {
+        if (resized && isRootChild(window)) queueEvent(this::refreshDesktopTransform);
         final long id = window.id;
         final long contentId = did(window.getContent());
         final int x = window.getX(), y = window.getY(), w = window.getWidth(), h = window.getHeight();
@@ -587,6 +624,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onModifyWindowProperty(Window window, Property property) {
+        // WM_CLASS is what marks Wine's desktop window; it may be set after the window is mapped.
+        if (property != null && property.name == Atom.getId("WM_CLASS") && isRootChild(window)
+            && window.attributes.isMapped()) {
+            queueEvent(this::refreshDesktopTransform);
+        }
+
         checkViewable(window);
     }
 
