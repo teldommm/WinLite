@@ -6,14 +6,9 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
-#include <utility>
-#include <chrono>
 #include <inttypes.h>
 #include <dlfcn.h>
 #include "VulkanRendererPipelineOpt.h"
-#include <cerrno>
-#include <sys/resource.h>
-#include <unistd.h>
 #include "window_vert.h"
 #include "window_frag.h"
 #include "window_sgsr_frag.h"
@@ -33,12 +28,6 @@ VKAPI_ATTR VkBool32 VKAPI_CALL logValidationMessage(
                         data && data->pMessage ? data->pMessage : "(no message)");
     return VK_FALSE;
 }
-}
-
-// CLOCK_MONOTONIC, the clock of System.nanoTime() and Choreographer.
-static int64_t steadyNowNs() {
-    return (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
@@ -61,15 +50,22 @@ VulkanRendererContext::~VulkanRendererContext() {
     if (renderThread.joinable()) renderThread.join();
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
-    releaseIdleWaiters();
     VulkanRendererDestroyOpaquePipeline(this);
-    texMap.clear();   // window textures only borrow the imports' handles
-    // Every import still holds an AHardwareBuffer reference of its own (this was never freed
-    // before: cleanupAllAHBCache() had no caller).
-    destroyAllSourceImports();
+    for (auto& [id, wt] : texMap) destroyWinTex(wt);
+    texMap.clear();
 
-    for (auto& retired : deleteQueue) destroyTexNow(retired);
+    for (auto& wt : deleteQueue) {
+        if (wt.ds   != VK_NULL_HANDLE) vk_.FreeDescriptorSets(device, winTexPool, 1, &wt.ds);
+        if (wt.view != VK_NULL_HANDLE) vk_.DestroyImageView(device, wt.view, nullptr);
+        if (wt.img  != VK_NULL_HANDLE) vk_.DestroyImage(device, wt.img, nullptr);
+        if (wt.mem  != VK_NULL_HANDLE) vk_.FreeMemory(device, wt.mem, nullptr);
+        if (wt.stg  != VK_NULL_HANDLE) { vk_.DestroyBuffer(device, wt.stg, nullptr); vk_.FreeMemory(device, wt.stgMem, nullptr); }
+    }
     deleteQueue.clear();
+    // Imported window buffers: their Vulkan objects (the device is idle) and the references taken
+    // at import. Nothing freed them when the renderer went away, so every re-created renderer
+    // left all of its imports behind.
+    cleanupAllAHBCache();
     cleanupSwapchain(); cleanupCursorTex();
 
     vk_.DestroySampler(device, sampler, nullptr);
@@ -84,24 +80,18 @@ VulkanRendererContext::~VulkanRendererContext() {
     vk_.DestroyPipeline(device, pipeline, nullptr);
     vk_.DestroyPipelineLayout(device, pipeLayout, nullptr);
     vk_.DestroyDescriptorSetLayout(device, dsLayout, nullptr);
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vk_.DestroyFence(device, inFlightFences[i], nullptr);
-    }
-    for (auto sem : imgAvailSems) vk_.DestroySemaphore(device, sem, nullptr);
     for (auto sem : renderDoneSems) vk_.DestroySemaphore(device, sem, nullptr);
-    if (gpuTimeline_ != VK_NULL_HANDLE) vk_.DestroySemaphore(device, gpuTimeline_, nullptr);
+    for (auto sem : imgAvailSems) vk_.DestroySemaphore(device, sem, nullptr);
+    for (auto fence : inFlightFences) vk_.DestroyFence(device, fence, nullptr);
     vk_.DestroyCommandPool(device, cmdPool, nullptr);
     vk_.DestroyRenderPass(device, renderPass, nullptr);
     vk_.DestroyDevice(device, nullptr);
     vk_.DestroySurfaceKHR(instance, surface, nullptr);
-    // The reference taken by nativeInit or reattachSurface (ANativeWindow_fromSurface). Only
-    // detachSurface() released it, so a renderer destroyed while attached - after a failed
-    // re-attach, Java re-creates it - kept the window's native Surface alive.
-    if (window) { ANativeWindow_release(window); window = nullptr; }
     if (validationMessenger != VK_NULL_HANDLE) {
         auto destroyMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
             gipa(instance, "vkDestroyDebugUtilsMessengerEXT"));
         if (destroyMessenger) destroyMessenger(instance, validationMessenger, nullptr);
+        validationMessenger = VK_NULL_HANDLE;
     }
     vk_.DestroyInstance(instance, nullptr);
     if (adrenotoolsHandle) { dlclose(adrenotoolsHandle); adrenotoolsHandle = nullptr; }
@@ -113,7 +103,6 @@ void VulkanRendererContext::loadInstanceDispatch() {
     LOAD_I2(DestroyInstance);
     LOAD_I2(EnumeratePhysicalDevices);
     LOAD_I2(GetPhysicalDeviceProperties);
-    LOAD_I2(GetPhysicalDeviceFeatures2);
     LOAD_I2(GetPhysicalDeviceMemoryProperties);
     LOAD_I2(GetPhysicalDeviceSurfaceCapabilitiesKHR);
     LOAD_I2(GetPhysicalDeviceSurfaceFormatsKHR);
@@ -198,13 +187,6 @@ void VulkanRendererContext::loadDeviceDispatch() {
     LOAD_D2(WaitForFences);
     LOAD_D2(ResetFences);
     LOAD_D2(GetFenceStatus);
-    vk_.GetSemaphoreCounterValue = (PFN_vkGetSemaphoreCounterValue)d("vkGetSemaphoreCounterValue");
-    if (!vk_.GetSemaphoreCounterValue)
-        vk_.GetSemaphoreCounterValue = (PFN_vkGetSemaphoreCounterValue)d("vkGetSemaphoreCounterValueKHR");
-    vk_.WaitSemaphores = (PFN_vkWaitSemaphores)d("vkWaitSemaphores");
-    if (!vk_.WaitSemaphores) vk_.WaitSemaphores = (PFN_vkWaitSemaphores)d("vkWaitSemaphoresKHR");
-    vk_.SignalSemaphore = (PFN_vkSignalSemaphore)d("vkSignalSemaphore");
-    if (!vk_.SignalSemaphore) vk_.SignalSemaphore = (PFN_vkSignalSemaphore)d("vkSignalSemaphoreKHR");
 
     vk_.GetAndroidHardwareBufferPropertiesANDROID =
         (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)d("vkGetAndroidHardwareBufferPropertiesANDROID");
@@ -223,9 +205,7 @@ void VulkanRendererContext::createInstance() {
             gipa = (PFN_vkGetInstanceProcAddr)dlsym(loaderLib, "vkGetInstanceProcAddr");
     }
 
-    if (!gipa) throw std::runtime_error("Vulkan loader unavailable");
     vk_.CreateInstance = (PFN_vkCreateInstance)gipa(nullptr, "vkCreateInstance");
-    if (!vk_.CreateInstance) throw std::runtime_error("vkCreateInstance unavailable");
     VkApplicationInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO;
     ai.pApplicationName="Winlator"; ai.apiVersion=VK_API_VERSION_1_3;
     const char* ext[]={"VK_KHR_surface","VK_KHR_android_surface",
@@ -233,6 +213,8 @@ void VulkanRendererContext::createInstance() {
     VkInstanceCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     ci.pApplicationInfo=&ai; ci.enabledExtensionCount=2; ci.ppEnabledExtensionNames=ext;
 
+    // Opt-in validation layer. Nothing below runs unless it was asked for, and an instance that
+    // cannot be created with it is created again without.
     const char* validationLayer = "VK_LAYER_KHRONOS_validation";
     bool enableValidation = false;
     VkDebugUtilsMessengerCreateInfoEXT debugInfo{};
@@ -346,23 +328,14 @@ void VulkanRendererContext::createLogicalDevice() {
     PFN_vkEnumerateDeviceExtensionProperties enumDevExts =
         (PFN_vkEnumerateDeviceExtensionProperties)gipa(instance, "vkEnumerateDeviceExtensionProperties");
     bool hasForeignQueue = false;
-    const char* globalPriorityExt = nullptr;
     if (enumDevExts) {
-        uint32_t extCount = 0;
-        if (enumDevExts(physicalDevice, nullptr, &extCount, nullptr) == VK_SUCCESS && extCount > 0) {
-            std::vector<VkExtensionProperties> availableExts(extCount);
-            if (enumDevExts(physicalDevice, nullptr, &extCount, availableExts.data()) == VK_SUCCESS) {
-                for (const auto& ext : availableExts) {
-                    RLOG("Available Vulkan device extension: %s (specVersion=%u)",
-                         ext.extensionName, ext.specVersion);
-                    if (strcmp(ext.extensionName, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME) == 0)
+        uint32_t n=0;
+        if (enumDevExts(physicalDevice,nullptr,&n,nullptr)==VK_SUCCESS && n>0) {
+            std::vector<VkExtensionProperties> av(n);
+            if (enumDevExts(physicalDevice,nullptr,&n,av.data())==VK_SUCCESS) {
+                for (auto& e:av)
+                    if (strcmp(e.extensionName, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME)==0)
                         hasForeignQueue = true;
-                    // KHR is the promoted name of EXT; same queue create struct and values.
-                    if (strcmp(ext.extensionName, "VK_KHR_global_priority") == 0)
-                        globalPriorityExt = "VK_KHR_global_priority";
-                    else if (!globalPriorityExt && strcmp(ext.extensionName, "VK_EXT_global_priority") == 0)
-                        globalPriorityExt = "VK_EXT_global_priority";
-                }
             }
         }
     }
@@ -370,111 +343,21 @@ void VulkanRendererContext::createLogicalDevice() {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME
     };
-    // The AHB extension depends on VK_EXT_queue_family_foreign, so it has to be enabled with it
-    // whenever the device offers it. Unlike upstream (which refuses to start without it), a device
-    // that doesn't advertise it keeps working exactly as before.
+    // The AHB extension depends on VK_EXT_queue_family_foreign, so it is enabled with it whenever
+    // the device offers it. A device that does not advertise it keeps working exactly as before.
     foreignQueueFamily_ = hasForeignQueue;
     if (hasForeignQueue) {
         extList.push_back(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
     } else {
         RLOG_E("AHB imports want VK_EXT_queue_family_foreign, but the Vulkan device does not advertise it; continuing without it");
     }
-    // The compositor's work per frame is tiny but sits behind the game's long submissions on the
-    // same GPU; with a HIGH priority queue the driver can schedule (or preempt for) it first, so
-    // a composite does not miss its vsync because the guest is mid-frame. A driver may refuse
-    // the level (VK_ERROR_NOT_PERMITTED): the device is then created exactly as before.
-    VkDeviceQueueGlobalPriorityCreateInfoEXT queuePriority{};
-    queuePriority.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT;
-    queuePriority.globalPriority = VK_QUEUE_GLOBAL_PRIORITY_HIGH_EXT;
-    if (globalPriorityExt) {
-        extList.push_back(globalPriorityExt);
-        qi.pNext = &queuePriority;
-    }
-    for (const char* ext : extList)
-        RLOG("Enabled Vulkan device extension: %s", ext);
     VkDeviceCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pQueueCreateInfos=&qi; ci.queueCreateInfoCount=1;
     ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
-
-    // The compositor's own GPU-progress counter (see gpuTimeline_): a timeline semaphore needs
-    // Vulkan 1.2 and the feature. The renderer enables no other optional feature
-    // (pEnabledFeatures = nullptr); without timelines the device is created exactly as it always
-    // was and guest buffers go back on timing alone.
-    VkPhysicalDeviceVulkan12Features v12Enable{};
-    v12Enable.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    bool timelineEnabled = false;
-    {
-        VkPhysicalDeviceProperties devProps{};
-        if (vk_.GetPhysicalDeviceProperties) vk_.GetPhysicalDeviceProperties(physicalDevice, &devProps);
-        if (devProps.apiVersion >= VK_API_VERSION_1_2 && vk_.GetPhysicalDeviceFeatures2) {
-            VkPhysicalDeviceVulkan12Features v12Support{};
-            v12Support.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-            VkPhysicalDeviceFeatures2 f2{};
-            f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-            f2.pNext = &v12Support;
-            vk_.GetPhysicalDeviceFeatures2(physicalDevice, &f2);
-            timelineEnabled = v12Support.timelineSemaphore == VK_TRUE;
-        }
-    }
-    if (timelineEnabled) v12Enable.timelineSemaphore = VK_TRUE;
-
-    // pEnabledFeatures stays null; with nothing to enable the device is created exactly as it
-    // always was.
-    const auto chainFeatures = [&]() {
-        ci.pNext = v12Enable.timelineSemaphore ? &v12Enable : nullptr;
-    };
-    const auto dropPriority = [&]() {
-        qi.pNext = nullptr;
-        extList.erase(std::remove(extList.begin(), extList.end(), globalPriorityExt), extList.end());
-        ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
-        globalPriorityExt = nullptr;
-    };
-    chainFeatures();
-
-    // Each optional piece is given up separately, so a driver that rejects one of them keeps the
-    // others: a refused queue priority (VK_ERROR_NOT_PERMITTED) costs only the priority, and a
-    // feature chain it rejects only the timeline semaphores.
-    VkResult deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
-    if (deviceResult == VK_ERROR_NOT_PERMITTED_KHR && globalPriorityExt) {
-        RLOG_E("createLogicalDevice: HIGH queue priority not permitted; retrying at default priority");
-        dropPriority();
-        deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
-    }
-    if (deviceResult != VK_SUCCESS && globalPriorityExt) {
-        // Some drivers refuse the priority with a generic error rather than NOT_PERMITTED.
-        RLOG_E("createLogicalDevice: CreateDevice failed (%d); retrying at default priority",
-               (int)deviceResult);
-        dropPriority();
-        deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
-    }
-    if (deviceResult != VK_SUCCESS && timelineEnabled) {
-        RLOG_E("createLogicalDevice: CreateDevice failed (%d); retrying without timeline semaphores",
-               (int)deviceResult);
-        v12Enable.timelineSemaphore = VK_FALSE;
-        timelineEnabled = false;
-        chainFeatures();
-        deviceResult = vk_.CreateDevice(physicalDevice,&ci,nullptr,&device);
-    }
-    if (deviceResult != VK_SUCCESS) throw std::runtime_error("device");
-    globalPriorityHigh_.store(globalPriorityExt != nullptr);
-    __android_log_print(ANDROID_LOG_INFO, WLOG_TAG,
-           "createLogicalDevice: compositor queue priority %s",
-           globalPriorityExt ? "HIGH" : "default (global priority unavailable)");
-
+    if (vk_.CreateDevice(physicalDevice,&ci,nullptr,&device)!=VK_SUCCESS) throw std::runtime_error("device");
     vk_.GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)gipa(instance, "vkGetDeviceProcAddr");
     loadDeviceDispatch();
     vk_.GetDeviceQueue(device,graphicsQueueFamilyIndex,0,&graphicsQueue);
-
-    // The X server both polls it (sourceBusy) and blocks on it (endSourceIdleWait).
-    if (timelineEnabled && vk_.GetSemaphoreCounterValue && vk_.WaitSemaphores) {
-        VkSemaphoreTypeCreateInfo ti{}; ti.sType=VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-        ti.semaphoreType=VK_SEMAPHORE_TYPE_TIMELINE; ti.initialValue=0;
-        VkSemaphoreCreateInfo si{}; si.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO; si.pNext=&ti;
-        if (vk_.CreateSemaphore(device,&si,nullptr,&gpuTimeline_)!=VK_SUCCESS) gpuTimeline_=VK_NULL_HANDLE;
-    }
-    RLOG("createLogicalDevice: guest buffers handed back %s",
-         gpuTimeline_ != VK_NULL_HANDLE ? "after the GPU is done with them (timeline)"
-                                        : "on timing only (no timeline semaphore)");
 
     vk_.GetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
@@ -527,6 +410,8 @@ void VulkanRendererContext::createSwapchain() {
     uint32_t fmtN=0; vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,surface,&fmtN,nullptr);
     std::vector<VkSurfaceFormatKHR> fmts(fmtN); vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,surface,&fmtN,fmts.data());
     swapchainFmt = VK_FORMAT_R8G8B8A8_UNORM;
+    uint32_t imgCount=caps.minImageCount+1;
+    if (caps.maxImageCount>0&&imgCount>caps.maxImageCount) imgCount=caps.maxImageCount;
 
     uint32_t pmCount=0;
     vk_.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice,surface,&pmCount,nullptr);
@@ -534,15 +419,6 @@ void VulkanRendererContext::createSwapchain() {
     vk_.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice,surface,&pmCount,availablePresentModes.data());
     VkPresentModeKHR presentMode=VK_PRESENT_MODE_FIFO_KHR;
     for (auto pm:availablePresentModes) if(pm==requestedPresentMode){presentMode=pm;break;}
-
-    // One image above the minimum in every mode. In FIFO the render pacing already keeps at
-    // most one frame waiting, so the spare image adds no latency while the model holds; it is
-    // the margin for a late latch or release fence (with minImageCount 2 and no spare, any late
-    // composite repeats a frame).
-    uint32_t imgCount = caps.minImageCount + 1;
-    if (caps.maxImageCount>0&&imgCount>caps.maxImageCount) imgCount=caps.maxImageCount;
-    swapchainFifo_.store(presentMode == VK_PRESENT_MODE_FIFO_KHR ||
-                         presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR, std::memory_order_relaxed);
     if(verboseLog){
         std::string pmList;
         for(auto pm:availablePresentModes) pmList+=std::to_string((int)pm)+" ";
@@ -564,9 +440,7 @@ void VulkanRendererContext::createSwapchain() {
     ci.imageSharingMode=VK_SHARING_MODE_EXCLUSIVE; ci.preTransform=pre;
     ci.compositeAlpha=compositeAlpha; ci.presentMode=presentMode; ci.clipped=VK_TRUE;
     ci.oldSwapchain=oldSwapchain;
-    VkSwapchainKHR newSwapchain=VK_NULL_HANDLE;
-    if (vk_.CreateSwapchainKHR(device,&ci,nullptr,&newSwapchain)!=VK_SUCCESS) throw std::runtime_error("swapchain");
-    swapchain=newSwapchain;
+    if (vk_.CreateSwapchainKHR(device,&ci,nullptr,&swapchain)!=VK_SUCCESS) throw std::runtime_error("swapchain");
     RLOG("swapchain created: %dx%d format=%d presentMode=%d compositeAlpha=%d imgCount=%u",
         swapchainExt.width,swapchainExt.height,(int)swapchainFmt,(int)presentMode,(int)compositeAlpha,imgCount);
     if (oldSwapchain!=VK_NULL_HANDLE) vk_.DestroySwapchainKHR(device,oldSwapchain,nullptr);
@@ -673,9 +547,8 @@ void VulkanRendererContext::createSgsrPipeline() {
     pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
     pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
     pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    const VkResult res=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&sgsrPipeline);
+    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&sgsrPipeline)!=VK_SUCCESS) throw std::runtime_error("sgsr_pipeline");
     vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
-    if (res!=VK_SUCCESS) { sgsrPipeline=VK_NULL_HANDLE; throw std::runtime_error("sgsr_pipeline"); }
     RLOG("createSgsrPipeline: done");
 }
 
@@ -699,9 +572,8 @@ void VulkanRendererContext::createFsr1Pipeline() {
     pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
     pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
     pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    const VkResult res=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&fsr1Pipeline);
+    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&fsr1Pipeline)!=VK_SUCCESS) throw std::runtime_error("fsr1_pipeline");
     vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
-    if (res!=VK_SUCCESS) { fsr1Pipeline=VK_NULL_HANDLE; throw std::runtime_error("fsr1_pipeline"); }
     RLOG("createFsr1Pipeline: done");
 }
 
@@ -725,9 +597,8 @@ void VulkanRendererContext::createStretchPipeline() {
     pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
     pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
     pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    const VkResult res=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&stretchPipeline);
+    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&stretchPipeline)!=VK_SUCCESS) throw std::runtime_error("stretch_pipeline");
     vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
-    if (res!=VK_SUCCESS) { stretchPipeline=VK_NULL_HANDLE; throw std::runtime_error("stretch_pipeline"); }
     RLOG("createStretchPipeline: done");
 }
 
@@ -801,7 +672,6 @@ void VulkanRendererContext::setPostFXMode(int mode) {
     if (postFXMode == mode) return;
     postFXMode = mode;
     syncPostFXPipeline();
-    adpfNote(kAdpfResetGpu);   // a different amount of GPU work per frame
     needsRender.store(true); wakeRender();
 }
 
@@ -840,9 +710,8 @@ void VulkanRendererContext::createSampler() {
 }
 
 void VulkanRendererContext::createWinTexPool() {
-    // One set per imported guest buffer and one for the cursor. 129 ran
-    // out with many windows plus swapchain images awaiting retirement, and every import past
-    // that failed: a black window. Sets are small; the pool is created once.
+    // One set per window texture / imported guest buffer and one for the cursor. 129 ran out
+    // with many windows, and every texture past that failed: a black window. Sets are small.
     constexpr uint32_t kWinTexSets = 1024;
     VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kWinTexSets};
     VkDescriptorPoolCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -860,7 +729,7 @@ void VulkanRendererContext::createCursorDS() {
 void VulkanRendererContext::createCmdBufs() {
     cmdBufs.resize(MAX_FRAMES_IN_FLIGHT);
     VkCommandBufferAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ai.commandPool=cmdPool; ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandBufferCount=(uint32_t)cmdBufs.size();
+    ai.commandPool=cmdPool; ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandBufferCount=MAX_FRAMES_IN_FLIGHT;
     if (vk_.AllocateCommandBuffers(device,&ai,cmdBufs.data())!=VK_SUCCESS) throw std::runtime_error("cmdbuf");
 }
 
@@ -873,13 +742,12 @@ void VulkanRendererContext::createSyncObjects() {
 }
 
 void VulkanRendererContext::recreateSyncObjects() {
-    // Sized against the swapchain, so this must run whenever it does. A
-    // pending semaphore from a since-destroyed swapchain must never survive
-    // into the new one, hence the unconditional destroy-then-rebuild here.
+    // renderDoneSems has one semaphore per swapchain image, so this must run whenever the
+    // swapchain is rebuilt. Indexing it by frame slot reused a semaphore the presentation engine
+    // could still be waiting on. Only called with the GPU idle on the old swapchain.
     for (auto sem : imgAvailSems) vk_.DestroySemaphore(device, sem, nullptr);
     for (auto sem : renderDoneSems) vk_.DestroySemaphore(device, sem, nullptr);
     imgAvailSems.assign(MAX_FRAMES_IN_FLIGHT, VK_NULL_HANDLE);
-    // Reacquiring an image guarantees its preceding present consumed this semaphore.
     renderDoneSems.assign(swapchainImages.size(), VK_NULL_HANDLE);
     VkSemaphoreCreateInfo si{}; si.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     for (auto& sem : imgAvailSems)
@@ -889,7 +757,6 @@ void VulkanRendererContext::recreateSyncObjects() {
 }
 
 void VulkanRendererContext::cleanupSwapchain() {
-    vk_.DeviceWaitIdle(device);
     for (auto fb:swapchainFBs) vk_.DestroyFramebuffer(device,fb,nullptr); swapchainFBs.clear();
     for (auto iv:swapchainViews) vk_.DestroyImageView(device,iv,nullptr); swapchainViews.clear();
     if (!cmdBufs.empty()){vk_.FreeCommandBuffers(device,cmdPool,(uint32_t)cmdBufs.size(),cmdBufs.data());cmdBufs.clear();}
@@ -945,8 +812,30 @@ void VulkanRendererContext::transition(VkCommandBuffer cb, VkImage img,
     vk_.CmdPipelineBarrier(cb,ss,dss,0,0,nullptr,0,nullptr,1,&b);
 }
 
-// HAL_PIXEL_FORMAT_BGRA_8888: not part of the public NDK AHardwareBuffer formats.
-static constexpr uint32_t kHalPixelFormatBgra8888 = 5;
+bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
+    VkImageCreateInfo ii{}; ii.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; ii.imageType=VK_IMAGE_TYPE_2D;
+    ii.extent={(uint32_t)w,(uint32_t)h,1}; ii.mipLevels=1; ii.arrayLayers=1; ii.format=VK_FORMAT_B8G8R8A8_UNORM;
+    ii.tiling=VK_IMAGE_TILING_OPTIMAL; ii.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+    ii.usage=VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT; ii.samples=VK_SAMPLE_COUNT_1_BIT; ii.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+    if (vk_.CreateImage(device,&ii,nullptr,&wt.img)!=VK_SUCCESS) return false;
+    VkMemoryRequirements req; vk_.GetImageMemoryRequirements(device,wt.img,&req);
+    VkMemoryAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ai.allocationSize=req.size; ai.memoryTypeIndex=findMemType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vk_.AllocateMemory(device,&ai,nullptr,&wt.mem)!=VK_SUCCESS){vk_.DestroyImage(device,wt.img,nullptr);wt.img=VK_NULL_HANDLE;return false;}
+    vk_.BindImageMemory(device,wt.img,wt.mem,0);
+    VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=VK_FORMAT_B8G8R8A8_UNORM; vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){destroyWinTex(wt);return false;}
+    VkDescriptorSetAllocateInfo dsai{}; dsai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO; dsai.descriptorPool=winTexPool; dsai.descriptorSetCount=1; dsai.pSetLayouts=&dsLayout;
+    if (vk_.AllocateDescriptorSets(device,&dsai,&wt.ds)!=VK_SUCCESS){destroyWinTex(wt);return false;}
+    VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; dii.imageView=wt.view; dii.sampler=sampler;
+    VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wr.dstSet=wt.ds; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr.descriptorCount=1; wr.pImageInfo=&dii;
+    vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
+    VkDeviceSize stgSz=(VkDeviceSize)w*h*4;
+    createBuffer(stgSz,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,wt.stg,wt.stgMem);
+    vk_.MapMemory(device,wt.stgMem,0,stgSz,0,&wt.mapped);
+    wt.cap=stgSz; wt.w=w; wt.h=h; wt.needsTransition=true;
+    return true;
+}
 
 bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) {
     if (!vk_.GetAndroidHardwareBufferPropertiesANDROID)
@@ -967,7 +856,7 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     if (imageFormat == VK_FORMAT_UNDEFINED) {
         if (desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM)
             imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
-        else if (desc.format == kHalPixelFormatBgra8888)
+        else if (desc.format == 5u)
             imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
         else {
             RLOG_E("importAHBToWinTex: unsupported external-only AHB format=%u externalFormat=%" PRIu64,
@@ -1016,6 +905,8 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D;
     vi.format=imageFormat;
+    vi.components={VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,
+                   VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY};
     vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
     if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){
         destroyWinTex(wt);
@@ -1045,17 +936,18 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
 
     wt.needsTransition=true;
-    wt.fmt=imageFormat;
+    wt.isAHB=true;
     wt.w=(int)desc.width;
     wt.h=(int)desc.height;
     return true;
 }
 
 void VulkanRendererContext::destroyWinTex(WinTex& wt) {
-    // Only for a texture this renderer owns (a half-built import); window textures borrow.
-    if (wt.img!=VK_NULL_HANDLE) {
-        deleteQueue.push_back({wt, pendingFrameSerial ? pendingFrameSerial : submittedSerial, nullptr});
-        retirePending.store(true, std::memory_order_release);
+    if (wt.isAHB) { wt = {}; return; }
+    if (wt.img!=VK_NULL_HANDLE || wt.stg!=VK_NULL_HANDLE) {
+        WinTex deferred = wt;
+        deferred.isAHB = false;
+        deleteQueue.push_back(deferred);
     }
     wt={};
 }
@@ -1076,276 +968,106 @@ void VulkanRendererContext::ensureCursorTex(short w, short h) {
     VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; dii.imageView=cursorView; dii.sampler=sampler;
     VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wr.dstSet=cursorDS; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr.descriptorCount=1; wr.pImageInfo=&dii;
     vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
-    cursorTexW=w; cursorTexH=h;
+    cursorTexW=w; cursorTexH=h; cursorImgInit=false;
 }
 
 void VulkanRendererContext::cleanupCursorTex() {
     if (cursorView!=VK_NULL_HANDLE){vk_.DestroyImageView(device,cursorView,nullptr);cursorView=VK_NULL_HANDLE;}
     if (cursorImg!=VK_NULL_HANDLE){vk_.DestroyImage(device,cursorImg,nullptr);cursorImg=VK_NULL_HANDLE;}
     if (cursorMem!=VK_NULL_HANDLE){vk_.FreeMemory(device,cursorMem,nullptr);cursorMem=VK_NULL_HANDLE;}
-    for (uint32_t slot=0; slot<MAX_FRAMES_IN_FLIGHT; ++slot) {
-        if (cursorStg[slot]!=VK_NULL_HANDLE) {
-            vk_.DestroyBuffer(device,cursorStg[slot],nullptr);
-            vk_.FreeMemory(device,cursorStgM[slot],nullptr);
-            cursorStg[slot]=VK_NULL_HANDLE; cursorStgM[slot]=VK_NULL_HANDLE;
-            cursorStgP[slot]=nullptr; cursorStgC[slot]=0;
+    for (uint32_t i=0;i<MAX_FRAMES_IN_FLIGHT;i++) {
+        if (cursorStg[i]!=VK_NULL_HANDLE){
+            vk_.DestroyBuffer(device,cursorStg[i],nullptr);vk_.FreeMemory(device,cursorStgM[i],nullptr);
+            cursorStg[i]=VK_NULL_HANDLE;cursorStgM[i]=VK_NULL_HANDLE;cursorStgP[i]=nullptr;cursorStgC[i]=0;
         }
     }
-    cursorTexW=0; cursorTexH=0;
+    cursorTexW=0; cursorTexH=0; cursorImgInit=false;
 }
 
-void VulkanRendererContext::ensureCursorStaging(VkDeviceSize sz, uint32_t slot) {
+// Only called for a slot whose fence has been waited, so the old buffer is no longer read.
+void VulkanRendererContext::ensureCursorStaging(uint32_t slot, VkDeviceSize sz) {
     if (cursorStgC[slot]>=sz) return;
-    if (cursorStg[slot]!=VK_NULL_HANDLE) {
-        vk_.DestroyBuffer(device,cursorStg[slot],nullptr);
-        vk_.FreeMemory(device,cursorStgM[slot],nullptr);
+    if (cursorStg[slot]!=VK_NULL_HANDLE){
+        vk_.DestroyBuffer(device,cursorStg[slot],nullptr);vk_.FreeMemory(device,cursorStgM[slot],nullptr);
+        cursorStg[slot]=VK_NULL_HANDLE;cursorStgM[slot]=VK_NULL_HANDLE;cursorStgP[slot]=nullptr;cursorStgC[slot]=0;
     }
     createBuffer(sz,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,cursorStg[slot],cursorStgM[slot]);
     vk_.MapMemory(device,cursorStgM[slot],0,sz,0,&cursorStgP[slot]); cursorStgC[slot]=sz;
 }
 
 void VulkanRendererContext::renderLoop() {
-    // The compositor sits on the path of every frame and of the cursor; at the default nice 0 it
-    // competes on equal terms with the emulator's guest threads. -10 is what Android uses for
-    // its own display-critical threads; an app may lower its own threads' nice value.
-    if (setpriority(PRIO_PROCESS, 0, -10) != 0)
-        RLOG_E("renderLoop: could not raise render thread priority (errno=%d)", errno);
-    // The head of the hint session's thread set (setPerformanceHint).
-    renderTid_.store((int)gettid(), std::memory_order_relaxed);
     while (isRunning) {
-        {
-            std::unique_lock<std::mutex> lk(dirtyMutex);
-            while (isRunning) {
-                // A hint-session request needs this thread; it is served below, between frames.
-                if (adpfDirty_.load(std::memory_order_acquire)) break;
-                const bool detached = surfaceDetached.load();
-                if (!detached && fbResized.load()) break;
-                const bool content = needsRender.load();
-                const bool cursor  = cursorMoved.load();
-                // A guest frame held by the limiter for its display slot.
-                const int64_t due  = nextPendingDueNs_.load(std::memory_order_relaxed);
-                if (!detached && (content || cursor || due != 0)) {
-                    const int64_t now = steadyNowNs();
-                    int64_t wait = INT64_MAX;
-                    if (content) wait = pacingWaitNs(true);
-                    else if (cursor) {
-                        wait = pacingWaitNs(false);
-                        // Cursor motion shortly before a held frame's slot rides along with
-                        // that frame: a separate cursor present there would sit in the queue
-                        // in front of it and push the frame a refresh late.
-                        const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-                        if (due != 0 && due - now < period) wait = std::max(wait, due - now);
-                    }
-                    if (due != 0) wait = std::min(wait, due - now);
-                    if (wait <= 0) break;
-                    // Woken early by newer updates; re-evaluated each time (a content update
-                    // during a cursor-only wait is allowed sooner).
-                    dirtyCV.wait_for(lk, std::chrono::nanoseconds(wait));
-                    continue;
-                }
-                dirtyCV.wait(lk);
-            }
-        }
+        { std::unique_lock<std::mutex> lk(dirtyMutex);
+          dirtyCV.wait(lk,[this]{
+              return !isRunning||(!surfaceDetached.load()&&(needsRender.load()||fbResized.load()))||cursorMoved.load(); }); }
         if (!isRunning) break;
-        // Hint session (switched on or off, threads, a workload change): between frames, then back
-        // to the wait, so pacing still decides when a frame that is due goes out.
-        if (adpfDirty_.load(std::memory_order_acquire)) { adpfService(); continue; }
-        try { renderFrame(); }
-        catch (const std::exception& error) {
-            if (!swapchainRetryPending.exchange(true)) RLOG_E("renderFrame failed: %s", error.what());
-            { std::lock_guard<std::mutex> lk(renderMutex); pendingFrameSerial=0; }
-            fbResized.store(true);
-        }
-        catch (...) {
-            if (!swapchainRetryPending.exchange(true)) RLOG_E("renderFrame failed: unknown exception");
-            { std::lock_guard<std::mutex> lk(renderMutex); pendingFrameSerial=0; }
-            fbResized.store(true);
-        }
-        // A failed frame or swapchain retries at a calm pace instead of spinning the core: the
-        // wait is cut short as soon as the surface goes away or the renderer stops.
-        if (swapchainRetryPending.load()) {
-            std::unique_lock<std::mutex> lk(dirtyMutex);
-            dirtyCV.wait_for(lk,std::chrono::milliseconds(50),[this]{
-                return !isRunning||surfaceDetached.load(); });
-        }
+        if (swapchain == VK_NULL_HANDLE || cmdBufs.empty()) continue;
+        try { renderFrame(); } catch(...) {}
     }
-    adpfShutdown();   // the session belongs to this thread's frames: it ends with them
 }
 
-int64_t VulkanRendererContext::pacingWaitNs(bool content) const {
-    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-    // No queue to drain outside FIFO: a newer frame simply replaces the waiting one, so content
-    // goes at once. Cursor-only frames are kept to one per refresh period all the same; the
-    // cursor is drawn at its latest position by whichever frame comes next.
-    if (!swapchainFifo_.load(std::memory_order_relaxed)) {
-        if (content || period <= 0 || lastPresentNs_ == 0) return 0;
-        const int64_t now = steadyNowNs();
-        if (!vsyncClockFresh(now)) return lastPresentNs_ + period - now;
-        // With the vsync clock: composite just before the first queue deadline after the last
-        // present (the same lead the limiter uses), so the frame that reaches the display
-        // carries the newest pointer position - no later than an unpaced composite would.
-        const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
-        const int64_t lead = queueLeadNs(period);
-        const int64_t next = deadline + (int64_t)std::floor((double)(lastPresentNs_ + lead - deadline)
-                                                           / (double)period + 1.0) * period;
-        return next - lead - now;
+void VulkanRendererContext::flushDeleteQueue() {
+    std::lock_guard<std::mutex> lk(renderMutex);
+    if (deleteQueue.empty()) return;
+    vk_.DeviceWaitIdle(device);
+    for (auto& wt:deleteQueue) {
+        if (wt.ds  !=VK_NULL_HANDLE) vk_.FreeDescriptorSets(device,winTexPool,1,&wt.ds);
+        if (wt.view!=VK_NULL_HANDLE) vk_.DestroyImageView(device,wt.view,nullptr);
+        if (wt.img !=VK_NULL_HANDLE) vk_.DestroyImage(device,wt.img,nullptr);
+        if (wt.mem !=VK_NULL_HANDLE) vk_.FreeMemory(device,wt.mem,nullptr);
+        if (wt.stg !=VK_NULL_HANDLE){vk_.DestroyBuffer(device,wt.stg,nullptr);vk_.FreeMemory(device,wt.stgMem,nullptr);}
     }
-    if (period <= 0) return 0;
-    // Time until the display has drained everything presented so far, in the model.
-    // Content is composited as soon as it may join the queue (one frame waiting at most), not
-    // held for the queue deadline: holding only helps a guest faster than the display, and
-    // costs a refresh of GPU margin for every slower one (the FPS limiter covers the former).
-    const int64_t pending = presentSlotEndNs_ - steadyNowNs();
-    // Content may have one frame waiting behind the one being shown; cursor-only motion none.
-    const int64_t wait = pending - (content ? period : 0);
-    // The model can only be wrong by about one refresh; never hold a frame longer than two.
-    return std::min(wait, 2 * period);
-}
-
-void VulkanRendererContext::notePresentedForPacing(uint32_t presents) {
-    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-    if (period <= 0 || presents == 0) return;
-    presentSlotEndNs_ = std::max(presentSlotEndNs_, steadyNowNs()) + (int64_t)presents * period;
-}
-
-void VulkanRendererContext::setDisplayRefreshRate(float hz) {
-    const int64_t period = (hz > 1.0f && hz < 1000.0f) ? (int64_t)(1.0e9 / (double)hz) : 0;
-    if (refreshPeriodNs_.exchange(period, std::memory_order_relaxed) != period)
-        RLOG("setDisplayRefreshRate: %.2f Hz (pacing %s)", hz, period ? "on" : "off");
-    wakeRender();
-}
-
-void VulkanRendererContext::destroyTexNow(RetiredTex& retired) {
-    WinTex& wt=retired.wt;
-    if (wt.ds  !=VK_NULL_HANDLE) vk_.FreeDescriptorSets(device,winTexPool,1,&wt.ds);
-    if (wt.view!=VK_NULL_HANDLE) vk_.DestroyImageView(device,wt.view,nullptr);
-    if (wt.img !=VK_NULL_HANDLE) vk_.DestroyImage(device,wt.img,nullptr);
-    if (wt.mem !=VK_NULL_HANDLE) vk_.FreeMemory(device,wt.mem,nullptr);
-    if (retired.ahb) AHardwareBuffer_release(retired.ahb);
+    deleteQueue.clear();
 }
 
 void VulkanRendererContext::renderFrame() {
     std::shared_lock<std::shared_mutex> frameLock(frameMutex);
 
-    // ADPF: when this cycle's work began (0 = no hint session), and how much of it was spent
-    // blocked on the GPU or the display - waiting, not working (see VulkanRendererAdpf.cpp).
-    const int64_t adpfStart = adpfSession_.isOpen() ? steadyNowNs() : 0;
-    int64_t adpfBlocked = 0;
-
     needsRender.store(false,std::memory_order_relaxed);
     cursorMoved.store(false,std::memory_order_relaxed);
 
     if (surfaceDetached.load(std::memory_order_acquire)) return;
-    if (surfaceWidth==0||surfaceHeight==0) { swapchainRetryPending.store(true); return; }
+    if (surfaceWidth==0||surfaceHeight==0) return;
 
     if (fbResized.load()) {
         for (auto& f:inFlightFences) vk_.WaitForFences(device,1,&f,VK_TRUE,UINT64_MAX);
         cleanupSwapchain();
         bool ok=false;
-        try{createSwapchain();createFramebuffers();createCmdBufs();recreateSyncObjects();imgInFlight.assign(swapchainImages.size(),VK_NULL_HANDLE);ok=true;}
-        catch(const std::exception& e){
-            if (!swapchainRetryPending.exchange(true)) RLOG_E("swapchain recreate failed: %s",e.what());
-        }
-        catch(...){
-            if (!swapchainRetryPending.exchange(true)) RLOG_E("swapchain recreate failed: unknown exception");
-        }
-        if (ok) {
-            fbResized.store(false);
-            swapchainRetryPending.store(false);
-            needsRender.store(true);
-            wakeRender();
-            // New swapchain: size and image count may differ.
-            if (adpfStart) adpfSession_.notify(adpf::Hint::Reset, true, true, "winlite-swapchain");
-        }
+        try{createSwapchain();createFramebuffers();createCmdBufs();recreateSyncObjects();imgInFlight.assign(swapchainImages.size(),VK_NULL_HANDLE);ok=true;}catch(...){}
+        if (ok) fbResized.store(false);
         return;
     }
 
-    // Nothing to draw into (a recreate is still failing or pending): ask for another attempt.
-    if (swapchain==VK_NULL_HANDLE || cmdBufs.empty()) {
-        fbResized.store(true);
-        swapchainRetryPending.store(true);
-        return;
-    }
-    if (currentFrame >= cmdBufs.size() || cmdBufs[currentFrame] == VK_NULL_HANDLE) {
-        fbResized.store(true);
-        swapchainRetryPending.store(true);
-        return;
-    }
-    // Frames held for their display slot go on screen now if their time has come.
-    if (nextPendingDueNs_.load(std::memory_order_relaxed) != 0) {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        applyDuePresentsLocked(steadyNowNs());
-    }
-
+    if (currentFrame >= cmdBufs.size() || cmdBufs[currentFrame] == VK_NULL_HANDLE) return;
     bool currentFenceWaited = false;
-    VkResult fenceState=vk_.GetFenceStatus ? vk_.GetFenceStatus(device,inFlightFences[currentFrame]) : VK_NOT_READY;
-    if (fenceState==VK_NOT_READY) {
-        const int64_t waitFrom = adpfStart ? steadyNowNs() : 0;
-        if (vk_.WaitForFences(device,1,&inFlightFences[currentFrame],VK_TRUE,UINT64_MAX)!=VK_SUCCESS)
-            throw std::runtime_error("frame fence wait");
-        if (adpfStart) adpfBlocked += steadyNowNs() - waitFrom;
+    if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, inFlightFences[currentFrame]) == VK_NOT_READY) {
+        vk_.WaitForFences(device,1,&inFlightFences[currentFrame],VK_TRUE,UINT64_MAX);
         currentFenceWaited = true;
-    } else if (fenceState!=VK_SUCCESS) throw std::runtime_error("frame fence status");
-
-    // This slot's frame is finished, so every texture it drew can now be destroyed.
-    completedSerial=std::max(completedSerial,slotSerial[currentFrame]);
-    if (retirePending.load(std::memory_order_acquire)) {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        if (!deleteQueue.empty()) {
-            size_t keep=0;
-            for (auto& retired:deleteQueue) {
-                if (retired.serial<=completedSerial) destroyTexNow(retired);
-                else deleteQueue[keep++]=std::move(retired);
-            }
-            deleteQueue.resize(keep);
-        }
-        retirePending.store(!deleteQueue.empty(),std::memory_order_release);
     }
 
-    uint32_t imgIdx = 0;
-    {
-        const int64_t acquireFrom = adpfStart ? steadyNowNs() : 0;
-        VkResult ar = vk_.AcquireNextImageKHR(device,swapchain,2000000000ULL,
-                                              imgAvailSems[currentFrame],VK_NULL_HANDLE,&imgIdx);
-        if (adpfStart) adpfBlocked += steadyNowNs() - acquireFrom;   // FIFO: waits for the display
-        if (ar==VK_ERROR_OUT_OF_DATE_KHR||ar==VK_ERROR_SURFACE_LOST_KHR){
-            RLOG_E("renderFrame: acquire -> %s (recreating swapchain)",
-                   ar==VK_ERROR_OUT_OF_DATE_KHR ? "OUT_OF_DATE" : "SURFACE_LOST");
-            fbResized.store(true);
-            return;
-        }
-        if (ar!=VK_SUCCESS&&ar!=VK_SUBOPTIMAL_KHR) {
-            // Nothing acquired. A failure that comes back at once (device lost) with a
-            // held frame already due would otherwise loop straight back here: retry at the
-            // calm pace of a failed swapchain instead (cleared by the next good present).
-            if (!swapchainRetryPending.exchange(true))
-                RLOG_E("renderFrame: acquire failed (res=%d), retrying", (int)ar);
-            return;
-        }
-        if (imgIdx >= swapchainFBs.size() || imgIdx >= swapchainImages.size()) {
-            RLOG_E("renderFrame: invalid acquired image index=%u (fb=%zu images=%zu)",
-                imgIdx, swapchainFBs.size(), swapchainImages.size());
-            fbResized.store(true);
-            return;
-        }
+    uint32_t imgIdx;
+    // Bounded wait: with UINT64_MAX a swapchain whose images never come back (surface being
+    // torn down, a stalled compositor) blocks this thread - and detachSurface(), which waits
+    // for the frame lock it holds - for good.
+    VkResult res=vk_.AcquireNextImageKHR(device,swapchain,2000000000ULL,imgAvailSems[currentFrame],VK_NULL_HANDLE,&imgIdx);
+    if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR){fbResized.store(true);return;}
+    if (res==VK_TIMEOUT||res==VK_NOT_READY) {
+        if (!surfaceDetached.load(std::memory_order_acquire)) { needsRender.store(true); wakeRender(); }
+        return;
     }
-    // A working acquire ends any failure back-off (it would otherwise pace every frame at 50 ms).
-    if (swapchainRetryPending.load(std::memory_order_relaxed)) swapchainRetryPending.store(false);
-    VkResult res = VK_SUCCESS;
+    if (res!=VK_SUCCESS&&res!=VK_SUBOPTIMAL_KHR) return;
+    if (imgIdx >= swapchainFBs.size() || imgIdx >= swapchainImages.size()) {
+        RLOG_E("renderFrame: invalid acquired image index=%u (fb=%zu images=%zu)",
+            imgIdx, swapchainFBs.size(), swapchainImages.size());
+        return;
+    }
 
+    if (imgIdx >= renderDoneSems.size()) { fbResized.store(true); return; }
     if (imgInFlight.size()!=swapchainImages.size()) imgInFlight.assign(swapchainImages.size(),VK_NULL_HANDLE);
     if (imgInFlight[imgIdx]!=VK_NULL_HANDLE &&
         (!currentFenceWaited || imgInFlight[imgIdx] != inFlightFences[currentFrame])) {
-        if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, imgInFlight[imgIdx]) == VK_NOT_READY) {
-            const int64_t imgWaitFrom = adpfStart ? steadyNowNs() : 0;
-            const VkResult imgWait = vk_.WaitForFences(device,1,&imgInFlight[imgIdx],VK_TRUE,2000000000ULL);
-            if (adpfStart) adpfBlocked += steadyNowNs() - imgWaitFrom;
-            if (imgWait != VK_SUCCESS) {
-                RLOG_E("renderFrame: in-flight image fence wait timed out (2s), skipping frame");
-                fbResized.store(true);
-                return;
-            }
-        }
+        if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, imgInFlight[imgIdx]) == VK_NOT_READY)
+            vk_.WaitForFences(device,1,&imgInFlight[imgIdx],VK_TRUE,UINT64_MAX);
     }
     imgInFlight[imgIdx]=inFlightFences[currentFrame];
 
@@ -1355,27 +1077,31 @@ void VulkanRendererContext::renderFrame() {
     short ptrX,ptrY,curHotX,curHotY,curW,curH; bool curVis;
     VkBuffer curUpload=VK_NULL_HANDLE; bool hasCurUpload=false;
     VkRect2D effectiveScissor{{0,0},swapchainExt};
-    // First-use transitions are only marked done once the submit that carries them succeeded.
-    struct PendingAHBTransition { int64_t srcId; VkImage image; };
-    std::vector<PendingAHBTransition> pendingAHB;
 
     {
         std::lock_guard<std::mutex> lk(renderMutex);
 
-        // Pin the draw list before releasing renderMutex: removeWindow may run while the
-        // commands are recorded but before their submit reaches the GPU.
-        pendingFrameSerial=++submittedSerial;
+        if (!deleteQueue.empty()) {
+            // The previous frame (the other slot) may still be sampling these textures: this
+            // slot's fence only covers the frame before it. This thread is the only submitter,
+            // so waiting here is race-free.
+            for (auto& f:inFlightFences) vk_.WaitForFences(device,1,&f,VK_TRUE,UINT64_MAX);
+            for (auto& wt:deleteQueue) {
+                if (wt.ds  !=VK_NULL_HANDLE) vk_.FreeDescriptorSets(device,winTexPool,1,&wt.ds);
+                if (wt.view!=VK_NULL_HANDLE) vk_.DestroyImageView(device,wt.view,nullptr);
+                if (wt.img !=VK_NULL_HANDLE) vk_.DestroyImage(device,wt.img,nullptr);
+                if (wt.mem !=VK_NULL_HANDLE) vk_.FreeMemory(device,wt.mem,nullptr);
+                if (wt.stg !=VK_NULL_HANDLE){vk_.DestroyBuffer(device,wt.stg,nullptr);vk_.FreeMemory(device,wt.stgMem,nullptr);}
+            }
+            deleteQueue.clear();
+        }
 
         ox=sceneOffsetX; oy=sceneOffsetY; sx=sceneScaleX; sy=sceneScaleY;
         cw=(float)containerWidth; ch=(float)containerHeight;
         ptrX=(short)pointerX.load(); ptrY=(short)pointerY.load();
-        curHotX=cursorHotX; curHotY=cursorHotY;
         curVis=cursorVisible.load();
 
         if (hasCustomScissor) effectiveScissor = rotateRectLogicalToIdentity(customScissor);
-
-        // A held frame that came due while this pass waited for its image goes along too.
-        applyDuePresentsLocked(steadyNowNs());
 
         if (treeDirty) { rebuildRenderListFromTree(); treeDirty = false; }
 
@@ -1385,108 +1111,68 @@ void VulkanRendererContext::renderFrame() {
             if (it==texMap.end()) continue;
             WinTex& wt=it->second;
             if (wt.ds==VK_NULL_HANDLE) continue;
-            DrawEntry de{wt.img,wt.ds,re.x,re.y,wt.w,wt.h};
-            auto sit=srcImports.find(wt.srcId);
-            if (sit!=srcImports.end()) sit->second.lastSerial = pendingFrameSerial;
-            if (sit!=srcImports.end() && sit->second.wt.img==wt.img &&
-                sit->second.wt.needsTransition &&
-                std::none_of(pendingAHB.begin(),pendingAHB.end(),
-                    [&](const PendingAHBTransition& p){return p.image==wt.img;})) {
-                de.needsTransition=true;
-                pendingAHB.push_back({wt.srcId,wt.img});
-            }
+            DrawEntry de{wt.img,wt.ds,VK_NULL_HANDLE,re.x,re.y,wt.w,wt.h};
+            de.isAHB=wt.isAHB;
+            if (wt.needsTransition) { de.needsTransition=true; wt.needsTransition=false; }
+            if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE) { de.upload=wt.stg; wt.dirty=false; }
+            else if (wt.isAHB) { wt.dirty=false; }
             frameDraws.push_back(de);
         }
 
-        if (isCursorImageDirty.load() && !cursorPixels.empty()) {
-            if (cursorImg==VK_NULL_HANDLE || cursorTexW!=cursorPendingW || cursorTexH!=cursorPendingH) {
-                // The shared cursor descriptor and the old image view can still be referenced by
-                // either frame slot. Resizes are rare; wait only here, never on pointer motion or
-                // same-size cursor updates.
-                if (cursorImg!=VK_NULL_HANDLE)
-                    for (auto& fence:inFlightFences)
-                        if (vk_.WaitForFences(device,1,&fence,VK_TRUE,UINT64_MAX)!=VK_SUCCESS)
-                            throw std::runtime_error("cursor resize fence wait");
-                ensureCursorTex(cursorPendingW,cursorPendingH);
+        // A new cursor image is applied here, on the render thread, in step with the frame that
+        // shows it. A different size replaces the texture, which frames still in flight may be
+        // sampling: both slots are drained first (only when the cursor changes size). The staging
+        // buffer is this slot's own, and this slot's fence was waited above.
+        if (isCursorImageDirty.load() && cursorPendW>0 && cursorPendH>0 &&
+            cursorPixels.size() >= (size_t)cursorPendW*cursorPendH) {
+            if (cursorImg==VK_NULL_HANDLE || cursorTexW!=cursorPendW || cursorTexH!=cursorPendH) {
+                for (auto& f:inFlightFences) vk_.WaitForFences(device,1,&f,VK_TRUE,UINT64_MAX);
+                ensureCursorTex(cursorPendW,cursorPendH);
             }
-            VkDeviceSize csz=(VkDeviceSize)cursorTexW*cursorTexH*4;
-            ensureCursorStaging(csz,currentFrame);
-            memcpy(cursorStgP[currentFrame],cursorPixels.data(),(size_t)csz);
-            isCursorImageDirty.store(false); hasCurUpload=true; curUpload=cursorStg[currentFrame];
+            if (cursorImg!=VK_NULL_HANDLE) {
+                const VkDeviceSize csz=(VkDeviceSize)cursorPendW*cursorPendH*4;
+                ensureCursorStaging(currentFrame,csz);
+                if (cursorStgP[currentFrame]) {
+                    memcpy(cursorStgP[currentFrame], cursorPixels.data(), (size_t)csz);
+                    cursorHotX=cursorPendHotX; cursorHotY=cursorPendHotY;
+                    hasCurUpload=true; curUpload=cursorStg[currentFrame];
+                    isCursorImageDirty.store(false);
+                }
+            }
         }
-        curW=cursorTexW; curH=cursorTexH;
+        curHotX=cursorHotX; curHotY=cursorHotY; curW=cursorTexW; curH=cursorTexH;
     }
 
     recordCmdBuf(cmdBufs[currentFrame],imgIdx,frameDraws,
-        frameAhbTransitions,framePostUpload,
+        frameAhbTransitions,framePreUpload,framePostUpload,
         curUpload,hasCurUpload,
         ox,oy,sx,sy,cw,ch,ptrX,ptrY,curHotX,curHotY,curW,curH,curVis,
         effectiveScissor);
 
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSwapchainKHR scs[]={swapchain};
+    if (hasCurUpload) cursorImgInit=true;   // the copy recorded above takes the image out of UNDEFINED
+
+    VkSemaphore wSem[]={imgAvailSems[currentFrame]}, sSem[]={renderDoneSems[imgIdx]};
+    VkPipelineStageFlags wStage[]={VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.waitSemaphoreCount=1; si.pWaitSemaphores=wSem; si.pWaitDstStageMask=wStage;
+    si.commandBufferCount=1; si.pCommandBuffers=&cmdBufs[currentFrame];
+    si.signalSemaphoreCount=1; si.pSignalSemaphores=sSem;
 
     vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
-    VkSemaphore wSem = imgAvailSems[currentFrame];
-    VkSemaphore sSem = renderDoneSems[imgIdx];
-    VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    si.waitSemaphoreCount=1; si.pWaitSemaphores=&wSem; si.pWaitDstStageMask=&waitStage;
-    si.commandBufferCount=1; si.pCommandBuffers=&cmdBufs[currentFrame];
-    si.signalSemaphoreCount=1; si.pSignalSemaphores=&sSem;
-    // The submit also moves the GPU-progress timeline to this frame's serial: once it is
-    // reached, every guest buffer this frame sampled can go back to the guest.
-    VkSemaphore signalSems[2] = {sSem, gpuTimeline_};
-    uint64_t signalValues[2] = {0, (uint64_t)pendingFrameSerial};
-    VkTimelineSemaphoreSubmitInfo timelineInfo{};
-    if (gpuTimeline_ != VK_NULL_HANDLE && pendingFrameSerial != 0) {
-        timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-        timelineInfo.signalSemaphoreValueCount = 2;
-        timelineInfo.pSignalSemaphoreValues = signalValues;
-        si.pNext = &timelineInfo;
-        si.signalSemaphoreCount = 2; si.pSignalSemaphores = signalSems;
-    }
     if (vk_.QueueSubmit(graphicsQueue,1,&si,inFlightFences[currentFrame])!=VK_SUCCESS) {
-        // The fence was reset above and may now never signal; replace it
-        // with a signalled one so the next use of this slot does not wait
-        // on it forever.
-        {
-            std::lock_guard<std::mutex> lk(renderMutex);
-            pendingFrameSerial = 0;
-            if (hasCurUpload) isCursorImageDirty.store(true);
-        }
         vk_.DestroyFence(device,inFlightFences[currentFrame],nullptr);
         VkFenceCreateInfo fi{}; fi.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; fi.flags=VK_FENCE_CREATE_SIGNALED_BIT;
         vk_.CreateFence(device,&fi,nullptr,&inFlightFences[currentFrame]);
-        imgInFlight.assign(swapchainImages.size(), VK_NULL_HANDLE);
-        fbResized.store(true);
-        swapchainRetryPending.store(true);
         return;
     }
-    if (!pendingAHB.empty()) {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        for (const auto& p:pendingAHB) {
-            auto it=srcImports.find(p.srcId);
-            if (it!=srcImports.end() && it->second.wt.img==p.image)
-                it->second.wt.needsTransition=false;
-        }
-    }
+    VkSwapchainKHR scs[]={swapchain};
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    pi.waitSemaphoreCount=1; pi.pWaitSemaphores=&sSem;
-    pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
-    res=vk_.QueuePresentKHR(graphicsQueue,&pi);
-    if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR||res==VK_SUBOPTIMAL_KHR) {
-        fbResized.store(true);
-    }
-    {
-        // Everything of this frame is submitted and the slot's fence covers it.
-        std::lock_guard<std::mutex> lk(renderMutex);
-        slotSerial[currentFrame]=pendingFrameSerial;
-        pendingFrameSerial=0;
-    }
-    lastPresentNs_ = steadyNowNs();
-    notePresentedForPacing(1);
+    pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
+
+    res = vk_.QueuePresentKHR(graphicsQueue, &pi);
+
+    if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR||res==VK_SUBOPTIMAL_KHR) fbResized.store(true);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
-    if (adpfStart) adpfFrameEnd(adpfStart, adpfBlocked);
 }
 
 void VulkanRendererContext::onSurfaceResized(int w, int h) {
@@ -1498,10 +1184,7 @@ void VulkanRendererContext::onSurfaceResized(int w, int h) {
 void VulkanRendererContext::detachSurface() {
     surfaceDetached.store(true, std::memory_order_release);
     wakeRender(true);
-    {
-        std::unique_lock<std::shared_mutex> frameLock(frameMutex);
-        adpfSession_.bindWindow(nullptr);   // the window is released below
-    }
+    { std::unique_lock<std::shared_mutex> frameLock(frameMutex); }
     vk_.DeviceWaitIdle(device);
     cleanupSwapchain();
     if (surface != VK_NULL_HANDLE) {
@@ -1537,11 +1220,9 @@ bool VulkanRendererContext::reattachSurface(ANativeWindow* newWindow) {
 
         surfaceWidth  = ANativeWindow_getWidth(window);
         surfaceHeight = ANativeWindow_getHeight(window);
-        // Texture layouts survive a surface change; forcing a transition from UNDEFINED here
-        // would throw their contents away.
-        swapchainRetryPending.store(false);
+        for (auto& [id, wt] : texMap) wt.needsTransition = true;
+        for (auto& [ahb, wt] : ahbImportCache) wt.needsTransition = true;
         surfaceDetached.store(false, std::memory_order_release);
-        adpfSession_.bindWindow(window);   // no-op without an open session
     }
     needsRender.store(true, std::memory_order_release);
     wakeRender(true);
@@ -1566,6 +1247,8 @@ void VulkanRendererContext::setCursorVisible(bool v) {
 void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short stride, short hotX, short hotY, bool rgba) {
     if (!px||w<=0||h<=0) return;
     std::lock_guard<std::mutex> lk(renderMutex);
+    // No Vulkan call here: the render thread creates/replaces the texture and fills the staging
+    // buffer when it has waited for the frames that may still use them (see renderFrame).
     cursorPixels.resize((size_t)w*h);
     const size_t srcStrideBytes=(size_t)std::max((int)stride,(int)w)*4;
     const size_t rowBytes=(size_t)w*4;
@@ -1577,388 +1260,140 @@ void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short 
         if (rgba) { memcpy(d,s,rowBytes); continue; }
         for (size_t x=0;x<rowBytes;x+=4) { d[x]=s[x+2]; d[x+1]=s[x+1]; d[x+2]=s[x]; d[x+3]=s[x+3]; }
     }
-    cursorPendingW=w; cursorPendingH=h;
-    cursorHotX=hotX; cursorHotY=hotY;
+    cursorPendW=w; cursorPendH=h; cursorPendHotX=hotX; cursorPendHotY=hotY;
     isCursorImageDirty.store(true); needsRender.store(true); wakeRender();
 }
 
-bool VulkanRendererContext::acquireSourceLocked(int64_t srcId, AHardwareBuffer* ahb) {
-    auto sit = srcImports.find(srcId);
-    if (sit != srcImports.end() && (sit->second.released || sit->second.ahb != ahb)) {
-        // A drawable's buffer never changes and a released one is never presented again; if
-        // either happens anyway, never sample the stale import. Windows still showing it keep
-        // the borrowed handles until they move on (retired only once unused).
-        RLOG_E("acquireSource: stale import for source %" PRId64 " (released=%d)",
-               srcId, (int)sit->second.released);
-        if (!sit->second.released) {
-            sit->second.released = true;
-            if (sit->second.users <= 0) retireSourceLocked(sit);
+void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, short h, short stride, int, int) {
+    if (!px||w<=0||h<=0) return;
+    void* mapped=nullptr;
+    {
+        std::lock_guard<std::mutex> lk(renderMutex);
+        WinTex& wt=texMap[id];
+        if (wt.img==VK_NULL_HANDLE || wt.w!=w || wt.h!=h) {
+            if (wt.img!=VK_NULL_HANDLE) destroyWinTex(wt);
+            if (!createWinTexResources(wt,w,h)) { texMap.erase(id); return; }
         }
-        return false;
+        mapped=wt.mapped;
     }
-    if (sit != srcImports.end()) return true;
-    SourceImport imp{};
-    if (!importAHBToWinTex(imp.wt, ahb)) {
-        RLOG_E("acquireSource: import failed for source %" PRId64, srcId);
-        return false;
+    if (!mapped) return;
+    const size_t dstPitch=(size_t)w*4;
+    const int32_t srcStride=stride>0?stride:w;
+    uint32_t* src2=static_cast<uint32_t*>(px);
+    uint8_t*  dst2=static_cast<uint8_t*>(mapped);
+    for (int row=0;row<h;++row)
+        memcpy(dst2+(size_t)row*dstPitch, &src2[(size_t)row*srcStride], (size_t)w*4);
+    {
+        std::lock_guard<std::mutex> lk(renderMutex);
+        auto it=texMap.find(id);
+        if (it!=texMap.end()) it->second.dirty=true;
     }
-    AHardwareBuffer_acquire(ahb);
-    imp.ahb = ahb;
-    srcImports.emplace(srcId, imp);
-    RLOG("acquireSource: imported source %" PRId64 " img=%p (%dx%d, %zu imports)",
-        srcId, (void*)imp.wt.img, imp.wt.w, imp.wt.h, srcImports.size());
-    return true;
-}
-
-void VulkanRendererContext::showSourceLocked(int64_t contentId, int64_t srcId) {
-    auto sit = srcImports.find(srcId);
-    if (sit == srcImports.end()) return;
-    SourceImport& src = sit->second;
-    WinTex& wt = texMap[contentId];
-    const int64_t previousSrc = wt.srcId;   // 0 for a new entry
-    if (previousSrc != srcId) src.users++;
-    wt = WinTex{};
-    wt.img  = src.wt.img; wt.mem  = src.wt.mem; wt.view = src.wt.view; wt.ds = src.wt.ds;
-    wt.srcId = srcId; wt.w = src.wt.w; wt.h = src.wt.h;
-    wt.needsTransition = false; // The first-use layout belongs to the import.
-    // After the new reference is taken: the old source may be a released pixmap that this
-    // window was the last one showing.
-    if (previousSrc != 0 && previousSrc != srcId) unrefSourceLocked(previousSrc);
-}
-
-void VulkanRendererContext::updateWindowContentAHB(int64_t contentId, int64_t srcId,
-                                                   AHardwareBuffer* ahb, short, short, int, int) {
-    if (!ahb || contentId==0 || srcId==0) return;
-    std::lock_guard<std::mutex> lk(renderMutex);
-    if (!acquireSourceLocked(srcId, ahb)) return;
-    // A newer frame replaces anything still waiting for its slot.
-    dropPendingLocked(contentId);
-    showSourceLocked(contentId, srcId);
     needsRender.store(true); wakeRender();
 }
 
-void VulkanRendererContext::presentFrame(int64_t contentId, int64_t srcId, AHardwareBuffer* ahb,
-                                         int64_t guestFrameNs, int64_t out[4]) {
-    out[0] = out[1] = out[2] = out[3] = 0;
-    if (!ahb || contentId==0 || srcId==0) return;
+void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short, short, int, int) {
+    if (!ahb) return;
     std::lock_guard<std::mutex> lk(renderMutex);
-    if (!acquireSourceLocked(srcId, ahb)) return;
-    const int64_t now = steadyNowNs();
-
-    // Windows that stopped presenting (closed launcher, recreated swapchain) drop their state.
-    if (pacers_.size() > 1) {
-        for (auto it = pacers_.begin(); it != pacers_.end();) {
-            if (it->first != contentId && now - it->second.lastPresentNs > 2000000000LL)
-                it = pacers_.erase(it);
-            else ++it;
+    auto cit = ahbImportCache.find(ahb);
+    if (cit == ahbImportCache.end()) {
+        WinTex tmp{};
+        if (!importAHBToWinTex(tmp, ahb)) {
+            RLOG_E("updateWindowContentAHB: import failed for id=%" PRId64, id);
+            return;
         }
+        AHardwareBuffer_acquire(ahb);
+        ahbImportCache[ahb] = tmp;
+        windowAhbs[id].push_back(ahb);
+        cit = ahbImportCache.find(ahb);
+        RLOG("updateWindowContentAHB: imported new AHB %p for id=%" PRId64 " (%dx%d)",
+            (void*)ahb, id, tmp.w, tmp.h);
     }
-    Pacer& pc = pacers_[contentId];
-    pc.lastPresentNs = now;
-
-    if (guestFrameNs >= 0 && guestFrameNs < 1000000000LL) {
-        if (!pc.guestFrameValid) {
-            pc.guestFrameMeanNs = (double)guestFrameNs; pc.guestFrameDevNs = guestFrameNs * 0.25;
-        } else {
-            const double d = (double)guestFrameNs - pc.guestFrameMeanNs;
-            pc.guestFrameMeanNs += 0.1 * d;
-            pc.guestFrameDevNs  += 0.1 * (std::fabs(d) - pc.guestFrameDevNs);
-        }
-        pc.guestFrameValid = true;
-    }
-
-    // How many buffers the guest cycles through: two may be out at once only if it has at least
-    // three (one stays here as the newest frame). A constant 2 would time a two-buffer guest's
-    // only free buffer for the slot after next - every frame late, half the rate.
-    int distinct = 1;
-    if (pc.recentSrc[0] != 0 && pc.recentSrc[0] != srcId) distinct++;
-    if (pc.recentSrc[1] != 0 && pc.recentSrc[1] != srcId && pc.recentSrc[1] != pc.recentSrc[0]) distinct++;
-    pc.recentSrc[1] = pc.recentSrc[0];
-    pc.recentSrc[0] = srcId;
-    const int depth = distinct >= 3 ? 2 : 1;
-
-    const int     fps    = fpsLimit_.load(std::memory_order_relaxed);
-    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-    bool staged = false;
-
-    if (fps > 0) {
-        int64_t spacing  = 1000000000LL / fps;
-        const int64_t deadline = vsyncDeadlineNs_.load(std::memory_order_relaxed);
-        const bool clockFresh  = vsyncClockFresh(now);
-        // Hold-to-slot needs a live vsync clock.
-        bool grid = clockFresh && period > 0 && spacing > period + period / 20;
-        // A limit at the refresh rate (within 5 %: 60 on 60 Hz, 120 on 120 Hz) is the grid with
-        // one slot per refresh: the frame is held to its slot and the buffer goes back just in
-        // time for the next one, instead of frames shown at once and queued in FIFO behind the
-        // previous one.
-        if (!grid && clockFresh && period > 0 && std::llabs(spacing - period) <= period / 20) {
-            grid = true;
-            spacing = period;
-        }
-        if (grid) {
-            // Composite this long before the slot's queue deadline (GPU blit + submit).
-            const int64_t lead = queueLeadNs(period);
-            const auto snap = [&](int64_t t) {
-                return deadline + (int64_t)std::llround((double)(t - deadline) / (double)period) * period; };
-            const auto ceilGrid = [&](int64_t t) {
-                return deadline + (int64_t)std::ceil((double)(t - deadline) / (double)period) * period; };
-            const int64_t earliest = now + lead + 500000LL;
-            int64_t ideal = pc.idealSlotNs ? pc.idealSlotNs + spacing : 0;
-            int64_t slot  = ideal ? snap(ideal) : 0;
-            const bool late = ideal != 0 && slot < earliest;
-            // First frame or a late one (missed its slot): restart the cadence from the next
-            // slot that can still be made.
-            if (!ideal || late) { slot = ceilGrid(earliest); ideal = slot; }
-            auto& q = pendingPresents_[contentId];
-            if (q.size() >= 2) {
-                // The guest got ahead (spare buffers at start-up): show the newest frame in
-                // the last queued slot instead of letting the queue - and latency - grow.
-                unrefSourceLocked(q.back().srcId);
-                q.back().srcId = srcId;
-                srcImports[srcId].users++;
-                slot  = q.back().slotNs;
-                ideal = pc.idealSlotNs;
-            } else {
-                q.push_back({srcId, slot - lead, slot});
-                srcImports[srcId].users++;   // the pending entry keeps the import alive
-                pc.idealSlotNs = ideal;
-            }
-            staged = true;
-            const int64_t due = slot - lead;
-
-            // The buffer given back now is drawn into for the next slot (depth 1) or, with the
-            // other one already out for that, the slot after (depth 2); it comes back just before
-            // its slot's composite. The release time of a given slot is the same at either
-            // depth: depth 2 only keeps a late frame from holding up the next buffer.
-            const int64_t target = snap(ideal + spacing * depth);
-            const int64_t guestEst = pc.guestFrameValid
-                ? (int64_t)(pc.guestFrameMeanNs + 3.0 * pc.guestFrameDevNs) : spacing / 2;
-            const int64_t justInTime = target - lead - guestEst - 2000000LL;
-            out[0] = std::max<int64_t>({justInTime, pc.lastReleaseNs + spacing * 95 / 100, now});
-            // Until `due` the previous buffer is still the window's content. GPU reads of it
-            // that are still running after that are covered by sourceBusy() when the device has
-            // a timeline semaphore; without one, by a fixed margin.
-            out[1] = gpuTimeline_ != VK_NULL_HANDLE ? due : due + 1500000LL;
-            out[2] = depth;
-            // The present is complete when it goes on screen - at its slot, not now. Guests that
-            // start their next frame on completion (DXVK 2.3+ with present_wait, FIFO WSIs) then
-            // read input right after the frame is shown instead of up to a slot earlier. Only
-            // for a guest that keeps up: this frame made its slot and one frame (with the
-            // submit lead and margin) fits in a slot interval. A heavy or late guest completes
-            // at once, so it keeps overlapping its frames instead of losing a slot each time.
-            const bool keepsUp = !late && guestEst + lead + 2000000LL <= spacing;
-            if (keepsUp) out[3] = slot;
-        } else {
-            // Release cadence only (no clock, or limit >= refresh). Two buffers may overlap so
-            // a heavy guest keeps its CPU/GPU pipelining.
-            pc.idealSlotNs = 0;
-            out[0] = std::max(now, pc.lastReleaseNs + spacing);
-            out[1] = 0;
-            out[2] = 2;
-        }
-        pc.lastReleaseNs = out[0];
-    } else {
-        pc.idealSlotNs = 0;
-        pc.lastReleaseNs = 0;
-    }
-
-    if (staged) {
-        updateNextPendingDueLocked();
-    } else {
-        dropPendingLocked(contentId);
-        showSourceLocked(contentId, srcId);
-        needsRender.store(true);
-    }
-    wakeRender();
+    WinTex& src = cit->second;
+    WinTex& wt  = texMap[id];
+    wt.img  = src.img; wt.mem  = src.mem; wt.view = src.view; wt.ds   = src.ds;
+    wt.isAHB = true; wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
+    if (src.needsTransition) { wt.needsTransition = true; src.needsTransition = false; }
+    // This window may have just stopped showing a buffer that was only waiting for that.
+    reapDeadAhbsLocked();
+    needsRender.store(true); wakeRender();
 }
 
-bool VulkanRendererContext::sourceBusy(int64_t srcId) {
-    if (gpuTimeline_ == VK_NULL_HANDLE || !vk_.GetSemaphoreCounterValue) return false;
-    uint64_t serial = 0;
-    {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        auto it = srcImports.find(srcId);
-        if (it == srcImports.end()) return false;
-        serial = it->second.lastSerial;
-    }
-    if (serial == 0) return false;
-    uint64_t done = 0;
-    if (vk_.GetSemaphoreCounterValue(device, gpuTimeline_, &done) != VK_SUCCESS) return false;
-    return done < serial;
-}
-
-uint64_t VulkanRendererContext::beginSourceIdleWait(int64_t srcId) {
-    if (gpuTimeline_ == VK_NULL_HANDLE || !vk_.GetSemaphoreCounterValue || !vk_.WaitSemaphores)
-        return 0;
-    uint64_t serial = 0;
-    {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        auto it = srcImports.find(srcId);
-        if (it == srcImports.end()) return 0;
-        serial = it->second.lastSerial;
-    }
-    uint64_t done = 0;
-    if (serial == 0 || vk_.GetSemaphoreCounterValue(device, gpuTimeline_, &done) != VK_SUCCESS ||
-        done >= serial)
-        return 0;
-    idleWaiters_.fetch_add(1, std::memory_order_acq_rel);
-    return serial;
-}
-
-void VulkanRendererContext::endSourceIdleWait(uint64_t serial, uint64_t timeoutNs) {
-    // A timeout (a frame whose submit never went out signals nothing until a later frame
-    // passes it) or a lost device just returns: the buffer goes back on the caller's bound.
-    VkSemaphoreWaitInfo wi{};
-    wi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-    wi.semaphoreCount = 1;
-    wi.pSemaphores = &gpuTimeline_;
-    wi.pValues = &serial;
-    vk_.WaitSemaphores(device, &wi, timeoutNs);
-    idleWaiters_.fetch_sub(1, std::memory_order_acq_rel);
-}
-
-void VulkanRendererContext::releaseIdleWaiters() {
-    // Called by the destructor once the GPU is idle (renderMutex held, so submittedSerial is
-    // stable). Every submitted serial has signalled by now; a waiter can still be blocked on one
-    // whose submit failed, so move the timeline past every serial handed out. No new waiter can
-    // start: beginSourceIdleWait runs under the Java lock this destructor is called under.
-    if (gpuTimeline_ == VK_NULL_HANDLE) return;
-    if (idleWaiters_.load(std::memory_order_acquire) > 0 && vk_.SignalSemaphore &&
-        vk_.GetSemaphoreCounterValue) {
-        uint64_t current = 0;
-        if (vk_.GetSemaphoreCounterValue(device, gpuTimeline_, &current) == VK_SUCCESS &&
-            current <= submittedSerial) {
-            VkSemaphoreSignalInfo si{};
-            si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
-            si.semaphore = gpuTimeline_;
-            si.value = (uint64_t)submittedSerial + 1;
-            vk_.SignalSemaphore(device, &si);
-        }
-    }
-    // Without vkSignalSemaphore this is bounded by the waiters' own timeout.
-    while (idleWaiters_.load(std::memory_order_acquire) > 0)
-        std::this_thread::sleep_for(std::chrono::microseconds(200));
-}
-
-void VulkanRendererContext::dropPendingLocked(int64_t contentId) {
-    auto it = pendingPresents_.find(contentId);
-    if (it == pendingPresents_.end()) return;
-    std::deque<PendingPresent> q = std::move(it->second);
-    pendingPresents_.erase(it);
-    for (const auto& p : q) unrefSourceLocked(p.srcId);
-    updateNextPendingDueLocked();
-}
-
-void VulkanRendererContext::applyDuePresentsLocked(int64_t nowNs) {
-    if (pendingPresents_.empty()) return;
-    // A wake can be a little early or late; anything due within the next 0.25 ms goes now.
-    const int64_t horizon = nowNs + 250000LL;
-    for (auto it = pendingPresents_.begin(); it != pendingPresents_.end();) {
-        auto& q = it->second;
-        while (!q.empty() && q.front().dueNs <= horizon) {
-            const int64_t src = q.front().srcId;
-            q.pop_front();
-            showSourceLocked(it->first, src);
-            unrefSourceLocked(src);   // the pending entry's reference
-        }
-        if (q.empty()) it = pendingPresents_.erase(it); else ++it;
-    }
-    updateNextPendingDueLocked();
-}
-
-void VulkanRendererContext::updateNextPendingDueLocked() {
-    int64_t due = 0;
-    for (const auto& [content, q] : pendingPresents_)
-        if (!q.empty() && (due == 0 || q.front().dueNs < due)) due = q.front().dueNs;
-    nextPendingDueNs_.store(due, std::memory_order_relaxed);
-}
-
-void VulkanRendererContext::setFpsLimit(int fps) {
-    fps = std::clamp(fps, 0, 1000);
-    if (fpsLimit_.exchange(fps, std::memory_order_relaxed) == fps) return;
-    {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        for (auto& [content, pc] : pacers_) pc.resetCadence();
-        // Frames held for the old cadence are shown right away.
-        for (auto& [content, q] : pendingPresents_)
-            for (auto& p : q) p.dueNs = 1;   // in the past (0 means "none")
-        updateNextPendingDueLocked();
-    }
-    RLOG("setFpsLimit: %d", fps);
-    wakeRender();
-}
-
-void VulkanRendererContext::onVsync(int64_t frameTimeNs, int64_t deadlineNs, int64_t presentNs) {
-    (void)presentNs;
-    // Before API 33 there is no frame timeline: a frame queued before the next app vsync makes
-    // the same display refresh as one queued right after this one, so that is the grid.
-    const int64_t period = refreshPeriodNs_.load(std::memory_order_relaxed);
-    const int64_t grid = deadlineNs > 0 ? deadlineNs : (period > 0 ? frameTimeNs + period : 0);
-    if (grid <= 0) return;
-    vsyncDeadlineNs_.store(grid, std::memory_order_relaxed);
-    vsyncSeenNs_.store(steadyNowNs(), std::memory_order_relaxed);
-}
-
-void VulkanRendererContext::unrefSourceLocked(int64_t srcId) {
-    auto it = srcImports.find(srcId);
-    if (it == srcImports.end()) return;
-    if (--it->second.users <= 0) {
-        it->second.users = 0;
-        if (it->second.released) retireSourceLocked(it);
-    }
-}
-
-void VulkanRendererContext::retireSourceLocked(std::unordered_map<int64_t, SourceImport>::iterator it) {
-    // Destroyed (and its AHB reference dropped) once the last frame that may have sampled it
-    // has completed on the GPU - see renderFrame()'s deleteQueue sweep.
-    deleteQueue.push_back({it->second.wt, pendingFrameSerial ? pendingFrameSerial : submittedSerial,
-                           it->second.ahb});
-    retirePending.store(true, std::memory_order_release);
-    srcImports.erase(it);
-}
-
-void VulkanRendererContext::eraseContentLocked(int64_t contentId) {
-    dropPendingLocked(contentId);
-    pacers_.erase(contentId);
-    auto it = texMap.find(contentId);
-    if (it == texMap.end()) return;
-    const int64_t srcId = it->second.srcId;
-    texMap.erase(it);
-    unrefSourceLocked(srcId);
-}
-
-void VulkanRendererContext::releaseDrawable(int64_t id) {
-    if (id == 0) return;
+void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, const int* ys, int count) {
     std::lock_guard<std::mutex> lk(renderMutex);
-    // As window content (a destroyed window, or the old content of a resized one).
-    eraseContentLocked(id);
-    renderList.erase(std::remove_if(renderList.begin(),renderList.end(),
-        [id](const RenderEntry& e){return e.id==id;}),renderList.end());
-    // As a buffer source (a freed pixmap, or the content above). A window may still be showing
-    // it - e.g. the last frame of a swapchain the game just recreated - so it lives until that
-    // window shows something else.
-    auto sit = srcImports.find(id);
-    if (sit != srcImports.end()) {
-        sit->second.released = true;
-        if (sit->second.users <= 0) retireSourceLocked(sit);
-    }
+    renderList.resize(count);
+    for (int i=0;i<count;i++) renderList[i]={ids[i],xs[i],ys[i]};
     needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::removeWindow(int64_t id) {
     std::lock_guard<std::mutex> lk(renderMutex);
-    eraseContentLocked(id);
+    auto it = texMap.find(id);
+    if (it != texMap.end()) {
+        if (!it->second.isAHB) destroyWinTex(it->second);
+        texMap.erase(it);
+    }
+    auto wit = windowAhbs.find(id);
+    if (wit != windowAhbs.end()) {
+        // Buffers imported for this window go too - unless another window still shows one of
+        // them (a pixmap presented to two windows): reapDeadAhbsLocked() keeps those.
+        for (AHardwareBuffer* ahb : wit->second) ahbDead.insert(ahb);
+        windowAhbs.erase(wit);
+    }
     renderList.erase(std::remove_if(renderList.begin(),renderList.end(),
         [id](const RenderEntry& e){return e.id==id;}),renderList.end());
+    reapDeadAhbsLocked();
     needsRender.store(true); wakeRender();
+}
+
+void VulkanRendererContext::releaseAhb(AHardwareBuffer* ahb) {
+    if (!ahb) return;
+    std::lock_guard<std::mutex> lk(renderMutex);
+    // Never imported (or already dropped): nothing of ours to free, and nothing may be marked -
+    // the pointer could be reused by a later allocation.
+    if (ahbImportCache.find(ahb) == ahbImportCache.end()) return;
+    ahbDead.insert(ahb);
+    reapDeadAhbsLocked();
+    needsRender.store(true); wakeRender();
+}
+
+// Frees every dead imported buffer that no window shows any more. A window that still shows one
+// keeps it (its last frame stays on screen) until updateWindowContentAHB() points it elsewhere
+// or removeWindow() drops it. Texture entries whose window content id is not used by any window
+// node (the old content of a resized window) cannot be shown again and are dropped here.
+void VulkanRendererContext::reapDeadAhbsLocked() {
+    if (ahbDead.empty()) return;
+
+    std::unordered_set<int64_t> liveContent;
+    for (auto& [wid, node] : windowTree) liveContent.insert(node.contentId);
+
+    for (auto it = texMap.begin(); it != texMap.end(); ) {
+        const WinTex& wt = it->second;
+        if (wt.isAHB && wt.ahb && ahbDead.count(wt.ahb) && !liveContent.count(it->first))
+            it = texMap.erase(it);
+        else ++it;
+    }
+
+    std::unordered_set<AHardwareBuffer*> shown;
+    for (auto& [id, wt] : texMap) if (wt.isAHB && wt.ahb) shown.insert(wt.ahb);
+
+    for (auto it = ahbDead.begin(); it != ahbDead.end(); ) {
+        AHardwareBuffer* ahb = *it;
+        if (shown.count(ahb)) { ++it; continue; }
+        auto cit = ahbImportCache.find(ahb);
+        if (cit != ahbImportCache.end()) {
+            WinTex deferred = cit->second; deferred.isAHB = false;
+            deleteQueue.push_back(deferred);           // freed after the frames in flight are done
+            ahbImportCache.erase(cit);
+            AHardwareBuffer_release(ahb);              // the reference taken at import
+        }
+        for (auto& [wid, list] : windowAhbs)
+            list.erase(std::remove(list.begin(), list.end(), ahb), list.end());
+        it = ahbDead.erase(it);
+    }
 }
 
 void VulkanRendererContext::initRootWindow(int64_t rootId, int64_t contentId, int width, int height) {
     std::lock_guard<std::mutex> lk(renderMutex);
-    // Only called on a fresh renderer and by the Java window-tree replay, which re-sends every
-    // window right after: start from an empty tree, so nodes created by window events queued
-    // ahead of the replay are rebuilt from the X server's current state, not merged with it.
-    windowTree.clear();
     rootWindowId = rootId;
     treeScreenW = width; treeScreenH = height;
     WinNode node;
@@ -1972,11 +1407,6 @@ void VulkanRendererContext::initRootWindow(int64_t rootId, int64_t contentId, in
 void VulkanRendererContext::createWindowNode(int64_t id, int64_t parentId, int64_t contentId,
                                               int x, int y, int width, int height) {
     std::lock_guard<std::mutex> lk(renderMutex);
-    // An X id is only reused after DestroyWindow, which erases the node first. A node that
-    // already exists therefore means a CreateWindow queued behind the window-tree replay, which
-    // already built it from newer state: re-creating it would wipe its children and map state
-    // and list it twice in its parent (drawn twice until the next restack).
-    if (windowTree.count(id)) return;
     WinNode node;
     node.id = id; node.parentId = parentId; node.contentId = contentId;
     node.x = x; node.y = y; node.width = width; node.height = height;
@@ -2052,13 +1482,10 @@ void VulkanRendererContext::updateWindowGeometryNode(int64_t id, int64_t content
     if (it == windowTree.end()) return;
     it->second.x = x; it->second.y = y;
     it->second.width = width; it->second.height = height;
-    // A resize replaces the window's content drawable. Java releases the old one (which also
-    // drops it here), but this call is queued and may arrive first or after: dropping the stale
-    // texture here too keeps the two orders equivalent.
-    if (it->second.contentId != contentId && it->second.contentId != 0)
-        eraseContentLocked(it->second.contentId);
     it->second.contentId = contentId;
     treeDirty = true;
+    // A resized window shows new content now; buffers of the old one may be free to go.
+    reapDeadAhbsLocked();
     needsRender.store(true); wakeRender();
 }
 
@@ -2091,11 +1518,7 @@ void VulkanRendererContext::collectWindowNodes(int64_t id, int absX, int absY,
     if (id != rootWindowId) {
         myAbsX = absX + node.x;
         myAbsY = absY + node.y;
-        // Only 1x1 helper windows are skipped (and empty ones); a 1xN or Nx1 window is real
-        // content. Their children still get collected below.
-        bool renderable = node.width >= 1 && node.height >= 1 &&
-                          !(node.width == 1 && node.height == 1);
-        if (node.viewable && renderable) {
+        if (node.viewable) {
             out.push_back({node.contentId, myAbsX, myAbsY});
             outSizes.push_back({node.width, node.height});
         }
@@ -2121,17 +1544,15 @@ void VulkanRendererContext::rebuildRenderListFromTree() {
     renderList.assign(flat.begin() + start, flat.end());
 }
 
-void VulkanRendererContext::destroyAllSourceImports() {
-    // Device idle (destructor only).
-    for (auto& [srcId, imp] : srcImports) {
-        WinTex& wt = imp.wt;
+void VulkanRendererContext::cleanupAllAHBCache() {
+    for (auto& [ahb, wt] : ahbImportCache) {
         if (wt.ds   != VK_NULL_HANDLE) vk_.FreeDescriptorSets(device, winTexPool, 1, &wt.ds);
         if (wt.view != VK_NULL_HANDLE) vk_.DestroyImageView(device, wt.view, nullptr);
         if (wt.img  != VK_NULL_HANDLE) vk_.DestroyImage(device, wt.img, nullptr);
         if (wt.mem  != VK_NULL_HANDLE) vk_.FreeMemory(device, wt.mem, nullptr);
-        if (imp.ahb) AHardwareBuffer_release(imp.ahb);
+        AHardwareBuffer_release(ahb);
     }
-    srcImports.clear();
+    ahbImportCache.clear(); windowAhbs.clear();
 }
 
 void VulkanRendererContext::dumpRendererInfo() {
@@ -2153,28 +1574,17 @@ void VulkanRendererContext::dumpRendererInfo() {
         filterMode, filterMode==7?"NIS":filterMode==6?"SGSR_HQ":filterMode==5?"COLOR_BOOST":filterMode==4?"LANCZOS2":filterMode==3?"FSR":filterMode==2?"SGSR":filterMode==1?"NEAREST":"LINEAR");
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Surface: %dx%d container: %dx%d",surfaceWidth,surfaceHeight,containerWidth,containerHeight);
-    __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
-        "Pacing: refresh period %.3f ms, compositor queue priority %s",
-        refreshPeriodNs_.load() / 1.0e6, globalPriorityHigh_.load() ? "HIGH" : "default");
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,"=== END RENDERER INFO ===");
 }
 
 void VulkanRendererContext::setFilterMode(int mode) {
-    // vkDeviceWaitIdle needs every queue externally synchronised, and the sampler and the
-    // descriptor sets rewritten below are in use by the frame being recorded: run between
-    // frames (frameMutex) and with the texture maps stable (renderMutex), the same order
-    // renderFrame() takes them in.
+    // Replaces pipelines/sampler the render thread may be recording with: between frames.
     auto frameLock = lockFrameExclusive();
     std::lock_guard<std::mutex> mapLock(renderMutex);
     auto modeName=[](int m){ return m==1?"NEAREST":m==2?"SGSR":m==3?"FSR":m==4?"LANCZOS2":m==5?"COLOR_BOOST":m==6?"SGSR_HQ":m==7?"NIS":"LINEAR"; };
     RLOG("setFilterMode: %d -> %d (%s->%s)", filterMode, mode, modeName(filterMode), modeName(mode));
     if (filterMode==mode) { RLOG("setFilterMode: already set, skipping"); return; }
-    // Only NEAREST (mode 1) has a sampler of its own; every other switch keeps it, and with it
-    // the descriptor sets - no GPU drain on an upscaler change.
-    const bool samplerChanges = (filterMode == 1) != (mode == 1);
     filterMode=mode;
-    // Every upscaler is built here, before the first frame that binds it, never while a frame is
-    // being recorded. Already-built pipelines are kept (the create calls return early).
     switch (mode) {
     case 2: tryCreatePipeline(&VulkanRendererContext::createSgsrPipeline,    "SGSR");    break;
     case 3: tryCreatePipeline(&VulkanRendererContext::createFsr1Pipeline,    "FSR");     break;
@@ -2184,8 +1594,6 @@ void VulkanRendererContext::setFilterMode(int mode) {
     default: break;
     }
     syncPostFXPipeline();   // waits for the GPU itself if it releases the postfx pipeline
-    adpfNote(kAdpfResetGpu);   // an upscaler costs a different amount of GPU time
-    if (!samplerChanges) { needsRender.store(true); wakeRender(); return; }
     vk_.DeviceWaitIdle(device);
     if (sampler!=VK_NULL_HANDLE){vk_.DestroySampler(device,sampler,nullptr);sampler=VK_NULL_HANDLE;}
     createSampler();
@@ -2199,7 +1607,7 @@ void VulkanRendererContext::setFilterMode(int mode) {
         vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
     };
     for (auto& [id,wt]:texMap) updateDS(wt.ds, wt.view);
-    for (auto& [srcId,imp]:srcImports) updateDS(imp.wt.ds, imp.wt.view);
+    for (auto& [ahb,wt]:ahbImportCache) updateDS(wt.ds, wt.view);
     if (cursorDS!=VK_NULL_HANDLE&&cursorView!=VK_NULL_HANDLE) updateDS(cursorDS, cursorView);
     needsRender.store(true); wakeRender();
 }
@@ -2209,14 +1617,11 @@ void VulkanRendererContext::setStretchMode(int mode) {
     RLOG("setStretchMode: %d -> %d", stretchMode, mode);
     if (stretchMode == mode) return;
     stretchMode = mode;
-    if (mode == 1) tryCreatePipeline(&VulkanRendererContext::createStretchPipeline, "stretch");
-    adpfNote(kAdpfResetGpu);
+    if (mode == 1 && stretchPipeline == VK_NULL_HANDLE) tryCreatePipeline(&VulkanRendererContext::createStretchPipeline, "stretch");
     needsRender.store(true); wakeRender();
 }
 
 void VulkanRendererContext::setPresentMode(VkPresentModeKHR mode) {
-    // availablePresentModes is rewritten by createSwapchain() on the render thread.
-    auto frameLock = lockFrameExclusive();
     bool supported = false;
     for (auto pm : availablePresentModes) if (pm == mode) { supported = true; break; }
     VkPresentModeKHR target = supported ? mode : VK_PRESENT_MODE_FIFO_KHR;

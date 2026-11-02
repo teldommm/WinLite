@@ -36,9 +36,7 @@ data class GraphicsPanelState(
     val sharpnessPercent: Int,
     val postFxModeIndex: Int,
     val reshadeEffectIndex: Int,
-    val reshadeStrengthPercent: Int,
-    val perfHintAvailable: Boolean = false,        // the active renderer and the device support ADPF
-    val perfHintEnabled: Boolean = false           // saved switch position (off unless chosen)
+    val reshadeStrengthPercent: Int
 )
 
 interface GraphicsPanelCallbacks {
@@ -50,8 +48,6 @@ interface GraphicsPanelCallbacks {
     fun onPostFxModeChanged(index: Int)
     fun onReshadeEffectChanged(index: Int)
     fun onReshadeStrengthChanged(percent: Int)
-    // ADPF (Android Performance Hint) switch of the Vulkan renderer.
-    fun onPerformanceHintChanged(enabled: Boolean)
 }
 
 object GraphicsSidebarPanelHost {
@@ -102,7 +98,6 @@ private fun GraphicsSidebarPanel(
     var postFxIndex by remember { mutableStateOf(state.postFxModeIndex) }
     var reshadeIndex by remember { mutableStateOf(state.reshadeEffectIndex) }
     var reshadeStrength by remember { mutableStateOf(state.reshadeStrengthPercent) }
-    var perfHintOn by remember { mutableStateOf(state.perfHintEnabled) }
 
     // Same visibility rule as the original updateSharpnessVis(): shown while Super Resolution
     // is on (any upscaler mode — SGSR/SGSR HQ/FSR/NIS/Lanczos2/Color Boost all read pc.sharpness
@@ -120,13 +115,7 @@ private fun GraphicsSidebarPanel(
 
         FpsLimiterCard(
             initialFps = state.fpsLimit,
-            onFpsChanged = callbacks::onFpsLimitChanged,
-            perfHintVisible = state.perfHintAvailable,
-            perfHintChecked = perfHintOn,
-            onPerfHintChanged = {
-                perfHintOn = it
-                callbacks.onPerformanceHintChanged(it)
-            }
+            onFpsChanged = callbacks::onFpsLimitChanged
         )
 
         SidebarGap()
@@ -245,11 +234,7 @@ private fun GraphicsSidebarPanel(
 @Composable
 private fun FpsLimiterCard(
     initialFps: Int,
-    onFpsChanged: (Int) -> Unit,
-    // ADPF (Android Performance Hint) switch, shown inside this card under the slider.
-    perfHintVisible: Boolean,
-    perfHintChecked: Boolean,
-    onPerfHintChanged: (Boolean) -> Unit
+    onFpsChanged: (Int) -> Unit
 ) {
     val initialPosition = when {
         initialFps <= 0 -> 0
@@ -333,14 +318,6 @@ private fun FpsLimiterCard(
                             apply()
                         }
                     }
-            )
-        }
-        if (perfHintVisible) {
-            Spacer(Modifier.height(8.dp))
-            SidebarInlineToggle(
-                label = "ADPF",
-                checked = perfHintChecked,
-                onCheckedChange = onPerfHintChanged
             )
         }
     }

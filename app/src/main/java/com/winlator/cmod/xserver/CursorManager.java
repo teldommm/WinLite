@@ -27,6 +27,10 @@ public class CursorManager extends XResourceManager {
     public Cursor createCursor(int id, short x, short y, Pixmap sourcePixmap, Pixmap maskPixmap) {
         if (cursors.indexOfKey(id) >= 0) return null;
         Drawable drawable = drawableManager.createDrawable(0, sourcePixmap.drawable.width, sourcePixmap.drawable.height, sourcePixmap.drawable.visual);
+        // RecolorCursor reads the source and mask again, possibly after the client freed those
+        // pixmaps: the cursor keeps their buffers alive until it is freed itself.
+        sourcePixmap.drawable.retain();
+        if (maskPixmap != null) maskPixmap.drawable.retain();
         Cursor cursor = new Cursor(id, x, y, drawable, sourcePixmap.drawable, maskPixmap != null ? maskPixmap.drawable : null);
         cursors.put(id, cursor);
         triggerOnCreateResourceListener(cursor);
@@ -35,9 +39,15 @@ public class CursorManager extends XResourceManager {
     }
 
     public void freeCursor(int id) {
-        triggerOnFreeResourceListener(cursors.get(id));
-        triggerOnFreeCursor(cursors.get(id));
+        final Cursor cursor = cursors.get(id);
+        triggerOnFreeResourceListener(cursor);
+        triggerOnFreeCursor(cursor);
         cursors.remove(id);
+        if (cursor != null) {
+            // cursorImage is left alone: a window may keep showing this cursor after FreeCursor.
+            drawableManager.dropReference(cursor.sourceImage);
+            drawableManager.dropReference(cursor.maskImage);
+        }
     }
 
     private static boolean isEmptyMaskImage(Drawable maskImage) {

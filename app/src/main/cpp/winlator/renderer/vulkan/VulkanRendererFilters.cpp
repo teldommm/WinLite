@@ -259,6 +259,7 @@ void VulkanRendererContext::createNisPipeline() {
 void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     const std::vector<DrawEntry>& draws,
     std::vector<VkImageMemoryBarrier>& ahbTransitions,
+    std::vector<VkImageMemoryBarrier>& preUpload,
     std::vector<VkImageMemoryBarrier>& postUpload,
     VkBuffer cursorUpload, bool hasCursorUpload,
     float ox, float oy, float sx, float sy, float cw, float ch,
@@ -272,6 +273,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         throw std::runtime_error("begin cb");
 
     ahbTransitions.clear();
+    preUpload.clear();
     postUpload.clear();
 
     // A guest buffer is written outside this device (the guest's driver, another API in another
@@ -284,26 +286,48 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     // keeps the one-time transition.
     for (auto& d : draws) {
         if (d.img == VK_NULL_HANDLE) continue;
-        if (!foreignQueueFamily_ && !d.needsTransition) continue;
-        if (std::any_of(ahbTransitions.begin(), ahbTransitions.end(),
-                [&](const VkImageMemoryBarrier& o) { return o.image == d.img; }))
-            continue;   // the same buffer drawn twice: one acquire (and release) per frame
-        VkImageMemoryBarrier b{};
-        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        b.oldLayout = d.needsTransition ? VK_IMAGE_LAYOUT_UNDEFINED
-                                        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        if (foreignQueueFamily_) {
-            b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-            b.dstQueueFamilyIndex = graphicsQueueFamilyIndex;
-        } else {
+        if (d.isAHB) {
+            if (!foreignQueueFamily_ && !d.needsTransition) continue;
+            auto dup = std::find_if(ahbTransitions.begin(), ahbTransitions.end(),
+                [&](const VkImageMemoryBarrier& o) { return o.image == d.img; });
+            if (dup != ahbTransitions.end()) {   // the same buffer drawn twice: one acquire per frame
+                if (d.needsTransition) dup->oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                continue;
+            }
+            VkImageMemoryBarrier b{};
+            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = d.needsTransition ? VK_IMAGE_LAYOUT_UNDEFINED
+                                            : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            if (foreignQueueFamily_) {
+                b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
+                b.dstQueueFamilyIndex = graphicsQueueFamilyIndex;
+            } else {
+                b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            }
+            b.image = d.img;
+            b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            b.srcAccessMask = 0;
+            b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            ahbTransitions.push_back(b);
+        } else if (d.needsTransition || d.upload != VK_NULL_HANDLE) {
+            VkImageMemoryBarrier b{};
+            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.image = d.img;
+            b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            b.srcAccessMask = 0;
+            b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            preUpload.push_back(b);
+
+            b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            postUpload.push_back(b);
         }
-        b.image = d.img;
-        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        b.srcAccessMask = 0;
-        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        ahbTransitions.push_back(b);
     }
 
     if (!ahbTransitions.empty()) {
@@ -311,26 +335,38 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr,
             (uint32_t)ahbTransitions.size(), ahbTransitions.data());
     }
+    if (!preUpload.empty()) {
+        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
+            (uint32_t)preUpload.size(), preUpload.data());
+    }
 
-    const bool cursorDrawn = curVis && cursorImg != VK_NULL_HANDLE && cursorDS != VK_NULL_HANDLE;
+    for (auto& d : draws) {
+        if (d.isAHB || d.upload == VK_NULL_HANDLE || d.img == VK_NULL_HANDLE) continue;
+        VkBufferImageCopy r{};
+        r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        r.imageExtent = {(uint32_t)d.w, (uint32_t)d.h, 1};
+        vk_.CmdCopyBufferToImage(cb, d.upload, d.img,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r);
+    }
+
     const bool hasCursorCopy = hasCursorUpload && cursorImg != VK_NULL_HANDLE &&
                                cursorUpload != VK_NULL_HANDLE;
+    // Not drawn before its first upload: a fresh texture holds nothing yet.
+    const bool cursorDrawn = curVis && cursorImg != VK_NULL_HANDLE && cursorDS != VK_NULL_HANDLE &&
+                             (cursorImgInit || hasCursorCopy);
     if (hasCursorCopy) {
+        const bool fresh = !cursorImgInit;   // never written: UNDEFINED, nothing to wait for
         VkImageMemoryBarrier b{};
         b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        // Every upload overwrites the whole image, so its old contents may be discarded - and
-        // UNDEFINED is the only old layout that is right for every upload: a freshly created
-        // cursor image (first upload, or after a size change) is not in SHADER_READ_ONLY yet.
-        // The execution dependency on the fragment stage still orders this after the frames
-        // that sampled the previous cursor (write-after-read needs no access mask).
-        b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        b.oldLayout = fresh ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.image = cursorImg;
         b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        b.srcAccessMask = 0;
+        b.srcAccessMask = fresh ? 0 : VK_ACCESS_SHADER_READ_BIT;
         b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        vk_.CmdPipelineBarrier(cb, fresh ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
 
         VkBufferImageCopy r{};
@@ -352,27 +388,25 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             (uint32_t)postUpload.size(), postUpload.data());
     }
 
-    const VkExtent2D targetExt = swapchainExt;
     VkRenderPassBeginInfo rpi{};
     rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = renderPass;
     rpi.framebuffer = swapchainFBs[imgIdx];
-    rpi.renderArea = {{0, 0}, targetExt};
+    rpi.renderArea = {{0, 0}, swapchainExt};
     VkClearValue clear = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
     rpi.clearValueCount = 1;
     rpi.pClearValues = &clear;
     vk_.CmdBeginRenderPass(cb, &rpi, VK_SUBPASS_CONTENTS_INLINE);
 
-    VkViewport viewport{0, 0, (float)targetExt.width, (float)targetExt.height, 0, 1};
+    VkViewport viewport{0, 0, (float)swapchainExt.width, (float)swapchainExt.height, 0, 1};
     vk_.CmdSetViewport(cb, 0, 1, &viewport);
 
     int32_t scX = std::max(0, scissorRect.offset.x);
     int32_t scY = std::max(0, scissorRect.offset.y);
-    uint32_t maxW = targetExt.width > (uint32_t)scX ? targetExt.width - (uint32_t)scX : 0u;
-    uint32_t maxH = targetExt.height > (uint32_t)scY ? targetExt.height - (uint32_t)scY : 0u;
+    uint32_t maxW = swapchainExt.width > (uint32_t)scX ? swapchainExt.width - (uint32_t)scX : 0u;
+    uint32_t maxH = swapchainExt.height > (uint32_t)scY ? swapchainExt.height - (uint32_t)scY : 0u;
     VkRect2D scissor{{scX, scY},
-        {std::min(scissorRect.extent.width,  maxW),
-         std::min(scissorRect.extent.height, maxH)}};
+        {std::min(scissorRect.extent.width, maxW), std::min(scissorRect.extent.height, maxH)}};
     vk_.CmdSetScissor(cb, 0, 1, &scissor);
 
     float rotCosR, rotSinR;
@@ -381,8 +415,6 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     const bool useSgsr = filterMode == 2 && sgsrPipeline != VK_NULL_HANDLE;
     const bool useFsr = filterMode == 3 && fsr1Pipeline != VK_NULL_HANDLE;
     const bool useLanczos = filterMode == 4 && lanczosPipeline != VK_NULL_HANDLE;
-    // Pipelines are built by setFilterMode; one that failed to build is null and the frame falls
-    // back to the plain blit.
     const bool useSgsrHq = filterMode == 6 && sgsrHqPipeline != VK_NULL_HANDLE;
     const bool useNis = filterMode == 7 && nisPipeline != VK_NULL_HANDLE;
     const bool useColorBoost = filterMode == 5 && postfxPipeline != VK_NULL_HANDLE;
@@ -442,9 +474,9 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             pc.srcW = (float)std::max(d.w, 1);
             pc.srcH = (float)std::max(d.h, 1);
             pc.outW = std::max(1.0f, std::abs(pc.ndcX1 - pc.ndcX0) * 0.5f *
-                                       (float)targetExt.width);
+                                       (float)swapchainExt.width);
             pc.outH = std::max(1.0f, std::abs(pc.ndcY1 - pc.ndcY0) * 0.5f *
-                                       (float)targetExt.height);
+                                       (float)swapchainExt.height);
             pc.effectId = postFXMode;
             pc.sharpness = sharpness;
             pc.cosR = rotCosR;
@@ -502,11 +534,8 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         vk_.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         vk_.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout,
                                   0, 1, &cursorDS, 0, nullptr);
-        // The image goes at pointer - hot spot even when that is off the top or left edge, as
-        // an X server draws it; clamping it to 0 moved a cursor whose hot spot is not its corner
-        // (I-beam, crosshair) away from the pointer near those edges.
-        float cx = (float)((int)ptrX - curHotX);
-        float cy = (float)((int)ptrY - curHotY);
+        float cx = (float)std::max(0, (int)ptrX - curHotX);
+        float cy = (float)std::max(0, (int)ptrY - curHotY);
         WindowPushConstants pc{};
         pc.ndcX0 = (ox + cx * sx) / cw * 2.0f - 1.0f;
         pc.ndcY0 = (oy + cy * sy) / ch * 2.0f - 1.0f;

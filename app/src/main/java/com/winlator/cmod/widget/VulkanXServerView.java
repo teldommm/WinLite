@@ -21,6 +21,7 @@ import com.winlator.cmod.xserver.Atom;
 import com.winlator.cmod.xserver.Bitmask;
 import com.winlator.cmod.xserver.Cursor;
 import com.winlator.cmod.xserver.Drawable;
+import com.winlator.cmod.xserver.Pixmap;
 import com.winlator.cmod.xserver.Pointer;
 import com.winlator.cmod.xserver.Property;
 import com.winlator.cmod.xserver.ScreenInfo;
@@ -51,9 +52,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private final Set<Integer> compositeRedirectedWindows = ConcurrentHashMap.newKeySet();
 
-    // The part of the X screen that is shown (see XServer.getEffectiveScreenInfo): the Wine
-    // desktop's size when a game shrank it below the container screen, else the screen itself.
-    private volatile ScreenInfo effectiveScreen;
     private boolean fullscreen = false;
     private float magnifierZoom = 1.0f;
     private boolean screenOffsetYRelativeToCursor = false;
@@ -82,11 +80,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private FrameRating classicHudRef = null;
     private volatile int fpsWindowId = -1;
     private volatile int fpsLimit = 0;
-    // ADPF switch (opt-in, off by default); applied to the renderer once it exists.
-    private volatile boolean perfHint = false;
-    private com.winlator.cmod.core.PerfHintThreads.Listener perfHintListener;
-    // Display vsync for frame pacing and for Present's MSC/UST; runs while a renderer exists.
-    private final VsyncClock vsyncClock = new VsyncClock(this::onVsyncTick);
 
     private static volatile boolean nativeLibLoaded = false;
 
@@ -106,7 +99,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
         rootCursorDrawable = createRootCursorDrawable(xServer.getSurfaceFormat());
         xServer.setXServerView(this);
-        effectiveScreen = xServer.getEffectiveScreenInfo();
         xServer.windowManager.addOnWindowModificationListener(this);
         xServer.pointer.addOnPointerMotionListener(this);
     }
@@ -135,21 +127,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
      * a fence wait when the cursor changes size; frameMutex across a whole frame) holds up every
      * garbage collection - and every thread, the UI thread included - until it returns. The
      * methods that lock renderMutex or frameMutex are plain native calls. */
-    private native void nativeUpdateWindowContentAHB(long handle, long contentId,
-        long sourceId, long ahbPtr, short width, short height, int x, int y);
-    @FastNative private native void nativeSetDisplayRefreshRate(long handle, float hz);
-    private native void nativePresentFrame(long handle, long contentId, long sourceId,
-        long ahbPtr, long guestFrameNs, long[] plan);
-    private native void nativeSetFpsLimit(long handle, int fps);
-    // ADPF. Plain natives on purpose: they take the renderer's locks or a mutex.
-    private native int nativePerformanceHintLevel();
-    private native void nativeSetPerformanceHint(long handle, boolean enabled);
-    private native void nativeSetPerformanceHintThreads(long handle, int[] tids);
-    private native boolean nativeSourceBusy(long handle, long sourceId);
-    private native long nativeBeginSourceIdleWait(long handle, long sourceId);
-    private native void nativeEndSourceIdleWait(long handle, long serial, long timeoutNs);
-    @FastNative private native void nativeOnVsync(long handle, long frameTimeNs, long deadlineNs, long presentNs);
-    private native void nativeReleaseDrawable(long handle, long drawableId);
+    private native void nativeUpdateWindowContentAHB(long handle, long id,
+        long ahbPtr, short width, short height, int x, int y);
     private native void nativeSetTransformAndScissor(long handle,
         float ox, float oy, float sx, float sy,
         boolean hasScissor, int scX, int scY, int scW, int scH);
@@ -158,6 +137,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeUpdateCursorImage(long handle,
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY,
         boolean rgba);
+    private native void nativeRemoveWindow(long handle, long id);
+    private native void nativeReleaseBuffer(long handle, long ahbPtr);
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
 
@@ -181,7 +162,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetWindowViewable(long handle, long id, boolean viewable);
 
     // Renderer key of a drawable: its process-unique uid (0 for "no drawable", e.g. an
-    // InputOnly window). identityHashCode() was used here before and is not unique.
+    // InputOnly window).
     private static long did(Drawable d) {
         return d != null ? d.uid : 0L;
     }
@@ -231,9 +212,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         // game made invisible (empty mask), and lastCursor is unchanged after the
                         // surface comes back, so nothing would hide it again.
                         restoreCursorStateLocked();
-                        pushDisplayRefreshRateLocked();
-                        nativeSetFpsLimit(nativeHandle, fpsLimit);
-                        vsyncClock.start();
                         initComplete = true;
                         return;
                     }
@@ -251,15 +229,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
                     updateTransform();
-                    pushDisplayRefreshRateLocked();
-                    nativeSetFpsLimit(nativeHandle, fpsLimit);
-                    if (perfHint) {
-                        // Threads first: the session is opened with them in one go.
-                        nativeSetPerformanceHintThreads(nativeHandle,
-                            com.winlator.cmod.core.PerfHintThreads.snapshot());
-                        nativeSetPerformanceHint(nativeHandle, true);
-                    }
-                    vsyncClock.start();
                     nativeSetCursorVisible(nativeHandle, false);
 
                     if (isColdInit) {
@@ -280,7 +249,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             }
             synchronized (lock) {
                 if (nativeHandle != 0) {
-                    nativeSetVerboseLog(nativeHandle, validationEnabled);
+                    nativeSetVerboseLog(nativeHandle, true);
                     nativeDumpRendererInfo(nativeHandle);
                 }
             }
@@ -291,56 +260,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void onSurfaceChanged(int width, int height) {
         if (inPipMode) return;
         surfaceWidth = width; surfaceHeight = height;
-        ScreenInfo inner = effectiveScreen;
-        viewTransformation.update(width, height, inner.width, inner.height);
+        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height);
         synchronized (lock) {
-            if (nativeHandle != 0) {
-                nativeResize(nativeHandle, width, height);
-                updateTransform();
-                pushDisplayRefreshRateLocked();
-            }
+            if (nativeHandle != 0) { nativeResize(nativeHandle, width, height); updateTransform(); }
         }
-    }
-
-    /**
-     * The render thread paces cursor-only and back-to-back frames against the panel's refresh
-     * period. Must be called with {@code lock} held; re-sent on every display mode change.
-     */
-    private void pushDisplayRefreshRateLocked() {
-        if (nativeHandle == 0) return;
-        android.view.Display display = getDisplay();
-        float hz = display != null ? display.getRefreshRate() : 0f;
-        if (hz > 1f) {
-            nativeSetDisplayRefreshRate(nativeHandle, hz);
-            vsyncClock.setNominalPeriod(Math.round(1.0e9 / hz));
-        }
-    }
-
-    private final android.hardware.display.DisplayManager.DisplayListener displayListener =
-            new android.hardware.display.DisplayManager.DisplayListener() {
-        @Override public void onDisplayAdded(int displayId) {}
-        @Override public void onDisplayRemoved(int displayId) {}
-        @Override public void onDisplayChanged(int displayId) {
-            android.view.Display display = getDisplay();
-            if (display == null || display.getDisplayId() != displayId) return;
-            synchronized (lock) { pushDisplayRefreshRateLocked(); }
-        }
-    };
-
-    @Override
-    protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
-                getContext().getSystemService(Context.DISPLAY_SERVICE);
-        if (dm != null) dm.registerDisplayListener(displayListener, getHandler());
-    }
-
-    @Override
-    protected void onDetachedFromWindow() {
-        android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
-                getContext().getSystemService(Context.DISPLAY_SERVICE);
-        if (dm != null) dm.unregisterDisplayListener(displayListener);
-        super.onDetachedFromWindow();
     }
 
     public void onSurfaceDestroyed() {
@@ -351,39 +274,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             initExecutor = null;
         }
-        vsyncClock.stop();
         synchronized (lock) {
             if (nativeHandle != 0) nativeDetachSurface(nativeHandle);
         }
-    }
-
-    private void onVsyncTick(long frameTimeNs, long deadlineNs, long presentNs) {
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeOnVsync(nativeHandle, frameTimeNs, deadlineNs, presentNs);
-        }
-    }
-
-    @Override
-    public boolean getVsync(long nowNs, long[] out) { return vsyncClock.sampleAt(nowNs, out); }
-
-    @Override
-    public boolean isGuestBufferBusy(Drawable buffer) {
-        synchronized (lock) {
-            return nativeHandle != 0 && buffer != null && nativeSourceBusy(nativeHandle, did(buffer));
-        }
-    }
-
-    @Override
-    public void waitGuestBufferIdle(Drawable buffer, long timeoutNs) {
-        final long handle, serial;
-        // The wait is registered under the lock nativeDestroy runs under, and happens outside it
-        // (it blocks): the native side keeps the device alive until a registered wait returns.
-        synchronized (lock) {
-            if (nativeHandle == 0 || buffer == null) return;
-            handle = nativeHandle;
-            serial = nativeBeginSourceIdleWait(handle, did(buffer));
-        }
-        if (serial != 0) nativeEndSourceIdleWait(handle, serial, timeoutNs);
     }
 
     @Override
@@ -392,9 +285,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void forceCleanup() {
-        fpsWindowId = -1;
-        hudRef = null;
-        classicHudRef = null;
         initComplete = false;
         if (initExecutor != null) {
             initExecutor.shutdownNow();
@@ -403,27 +293,15 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             initExecutor = null;
         }
         compositeRedirectedWindows.clear();
-        vsyncClock.stop();
-        if (perfHintListener != null)
-            com.winlator.cmod.core.PerfHintThreads.clearListener(perfHintListener);
         synchronized (lock) {
             if (nativeHandle != 0) {
                 nativeDestroy(nativeHandle);
                 nativeHandle = 0;
             }
         }
-        // Queued tasks still run (they see nativeHandle == 0 and do nothing); the thread then
-        // exits instead of outliving the view.
-        eventExecutor.shutdown();
     }
 
-    public void queueEvent(Runnable r) {
-        try {
-            eventExecutor.execute(r);
-        } catch (RejectedExecutionException ignored) {
-            // The view was destroyed; there is no renderer left to update.
-        }
-    }
+    public void queueEvent(Runnable r) { eventExecutor.execute(r); }
     @Override
     public void onPause()  {}
     @Override
@@ -435,34 +313,28 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         final float ptrX = xServer.pointer.getX();
         final float ptrY = xServer.pointer.getY();
 
-        // The native scene is laid out in container (screen) coordinates; when only the top-left
-        // part of it (the shrunken Wine desktop) is shown, the scene scale and offset are
-        // computed for that part and then stretched by screen/effective. fx = fy = 1 normally.
-        final ScreenInfo inner = effectiveScreen;
-        final float fx = (float) xServer.screenInfo.width / inner.width;
-        final float fy = (float) xServer.screenInfo.height / inner.height;
-
         final float ox, oy, sx, sy;
         if (fullscreen) {
-            viewTransformation.update(surfaceWidth, surfaceHeight, inner.width, inner.height);
+            viewTransformation.update(surfaceWidth, surfaceHeight,
+                xServer.screenInfo.width, xServer.screenInfo.height);
             if (zoom != 1.0f) {
-                ox = (viewTransformation.sceneOffsetX + ptrX * viewTransformation.sceneScaleX * (1f - zoom)) * fx;
-                oy = (viewTransformation.sceneOffsetY + ptrY * viewTransformation.sceneScaleY * (1f - zoom)) * fy;
-                sx = viewTransformation.sceneScaleX * zoom * fx;
-                sy = viewTransformation.sceneScaleY * zoom * fy;
+                ox = viewTransformation.sceneOffsetX + ptrX * viewTransformation.sceneScaleX * (1f - zoom);
+                oy = viewTransformation.sceneOffsetY + ptrY * viewTransformation.sceneScaleY * (1f - zoom);
+                sx = viewTransformation.sceneScaleX * zoom;
+                sy = viewTransformation.sceneScaleY * zoom;
             } else {
-                ox = 0f; oy = 0f; sx = fx; sy = fy;
+                ox = 0f; oy = 0f; sx = 1f; sy = 1f;
             }
         } else {
             float py = 0;
             if (screenOffsetYRelativeToCursor) {
-                short halfH = (short)(inner.height / 2);
+                short halfH = (short)(xServer.screenInfo.height / 2);
                 py = Math.max(0, Math.min(ptrY - halfH / 2.0f, halfH));
             }
-            ox = (viewTransformation.sceneOffsetX + ptrX * viewTransformation.sceneScaleX * (1f - zoom)) * fx;
-            oy = (viewTransformation.sceneOffsetY - py + ptrY * viewTransformation.sceneScaleY * (1f - zoom)) * fy;
-            sx = viewTransformation.sceneScaleX * zoom * fx;
-            sy = viewTransformation.sceneScaleY * zoom * fy;
+            ox = viewTransformation.sceneOffsetX + ptrX * viewTransformation.sceneScaleX * (1f - zoom);
+            oy = viewTransformation.sceneOffsetY - py + ptrY * viewTransformation.sceneScaleY * (1f - zoom);
+            sx = viewTransformation.sceneScaleX * zoom;
+            sy = viewTransformation.sceneScaleY * zoom;
         }
 
         final boolean needScissor = !(fullscreen && zoom == 1.0f);
@@ -470,29 +342,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             needScissor,
             viewTransformation.viewOffsetX, viewTransformation.viewOffsetY,
             viewTransformation.viewWidth,   viewTransformation.viewHeight);
-    }
-
-    private boolean isRootChild(Window window) {
-        return window != null && window.getParent() == xServer.windowManager.rootWindow;
-    }
-
-    /**
-     * Re-reads the effective screen size and re-applies the transform. Runs on eventExecutor:
-     * the X server locks are taken (inside getEffectiveScreenInfo) before {@code lock}, as
-     * everywhere else.
-     */
-    private void refreshDesktopTransform() {
-        final ScreenInfo inner = xServer.getEffectiveScreenInfo();
-        final ScreenInfo old = effectiveScreen;
-        final boolean changed = old == null || old.width != inner.width || old.height != inner.height;
-        synchronized (lock) {
-            effectiveScreen = inner;
-            if (surfaceWidth > 0 && surfaceHeight > 0) {
-                viewTransformation.update(surfaceWidth, surfaceHeight, inner.width, inner.height);
-            }
-            updateTransform();
-        }
-        if (changed) xServer.notifyEffectiveScreenChanged();
     }
 
     /**
@@ -516,20 +365,17 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             cd = cursor.cursorImage; hotX = (short)cursor.hotSpotX; hotY = (short)cursor.hotSpotY;
         } else { cd = rootCursorDrawable; }
         nativeSetCursorVisible(nativeHandle, effVis);
-        if (effVis && cd != null) {
-            // Checked under renderLock: Drawable.release() zeroes backingAHB under it.
+        if (effVis && cd != null && cd.backingAHB != 0) {
             synchronized (cd.renderLock) {
-                final long ahb = cd.backingAHB;
-                if (ahb == 0) return;
-                ByteBuffer pixels = cd.lockBuffer(ahb);
+                ByteBuffer pixels = cd.lockBuffer(cd.backingAHB);
                 if (pixels != null) {
                     try {
-                        // The renderer's cursor texture is always RGBA; the native side swaps
-                        // R and B when the cursor drawable is BGRA.
+                        // The renderer's cursor texture is RGBA; the native side swaps R and B
+                        // when the cursor drawable is BGRA.
                         nativeUpdateCursorImage(nativeHandle, pixels, cd.width, cd.height,
                             cd.getStride(), hotX, hotY, cd.format == SurfaceFormat.RGBA);
                     } finally {
-                        cd.unlockBuffer(ahb);
+                        cd.unlockBuffer(cd.backingAHB);
                     }
                 }
             }
@@ -569,10 +415,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 nativeMapWindow(nativeHandle, window.id);
                 if (content != null) {
                     synchronized (content.renderLock) {
-                        final long ahb = content.backingAHB;
-                        if (ahb != 0) {
-                            nativeUpdateWindowContentAHB(nativeHandle, did(content), did(content),
-                                ahb, content.width, content.height, window.getRootX(), window.getRootY());
+                        if (content.backingAHB != 0) {
+                            nativeUpdateWindowContentAHB(nativeHandle, did(content),
+                                content.backingAHB, content.width, content.height,
+                                window.getRootX(), window.getRootY());
                         }
                     }
                 }
@@ -638,7 +484,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onMapWindow(Window window) {
-        if (isRootChild(window)) queueEvent(this::refreshDesktopTransform);
         final long id = window.id;
         queueEvent(() -> {
             synchronized (lock) {
@@ -650,7 +495,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onUnmapWindow(Window window) {
-        if (isRootChild(window)) queueEvent(this::refreshDesktopTransform);
         final long id = window.id;
         queueEvent(() -> {
             synchronized (lock) {
@@ -692,7 +536,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onUpdateWindowGeometry(Window window, boolean resized) {
-        if (resized && isRootChild(window)) queueEvent(this::refreshDesktopTransform);
         final long id = window.id;
         final long contentId = did(window.getContent());
         final int x = window.getX(), y = window.getY(), w = window.getWidth(), h = window.getHeight();
@@ -705,12 +548,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onModifyWindowProperty(Window window, Property property) {
-        // WM_CLASS is what marks Wine's desktop window; it may be set after the window is mapped.
-        if (property != null && property.name == Atom.getId("WM_CLASS") && isRootChild(window)
-            && window.attributes.isMapped()) {
-            queueEvent(this::refreshDesktopTransform);
-        }
-
         checkViewable(window);
     }
 
@@ -733,38 +570,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         countFrameForHud(window);
         synchronized (lock) {
             if (nativeHandle == 0 || pixmap == null) return;
-            final Drawable content = window.getContent();
-            if (content == null) return;
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
-                final long ahb = pixmap.backingAHB;
-                if (ahb != 0) {
-                    // The window shows the pixmap: the texture is keyed by the window's content,
-                    // the imported buffer by the pixmap it came from.
-                    nativeUpdateWindowContentAHB(nativeHandle, did(content), did(pixmap),
-                        ahb, pixmap.width, pixmap.height, rx, ry);
-                }
-            }
-        }
-    }
-
-    /**
-     * PresentPixmap: one call into the renderer that swaps the window's content (at once, or at
-     * the frame's display slot under the FPS limit), counts the present, wakes the render thread
-     * once, and returns the plan for handing buffers back to the guest.
-     */
-    @Override
-    public void onGuestPresent(Window window, Drawable pixmap, long guestFrameNs, long[] plan) {
-        countFrameForHud(window);
-        synchronized (lock) {
-            if (nativeHandle == 0 || pixmap == null) return;
-            final Drawable content = window.getContent();
-            if (content == null) return;
-            synchronized (pixmap.renderLock) {
-                final long ahb = pixmap.backingAHB;
-                if (ahb != 0) {
-                    nativePresentFrame(nativeHandle, did(content), did(pixmap), ahb,
-                        guestFrameNs, plan);
+                if (pixmap.backingAHB != 0) {
+                    nativeUpdateWindowContentAHB(nativeHandle, did(window.getContent()),
+                        pixmap.backingAHB, pixmap.width, pixmap.height, rx, ry);
                 }
             }
         }
@@ -772,9 +582,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     private void countFrameForHud(Window window) {
         if (window.id == fpsWindowId) {
-            // Under the lock, like every other native call: nativeDestroy runs under it, and this
-            // used to read nativeHandle and call in without it - into a renderer that could be
-            // being deleted on another thread. The HUD updates below stay outside.
             if (hudRef != null) hudRef.onFrame();
             if (classicHudRef != null) classicHudRef.update();
         }
@@ -785,14 +592,28 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     @Override
-    public void onDrawableReleased(Drawable drawable) {
-        if (drawable == null) return;
-        // Synchronous (not queueEvent): the native side must stop resolving this drawable before
-        // the X server can hand its id to a new one. The renderer keeps its own buffer reference
-        // until the GPU has finished the frames that sampled it.
+    public boolean ownsDrawableBuffers() { return true; }
+
+    @Override
+    public void onBufferReleased(long ahbPtr) {
+        if (ahbPtr == 0) return;
+        // Synchronous, under the lock every content update takes: no update can import this
+        // buffer again after the renderer has dropped it. Lock order as elsewhere: X locks first.
         synchronized (lock) {
-            if (nativeHandle != 0) nativeReleaseDrawable(nativeHandle, did(drawable));
+            if (nativeHandle != 0) nativeReleaseBuffer(nativeHandle, ahbPtr);
         }
+    }
+
+    @Override
+    public void nativeRemoveDirectContent(int windowId, int pixmapId) {
+        Pixmap pixmap = xServer.pixmapManager.getPixmap(pixmapId);
+        if (pixmap == null || pixmap.drawable == null) return;
+        final long contentId = did(pixmap.drawable);
+        queueEvent(() -> {
+            synchronized (lock) {
+                if (nativeHandle != 0) nativeRemoveWindow(nativeHandle, contentId);
+            }
+        });
     }
 
     @Override
@@ -866,10 +687,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
             final int rx = window.getRootX(), ry = window.getRootY();
             synchronized (drawable.renderLock) {
-                final long ahb = drawable.backingAHB;
-                if (ahb != 0) {
-                    nativeUpdateWindowContentAHB(nativeHandle, did(drawable), did(drawable),
-                        ahb, drawable.width, drawable.height, rx, ry);
+                if (drawable.backingAHB != 0) {
+                    nativeUpdateWindowContentAHB(nativeHandle, did(drawable),
+                        drawable.backingAHB, drawable.width, drawable.height, rx, ry);
                 }
             }
         }
@@ -892,10 +712,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         cursorVisible = visible;
         synchronized (lock) {
             if (nativeHandle != 0) {
-                // When shown, go through sendCursorToNative so a game-hidden X cursor is not
-                // flashed visible for a frame before being hidden again.
+                nativeSetCursorVisible(nativeHandle, visible);
                 if (visible) sendCursorToNative(lastCursor);
-                else nativeSetCursorVisible(nativeHandle, false);
             }
         }
     }
@@ -908,6 +726,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         this.nativeLibDir = nativeLibDir;
     }
 
+    /** Opt-in Vulkan validation layer (needs libVkLayer_khronos_validation.so in the app's native libs). */
     public void setValidationEnabled(boolean enabled, String nativeLibDir) {
         this.validationEnabled = enabled;
         this.nativeLibDir = nativeLibDir;
@@ -984,45 +803,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public int getFpsLimit() {
         return fpsLimit;
     }
-    public void setFpsLimit(int limit) {
-        this.fpsLimit = Math.max(0, Math.min(1000, limit));
-        // Same cap for clients that draw with MIT-SHM blits and never reach the Present limiter.
-        com.winlator.cmod.xserver.ShmFramePacer.setFrameRateLimit(this.fpsLimit);
-        synchronized (lock) { if (nativeHandle != 0) nativeSetFpsLimit(nativeHandle, fpsLimit); }
-    }
-    @Override
-    public boolean isPerformanceHintSupported() {
-        try {
-            loadNativeLibrary();
-            return nativePerformanceHintLevel() > 0;
-        } catch (UnsatisfiedLinkError e) {
-            return false;
-        }
-    }
-
-    @Override
-    public void setPerformanceHint(boolean enabled) {
-        perfHint = enabled;
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeSetPerformanceHint(nativeHandle, enabled);
-        }
-        // Subscribe only while on: with the hint off nothing here is touched on a thread start.
-        if (enabled) {
-            if (perfHintListener == null) {
-                // Hands the work to the event thread: the caller is a connector or limiter
-                // thread and must not wait on this view's lock.
-                perfHintListener = tids -> queueEvent(() -> {
-                    synchronized (lock) {
-                        if (nativeHandle != 0 && perfHint) nativeSetPerformanceHintThreads(nativeHandle, tids);
-                    }
-                });
-            }
-            com.winlator.cmod.core.PerfHintThreads.setListener(perfHintListener);
-        } else if (perfHintListener != null) {
-            com.winlator.cmod.core.PerfHintThreads.clearListener(perfHintListener);
-        }
-    }
-
+    public void setFpsLimit(int limit) { this.fpsLimit = Math.max(0, Math.min(1000, limit)); }
     public void setPipMode(boolean pip) { inPipMode = pip; }
     public int getSurfaceWidth() { return surfaceWidth; }
     public int getSurfaceHeight() { return surfaceHeight; }

@@ -6,12 +6,8 @@ import com.winlator.cmod.core.Callback;
 import com.winlator.cmod.math.Mathf;
 import com.winlator.cmod.renderer.GPUImage;
 
-import java.lang.ref.PhantomReference;
-import java.lang.ref.ReferenceQueue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class Drawable extends XResource {
@@ -19,18 +15,18 @@ public class Drawable extends XResource {
 
     /**
      * Process-unique, never reused key for this drawable. The renderer keys its textures by it
-     * (System.identityHashCode() was used before: not unique, so two drawables could share one).
+     * (System.identityHashCode() is not unique, so two drawables could end up sharing one).
      */
     public final long uid = UID_GENERATOR.incrementAndGet();
 
     public final short width;
     public short stride;
-    /** The AHardwareBuffer this drawable owns; 0 once {@link #release()} has run. */
+    /** The AHardwareBuffer this drawable owns; 0 once its last reference has been dropped. */
     public volatile long backingAHB;
     public final short height;
     public final Visual visual;
     /** Pixel order of this drawable's buffer. */
-    public final SurfaceFormat format;
+    public SurfaceFormat format;
 
     private GPUImage gpuImage = null;
     private boolean directScanout;
@@ -38,7 +34,8 @@ public class Drawable extends XResource {
     private Callback<Drawable> onDestroyListener;
     private boolean offscreen = false;
     public final Object renderLock = new Object();
-    private final Backing backing;
+    /** Users of the buffer: the X resource itself, plus one per cursor built from it. Guarded by renderLock. */
+    private int refCount = 1;
 
     static {
         System.loadLibrary("winlator");
@@ -55,26 +52,6 @@ public class Drawable extends XResource {
             throw new IllegalStateException("Drawable data initialized as null!");
         }
         this.backingAHB = ahb;
-        this.backing = Backing.track(this, ahb);
-    }
-
-    /**
-     * A drawable backed by a buffer the client handed over (DRI3). Nothing is allocated here:
-     * the buffer received from the client becomes the backing, and this drawable owns its
-     * reference from now on.
-     */
-    public Drawable(int id, int width, int height, Visual visual, GPUImage gpuImage) {
-        super(id);
-        if (gpuImage == null || gpuImage.hardwareBufferPtr == 0) {
-            throw new IllegalStateException("Drawable created from an empty GPUImage");
-        }
-        this.width = (short)width;
-        this.height = (short)height;
-        this.visual = visual;
-        this.gpuImage = gpuImage;
-        this.format = SurfaceFormat.fromHalFormat(gpuImage.format);
-        this.backingAHB = gpuImage.hardwareBufferPtr;
-        this.backing = Backing.track(this, gpuImage.hardwareBufferPtr);
     }
 
     public static Drawable fromBitmap(Bitmap bitmap, SurfaceFormat format) {
@@ -111,25 +88,43 @@ public class Drawable extends XResource {
         return drawable;
     }
 
-    /**
-     * Gives the backing buffer back. Called by DrawableManager when the X resource is gone
-     * (pixmap freed, window destroyed, window content replaced on resize): all of those run
-     * under the DRAWABLE_MANAGER lock, the same lock every draw request holds, so no draw can
-     * be using the buffer here. Readers outside the X locks (the cursor upload) take renderLock
-     * and check for 0. The renderer holds its own reference on everything it imported, so the
-     * GPU may still be sampling this buffer; it is freed when the last reference goes.
-     */
-    public void release() {
+    public void setGPUImage(GPUImage texture) {
+        final long allocated = this.backingAHB;
+        this.gpuImage = texture;
+        this.backingAHB = gpuImage.hardwareBufferPtr;
+        this.format = SurfaceFormat.fromHalFormat(gpuImage.format);
+        // The buffer allocated by the constructor is replaced by the client's one before anything
+        // has seen it (no draw listener yet, never handed to the renderer): give it back instead
+        // of leaking a full-size buffer per DRI3 pixmap.
+        if (allocated != 0 && this.backingAHB != 0 && allocated != this.backingAHB) releaseBuffer(allocated);
+    }
+
+    /** Another user of the buffer (a cursor built from this pixmap); pair with releaseRef(). */
+    public void retain() {
         synchronized (renderLock) {
-            if (backingAHB == 0) return;
-            backingAHB = 0;
-            onDrawListener = null;
-            backing.free();
+            if (refCount > 0) refCount++;
         }
     }
 
-    public boolean isReleased() {
-        return backingAHB == 0;
+    /**
+     * Drops one reference. Returns the buffer to give back with {@link #dropBacking} when that was
+     * the last one (backingAHB is cleared here, under renderLock - the lock every update of the
+     * renderer's texture is made under - so nothing starts using the buffer afterwards), else 0.
+     */
+    public long releaseRef() {
+        synchronized (renderLock) {
+            if (refCount <= 0) return 0;
+            if (--refCount > 0) return 0;
+            final long ahb = backingAHB;
+            backingAHB = 0;
+            onDrawListener = null;
+            return ahb;
+        }
+    }
+
+    /** Gives back the reference the drawable held on its buffer (see {@link #releaseRef}). */
+    public static void dropBacking(long ahb) {
+        if (ahb != 0) releaseBuffer(ahb);
     }
 
     public GPUImage getGPUImage() {
@@ -345,59 +340,6 @@ public class Drawable extends XResource {
         return this.offscreen;
     }
 
-    /**
-     * Owns the drawable's AHardwareBuffer reference. Freed explicitly by {@link #release()};
-     * a drawable that is never released (cursor images, which a window may keep using after
-     * FreeCursor, or one lost to an exception) is freed when it becomes unreachable instead.
-     */
-    private static final class Backing extends PhantomReference<Drawable> {
-        private static final ReferenceQueue<Drawable> QUEUE = new ReferenceQueue<>();
-        // Phantom references must stay reachable until they are enqueued.
-        private static final Set<Backing> LIVE = ConcurrentHashMap.newKeySet();
-        private static volatile boolean reaperStarted = false;
-
-        private final AtomicLong ahb;
-
-        private Backing(Drawable owner, long ahb) {
-            super(owner, QUEUE);
-            this.ahb = new AtomicLong(ahb);
-        }
-
-        static Backing track(Drawable owner, long ahb) {
-            startReaper();
-            Backing backing = new Backing(owner, ahb);
-            LIVE.add(backing);
-            return backing;
-        }
-
-        void free() {
-            LIVE.remove(this);
-            clear();
-            long ptr = ahb.getAndSet(0);
-            if (ptr != 0) releaseBuffer(ptr);
-        }
-
-        private static void startReaper() {
-            if (reaperStarted) return;
-            synchronized (Backing.class) {
-                if (reaperStarted) return;
-                Thread reaper = new Thread(() -> {
-                    while (true) {
-                        try {
-                            ((Backing) QUEUE.remove()).free();
-                        } catch (InterruptedException e) {
-                            return;
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                }, "DrawableReaper");
-                reaper.setDaemon(true);
-                reaper.start();
-                reaperStarted = true;
-            }
-        }
-    }
-
     private static native void drawBitmap(short dstX, short dstY, short width, short height, ByteBuffer srcData, short stride, short dstWidth, short dstHeight, long dstAHB);
 
     private static native void drawAlphaMaskedBitmap(byte foreRed, byte foreGreen, byte foreBlue, byte backRed, byte backGreen, byte backBlue, long srcAHB, short srcStride, long maskAHB, short maskStride, short width, short height, short stride, long dstAHB);
@@ -417,6 +359,7 @@ public class Drawable extends XResource {
     private static native void drawPolyLine(short[] points, int count, int color, short lineWidth, short stride, long dstAHB);
 
     private static native void drawLine(short x0, short y0, short x1, short y1, int color, short lineWidth, short stride, long dstAHB);
+
 
     private static native void releaseBuffer(long ahb);
 

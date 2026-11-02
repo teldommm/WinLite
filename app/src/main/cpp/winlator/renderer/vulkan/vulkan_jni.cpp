@@ -6,9 +6,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
-#include <string>
 #include <vector>
-#include <android/log.h>
+#include <string>
+#include <mutex>
+#include <shared_mutex>
 #include "../../../adrenotools/include/adrenotools/driver.h"
 #include "VulkanRendererContext.h"
 
@@ -118,117 +119,25 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeDestroy(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContent(
+    JNIEnv* env, jobject, jlong handle, jlong id, jobject buf,
+    jshort w, jshort h, jshort stride, jint x, jint y)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || !buf) return;
+    void* px = env->GetDirectBufferAddress(buf);
+    if (px && env->GetDirectBufferCapacity(buf) >= (jlong)w * h * 4)
+        r->updateWindowContent(id, px, w, h, stride, x, y);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
-    JNIEnv*, jobject, jlong handle, jlong contentId, jlong sourceId, jlong ahbPtr,
+    JNIEnv*, jobject, jlong handle, jlong id, jlong ahbPtr,
     jshort w, jshort h, jint x, jint y)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r && ahbPtr)
-        r->updateWindowContentAHB(contentId, sourceId,
-                                  reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativePresentFrame(
-    JNIEnv* env, jobject, jlong handle, jlong contentId, jlong sourceId, jlong ahbPtr,
-    jlong guestFrameNs, jlongArray jout)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    int64_t out[4] = {0, 0, 0, 0};
-    if (r && ahbPtr)
-        r->presentFrame(contentId, sourceId, reinterpret_cast<AHardwareBuffer*>(ahbPtr),
-                        guestFrameNs, out);
-    if (jout) {
-        const jsize n = std::min<jsize>(env->GetArrayLength(jout), 4);
-        jlong vals[4] = {(jlong)out[0], (jlong)out[1], (jlong)out[2], (jlong)out[3]};
-        if (n > 0) env->SetLongArrayRegion(jout, 0, n, vals);
-    }
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSourceBusy(
-    JNIEnv*, jobject, jlong handle, jlong sourceId)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    return (r && r->sourceBusy(sourceId)) ? JNI_TRUE : JNI_FALSE;
-}
-
-extern "C" JNIEXPORT jlong JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeBeginSourceIdleWait(
-    JNIEnv*, jobject, jlong handle, jlong sourceId)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    return r ? (jlong)r->beginSourceIdleWait(sourceId) : 0;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeEndSourceIdleWait(
-    JNIEnv*, jobject, jlong handle, jlong serial, jlong timeoutNs)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r && serial != 0) r->endSourceIdleWait((uint64_t)serial, timeoutNs > 0 ? (uint64_t)timeoutNs : 0);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetFpsLimit(
-    JNIEnv*, jobject, jlong handle, jint fps)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->setFpsLimit(fps);
-}
-
-// ---- ADPF (Android Performance Hint) ----
-
-// What the device offers: 0 = nothing, otherwise the API step 33 / 34 / 35 / 36.
-extern "C" JNIEXPORT jint JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativePerformanceHintLevel(JNIEnv*, jobject)
-{
-    return adpf::caps().level();
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPerformanceHint(
-    JNIEnv*, jobject, jlong handle, jboolean enabled)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->setPerformanceHint(enabled == JNI_TRUE);
-}
-
-// Native thread ids (gettid) of the other threads that carry a frame.
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPerformanceHintThreads(
-    JNIEnv* env, jobject, jlong handle, jintArray tids)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r) return;
-    const jsize n = tids ? env->GetArrayLength(tids) : 0;
-    std::vector<int32_t> list((size_t)n);
-    if (n > 0) env->GetIntArrayRegion(tids, 0, n, reinterpret_cast<jint*>(list.data()));
-    r->setPerformanceHintThreads(list.data(), list.size());
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeOnVsync(
-    JNIEnv*, jobject, jlong handle, jlong frameTimeNs, jlong deadlineNs, jlong presentNs)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->onVsync(frameTimeNs, deadlineNs, presentNs);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetDisplayRefreshRate(
-    JNIEnv*, jobject, jlong handle, jfloat hz)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->setDisplayRefreshRate(hz);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeReleaseDrawable(
-    JNIEnv*, jobject, jlong handle, jlong drawableId)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->releaseDrawable(drawableId);
+        r->updateWindowContentAHB(id, reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -268,6 +177,40 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateCursorImage(
     jlong required = (jlong)std::max((int)stride, (int)w) * h * 4;
     if (px && env->GetDirectBufferCapacity(buf) >= required)
         r->updateCursorImage(px, w, h, stride, hotX, hotY, rgba == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetRenderList(
+    JNIEnv* env, jobject, jlong handle,
+    jlongArray jids, jintArray jxs, jintArray jys, jint count)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || count <= 0) return;
+
+    jlong* ids = (jlong*)env->GetPrimitiveArrayCritical(jids, nullptr);
+    jint*  xs  = (jint*) env->GetPrimitiveArrayCritical(jxs,  nullptr);
+    jint*  ys  = (jint*) env->GetPrimitiveArrayCritical(jys,  nullptr);
+    r->setRenderList(reinterpret_cast<const int64_t*>(ids), xs, ys, count);
+    env->ReleasePrimitiveArrayCritical(jys,  ys,  JNI_ABORT);
+    env->ReleasePrimitiveArrayCritical(jxs,  xs,  JNI_ABORT);
+    env->ReleasePrimitiveArrayCritical(jids, ids, JNI_ABORT);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeRemoveWindow(
+    JNIEnv*, jobject, jlong handle, jlong id)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->removeWindow(id);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeReleaseBuffer(
+    JNIEnv*, jobject, jlong handle, jlong ahbPtr)
+{
+    // The Java side is dropping its reference to this buffer: forget the renderer's import of it.
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r && ahbPtr) r->releaseAhb(reinterpret_cast<AHardwareBuffer*>(ahbPtr));
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -336,9 +279,9 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSyncChildOrder(
     if (!r || count <= 0 || !jorderedIds || env->GetArrayLength(jorderedIds) < count) return;
     // Copied out first: syncChildOrder() waits for renderMutex, which the render thread and the
     // configuration calls hold across fence waits and vkDeviceWaitIdle. A JNI critical section
-    // open across that wait blocks the garbage collector's thread flip (ART: ThreadFlipBegin
-    // waits for every critical section to close, and stops new ones from opening) - every
-    // allocating thread, the UI thread included, waits with it.
+    // open across that wait blocks the garbage collector (ART waits for every critical section
+    // to close before a thread flip, and stops new ones from opening) - and with it every
+    // allocating thread, the UI thread included.
     std::vector<int64_t> ids((size_t)count);
     env->GetLongArrayRegion(jorderedIds, 0, count, reinterpret_cast<jlong*>(ids.data()));
     if (env->ExceptionCheck()) return;

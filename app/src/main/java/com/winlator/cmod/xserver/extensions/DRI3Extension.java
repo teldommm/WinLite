@@ -18,7 +18,6 @@ import com.winlator.cmod.xserver.XLock;
 import com.winlator.cmod.xserver.XResource;
 import com.winlator.cmod.xserver.XResourceManager;
 import com.winlator.cmod.xserver.XServer;
-import com.winlator.cmod.xserver.errors.BadAlloc;
 import com.winlator.cmod.xserver.errors.BadDrawable;
 import com.winlator.cmod.xserver.errors.BadIdChoice;
 import com.winlator.cmod.xserver.errors.BadImplementation;
@@ -178,13 +177,8 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
     private void pixmapFromHardwareBuffer(XClient client, int pixmapId, short width, short height, byte depth, int fd, Window window) throws IOException, XRequestError {
         try {
             GPUImage gpuImage = new GPUImage(fd);
-            if (gpuImage.hardwareBufferPtr == 0) throw new BadAlloc();
-            // The client's buffer IS the backing: nothing is allocated for this pixmap.
-            Drawable drawable = client.xServer.drawableManager.createDrawableFromBuffer(pixmapId, width, height, depth, gpuImage);
-            if (drawable == null) {
-                gpuImage.destroy();
-                throw new BadIdChoice(pixmapId);
-            }
+            Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, width, height, depth);
+            drawable.setGPUImage(gpuImage);
             drawable.setDirectScanout(true);
             drawable.setOnDrawListener(() -> client.xServer.windowManager.triggerOnUpdateWindowContentDirect(window, drawable));
             client.xServer.getXServerView().addDirectContent(window.id, drawable, gpuImage);
@@ -235,9 +229,11 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
     public void onFreeResource(XResource resource) {
         if (resource instanceof Pixmap) {
             Pixmap pixmap = (Pixmap)resource;
-            // The renderer's textures for this buffer are dropped by DrawableManager.removeDrawable()
-            // (XServerRendererView.onDrawableReleased), keyed by the drawable itself.
-            directContents.remove(pixmap.id);
+            DirectContent content = directContents.get(pixmap.id);
+            if (content != null) {
+                xServer.getXServerView().nativeRemoveDirectContent(content.window.id, pixmap.id);
+                directContents.remove(pixmap.id);
+            }
         }
     }
 }

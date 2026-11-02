@@ -187,8 +187,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private int editorResultProfileId = -1;
     private Runnable refreshInputPanel;
     private Shortcut shortcut;
-    // The display's refresh rate before this activity pinned any mode for an FPS limit: the ceiling for a cadence mode without the high refresh preference.
-    private float baseRefreshHz = 0f;
     private boolean graphicsFsrEnabled;
     private int graphicsUpscalerModeIndex;
     private int graphicsPostFxModeIndex;
@@ -1309,9 +1307,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         vkRenderer.setVkPresentMode(com.winlator.cmod.contentdialog.RendererOptions.toVkPresentMode(presentMode));
         vkRenderer.setFilterMode(shortcut != null ? shortcut.getRendererFilterMode()
                 : (container != null ? container.getRendererFilterMode() : 0));
-
-        // Pick the display mode: the user's refresh preference, or one an FPS limit divides evenly.
-        applyDisplayMode();
     }
 
     private void setupUI() {
@@ -1832,8 +1827,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         int initialFpsLimit = loadFpsLimit();
         if (vkRenderer != null) vkRenderer.setFpsLimit(initialFpsLimit);
-        // An FPS limit wants a display mode it divides evenly.
-        if (initialFpsLimit > 0) applyDisplayMode();
 
         // FSR/Upscaler/PostFX/Sharpness prefer the per-shortcut value over the container-wide
         // one, exactly like SidebarCleanupView's bolted-on autosave used to (it re-read these
@@ -1861,12 +1854,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (initPFX > 0) vkRenderer.setPostFXMode(initPFX);
         }
 
-        // ADPF: opt-in. The switch is saved like the FPS limit (shortcut first, else container)
-        // and only exists on the Vulkan renderer, on a device that offers hint sessions.
-        final boolean perfHintAvailable = vkRenderer != null && vkRenderer.isPerformanceHintSupported();
-        final boolean perfHintOn = perfHintAvailable && loadPerformanceHint();
-        if (vkRenderer != null) vkRenderer.setPerformanceHint(perfHintOn);
-
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
                 fsrOn,
@@ -1874,9 +1861,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 initSharp,
                 initPFX,
                 0,  // ReShade never persisted anything in the original either — always starts Off
-                graphicsReshadeStrength,
-                perfHintAvailable,
-                perfHintOn
+                graphicsReshadeStrength
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
@@ -1884,15 +1869,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             public void onFpsLimitChanged(int fps) {
                 saveFpsLimit(fps);
                 if (vkRenderer != null) vkRenderer.setFpsLimit(fps);
-                // The display mode follows the limit: 30/40/60 on 144 Hz cannot be shown evenly,
-                // on 120 Hz they can.
-                applyDisplayMode();
-            }
-
-            @Override
-            public void onPerformanceHintChanged(boolean enabled) {
-                savePerformanceHint(enabled);
-                if (vkRenderer != null) vkRenderer.setPerformanceHint(enabled);
             }
 
             @Override
@@ -2028,24 +2004,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         if ("0".equals(oldEnabled)) limit = 0;
         return limit;
-    }
-
-    private boolean loadPerformanceHint() {
-        String saved = "";
-        if (shortcut != null) saved = shortcut.getExtra("performanceHint", "");
-        if (saved.isEmpty() && container != null) saved = container.getExtra("performanceHint", "");
-        return "1".equals(saved);
-    }
-
-    private void savePerformanceHint(boolean enabled) {
-        final String value = enabled ? "1" : "0";
-        if (shortcut != null) {
-            shortcut.putExtra("performanceHint", value);
-            shortcut.saveData();
-        } else if (container != null) {
-            container.putExtra("performanceHint", value);
-            container.saveData();
-        }
     }
 
     private void saveFpsLimit(int fps) {
@@ -3008,66 +2966,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * Display mode for the window: one the FPS limit divides evenly when there is such a mode,
      * otherwise the user's own refresh preference.
      */
-    private void applyDisplayMode() {
-        android.view.Window window = getWindow();
-        android.view.Display display = getWindowManager().getDefaultDisplay();
-        if (window == null || display == null) return;
-        android.view.WindowManager.LayoutParams params = window.getAttributes();
-        if (baseRefreshHz <= 0f) baseRefreshHz = display.getMode().getRefreshRate();
-
-        boolean highRefresh = preferences.getBoolean("high_refresh_rate_mode", false);
-        int limit = xServerView != null ? xServerView.getFpsLimit() : 0;
-        android.view.Display.Mode cadence = limit > 0 ? pickCadenceMode(display, limit, highRefresh, baseRefreshHz) : null;
-        if (cadence != null) {
-            // Every limited frame then stays on screen for the same number of refreshes.
-            if (params.preferredDisplayModeId != cadence.getModeId() || params.preferredRefreshRate != 0f) {
-                params.preferredDisplayModeId = cadence.getModeId();
-                params.preferredRefreshRate = 0f;
-                window.setAttributes(params);
-                Log.i("XServerDisplayActivity", "FPS limit " + limit + ": display mode "
-                        + Math.round(cadence.getRefreshRate()) + "Hz (mode " + cadence.getModeId() + ")");
-            }
-            return;
-        }
-        float userRate = highRefresh ? pickHighestRefreshRate() : 0f;
-        if (params.preferredDisplayModeId != 0 || params.preferredRefreshRate != userRate) {
-            params.preferredDisplayModeId = 0;
-            params.preferredRefreshRate = userRate;
-            window.setAttributes(params);
-        }
-    }
-
-    /**
-     * Display mode (same resolution) whose refresh rate the FPS limit divides evenly: the
-     * fastest such mode, up to the display's own rate before any pin ({@code ceilingHz}) or
-     * without a ceiling under the high refresh preference. Fastest, not slowest: the display
-     * and compositor pipeline costs about two refreshes of latency, a touch panel samples at the
-     * refresh rate, and the on-screen controls run at it too - a 60 FPS limit on a 144 Hz panel
-     * belongs on 120 Hz, not 60, and 30 FPS never on a 30 Hz mode. Null when no mode fits (e.g.
-     * a 35 FPS limit): the user's own refresh preference stays.
-     */
-    private static android.view.Display.Mode pickCadenceMode(android.view.Display display, int limit,
-                                                             boolean preferHighest, float ceilingHz) {
-        android.view.Display.Mode active = display.getMode();
-        final float ceiling = preferHighest || ceilingHz <= 0f ? Float.MAX_VALUE : ceilingHz + 0.5f;
-        android.view.Display.Mode best = null;
-        for (android.view.Display.Mode mode : display.getSupportedModes()) {
-            if (mode.getPhysicalWidth() != active.getPhysicalWidth()
-                    || mode.getPhysicalHeight() != active.getPhysicalHeight()) continue;
-            if (mode.getRefreshRate() > ceiling) continue;
-            if (!isFrameCadenceCompatible(mode.getRefreshRate(), limit)) continue;
-            if (best == null || mode.getRefreshRate() > best.getRefreshRate()) best = mode;
-        }
-        return best;
-    }
-
-    private static boolean isFrameCadenceCompatible(float refreshRate, int fpsLimit) {
-        if (refreshRate <= 0f || fpsLimit <= 0 || refreshRate < fpsLimit) return false;
-        float ratio = refreshRate / fpsLimit;
-        int nearest = Math.round(ratio);
-        return nearest >= 1 && Math.abs(ratio - nearest) <= 0.01f;
-    }
-
     private float currentDisplayRefreshRate() {
         android.view.Display display = getWindowManager().getDefaultDisplay();
         return display != null ? display.getRefreshRate() : 60f;

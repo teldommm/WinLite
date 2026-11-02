@@ -107,8 +107,6 @@ include_directories(
 add_library(vulkan_renderer SHARED
         winlator/renderer/vulkan/vulkan_jni.cpp
         winlator/renderer/vulkan/VulkanRendererContext.cpp
-        winlator/renderer/vulkan/VulkanRendererAdpf.cpp
-        winlator/renderer/vulkan/adpf/adpf_session.cpp
         winlator/renderer/vulkan/VulkanRendererFilters.cpp
         winlator/renderer/vulkan/VulkanRendererPipelineOpt.cpp
 
