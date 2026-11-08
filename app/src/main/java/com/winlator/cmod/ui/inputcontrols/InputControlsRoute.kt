@@ -2,11 +2,8 @@ package com.winlator.cmod.ui.inputcontrols
 
 import com.winlator.cmod.ui.uiStr
 import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import com.winlator.cmod.ui.toast.WinToast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -14,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +31,7 @@ import com.winlator.cmod.inputcontrols.ExternalController
 import com.winlator.cmod.inputcontrols.InputControlsManager
 import com.winlator.cmod.ui.ThemedAlertHost
 import com.winlator.cmod.ui.ThemedLoadingOverlayHost
+import com.winlator.cmod.ui.filemanager.FilePickerDialog
 import com.winlator.cmod.ui.theme.findActivity
 import com.winlator.cmod.widget.InputControlsView
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 
@@ -54,8 +52,8 @@ import kotlin.math.roundToInt
 //  - Profiles are (re)loaded off the main thread into a fresh InputControlsManager that is then
 //    swapped in on the main thread. The fragment built a new manager (and re-read every
 //    profile JSON) synchronously on every tab switch, right when the transition started.
-//  - The file picker uses the Activity Result API instead of startActivityFromFragment +
-//    onActivityResult with MainActivity.OPEN_FILE_REQUEST_CODE.
+//  - Importing a local profile uses the app's own file picker (FilePickerDialog, plain java.io.File
+//    browsing) instead of the system Storage Access Framework picker.
 //  - Refresh points are explicit: whenever the activity (re)starts — e.g. back from
 //    ControlsEditorActivity / ExternalControllerBindingsActivity, same as the fragment's
 //    onStart — and whenever MainShell re-shows the tab (shownSerial).
@@ -65,11 +63,6 @@ fun InputControlsRoute(initialProfileId: Int, shownSerial: Int) {
     val activity = LocalContext.current.findActivity() as AppCompatActivity
     val scope = rememberCoroutineScope()
     val state = remember { InputControlsScreenState(activity, initialProfileId, scope) }
-
-    val openDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) state.importProfileFrom(uri)
-    }
-    SideEffect { state.launchProfilePicker = { openDocument.launch(arrayOf("*/*")) } }
 
     LifecycleStartEffect(state) {
         state.reload()
@@ -105,9 +98,6 @@ internal class InputControlsScreenState(
 
     var model by mutableStateOf<InputControlsModel?>(null)
         private set
-
-    // Set by InputControlsRoute each composition (the launcher belongs to the composition).
-    var launchProfilePicker: (() -> Unit)? = null
 
     // ---------- Loading ----------
 
@@ -236,7 +226,7 @@ internal class InputControlsScreenState(
             activity,
             uiStr(R.string.ui_import_profile),
             listOf(
-                ThemedAlertHost.ActionItem(uiStr(R.string.ui_open_local_profile), { launchProfilePicker?.invoke() }),
+                ThemedAlertHost.ActionItem(uiStr(R.string.ui_open_local_profile), { showProfilePicker() }),
                 ThemedAlertHost.ActionItem(uiStr(R.string.ui_download_profiles), { downloadProfileList() })
             )
         )
@@ -288,14 +278,38 @@ internal class InputControlsScreenState(
 
     // ---------- Import / download ----------
 
-    fun importProfileFrom(uri: Uri) {
-        val manager = manager ?: return
-        try {
-            currentProfile = manager.importProfile(JSONObject(FileUtils.readString(activity, uri)))
-            rebuild()
-            WinToast.show(activity, uiStr(R.string.ui_profile_imported), Toast.LENGTH_SHORT)
-        } catch (e: Exception) {
-            WinToast.show(activity, uiStr(R.string.ui_unable_to_import_profile), Toast.LENGTH_SHORT)
+    // Opens the in-app picker on the folder exported profiles are written to (so a profile exported
+    // earlier is one tap away), listing .icp files.
+    private fun showProfilePicker() {
+        FilePickerDialog.show(
+            activity,
+            uiStr(R.string.ui_select_profile_file),
+            listOf("icp"),
+            InputControlsManager.getExportDir(activity)
+        ) { file -> importProfileFrom(file) }
+    }
+
+    fun importProfileFrom(file: File) {
+        scope.launch {
+            // A profile is a small JSON file; the read still stays off the main thread.
+            val json = withContext(Dispatchers.IO) {
+                try {
+                    if (!file.isFile || file.length() > MAX_PROFILE_BYTES) null
+                    else JSONObject(FileUtils.readString(file))
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            val manager = manager
+            // importProfile returns null when the JSON has no "id"/"name", i.e. it is not a profile.
+            val imported = if (json != null && manager != null) manager.importProfile(json) else null
+            if (imported != null) {
+                currentProfile = imported
+                rebuild()
+                WinToast.show(activity, uiStr(R.string.ui_profile_imported), Toast.LENGTH_SHORT)
+            } else {
+                WinToast.show(activity, uiStr(R.string.ui_unable_to_import_profile), Toast.LENGTH_SHORT)
+            }
         }
     }
 
@@ -365,5 +379,10 @@ internal class InputControlsScreenState(
         val profile = currentProfile
         if (profile == null) WinToast.show(activity, uiStr(R.string.ui_no_profile_selected), Toast.LENGTH_SHORT)
         return profile
+    }
+
+    private companion object {
+        // Real profiles are a few KB; anything this large is not one.
+        const val MAX_PROFILE_BYTES = 8L * 1024 * 1024
     }
 }

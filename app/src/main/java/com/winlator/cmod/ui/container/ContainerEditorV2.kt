@@ -9,10 +9,10 @@ import com.winlator.cmod.ssbs.ForceSsbs
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.widget.Toast
 import com.winlator.cmod.ui.toast.WinToast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import com.winlator.cmod.ui.filemanager.FilePickerDialog
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -742,10 +742,10 @@ private fun ContainerCategoryV2(
     installRuntime: (String, String, (String) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
-    val wallpaperPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
+    val launchWallpaperPicker: () -> Unit = {
+        FilePickerDialog.showImage(context, uiStr(R.string.ui_select_image), null) { picked ->
             runCatching {
-                val bitmap = ImageUtils.getBitmapFromUri(context, uri, 1280) ?: error("Unable to decode image")
+                val bitmap = ImageUtils.getBitmapFromUri(context, Uri.fromFile(picked), 1280) ?: error("Unable to decode image")
                 val target = WineThemeManager.getUserWallpaperFile(context)
                 target.parentFile?.mkdirs()
                 if (!ImageUtils.save(bitmap, target, Bitmap.CompressFormat.PNG, 100)) error("Unable to save image")
@@ -853,7 +853,7 @@ private fun ContainerCategoryV2(
                                 fontWeight = FontWeight.Medium
                             )
                         }
-                        TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
+                        TextButton(onClick = launchWallpaperPicker) {
                             Text(if (s.wallpaperStamp > 0L) uiStr(R.string.ui_change) else uiStr(R.string.ui_choose))
                         }
                     }

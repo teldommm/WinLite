@@ -35,6 +35,7 @@ import com.winlator.cmod.core.ProtonPackageManager;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineRuntimeGuard;
 import com.winlator.cmod.fexcore.FEXCorePreset;
+import com.winlator.cmod.ui.filemanager.FilePickerDialog;
 import com.winlator.cmod.ui.onboarding.OnboardingComposeController;
 import com.winlator.cmod.ui.onboarding.OnboardingComposeHost;
 
@@ -44,6 +45,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -69,7 +71,6 @@ public class OnboardingActivity extends AppCompatActivity implements ComponentCa
     private static final String PREF_INITIAL_WINE = "winz_initial_wine_version";
     private static final int REQUEST_STORAGE = 820;
     private static final int REQUEST_NOTIFICATIONS = 821;
-    private static final int REQUEST_LOCAL_COMPONENT = 822;
     private static final int REQUEST_ALL_FILES = 823;
 
     private final ComponentCatalogController controller = new ComponentCatalogController(this);
@@ -106,10 +107,14 @@ public class OnboardingActivity extends AppCompatActivity implements ComponentCa
                 controller.createCallbacks(new ComponentCatalogController.ExtraCallbacks() {
                     @Override
                     public void onBrowseLocal() {
-                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                        intent.addCategory(Intent.CATEGORY_OPENABLE);
-                        intent.setType("*/*");
-                        startActivityForResult(intent, REQUEST_LOCAL_COMPONENT);
+                        // Component (.wcp) and driver (.zip) packages; the controller tells them
+                        // apart by content, and "Show all files" covers any other extension.
+                        FilePickerDialog.show(
+                                OnboardingActivity.this,
+                                UiStrings.get(R.string.ui_select_component_package),
+                                Arrays.asList("wcp", "zip", "xz", "zst", "tzst", "tar"),
+                                null,
+                                file -> controller.handleLocalPackagePicked(Uri.fromFile(file)));
                     }
 
                     @Override
@@ -164,9 +169,7 @@ public class OnboardingActivity extends AppCompatActivity implements ComponentCa
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_LOCAL_COMPONENT && resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
-            controller.handleLocalPackagePicked(data.getData());
-        } else if (requestCode == REQUEST_ALL_FILES) {
+        if (requestCode == REQUEST_ALL_FILES) {
             continuePermissionFlow();
         }
     }

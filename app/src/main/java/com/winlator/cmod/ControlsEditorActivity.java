@@ -26,6 +26,7 @@ import androidx.preference.PreferenceManager;
 
 import com.winlator.cmod.R;
 import com.winlator.cmod.ui.ThemedAlertHost;
+import com.winlator.cmod.ui.filemanager.FilePickerDialog;
 import com.winlator.cmod.ui.inputcontrols.ControlElementBindingRow;
 import com.winlator.cmod.ui.inputcontrols.ControlElementIcon;
 import com.winlator.cmod.ui.inputcontrols.ControlElementIconTint;
@@ -47,7 +48,6 @@ public class ControlsEditorActivity extends AppCompatActivity {
     private ControlsProfile profile;
     private ControlElement pendingIconElement = null;
     private int pendingBuiltinOverrideId = -1;
-    private static final int PICK_ICON_REQUEST = 7001;
     private static final String BUILTIN_ICON_PREFIX = "builtin:";
     // Built-in icon 0 is the "no icon" tile (assets/inputcontrols/icons/0.png): an element with
     // iconId 0 shows its text instead of a picture.
@@ -556,10 +556,11 @@ public class ControlsEditorActivity extends AppCompatActivity {
     }
 
     private void launchIconPicker() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-        intent.setType("image/*");
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        startActivityForResult(intent, PICK_ICON_REQUEST);
+        FilePickerDialog.showImage(
+                this,
+                UiStrings.get(R.string.ui_select_image),
+                null,
+                file -> applyPickedIcon(file));
     }
 
     private ControlElementSettingsModel buildElementSettingsModel(ControlElement element) {
@@ -850,65 +851,61 @@ public class ControlsEditorActivity extends AppCompatActivity {
         return count > 0 && (totalLuminance / count) < 50;
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PICK_ICON_REQUEST && resultCode == Activity.RESULT_OK
-                && data != null) {
-            Uri uri = data.getData();
-            try {
-                File iconsDir = getCustomIconsDir();
-                if (!iconsDir.exists()) iconsDir.mkdirs();
+    // An image picked in the app's own picker becomes the icon of the element chosen in
+    // onBrowseIcon / onIconLongPress (or the override of a built-in icon).
+    private void applyPickedIcon(File picked) {
+        try {
+            File iconsDir = getCustomIconsDir();
+            if (!iconsDir.exists()) iconsDir.mkdirs();
 
-                File dest;
-                if (pendingBuiltinOverrideId >= 0) {
-                    dest = getBuiltinOverridePath(pendingBuiltinOverrideId);
-                    pendingBuiltinOverrideId = -1;
-                } else {
-                    dest = new File(iconsDir, "icon_" + System.currentTimeMillis() + ".png");
-                }
-
-                try (InputStream in = getContentResolver().openInputStream(uri);
-                     java.io.FileOutputStream out = new java.io.FileOutputStream(dest)) {
-                    byte[] buf = new byte[4096];
-                    int len;
-                    while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
-                }
-
-                Bitmap loaded = loadAndScaleBitmap(dest.getAbsolutePath());
-                if (loaded == null) {
-                    dest.delete();
-                    Log.w("Icons", "Picked file is not a valid image or could not be decoded: " + uri);
-                    WinToast.show(this, UiStrings.get(R.string.ui_unable_to_set_icon), Toast.LENGTH_SHORT);
-                    pendingIconElement = null;
-                    return;
-                }
-                if (loaded.getWidth() != -1) {
-                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(dest)) {
-                        loaded.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                    }
-                }
-                loaded.recycle();
-
-                inputControlsView.invalidateIconCache();
-                iconCache = null;
-
-                if (pendingIconElement != null) {
-                    startEdit(pendingIconElement);
-                    pendingIconElement.setCustomIconPath(dest.getAbsolutePath());
-                    pendingIconElement.setIconId(0);
-                    profile.save();
-                    inputControlsView.invalidate();
-                    refreshElementSettings(pendingIconElement);
-                    endEdit();
-                    pendingIconElement = null;
-                }
-            } catch (Exception e) {
-                Log.e("Icons", "Error saving picked icon: " + e.getMessage());
-                pendingIconElement = null;
+            File dest;
+            if (pendingBuiltinOverrideId >= 0) {
+                dest = getBuiltinOverridePath(pendingBuiltinOverrideId);
                 pendingBuiltinOverrideId = -1;
-                WinToast.show(this, UiStrings.get(R.string.ui_unable_to_set_icon), Toast.LENGTH_SHORT);
+            } else {
+                dest = new File(iconsDir, "icon_" + System.currentTimeMillis() + ".png");
             }
+
+            try (InputStream in = new java.io.FileInputStream(picked);
+                 java.io.FileOutputStream out = new java.io.FileOutputStream(dest)) {
+                byte[] buf = new byte[4096];
+                int len;
+                while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
+            }
+
+            Bitmap loaded = loadAndScaleBitmap(dest.getAbsolutePath());
+            if (loaded == null) {
+                dest.delete();
+                Log.w("Icons", "Picked file is not a valid image or could not be decoded: " + picked);
+                WinToast.show(this, UiStrings.get(R.string.ui_unable_to_set_icon), Toast.LENGTH_SHORT);
+                pendingIconElement = null;
+                return;
+            }
+            if (loaded.getWidth() != -1) {
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(dest)) {
+                    loaded.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                }
+            }
+            loaded.recycle();
+
+            inputControlsView.invalidateIconCache();
+            iconCache = null;
+
+            if (pendingIconElement != null) {
+                startEdit(pendingIconElement);
+                pendingIconElement.setCustomIconPath(dest.getAbsolutePath());
+                pendingIconElement.setIconId(0);
+                profile.save();
+                inputControlsView.invalidate();
+                refreshElementSettings(pendingIconElement);
+                endEdit();
+                pendingIconElement = null;
+            }
+        } catch (Exception e) {
+            Log.e("Icons", "Error saving picked icon: " + e.getMessage());
+            pendingIconElement = null;
+            pendingBuiltinOverrideId = -1;
+            WinToast.show(this, UiStrings.get(R.string.ui_unable_to_set_icon), Toast.LENGTH_SHORT);
         }
     }
 

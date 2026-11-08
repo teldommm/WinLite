@@ -185,17 +185,21 @@ public class InputControlsManager {
         }
     }
 
-    public File exportProfile(ControlsProfile profile) {
-        File destination;
+    // The folder exported .icp profiles are written to: "profiles" inside the user's Winlator folder.
+    // The in-app import picker opens here first.
+    public static File getExportDir(Context context) {
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(context);
         String winlatorPath = sp.getString("winlator_path_uri", null);
+        String basePath = null;
         if (winlatorPath != null) {
-            Uri winlatorUri = Uri.parse(winlatorPath);
-            destination = new File(FileUtils.getFilePathFromUri(context, winlatorUri), "profiles/" + profile.getName() + ".icp");
+            basePath = FileUtils.getFilePathFromUri(context, Uri.parse(winlatorPath));
         }
-        else {
-            destination = new File(AppDefaults.DEFAULT_WINLATOR_PATH, "profiles/" + profile.getName() + ".icp");
-        }
+        if (basePath == null) basePath = AppDefaults.DEFAULT_WINLATOR_PATH;
+        return new File(basePath, "profiles");
+    }
+
+    public File exportProfile(ControlsProfile profile) {
+        File destination = new File(getExportDir(context), profile.getName() + ".icp");
         FileUtils.copy(ControlsProfile.getProfileFile(context, profile.id), destination);
         MediaScannerConnection.scanFile(context, new String[]{destination.getAbsolutePath()}, null, null);
         return destination.isFile() ? destination : null;

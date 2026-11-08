@@ -1,12 +1,9 @@
 package com.winlator.cmod.ui.settings
 
 import com.winlator.cmod.ui.uiStr
-import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import com.winlator.cmod.ui.toast.WinToast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -14,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +35,7 @@ import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.steamgrid.ArtworkRepository
 import com.winlator.cmod.midi.MidiManager
 import com.winlator.cmod.ui.ThemedAlertHost
+import com.winlator.cmod.ui.filemanager.FilePickerDialog
 import com.winlator.cmod.ui.theme.findActivity
 import com.winlator.cmod.xenvironment.ImageFsInstaller
 import kotlinx.coroutines.CoroutineScope
@@ -48,13 +45,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONException
+import java.io.File
 import java.io.FileNotFoundException
 import kotlin.math.roundToInt
 
 // Settings as a plain composable tab of MainShell (replaces SettingsFragment). Behaviour is the
 // same; the differences are structural:
-//  - File/folder pickers use two Activity Result launchers (document, document tree) with a
-//    pending action, instead of six request codes funnelled through onActivityResult.
+//  - File/folder pickers use the app's own picker (FilePickerDialog, plain java.io.File browsing)
+//    instead of the system Storage Access Framework; a picked folder is stored as a file:// URI
+//    under the same preference keys, which FileUtils.getFilePathFromUri resolves.
 //  - The model is built off the main thread when the screen (re)appears; user-initiated changes
 //    still rebuild synchronously so switches/sliders respond in the same frame.
 //  - Refresh on resume matches the fragment's onResume (back from Components/Containers
@@ -67,17 +66,6 @@ fun SettingsRoute(shownSerial: Int) {
     val activity = LocalContext.current.findActivity() as AppCompatActivity
     val scope = rememberCoroutineScope()
     val state = remember { SettingsScreenState(activity, scope) }
-
-    val openDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        state.onDocumentPicked(uri)
-    }
-    val openTree = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        state.onTreePicked(uri)
-    }
-    SideEffect {
-        state.launchDocumentPicker = { openDocument.launch(arrayOf("*/*")) }
-        state.launchTreePicker = { openTree.launch(null) }
-    }
 
     LifecycleResumeEffect(state) {
         state.reload()
@@ -105,12 +93,6 @@ internal class SettingsScreenState(
 
     var model by mutableStateOf<SettingsModel?>(null)
         private set
-
-    // Launchers belong to the composition; SettingsRoute sets these on every composition.
-    var launchDocumentPicker: (() -> Unit)? = null
-    var launchTreePicker: (() -> Unit)? = null
-    private var pendingDocumentAction: ((Uri) -> Unit)? = null
-    private var pendingTreePreferenceKey: String? = null
 
     // ---------- Model ----------
 
@@ -192,37 +174,25 @@ internal class SettingsScreenState(
 
     // ---------- Pickers ----------
 
-    private fun pickDocument(action: (Uri) -> Unit) {
-        pendingDocumentAction = action
-        launchDocumentPicker?.invoke()
+    // The picked file arrives as a file:// Uri, which the existing readers (ContentResolver streams,
+    // FileUtils.getUriFileName) handle like any other.
+    private fun pickDocument(title: String, extensions: List<String>, action: (Uri) -> Unit) {
+        FilePickerDialog.show(activity, title, extensions, null) { file -> action(Uri.fromFile(file)) }
     }
 
     private fun pickTreeFor(preferenceKey: String) {
-        pendingTreePreferenceKey = preferenceKey
-        launchTreePicker?.invoke()
+        val label = if (preferenceKey == "shortcuts_export_path_uri") uiStr(R.string.ui_shortcut_export_folder) else uiStr(R.string.ui_winlator_folder)
+        val fallback = if (preferenceKey == "shortcuts_export_path_uri") AppDefaults.DEFAULT_SHORTCUT_EXPORT_PATH else AppDefaults.DEFAULT_WINLATOR_PATH
+        // Open on the current folder, or the nearest existing parent when it was not created yet.
+        var start: File? = File(resolveStoredPath(preferenceKey, fallback))
+        while (start != null && !start.isDirectory) start = start.parentFile
+        FilePickerDialog.showFolder(activity, label, start) { dir -> onTreePicked(preferenceKey, dir) }
     }
 
-    fun onDocumentPicked(uri: Uri?) {
-        val action = pendingDocumentAction
-        pendingDocumentAction = null
-        if (uri != null && action != null) action(uri)
-    }
-
-    fun onTreePicked(uri: Uri?) {
-        val key = pendingTreePreferenceKey
-        pendingTreePreferenceKey = null
-        if (uri == null || key == null) return
-        preferences.edit().putString(key, uri.toString()).apply()
-        try {
-            activity.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        } catch (e: SecurityException) {
-            WinToast.show(activity, uiStr(R.string.ui_unable_to_take_persistable_permissions) + e.message, Toast.LENGTH_SHORT)
-            rebuild()
-            return
-        }
+    private fun onTreePicked(key: String, dir: File) {
+        // Stored as a file:// URI under the same key the SAF tree URI used; getFilePathFromUri turns
+        // it back into the path. No persistable URI permission is involved any more.
+        preferences.edit().putString(key, Uri.fromFile(dir).toString()).apply()
         rebuild()
         val label = if (key == "shortcuts_export_path_uri") uiStr(R.string.ui_shortcut_export_folder) else uiStr(R.string.ui_winlator_folder)
         val path = resolveStoredPath(key, "")
@@ -252,7 +222,7 @@ internal class SettingsScreenState(
     }
 
     override fun onInstallSoundFont() {
-        pickDocument { uri ->
+        pickDocument(uiStr(R.string.ui_select_soundfont), listOf("sf2")) { uri ->
             try {
                 val dialog = PreloaderDialog(activity)
                 dialog.showOnUiThread(R.string.installing_content)
@@ -415,7 +385,7 @@ internal class SettingsScreenState(
                     true
                 )
             }
-            "import" -> pickDocument { uri ->
+            "import" -> pickDocument(uiStr(R.string.ui_select_preset_file), listOf("wbp")) { uri ->
                 try {
                     val stream = activity.contentResolver.openInputStream(uri)
                     val imported = stream != null && (

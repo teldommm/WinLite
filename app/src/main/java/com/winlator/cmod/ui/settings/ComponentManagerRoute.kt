@@ -1,10 +1,7 @@
 package com.winlator.cmod.ui.settings
 
-import android.app.Activity
 import android.content.Context
-import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -13,11 +10,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import com.winlator.cmod.ComponentCatalogController
+import com.winlator.cmod.R
 import com.winlator.cmod.core.WineInfo
 import com.winlator.cmod.core.WineRuntimeGuard
+import com.winlator.cmod.ui.filemanager.FilePickerDialog
 import com.winlator.cmod.ui.onboarding.ComponentManagerContent
 import com.winlator.cmod.ui.onboarding.OnboardingComposeHost
 import com.winlator.cmod.ui.theme.findActivity
+import com.winlator.cmod.ui.uiStr
 
 // Components (catalog/install/remove) as a MainShell detail entry. The logic is
 // ComponentCatalogController, shared with OnboardingActivity's first-run flow; this route is its
@@ -39,11 +39,6 @@ fun ComponentManagerRoute(onClose: () -> Unit) {
         })
     }
 
-    val pickComponent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val uri = result.data?.data
-        if (result.resultCode == Activity.RESULT_OK && uri != null) catalog.handleLocalPackagePicked(uri)
-    }
-
     // Same order the fragment used: initialize → UI state → callbacks → attach; start() once
     // the screen is composed (DisposableEffect below).
     val ui = remember {
@@ -57,7 +52,7 @@ fun ComponentManagerRoute(onClose: () -> Unit) {
     }
     val callbacks = remember {
         catalog.createCallbacks(object : ComponentCatalogController.ExtraCallbacks {
-            override fun onBrowseLocal() = pickComponent.launch(openDocumentIntent())
+            override fun onBrowseLocal() = browseLocalPackage(activity, catalog)
         })
     }
 
@@ -72,5 +67,13 @@ fun ComponentManagerRoute(onClose: () -> Unit) {
     ComponentManagerContent(ui, callbacks)
 }
 
-private fun openDocumentIntent(): Intent =
-    Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+// Component (.wcp) and driver (.zip) packages. ComponentCatalogController decides what a picked
+// file is from its first bytes, not its name, so "Show all files" in the picker covers a package
+// that was saved under some other extension.
+private val LOCAL_PACKAGE_EXTENSIONS = listOf("wcp", "zip", "xz", "zst", "tzst", "tar")
+
+private fun browseLocalPackage(activity: AppCompatActivity, catalog: ComponentCatalogController) {
+    FilePickerDialog.show(activity, uiStr(R.string.ui_select_component_package), LOCAL_PACKAGE_EXTENSIONS, null) { file ->
+        catalog.handleLocalPackagePicked(Uri.fromFile(file))
+    }
+}

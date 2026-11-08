@@ -2,8 +2,7 @@ package com.winlator.cmod.ui.shortcut
 
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import com.winlator.cmod.ui.filemanager.FilePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +28,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,15 +69,18 @@ internal fun DriveLettersEditorV2(
             }
         }
     }
-    var browseIndex by remember { mutableIntStateOf(-1) }
     var committedDrives by remember { mutableStateOf(initialDrives) }
 
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        val index = browseIndex
-        browseIndex = -1
-        if (uri == null || index !in entries.indices) return@rememberLauncherForActivityResult
-        val path = FileUtils.getFilePathFromUri(context, uri)
-        if (!path.isNullOrBlank()) entries[index] = entries[index].copy(path = path)
+    // Picks the folder a drive letter points at, starting where its path field points now. The
+    // picked folder's real path goes straight into the field.
+    val browseDrive: (Int) -> Unit = { index ->
+        FilePickerDialog.showFolder(
+            context,
+            uiStr(R.string.ui_select_folder),
+            FilePickerDialog.nearestDir(entries.getOrNull(index)?.path)
+        ) { dir ->
+            if (index in entries.indices) entries[index] = entries[index].copy(path = dir.absolutePath)
+        }
     }
 
     val serialized = entries
@@ -132,10 +133,7 @@ internal fun DriveLettersEditorV2(
                     },
                     onLetter = { letter -> entries[index] = entry.copy(letter = letter) },
                     onPath = { path -> entries[index] = entry.copy(path = path) },
-                    onBrowse = {
-                        browseIndex = index
-                        folderPicker.launch(null)
-                    },
+                    onBrowse = { browseDrive(index) },
                     onRemove = { entries.removeAt(index) }
                 )
             }

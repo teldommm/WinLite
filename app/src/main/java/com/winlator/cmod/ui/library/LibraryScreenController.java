@@ -21,7 +21,6 @@ import com.winlator.cmod.ui.toast.WinToast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.documentfile.provider.DocumentFile;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.cmod.MainActivity;
@@ -770,13 +769,15 @@ public class LibraryScreenController {
         File shortcutsDir;
 
         if (uriString != null) {
-            Uri folderUri = Uri.parse(uriString);
-            DocumentFile pickedDir = DocumentFile.fromTreeUri(activity, folderUri);
-            if (pickedDir == null || !pickedDir.canWrite()) {
+            // The stored folder is a file:// URI (picked in the app's own picker) or, from older
+            // versions, a SAF tree URI; getFilePathFromUri resolves both to a path.
+            String folderPath = FileUtils.getFilePathFromUri(activity, Uri.parse(uriString));
+            shortcutsDir = folderPath != null ? new File(folderPath) : null;
+            // An existing folder must be writable; one that does not exist yet is created below.
+            if (shortcutsDir == null || (shortcutsDir.exists() && !shortcutsDir.canWrite())) {
                 WinToast.show(activity, UiStrings.get(R.string.ui_export_folder_not_writable), Toast.LENGTH_LONG);
                 return;
             }
-            shortcutsDir = new File(FileUtils.getFilePathFromUri(activity, folderUri));
         } else {
             shortcutsDir = new File(AppDefaults.DEFAULT_SHORTCUT_EXPORT_PATH);
         }

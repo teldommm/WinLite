@@ -336,6 +336,11 @@ public abstract class FileUtils {
     public static String getFilePathFromUriUsingSAF(Context context, Uri uri) {
         Log.d(TAG, "getFilePathFromUriUsingSAF called with URI: " + uri.toString());
 
+        // A folder or file picked in the app's own picker is stored as a file:// URI (or a bare
+        // absolute path); there is nothing to resolve. Older SAF tree URIs fall through below.
+        if ("file".equals(uri.getScheme())) return uri.getPath();
+        if (uri.getScheme() == null && uri.getPath() != null && uri.getPath().startsWith("/")) return uri.getPath();
+
         String documentId;
         try {
             documentId = DocumentsContract.getTreeDocumentId(uri);
@@ -533,6 +538,12 @@ public abstract class FileUtils {
     }
 
     public static String getUriFileName(Context context, Uri uri) {
+        // A file:// URI has no content provider to ask for a display name.
+        if ("file".equals(uri.getScheme())) {
+            String path = uri.getPath();
+            return path != null ? new File(path).getName() : null;
+        }
+
         String fileName = null;
         Cursor cursor = context.getContentResolver().query(uri, null, null, null, null);
 

@@ -3,8 +3,6 @@ package com.winlator.cmod.ui.container
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import android.graphics.Color as AndroidColor
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,6 +46,7 @@ import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.WineRegistryEditor
 import com.winlator.cmod.core.WineThemeManager
+import com.winlator.cmod.ui.filemanager.FilePickerDialog
 import com.winlator.cmod.ui.theme.controlAccentColor
 import java.io.File
 import java.io.FileOutputStream
@@ -90,15 +89,17 @@ internal fun ContainerSystemInline(containerId: Int, callbacks: ContainerInlineC
     var wallpaperLabel by remember {
         mutableStateOf(if (WineThemeManager.getUserWallpaperFile(context).isFile) uiStr(R.string.ui_custom_image) else uiStr(R.string.ui_default_image))
     }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) runCatching {
-            val target = WineThemeManager.getUserWallpaperFile(context)
-            target.parentFile?.mkdirs()
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(target).use { output -> input.copyTo(output) }
+    val launchImagePicker: () -> Unit = {
+        FilePickerDialog.showImage(context, uiStr(R.string.ui_select_image), null) { picked ->
+            runCatching {
+                val target = WineThemeManager.getUserWallpaperFile(context)
+                target.parentFile?.mkdirs()
+                picked.inputStream().use { input ->
+                    FileOutputStream(target).use { output -> input.copyTo(output) }
+                }
+                wallpaperLabel = uiStr(R.string.ui_custom_image)
+                backgroundType = "Image"
             }
-            wallpaperLabel = uiStr(R.string.ui_custom_image)
-            backgroundType = "Image"
         }
     }
 
@@ -127,7 +128,7 @@ internal fun ContainerSystemInline(containerId: Int, callbacks: ContainerInlineC
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(wallpaperLabel, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onClick = { imagePicker.launch("image/*") }) { Text(uiStr(R.string.ui_choose_image)) }
+                OutlinedButton(onClick = launchImagePicker) { Text(uiStr(R.string.ui_choose_image)) }
             }
         } else {
             OutlinedTextField(
@@ -174,14 +175,16 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
             }
         }
     }
-    var browseIndex by remember { mutableStateOf(-1) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null && browseIndex in drives.indices) {
-            val resolved = FileUtils.getFilePathFromUri(context, uri)
-            val path = if (resolved.isNullOrBlank()) uri.path.orEmpty() else resolved
-            if (path.isNotBlank()) drives[browseIndex] = drives[browseIndex].copy(path = path)
+    // Picks the folder a drive letter points at, starting where its path field points now. The
+    // picked folder's real path goes straight into the field.
+    val browseDrive: (Int) -> Unit = { index ->
+        FilePickerDialog.showFolder(
+            context,
+            uiStr(R.string.ui_select_folder),
+            FilePickerDialog.nearestDir(drives.getOrNull(index)?.path)
+        ) { dir ->
+            if (index in drives.indices) drives[index] = drives[index].copy(path = dir.absolutePath)
         }
-        browseIndex = -1
     }
     val letters = remember { ('A'..'Z').filter { it != 'C' }.map { "$it:" }.toTypedArray() }
 
@@ -216,7 +219,7 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
                     shape = WinZShapes.Small
                 )
                 OutlinedButton(
-                    onClick = { browseIndex = index; picker.launch(null) },
+                    onClick = { browseDrive(index) },
                     modifier = Modifier.size(42.dp),
                     contentPadding = PaddingValues(0.dp)
                 ) { Icon(Icons.Outlined.Folder, uiStr(R.string.browse)) }
