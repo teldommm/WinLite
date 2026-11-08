@@ -39,8 +39,8 @@ WFG is a Vulkan compute implementation of optical-flow frame interpolation. It r
 - **How it works:** the scene is drawn into an intermediate image. For every new game frame, WFG estimates motion between the previous and the current frame and renders the in-between frames straight into extra swapchain images. They are presented first, followed by the real frame.
 - **Motion estimation:** Dense Inverse Search (DIS) optical flow, combined with Farneback polynomial-expansion flow on the coarse levels (the default hybrid).
 - **Motion Quality:** *Fast* or *Balanced* (how many pixels of the frame's shorter side are analysed).
-- **Target FPS:** *Max refresh*, 60, 90, 120 or 144. The target never exceeds the display's refresh rate.
-- **Automatic multiplier:** the number of generated frames per game frame (up to 7) follows the ratio between your target and the game's real frame rate. No generation happens when the game already reaches the target (or is within roughly 1.5× of it).
+- **Frame Multiplier:** *x2*, *x3* or *x4* fixes the output at that many frames per game frame (x2 = one generated frame between two real ones). The multiplier is capped at what the display can show: x4 on a 120 Hz panel with a 40 FPS game gives x3, and on a 60 Hz panel x2 only works for games up to about 30 FPS.
+- **Target:** the last entry opens a field for a target FPS of your choice (60, 90, 100, ...), from 40 up to the panel's fastest refresh rate, or **0** to always aim for the display's own refresh rate (the former *Max refresh*). The number of generated frames per game frame (up to 7) then follows the ratio between that target and the game's real frame rate. No generation happens when the game already reaches the target (or is within roughly 1.5× of it).
 - **Low frame rates:** generation switches itself off below about 20 FPS and comes back above about 24 FPS. Below that, motion between two real frames is too large for the search to follow.
 - **Letterboxes:** only the game's own area is analysed; the borders around it are filled from the composite.
 - **Settings:** switch on the fly from the sidebar (Frame Generation card); the choice is remembered per container or per shortcut.
@@ -110,9 +110,9 @@ Removed to stay lean: OpenGL (EGL) renderer, the legacy PulseAudio build, OpenXR
 Package: `com.winlite.bionic` · Arm64 only · Android 9+ (`minSdk 28`)
 
 ## Tips
-- Frame generation: open the sidebar → Rendering → Frame Generation and switch on **WFG Frame Generator**. It works best when the game holds a steady 30–60 FPS; set a target FPS that is clearly higher than that (for example 30–45 FPS → 90 or 120).
+- Frame generation: open the sidebar → Rendering → Frame Generation and switch on **WFG Frame Generator**. It works best when the game holds a steady 30–60 FPS; pick a multiplier (x2 for 45–60 FPS, x3 or x4 for 30 FPS), or choose **Target** and type an FPS that is clearly higher than the game's (for example 30–45 FPS → 90 or 120).
 - Pair WFG with the FPS limiter: a steady, capped game frame rate gives more evenly spaced generated frames than a fluctuating one.
-- If frame generation does nothing, check the game's real frame rate: it stays off below roughly 20 FPS and when the game already reaches the target.
+- If frame generation does nothing, check the game's real frame rate: it stays off below roughly 20 FPS, when the game already reaches the target, and when the display cannot show the chosen multiplier at that frame rate.
 - DirectAudio and Force SSBS need a Proton 9 or 11 Arm64EC container.
 - Slow `x86_64` container: set the Box86/Box64 preset to **Performance** (Container → Advanced); use **Intermediate** for installers.
 - `Arm64EC` container: try other FEXCore versions.

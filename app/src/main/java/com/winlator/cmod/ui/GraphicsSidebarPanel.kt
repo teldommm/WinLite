@@ -39,7 +39,10 @@ data class GraphicsPanelState(
     val reshadeStrengthPercent: Int,
     val wfgEnabled: Boolean,
     val wfgQualityIndex: Int,
-    val wfgTargetIndex: Int
+    val wfgModeIndex: Int,
+    val wfgTargetFps: Int,
+    // Fastest refresh rate the panel can run at (0 = unknown): the ceiling for the target FPS.
+    val wfgPanelHz: Int
 )
 
 interface GraphicsPanelCallbacks {
@@ -51,7 +54,7 @@ interface GraphicsPanelCallbacks {
     fun onPostFxModeChanged(index: Int)
     fun onReshadeEffectChanged(index: Int)
     fun onReshadeStrengthChanged(percent: Int)
-    fun onWfgChanged(enabled: Boolean, qualityIndex: Int, targetIndex: Int)
+    fun onWfgChanged(enabled: Boolean, qualityIndex: Int, modeIndex: Int, targetFps: Int)
 }
 
 object GraphicsSidebarPanelHost {
@@ -81,10 +84,62 @@ private val RESHADE_EFFECTS = listOf(
     "Vibrance", "Curves", "CAS Lite", "Technicolor", "Levels"
 )
 
-// WFG frame generation. Positions match XServerDisplayActivity's WFG_FLOW_SIDES / WFG_TARGET_FPS
-// (saved as indices, never reorder): quality = pixels analysed on the frame's shorter side.
+// WFG frame generation. Positions match XServerDisplayActivity's WFG_FLOW_SIDES (saved as an
+// index, never reorder): quality = pixels analysed on the frame's shorter side.
 private val WFG_QUALITY_LABELS = listOf("Fast", "Balanced")
-private val WFG_TARGET_LABELS = listOf("Max refresh", "60 FPS", "90 FPS", "120 FPS", "144 FPS")
+
+/**
+ * What the Frame Generation card offers for the frame multiplier and the target FPS, and how it is
+ * saved. XServerDisplayActivity takes the native values from here instead of keeping copies, so
+ * the list, the saved indices and the multipliers handed to the renderer cannot drift apart.
+ */
+object WfgSettings {
+    private class Mode(val label: String, val multiplier: Int)
+
+    // Saved as the index (never reorder). x2/x3/x4 fix the output at that many frames per game
+    // frame; multiplier 0 means none is fixed and the target FPS decides (the "Target" entry,
+    // which shows a numeric field).
+    private val MODES = listOf(Mode("x2", 2), Mode("x3", 3), Mode("x4", 4), Mode("Target", 0))
+
+    @JvmField
+    val MODE_LABELS: List<String> = MODES.map { it.label }
+
+    @JvmField
+    val MODE_COUNT: Int = MODES.size
+
+    @JvmStatic
+    fun clampMode(index: Int): Int = index.coerceIn(0, MODES.lastIndex)
+
+    /** Frames per game frame for a saved mode index; 0 when the target FPS decides instead. */
+    @JvmStatic
+    fun multiplierOf(index: Int): Int = MODES[clampMode(index)].multiplier
+
+    @JvmStatic
+    fun isTarget(index: Int): Boolean = multiplierOf(index) == 0
+
+    // 0 follows the panel's refresh rate (the former "Max refresh"): the renderer aims at whatever
+    // the display runs at, which WFG raises to the panel's fastest mode when it is on.
+    const val TARGET_PANEL = 0
+
+    // WFG only generates from a source of at least 24 FPS (DIS_MIN_SOURCE_FPS_ON) and a target at
+    // least 1.45x the source (DIS_MIN_GEN_RATIO): 24 * 1.45 = ~35. A lower target could never
+    // produce a frame, so it is not offered.
+    const val TARGET_MIN = 40
+    const val TARGET_DEFAULT = 60
+
+    // When the panel's refresh rate is unknown. The planner never targets more than the display
+    // runs at, so the real ceiling is the panel's own.
+    private const val TARGET_FALLBACK_MAX = 240
+
+    @JvmStatic
+    fun targetMax(panelHz: Int): Int =
+        if (panelHz > 0) maxOf(TARGET_MIN, panelHz) else TARGET_FALLBACK_MAX
+
+    /** [TARGET_PANEL] stays as it is; anything else is pulled into TARGET_MIN..targetMax. */
+    @JvmStatic
+    fun clampTarget(fps: Int, panelHz: Int): Int =
+        if (fps <= TARGET_PANEL) TARGET_PANEL else fps.coerceIn(TARGET_MIN, targetMax(panelHz))
+}
 
 // FPS Limit slider: position 0 = Off, positions 1..24 = 5..120 FPS in 5 FPS steps, position 25
 // ("Custom") shows a numeric field for any other value (e.g. 40, 72, 144). 0 is what
@@ -109,7 +164,34 @@ private fun GraphicsSidebarPanel(
     var reshadeStrength by remember { mutableStateOf(state.reshadeStrengthPercent) }
     var wfgEnabled by remember { mutableStateOf(state.wfgEnabled) }
     var wfgQualityIndex by remember { mutableStateOf(state.wfgQualityIndex) }
-    var wfgTargetIndex by remember { mutableStateOf(state.wfgTargetIndex) }
+    var wfgModeIndex by remember { mutableStateOf(state.wfgModeIndex) }
+    // The target FPS in effect (kept while a multiplier is selected, so switching back restores it)
+    // and the text being typed, which is only applied once editing ends.
+    var wfgTargetFps by remember { mutableStateOf(WfgSettings.clampTarget(state.wfgTargetFps, state.wfgPanelHz)) }
+    var wfgTargetText by remember { mutableStateOf(wfgTargetFps.toString()) }
+
+    // Pulls the typed target into the allowed range (e.g. 5000 -> the panel's maximum; 0 stays 0,
+    // meaning the panel's own rate) and makes it the one in effect; true when that changed it. An
+    // empty field falls back to the value in effect.
+    fun commitWfgTarget(): Boolean {
+        val typed = wfgTargetText.toIntOrNull()
+            ?.let { WfgSettings.clampTarget(it, state.wfgPanelHz) }
+        if (typed == null) {
+            wfgTargetText = wfgTargetFps.toString()
+            return false
+        }
+        wfgTargetText = typed.toString()
+        if (typed == wfgTargetFps) return false
+        wfgTargetFps = typed
+        return true
+    }
+
+    // Every WFG control reports through here, so a typed target that is still pending when another
+    // control acts (or its field goes away) is applied with it instead of being dropped.
+    fun pushWfg() {
+        commitWfgTarget()
+        callbacks.onWfgChanged(wfgEnabled, wfgQualityIndex, wfgModeIndex, wfgTargetFps)
+    }
 
     // Same visibility rule as the original updateSharpnessVis(): shown while Super Resolution
     // is on (any upscaler mode — SGSR/SGSR HQ/FSR/NIS/Lanczos2/Color Boost all read pc.sharpness
@@ -239,7 +321,7 @@ private fun GraphicsSidebarPanel(
                 checked = wfgEnabled,
                 onCheckedChange = {
                     wfgEnabled = it
-                    callbacks.onWfgChanged(wfgEnabled, wfgQualityIndex, wfgTargetIndex)
+                    pushWfg()
                 }
             )
             if (wfgEnabled) {
@@ -250,19 +332,34 @@ private fun GraphicsSidebarPanel(
                     selectedIndex = wfgQualityIndex.coerceIn(0, WFG_QUALITY_LABELS.lastIndex),
                     onSelect = {
                         wfgQualityIndex = it
-                        callbacks.onWfgChanged(wfgEnabled, wfgQualityIndex, wfgTargetIndex)
+                        pushWfg()
                     }
                 )
                 Spacer(Modifier.height(12.dp))
                 SidebarDropdownField(
-                    caption = uiStr(R.string.ui_wfg_target_fps),
-                    options = WFG_TARGET_LABELS,
-                    selectedIndex = wfgTargetIndex.coerceIn(0, WFG_TARGET_LABELS.lastIndex),
+                    caption = uiStr(R.string.ui_wfg_multiplier),
+                    options = WfgSettings.MODE_LABELS,
+                    selectedIndex = WfgSettings.clampMode(wfgModeIndex),
                     onSelect = {
-                        wfgTargetIndex = it
-                        callbacks.onWfgChanged(wfgEnabled, wfgQualityIndex, wfgTargetIndex)
+                        wfgModeIndex = it
+                        pushWfg()
                     }
                 )
+                if (WfgSettings.isTarget(wfgModeIndex)) {
+                    Spacer(Modifier.height(10.dp))
+                    WfgTargetField(
+                        text = wfgTargetText,
+                        range = WfgSettings.TARGET_MIN..WfgSettings.targetMax(state.wfgPanelHz),
+                        onTextChange = { wfgTargetText = it },
+                        // Done, tap elsewhere or drawer closed: apply once, not per keystroke
+                        // (typing "144" would otherwise pass through 1 and 14 and save each).
+                        onCommit = {
+                            if (commitWfgTarget()) {
+                                callbacks.onWfgChanged(wfgEnabled, wfgQualityIndex, wfgModeIndex, wfgTargetFps)
+                            }
+                        }
+                    )
+                }
             }
         }
 
@@ -361,6 +458,43 @@ private fun FpsLimiterCard(
             )
         }
     }
+}
+
+// Numeric field for WFG's custom target FPS, shown while the multiplier list is on "Target"; the
+// allowed range (and that 0 means the panel's rate) is shown under it and enforced when editing
+// ends. Same focus handling as the FPS limiter's custom field: onCommit fires when focus is lost.
+@Composable
+private fun WfgTargetField(
+    text: String,
+    range: IntRange,
+    onTextChange: (String) -> Unit,
+    onCommit: () -> Unit
+) {
+    val focusManager = LocalFocusManager.current
+
+    // Reset on dispose so a field torn down while focused (mode switched, WFG turned off) can't
+    // leave the Activity handing every key to the IME.
+    DisposableEffect(Unit) {
+        onDispose { SidebarTextInputFocus.active = false }
+    }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { onTextChange(it.filter(Char::isDigit).take(3)) },
+        singleLine = true,
+        label = { Text(uiStr(R.string.ui_wfg_target_fps)) },
+        suffix = { Text("FPS") },
+        supportingText = { Text(uiStr(R.string.ui_wfg_target_hint, range.first, range.last)) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { focus ->
+                val wasActive = SidebarTextInputFocus.active
+                SidebarTextInputFocus.active = focus.isFocused
+                if (wasActive && !focus.isFocused) onCommit()
+            }
+    )
 }
 
 /**

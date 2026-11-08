@@ -209,9 +209,10 @@ public:
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
     // WFG frame generation (VulkanRendererWfg.cpp). flowSide: pixels on the shorter side of
-    // the frame the motion is analysed at; targetFps 0 follows the display refresh rate.
+    // the frame the motion is analysed at; multiplier 2..4 fixes the output at that many frames
+    // per game frame, 0 chases targetFps instead (0 = the display refresh rate).
     void setWfgEnabled(bool enabled);
-    void setWfgConfig(int flowSide, int targetFps, float refreshHz);
+    void setWfgConfig(int flowSide, int targetFps, int multiplier, float refreshHz);
     uint64_t getWfgGeneratedFrames() const { return wfgMadeFrames.load(std::memory_order_relaxed); }
     uint64_t getPresentedFrames() const { return presentedFrames.load(std::memory_order_relaxed); }
 
@@ -430,6 +431,7 @@ public:
     std::atomic<bool>     wfgRequested{false};
     std::atomic<uint32_t> wfgFlowSide{180};
     std::atomic<uint32_t> wfgTargetFps{0};
+    std::atomic<uint32_t> wfgMultiplier{0};
     std::atomic<uint32_t> wfgRefreshMhz{0};
     std::atomic<uint64_t> contentFrames{0};       // the game window's content updates
     std::atomic<uint64_t> wfgMadeFrames{0};

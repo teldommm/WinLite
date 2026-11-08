@@ -82,6 +82,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private boolean pendingWfgEnabled     = false;
     private int     pendingWfgFlowSide    = 180;
     private int     pendingWfgTargetFps   = 0;
+    private int     pendingWfgMultiplier  = 0;
     private int     savedDisplayModeId    = -1;   // the window's mode before WFG raised it
     private android.hardware.display.DisplayManager.DisplayListener displayListener;
 
@@ -152,7 +153,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
     private native void nativeSetWfg(long handle, boolean enabled, int flowSide, int targetFps,
-                                     float refreshHz);
+                                     int multiplier, float refreshHz);
     private native void nativeGetFrameCounts(long handle, long[] out);
 
     private native void nativeDumpRendererInfo(long handle);
@@ -840,14 +841,34 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     /**
      * WFG (WinNative/Winlator Frame Generator) frame interpolation.
      * @param flowSide  pixels on the shorter side of the frame the motion is analysed at
-     * @param targetFps output rate to reach; 0 follows the display refresh rate
+     * @param targetFps output rate to reach; 0 follows the display refresh rate. Ignored while
+     *                  multiplier is set.
+     * @param multiplier 2..4 fixes the output at that many frames per game frame (x2 = one
+     *                  generated frame); 0 chases targetFps instead
      */
-    public void setWfg(boolean enabled, int flowSide, int targetFps) {
+    public void setWfg(boolean enabled, int flowSide, int targetFps, int multiplier) {
         pendingWfgEnabled = enabled;
         pendingWfgFlowSide = flowSide;
         pendingWfgTargetFps = targetFps;
+        pendingWfgMultiplier = multiplier;
         requestWfgRefreshRate(enabled);
         synchronized (lock) { applyWfg(); }
+    }
+
+    /**
+     * The panel's fastest mode at its current resolution: the one WFG asks for, and so the most
+     * frames per second it can ever show. Null when the display is unknown.
+     */
+    public static android.view.Display.Mode fastestMode(android.view.Display display) {
+        if (display == null) return null;
+        android.view.Display.Mode current = display.getMode();
+        android.view.Display.Mode best = current;
+        for (android.view.Display.Mode m : display.getSupportedModes()) {
+            if (m.getPhysicalWidth() == current.getPhysicalWidth()
+                    && m.getPhysicalHeight() == current.getPhysicalHeight()
+                    && m.getRefreshRate() > best.getRefreshRate()) best = m;
+        }
+        return best;
     }
 
     /**
@@ -863,13 +884,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             android.view.WindowManager.LayoutParams lp = window.getAttributes();
             Surface surface = getHolder().getSurface();
             if (on) {
-                android.view.Display.Mode current = display.getMode();
-                android.view.Display.Mode best = current;
-                for (android.view.Display.Mode m : display.getSupportedModes()) {
-                    if (m.getPhysicalWidth() == current.getPhysicalWidth()
-                            && m.getPhysicalHeight() == current.getPhysicalHeight()
-                            && m.getRefreshRate() > best.getRefreshRate()) best = m;
-                }
+                android.view.Display.Mode best = fastestMode(display);
                 if (savedDisplayModeId < 0) savedDisplayModeId = lp.preferredDisplayModeId;
                 lp.preferredDisplayModeId = best.getModeId();
                 window.setAttributes(lp);
@@ -920,7 +935,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         float refreshHz = 60f;
         android.view.Display display = getDisplay();
         if (display != null && display.getRefreshRate() > 1f) refreshHz = display.getRefreshRate();
-        nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgTargetFps, refreshHz);
+        nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgTargetFps,
+                pendingWfgMultiplier, refreshHz);
     }
 
     public void setFilterMode(int mode) {

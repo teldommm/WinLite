@@ -37,8 +37,10 @@ bool vkr_dis_bind_dispatch(PFN_vkGetInstanceProcAddr gipa, VkInstance instance);
 VkrDis* vkr_dis_create(VkDevice device, VkPhysicalDevice physical_device);
 void vkr_dis_destroy(VkrDis* dis);
 
+// multiplier >= 2 fixes the output at that many frames per game frame (x2 = one generated
+// frame); the target is then ignored. 0 derives the count from target_fps (0 = refresh rate).
 void vkr_dis_configure(VkrDis* dis, uint32_t flow_min_side, uint32_t target_fps,
-                       float refresh_rate);
+                       uint32_t multiplier, float refresh_rate);
 
 void vkr_dis_set_debug_flow(VkrDis* dis, bool debug_flow);
 

@@ -160,6 +160,7 @@ struct VkrDis {
 
     uint32_t flow_min_side;
     uint32_t target_fps;
+    uint32_t multiplier;
     float refresh_rate;
 
     VkExtent2D built_extent;
@@ -1679,6 +1680,7 @@ VkrDis* vkr_dis_create(VkDevice device, VkPhysicalDevice physical_device) {
     d->physical_device = physical_device;
     d->flow_min_side = DIS_DEFAULT_FLOW_MIN_SIDE;
     d->target_fps = 0;
+    d->multiplier = 0;
     d->refresh_rate = 0.0f;
     d->plan_log_gen = -1;
 
@@ -1780,13 +1782,18 @@ void vkr_dis_destroy(VkrDis* d) {
     free(d);
 }
 
-void vkr_dis_configure(VkrDis* d, uint32_t flow_min_side, uint32_t target_fps, float refresh_rate) {
+void vkr_dis_configure(VkrDis* d, uint32_t flow_min_side, uint32_t target_fps,
+                       uint32_t multiplier, float refresh_rate) {
     if (!d) return;
     uint32_t side = flow_min_side < DIS_FLOW_MIN_SIDE_FLOOR ? DIS_FLOW_MIN_SIDE_FLOOR
                   : (flow_min_side > DIS_FLOW_MIN_SIDE_CEIL ? DIS_FLOW_MIN_SIDE_CEIL
                                                             : flow_min_side);
     d->flow_min_side = side;
     d->target_fps = target_fps;
+    // 0 and 1 both mean "no fixed multiplier"; one output per game frame generates nothing.
+    d->multiplier = multiplier < 2u ? 0u
+                  : (multiplier > VKR_DIS_MAX_GENERATIONS + 1u ? VKR_DIS_MAX_GENERATIONS + 1u
+                                                               : multiplier);
     d->refresh_rate = refresh_rate > 0.0f ? refresh_rate : 0.0f;
 }
 
@@ -1935,6 +1942,13 @@ static void dis_log_plan(VkrDis* d, uint64_t now, float source_rate, float desir
     if (d->planned_gen == d->plan_log_gen && now - d->plan_log_ns < DIS_PLAN_LOG_NS) return;
     d->plan_log_gen = d->planned_gen;
     d->plan_log_ns = now;
+    if (d->multiplier >= 2u) {
+        // A fixed multiplier has no target; "desired" there is just source * multiplier.
+        DIS_LOGI("WFG plan: source %.1f fps, fixed x%u -> %d generated (capacity %u, output %.1f fps)",
+                 (double)source_rate, d->multiplier, d->planned_gen, capacity,
+                 (double)(source_rate * (float)(d->planned_gen + 1)));
+        return;
+    }
     DIS_LOGI("WFG plan: source %.1f fps, target %.1f fps, ratio %.2f -> %d generated "
              "(capacity %u, output %.1f fps)",
              (double)source_rate, (double)desired, (double)ratio, d->planned_gen, capacity,
@@ -1957,18 +1971,28 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
     }
 
     const float source_rate = 1.0f / d->src_interval;
-    float desired = d->target_fps > 0 ? (float)d->target_fps : d->refresh_rate;
-    if (d->refresh_rate > 0.0f && desired > d->refresh_rate) desired = d->refresh_rate;
-    if (desired <= 0.0f) return 0;
-
-    if (d->smoothed_desired <= 0.0f) {
-        d->smoothed_desired = desired;
+    const bool fixed_mult = d->multiplier >= 2u;
+    float eff_desired;
+    float ratio;
+    if (fixed_mult) {
+        // A chosen xN has no target to chase, so there is nothing to smooth either. Dropping the
+        // smoothed value makes a later switch back to a target start from that target.
+        ratio = (float)d->multiplier;
+        eff_desired = source_rate * ratio;
+        d->smoothed_desired = 0.0f;
     } else {
-        d->smoothed_desired += (desired - d->smoothed_desired) * 0.25f;
-    }
-    const float eff_desired = d->smoothed_desired;
+        float desired = d->target_fps > 0 ? (float)d->target_fps : d->refresh_rate;
+        if (d->refresh_rate > 0.0f && desired > d->refresh_rate) desired = d->refresh_rate;
+        if (desired <= 0.0f) return 0;
 
-    const float ratio = eff_desired / source_rate;
+        if (d->smoothed_desired <= 0.0f) {
+            d->smoothed_desired = desired;
+        } else {
+            d->smoothed_desired += (desired - d->smoothed_desired) * 0.25f;
+        }
+        eff_desired = d->smoothed_desired;
+        ratio = eff_desired / source_rate;
+    }
 
     if (ratio <= 1.0f) {
         d->planned_gen = 0;
@@ -1986,18 +2010,26 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
     // there. Off below 20, back on above 24, so a game around the limit does not flicker on and off.
     const bool fast_enough = cur > 0 ? source_rate >= DIS_MIN_SOURCE_FPS_OFF
                                      : source_rate >= DIS_MIN_SOURCE_FPS_ON;
-    const bool generate = fast_enough && (cur > 0 ? (ratio >= DIS_MIN_GEN_RATIO - DIS_RATIO_HYST)
-                                                  : (ratio >= DIS_MIN_GEN_RATIO));
+    // A fixed xN always generates (the ratio is the multiplier itself, never below 2); only the
+    // source-rate floor and the display cap below can hold it back.
+    const bool generate = fast_enough && (fixed_mult ||
+                                          (cur > 0 ? (ratio >= DIS_MIN_GEN_RATIO - DIS_RATIO_HYST)
+                                                   : (ratio >= DIS_MIN_GEN_RATIO)));
 
     int raw = 0;
     if (generate) {
-        const int want_up = dis_gen_for_ratio(ratio - DIS_RATIO_HYST, capacity);
-        const int want_down = dis_gen_for_ratio(ratio + DIS_RATIO_HYST, capacity);
-        raw = cur;
-        if (want_up > cur) {
-            raw = want_up;
-        } else if (want_down < cur) {
-            raw = want_down;
+        if (fixed_mult) {
+            raw = (int)d->multiplier - 1;
+            if (raw > (int)capacity) raw = (int)capacity;
+        } else {
+            const int want_up = dis_gen_for_ratio(ratio - DIS_RATIO_HYST, capacity);
+            const int want_down = dis_gen_for_ratio(ratio + DIS_RATIO_HYST, capacity);
+            raw = cur;
+            if (want_up > cur) {
+                raw = want_up;
+            } else if (want_down < cur) {
+                raw = want_down;
+            }
         }
         if (raw < 1) raw = 1;
         // Never more frames than the display can show. dis_gen_for_ratio rounds the output count
@@ -2012,7 +2044,13 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
         if (d->refresh_rate > 0.0f) {
             const float slack = raw > d->planned_gen ? 1.05f : 1.10f;
             const int max_gen = (int)floorf(d->refresh_rate * slack / source_rate) - 1;
-            if (max_gen >= 1 && raw > max_gen) raw = max_gen;
+            if (fixed_mult && max_gen < 1) {
+                // The panel cannot show even two frames per game frame at this source rate (a
+                // target never gets here: its ratio already keeps it under the refresh rate).
+                raw = 0;
+            } else if (max_gen >= 1 && raw > max_gen) {
+                raw = max_gen;
+            }
         }
     }
 

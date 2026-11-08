@@ -527,7 +527,9 @@
     <string name="ui_frame_generation">Frame Generation</string>
     <string name="ui_wfg_frame_generator">WFG Engine</string>
     <string name="ui_wfg_motion_quality">Motion Quality</string>
+    <string name="ui_wfg_multiplier">Frame Multiplier</string>
     <string name="ui_wfg_target_fps">Target FPS</string>
+    <string name="ui_wfg_target_hint">0 = display max, or %1$d–%2$d FPS</string>
     <string name="ui_fps_limit">FPS Limit</string>
     <string name="ui_max_fps">Max FPS</string>
     <string name="ui_enable_hud">Enable HUD</string>

@@ -71,12 +71,14 @@ void VulkanRendererContext::setWfgEnabled(bool enabled) {
     wakeRender();
 }
 
-void VulkanRendererContext::setWfgConfig(int flowSide, int targetFps, float refreshHz) {
+void VulkanRendererContext::setWfgConfig(int flowSide, int targetFps, int multiplier, float refreshHz) {
     wfgFlowSide.store((uint32_t)std::clamp(flowSide, 64, 1080));
     wfgTargetFps.store((uint32_t)std::max(0, targetFps));
+    wfgMultiplier.store((uint32_t)std::clamp(multiplier, 0, (int)VKR_DIS_MAX_GENERATIONS + 1));
     const uint32_t mhz = refreshHz > 0.f ? (uint32_t)std::lround(refreshHz * 1000.f) : 0u;
     if (wfgRefreshMhz.exchange(mhz) != mhz)
-        WLOG_I("WFG display refresh %.1f Hz, flow side %d, target %d fps", refreshHz, flowSide, targetFps);
+        WLOG_I("WFG display refresh %.1f Hz, flow side %d, target %d fps, multiplier x%d",
+               refreshHz, flowSide, targetFps, multiplier);
 }
 
 // Under renderMutex, for every window content update. Counts it as a game frame only when the
@@ -332,7 +334,7 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
 
     const VkrDisContentRect content = wfgContentRect(draws, ox, oy, sx, sy, cw, ch);
     const float refresh = (float)wfgRefreshMhz.load() / 1000.f;
-    vkr_dis_configure(wfg, wfgFlowSide.load(), wfgTargetFps.load(), refresh);
+    vkr_dis_configure(wfg, wfgFlowSide.load(), wfgTargetFps.load(), wfgMultiplier.load(), refresh);
     if (vkr_dis_needs_rebuild(wfg, swapchainExt.width, swapchainExt.height, swapchainFmt, content))
         vk_.DeviceWaitIdle(device);
     if (!vkr_dis_prepare(wfg, swapchainExt.width, swapchainExt.height, swapchainFmt, content))

@@ -108,6 +108,7 @@ import com.winlator.cmod.ui.TaskManagerCallbacks;
 import com.winlator.cmod.ui.TaskManagerPanelHost;
 import com.winlator.cmod.ui.TaskManagerPanelState;
 import com.winlator.cmod.ui.ThemedAlertHost;
+import com.winlator.cmod.ui.WfgSettings;
 import com.winlator.cmod.widget.FrameRating;
 import com.winlator.cmod.widget.WinlatorHUD;
 import com.winlator.cmod.widget.InputControlsView;
@@ -192,10 +193,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private int graphicsPostFxModeIndex;
     private int graphicsSharpnessPercent = 50;
     private int graphicsReshadeStrength = 65;
-    // WFG frame generation: the quality/target indices are what gets saved (never reorder);
-    // GraphicsSidebarPanel lists the same positions.
+    // WFG frame generation: the quality index is what gets saved (never reorder);
+    // GraphicsSidebarPanel lists the same positions. The frame multiplier modes and the target FPS
+    // range live in WfgSettings.
     private static final int[] WFG_FLOW_SIDES = {180, 252};
-    private static final int[] WFG_TARGET_FPS = {0, 60, 90, 120, 144};
     // Id of the bundled assets/graphics_driver/wrapper_wl.tzst; bump it with every new wrapper build.
     private static final String WRAPPER_BUILD_ID = "becf2a03";
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
@@ -1860,9 +1861,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         final boolean wfgOn = readWfgInt("wfgEnabled", 0, 1) == 1;
         final int wfgQuality = readWfgInt("wfgQuality", 0, WFG_FLOW_SIDES.length - 1);
-        final int wfgTarget = readWfgInt("wfgTarget", 0, WFG_TARGET_FPS.length - 1);
+        final int wfgMode = readWfgInt("wfgMode", 0, WfgSettings.MODE_COUNT - 1);
+        // The target can't usefully exceed what the panel runs at, so it is limited to that.
+        final int wfgPanelHz = fastestPanelRefreshHz();
+        final int wfgTargetFps = WfgSettings.clampTarget(
+                readWfgInt("wfgTargetFps", WfgSettings.TARGET_DEFAULT, Integer.MAX_VALUE), wfgPanelHz);
         if (vkRenderer != null) {
-            vkRenderer.setWfg(wfgOn, WFG_FLOW_SIDES[wfgQuality], WFG_TARGET_FPS[wfgTarget]);
+            vkRenderer.setWfg(wfgOn, WFG_FLOW_SIDES[wfgQuality], wfgTargetFps,
+                    WfgSettings.multiplierOf(wfgMode));
         }
 
         GraphicsPanelState state = new GraphicsPanelState(
@@ -1875,7 +1881,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 graphicsReshadeStrength,
                 wfgOn,
                 wfgQuality,
-                wfgTarget
+                wfgMode,
+                wfgTargetFps,
+                wfgPanelHz
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
@@ -1953,16 +1961,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onWfgChanged(boolean enabled, int qualityIndex, int targetIndex) {
+            public void onWfgChanged(boolean enabled, int qualityIndex, int modeIndex, int targetFps) {
                 int q = Math.max(0, Math.min(WFG_FLOW_SIDES.length - 1, qualityIndex));
-                int t = Math.max(0, Math.min(WFG_TARGET_FPS.length - 1, targetIndex));
-                if (vkRenderer != null) vkRenderer.setWfg(enabled, WFG_FLOW_SIDES[q], WFG_TARGET_FPS[t]);
-                saveWfgSettings(enabled, q, t);
+                int m = WfgSettings.clampMode(modeIndex);
+                int t = WfgSettings.clampTarget(targetFps, wfgPanelHz);
+                if (vkRenderer != null) {
+                    vkRenderer.setWfg(enabled, WFG_FLOW_SIDES[q], t, WfgSettings.multiplierOf(m));
+                }
+                saveWfgSettings(enabled, q, m, t);
             }
 
         };
 
         GraphicsSidebarPanelHost.attach(ingameSidebar, R.id.LLSubGraphics, state, callbacks);
+    }
+
+    // Highest refresh rate the panel offers at its current resolution (what WFG switches to), or 0
+    // when the display can't be queried.
+    private int fastestPanelRefreshHz() {
+        android.view.Display.Mode mode =
+                VulkanXServerView.fastestMode(getWindowManager().getDefaultDisplay());
+        return mode != null ? Math.round(mode.getRefreshRate()) : 0;
     }
 
     private int readWfgInt(String key, int fallback, int max) {
@@ -1976,16 +1995,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     // Saved where the other graphics settings are: the shortcut when launched from one, else the container.
-    private void saveWfgSettings(boolean enabled, int quality, int target) {
+    private void saveWfgSettings(boolean enabled, int quality, int mode, int targetFps) {
         if (shortcut != null) {
             shortcut.putExtra("wfgEnabled", enabled ? "1" : "0");
             shortcut.putExtra("wfgQuality", String.valueOf(quality));
-            shortcut.putExtra("wfgTarget", String.valueOf(target));
+            shortcut.putExtra("wfgMode", String.valueOf(mode));
+            shortcut.putExtra("wfgTargetFps", String.valueOf(targetFps));
             shortcut.saveData();
         } else if (container != null) {
             container.putExtra("wfgEnabled", enabled ? "1" : "0");
             container.putExtra("wfgQuality", String.valueOf(quality));
-            container.putExtra("wfgTarget", String.valueOf(target));
+            container.putExtra("wfgMode", String.valueOf(mode));
+            container.putExtra("wfgTargetFps", String.valueOf(targetFps));
             container.saveData();
         }
     }
