@@ -121,11 +121,7 @@ add_library(vulkan_renderer SHARED
         winlator/renderer/vulkan/vulkan_jni.cpp
         winlator/renderer/vulkan/VulkanRendererContext.cpp
         winlator/renderer/vulkan/VulkanRendererFilters.cpp
-        winlator/renderer/vulkan/VulkanRendererPipelineOpt.cpp
         winlator/renderer/vulkan/VulkanRendererWfg.cpp
-
-        winlator/renderer/vulkan/view_transformation.cpp
-        winlator/renderer/vulkan/xform.cpp
 
         ${VULKAN_SHADER_HEADERS}
 )

@@ -126,7 +126,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native long nativeInit(Surface surface,
                                    int screenWidth, int screenHeight,
                                    String driverPath, String libraryName, String nativeLibDir,
-                                   boolean validationEnabled);
+                                   boolean validationEnabled, String cacheDir);
     private native void nativeResize(long handle, int width, int height);
     private native void nativeDestroy(long handle);
     private native void nativeDetachSurface(long handle);
@@ -224,6 +224,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         onSurfaceDestroyed();
     }
 
+    // Where the renderer keeps its Vulkan pipeline cache between runs (null: not persisted).
+    private String pipelineCacheDir() {
+        try {
+            java.io.File dir = getContext().getCacheDir();
+            return dir != null ? dir.getAbsolutePath() : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     public void onSurfaceCreated(Surface surface) {
         if (!gpuImageChecked) { GPUImage.checkIsSupported(); gpuImageChecked = true; }
         if (initExecutor != null) {
@@ -234,6 +244,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         initExecutor = Executors.newSingleThreadExecutor();
 
         final boolean isColdInit = (nativeHandle == 0);
+        final String cacheDir = pipelineCacheDir();
 
         initExecutor.execute(() -> {
             synchronized (lock) {
@@ -263,7 +274,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 nativeHandle = nativeInit(
                     surface,
                     xServer.screenInfo.width, xServer.screenInfo.height,
-                    driverPath, driverLibraryName, nativeLibDir, validationEnabled);
+                    driverPath, driverLibraryName, nativeLibDir, validationEnabled, cacheDir);
 
                 if (nativeHandle != 0) {
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);

@@ -4,8 +4,6 @@
 #include <cstddef>
 #include <vulkan/vulkan_android.h>
 
-#include "view_transformation.hpp"
-#include "xform.hpp"
 #include "vkr_dis.h"
 
 struct VkTable {
@@ -66,6 +64,9 @@ struct VkTable {
     PFN_vkDestroyShaderModule DestroyShaderModule;
     PFN_vkCreateGraphicsPipelines CreateGraphicsPipelines;
     PFN_vkDestroyPipeline DestroyPipeline;
+    PFN_vkCreatePipelineCache CreatePipelineCache;
+    PFN_vkDestroyPipelineCache DestroyPipelineCache;
+    PFN_vkGetPipelineCacheData GetPipelineCacheData;
     PFN_vkCreateCommandPool CreateCommandPool;
     PFN_vkDestroyCommandPool DestroyCommandPool;
     PFN_vkAllocateCommandBuffers AllocateCommandBuffers;
@@ -158,20 +159,23 @@ static_assert(offsetof(WindowPushConstantsPostFX, postFxId) == 32, "postFxId off
 
 class VulkanRendererContext {
 public:
+    // cacheDir: where the VkPipelineCache is kept between runs (null/empty: not persisted).
     VulkanRendererContext(ANativeWindow* window, int cWidth, int cHeight,
                           void* adrenotoolsHandle = nullptr,
-                          bool validationEnabled = false);
+                          bool validationEnabled = false,
+                          const char* cacheDir = nullptr);
     ~VulkanRendererContext();
+
+    // The pipelines built on demand for the effect setters (the base window pipelines are not here).
+    enum class PipelineKind { Sgsr, Fsr1, Lanczos, SgsrHq, Nis, Stretch, PostFx };
 
     void onSurfaceResized(int width, int height);
     void setTransform(float ox, float oy, float sx, float sy);
     void updatePointerPosition(short x, short y);
-    void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
     void updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short w, short h, int x, int y);
     // The cursor texture is R8G8B8A8; rgba=false means the source is B8G8R8A8 and gets swapped.
     void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY, bool rgba);
     void setCursorVisible(bool visible);
-    void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);
     void removeWindow(int64_t id);
     // The Java side is done with this buffer (pixmap freed, window content replaced or destroyed).
     // Drops the renderer's import of it as soon as no window still shows it; the GPU may still be
@@ -227,18 +231,15 @@ public:
     }
 
 private:
+    // A window texture is an imported guest buffer (AHB); its Vulkan objects live in ahbImportCache
+    // and texMap entries alias them.
     struct WinTex {
         VkImage              img            = VK_NULL_HANDLE;
         VkDeviceMemory       mem            = VK_NULL_HANDLE;
         VkImageView          view           = VK_NULL_HANDLE;
         VkDescriptorSet      ds             = VK_NULL_HANDLE;
-        VkBuffer             stg            = VK_NULL_HANDLE;
-        VkDeviceMemory       stgMem         = VK_NULL_HANDLE;
-        void*                mapped         = nullptr;
-        VkDeviceSize         cap            = 0;
         int                  w              = 0;
         int                  h              = 0;
-        bool                 dirty          = false;
         bool                 isAHB          = false;
         bool                 needsTransition = false;
         AHardwareBuffer*     ahb            = nullptr;
@@ -248,7 +249,6 @@ private:
     struct DrawEntry {
         VkImage         img            = VK_NULL_HANDLE;
         VkDescriptorSet ds             = VK_NULL_HANDLE;
-        VkBuffer        upload         = VK_NULL_HANDLE;
         int             x=0, y=0, w=0, h=0;
         bool            needsTransition = false;
         bool            isAHB          = false;
@@ -293,6 +293,7 @@ public:
     void* adrenotoolsHandle = nullptr;
     // Opt-in VK_LAYER_KHRONOS_validation (WINLATOR_VULKAN_VALIDATION=1); off unless asked for.
     bool validationRequested = false;
+    std::string cacheDirPath;
     VkDebugUtilsMessengerEXT validationMessenger = VK_NULL_HANDLE;
     // VK_EXT_queue_family_foreign is enabled: guest buffers are acquired from and released to the
     // foreign queue family on every frame that samples them (recordCmdBuf).
@@ -318,12 +319,19 @@ public:
     // until the window shows something else.
     std::unordered_set<AHardwareBuffer*>                       ahbDead;
 
+    // Textures other threads gave up (under renderMutex). The render thread stamps them with the
+    // number of frames submitted so far - every frame that can still sample them - and frees them
+    // once those frames' fences have signaled; nothing ever waits for the GPU on their account.
     std::vector<WinTex>    deleteQueue;
+    struct RetiredTex { WinTex tex; uint64_t retireAfter; };
+    std::vector<RetiredTex> retiring;                 // render thread / renderMutex holders only
+    std::atomic<bool>      hasRetired{false};         // retiring is not empty (render loop polls)
+    uint64_t               submitSerial = 0;          // frames submitted so far (render thread)
+    uint64_t               slotSerial[MAX_FRAMES_IN_FLIGHT] = {};   // serial each slot's fence belongs to
     std::vector<RenderEntry> renderList;
 
     std::vector<DrawEntry>             frameDraws;
     std::vector<VkImageMemoryBarrier>  frameAhbTransitions;
-    std::vector<VkImageMemoryBarrier>  framePreUpload;
     std::vector<VkImageMemoryBarrier>  framePostUpload;
 
     std::atomic<int>  pointerX{0}, pointerY{0};
@@ -379,6 +387,17 @@ public:
     VkPipeline            nisPipeline     = VK_NULL_HANDLE;
     VkPipeline            stretchPipeline = VK_NULL_HANDLE;
     VkPipeline            postfxPipeline  = VK_NULL_HANDLE;
+    // The window pipeline without blending: guest buffers are drawn opaque, only the cursor blends.
+    VkPipeline            opaquePipeline  = VK_NULL_HANDLE;
+
+    VkPipelineCache       pipelineCache   = VK_NULL_HANDLE;
+    std::string           pipelineCachePath;
+    size_t                pipelineCacheSavedSize = 0;
+    // Serializes pipeline compilation and the cache's save (the cache itself is not touched by
+    // two threads at once).
+    std::mutex            pipelineBuildMutex;
+    // The effect setters run one at a time, so they can compile before taking the frame lock.
+    std::mutex            setterMutex;
 
     VkCommandPool                cmdPool = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> cmdBufs;
@@ -399,6 +418,11 @@ public:
     // The last swapchain rebuild in renderFrame failed: renderLoop retries after a pause
     // instead of spinning on a swapchain that is gone. Render thread only.
     bool              swapchainRebuildFailed = false;
+    // Render thread only. A SUBOPTIMAL present rebuilds the swapchain only if the surface really
+    // changed (transform or size); the check runs at most every 250 ms.
+    bool              swapchainStillMatchesSurface();
+    uint64_t          lastSuboptimalCheckNs = 0;
+    uint64_t          suboptimalIgnored = 0;
     std::mutex        renderMutex;
     std::mutex        dirtyMutex;
     std::condition_variable dirtyCV;
@@ -512,34 +536,38 @@ public:
     void createSwapchain();
     void createRenderPass();
     void createDSLayout();
-    void createPipeline(bool blend, VkPipeline& out);
-    void createSgsrPipeline();
-    void createFsr1Pipeline();
-    void createLanczosPipeline();
-    void createStretchPipeline();
-    void createPostFXPipeline();
-    void createSgsrHqPipeline();
-    void createNisPipeline();
-    // A failed build leaves the handle null and the frame falls back to the plain blit.
-    void tryCreatePipeline(void (VulkanRendererContext::*create)(), const char* name);
+    void createPipelineCache();
+    void savePipelineCache();            // writes the cache to disk when it grew
+    void createPipelineLayout();
+    void createBasePipelines();          // the window pipeline (blend) and its opaque twin
+    // Compiles a window pipeline with the shared vertex shader; throws on failure. Needs neither
+    // the frame lock nor renderMutex: it only reads objects that outlive the renderer's frames.
+    VkPipeline buildPipeline(const uint32_t* fragCode, size_t fragSize, bool blend, const char* name);
+    VkPipeline& pipelineSlot(PipelineKind kind);
+    // Builds the pipeline for `kind` unless it exists; null if it did, or if the build failed
+    // (logged - the frame then falls back to the plain blit). No locks needed; callers hold
+    // setterMutex.
+    VkPipeline prebuildPipeline(PipelineKind kind);
+    // Frame lock held exclusively: installs a prebuilt pipeline (or drops it if one got there first).
+    void adoptPipeline(PipelineKind kind, VkPipeline built);
     bool upscalerActive() const;   // the selected upscaler is built and applies PostFX inline
     void syncPostFXPipeline();
     void createFramebuffers();
     void createCmdPool();
     void createSampler();
     void createWinTexPool();
-    void createCursorPipeline();
     void createCursorDS();
     void createCmdBufs();
     void createSyncObjects();
     void recreateSyncObjects();   // semaphores sized against the current swapchain
     void cleanupSwapchain();
 
-    bool  createWinTexResources(WinTex& wt, int w, int h);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
     void  cleanupAllAHBCache();
-    void  flushDeleteQueue();
-    void  destroyWinTex(WinTex& wt);
+    void  freeWinTexVk(const WinTex& wt);   // renderMutex held or GPU idle
+    void  retireDeleteQueueLocked();        // renderMutex held, render thread
+    void  reapRetiredLocked();              // renderMutex held, render thread
+    void  reapRetiredIdle();                // render thread, between frames
     void  ensureCursorTex(short w, short h);
     void  cleanupCursorTex();
     void  ensureCursorStaging(uint32_t slot, VkDeviceSize sz);
@@ -548,7 +576,6 @@ public:
     void recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         const std::vector<DrawEntry>& draws,
         std::vector<VkImageMemoryBarrier>& ahbTransitions,
-        std::vector<VkImageMemoryBarrier>& preUpload,
         std::vector<VkImageMemoryBarrier>& postUpload,
         VkBuffer cursorUpload, bool hasCursorUpload,
         float ox, float oy, float sx, float sy, float cw, float ch,

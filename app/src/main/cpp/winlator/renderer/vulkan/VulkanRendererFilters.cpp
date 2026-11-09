@@ -1,184 +1,179 @@
 #include "VulkanRendererContext.h"
-#include "VulkanRendererPipelineOpt.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "window_vert.h"
+#include "window_frag.h"
+#include "window_sgsr_frag.h"
+#include "window_fsr1_frag.h"
 #include "window_lanczos_frag.h"
 #include "window_sgsr_hq_frag.h"
 #include "window_nis_frag.h"
+#include "window_stretch_frag.h"
+#include "window_postfx_frag.h"
 
-void VulkanRendererContext::createLanczosPipeline() {
-    if (lanczosPipeline != VK_NULL_HANDLE) return;
+// Pipelines and the pipeline cache. Every window pipeline is the shared vertex shader plus one
+// fragment shader; buildPipeline() is the only place that fills in the fixed-function state.
 
-    auto vert = makeShader(window_vert_code, sizeof(window_vert_code));
-    auto frag = makeShader(window_lanczos_frag_code, sizeof(window_lanczos_frag_code));
+namespace {
 
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vert;
-    stages[0].pName = "main";
-    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = frag;
-    stages[1].pName = "main";
+struct PipelineSource {
+    const uint32_t* code;
+    size_t          size;
+    const char*     name;
+};
 
-    VkPipelineVertexInputStateCreateInfo vi{};
-    vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+// Indexed by VulkanRendererContext::PipelineKind.
+const PipelineSource kPipelineSources[] = {
+    { window_sgsr_frag_code,    sizeof(window_sgsr_frag_code),    "SGSR"    },
+    { window_fsr1_frag_code,    sizeof(window_fsr1_frag_code),    "FSR"     },
+    { window_lanczos_frag_code, sizeof(window_lanczos_frag_code), "Lanczos" },
+    { window_sgsr_hq_frag_code, sizeof(window_sgsr_hq_frag_code), "SGSR HQ" },
+    { window_nis_frag_code,     sizeof(window_nis_frag_code),     "NIS"     },
+    { window_stretch_frag_code, sizeof(window_stretch_frag_code), "stretch" },
+    { window_postfx_frag_code,  sizeof(window_postfx_frag_code),  "postfx"  },
+};
+static_assert(sizeof(kPipelineSources) / sizeof(kPipelineSources[0]) == 7,
+              "one source per VulkanRendererContext::PipelineKind");
 
-    VkPipelineInputAssemblyStateCreateInfo ia{};
-    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+// A cache this large was not written by us (or is corrupt); the driver never sees it.
+constexpr size_t kMaxCacheFileBytes = 32u * 1024u * 1024u;
 
-    VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dyn{};
-    dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dyn.dynamicStateCount = 2;
-    dyn.pDynamicStates = dynStates;
-
-    VkPipelineViewportStateCreateInfo vp{};
-    vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo rast{};
-    rast.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rast.polygonMode = VK_POLYGON_MODE_FILL;
-    rast.lineWidth = 1.0f;
-    rast.cullMode = VK_CULL_MODE_NONE;
-    rast.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-    VkPipelineMultisampleStateCreateInfo ms{};
-    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineColorBlendAttachmentState ba{};
-    ba.colorWriteMask = 0xF;
-    ba.blendEnable = VK_FALSE;
-
-    VkPipelineColorBlendStateCreateInfo blend{};
-    blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blend.attachmentCount = 1;
-    blend.pAttachments = &ba;
-
-    VkGraphicsPipelineCreateInfo pi{};
-    pi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pi.stageCount = 2;
-    pi.pStages = stages;
-    pi.pVertexInputState = &vi;
-    pi.pInputAssemblyState = &ia;
-    pi.pViewportState = &vp;
-    pi.pRasterizationState = &rast;
-    pi.pMultisampleState = &ms;
-    pi.pColorBlendState = &blend;
-    pi.pDynamicState = &dyn;
-    pi.layout = pipeLayout;
-    pi.renderPass = renderPass;
-    pi.subpass = 0;
-
-    VkResult result = vk_.CreateGraphicsPipelines(
-        device, VK_NULL_HANDLE, 1, &pi, nullptr, &lanczosPipeline);
-
-    vk_.DestroyShaderModule(device, frag, nullptr);
-    vk_.DestroyShaderModule(device, vert, nullptr);
-
-    if (result != VK_SUCCESS) {
-        lanczosPipeline = VK_NULL_HANDLE;
-        throw std::runtime_error("lanczos_pipeline");
-    }
-    RLOG("createLanczosPipeline: done");
+// The header the Vulkan spec puts at the start of every pipeline cache blob.
+bool cacheHeaderMatches(const std::vector<uint8_t>& data, const VkPhysicalDeviceProperties& props) {
+    if (data.size() < 16 + VK_UUID_SIZE) return false;
+    uint32_t headerSize, headerVersion, vendorId, deviceId;
+    memcpy(&headerSize,    data.data() + 0,  4);
+    memcpy(&headerVersion, data.data() + 4,  4);
+    memcpy(&vendorId,      data.data() + 8,  4);
+    memcpy(&deviceId,      data.data() + 12, 4);
+    return headerSize >= 16 + VK_UUID_SIZE &&
+           headerSize <= data.size() &&
+           headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE &&
+           vendorId == props.vendorID && deviceId == props.deviceID &&
+           memcmp(data.data() + 16, props.pipelineCacheUUID, VK_UUID_SIZE) == 0;
 }
 
-void VulkanRendererContext::createSgsrHqPipeline() {
-    if (sgsrHqPipeline != VK_NULL_HANDLE) return;
-
-    auto vert = makeShader(window_vert_code, sizeof(window_vert_code));
-    auto frag = makeShader(window_sgsr_hq_frag_code, sizeof(window_sgsr_hq_frag_code));
-
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vert;
-    stages[0].pName = "main";
-    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = frag;
-    stages[1].pName = "main";
-
-    VkPipelineVertexInputStateCreateInfo vi{};
-    vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-    VkPipelineInputAssemblyStateCreateInfo ia{};
-    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-
-    VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dyn{};
-    dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dyn.dynamicStateCount = 2;
-    dyn.pDynamicStates = dynStates;
-
-    VkPipelineViewportStateCreateInfo vp{};
-    vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo rast{};
-    rast.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rast.polygonMode = VK_POLYGON_MODE_FILL;
-    rast.lineWidth = 1.0f;
-    rast.cullMode = VK_CULL_MODE_NONE;
-    rast.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-    VkPipelineMultisampleStateCreateInfo ms{};
-    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineColorBlendAttachmentState ba{};
-    ba.colorWriteMask = 0xF;
-    ba.blendEnable = VK_FALSE;
-
-    VkPipelineColorBlendStateCreateInfo blend{};
-    blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blend.attachmentCount = 1;
-    blend.pAttachments = &ba;
-
-    VkGraphicsPipelineCreateInfo pi{};
-    pi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pi.stageCount = 2;
-    pi.pStages = stages;
-    pi.pVertexInputState = &vi;
-    pi.pInputAssemblyState = &ia;
-    pi.pViewportState = &vp;
-    pi.pRasterizationState = &rast;
-    pi.pMultisampleState = &ms;
-    pi.pColorBlendState = &blend;
-    pi.pDynamicState = &dyn;
-    pi.layout = pipeLayout;
-    pi.renderPass = renderPass;
-    pi.subpass = 0;
-
-    VkResult result = vk_.CreateGraphicsPipelines(
-        device, VK_NULL_HANDLE, 1, &pi, nullptr, &sgsrHqPipeline);
-
-    vk_.DestroyShaderModule(device, frag, nullptr);
-    vk_.DestroyShaderModule(device, vert, nullptr);
-
-    if (result != VK_SUCCESS) {
-        sgsrHqPipeline = VK_NULL_HANDLE;
-        throw std::runtime_error("sgsr_hq_pipeline");
+std::vector<uint8_t> readFile(const std::string& path) {
+    std::vector<uint8_t> out;
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return out;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        const long len = ftell(f);
+        if (len > 0 && (size_t)len <= kMaxCacheFileBytes && fseek(f, 0, SEEK_SET) == 0) {
+            out.resize((size_t)len);
+            if (fread(out.data(), 1, out.size(), f) != out.size()) out.clear();
+        }
     }
-    RLOG("createSgsrHqPipeline: done");
+    fclose(f);
+    return out;
 }
 
-void VulkanRendererContext::createNisPipeline() {
-    if (nisPipeline != VK_NULL_HANDLE) return;
+}  // namespace
 
-    auto vert = makeShader(window_vert_code, sizeof(window_vert_code));
-    auto frag = makeShader(window_nis_frag_code, sizeof(window_nis_frag_code));
+void VulkanRendererContext::createPipelineCache() {
+    // Never fatal: without a cache the pipelines are just compiled from scratch every run.
+    if (!vk_.CreatePipelineCache || !vk_.GetPipelineCacheData || !vk_.DestroyPipelineCache) return;
+
+    VkPhysicalDeviceProperties props{};
+    vk_.GetPhysicalDeviceProperties(physicalDevice, &props);
+
+    std::vector<uint8_t> data;
+    if (!cacheDirPath.empty()) {
+        // A cache is only valid for the device and driver build that wrote it: both are in the name.
+        char name[96];
+        snprintf(name, sizeof(name), "winlite_vkpc_%08x_%08x_%02x%02x%02x%02x.bin",
+                 props.vendorID, props.deviceID,
+                 props.pipelineCacheUUID[0], props.pipelineCacheUUID[1],
+                 props.pipelineCacheUUID[2], props.pipelineCacheUUID[3]);
+        pipelineCachePath = cacheDirPath + "/" + name;
+        data = readFile(pipelineCachePath);
+        if (!data.empty() && !cacheHeaderMatches(data, props)) {
+            RLOG("pipeline cache %s does not match this driver: starting empty", pipelineCachePath.c_str());
+            data.clear();
+        }
+    }
+
+    VkPipelineCacheCreateInfo ci{};
+    ci.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    ci.initialDataSize = data.size();
+    ci.pInitialData = data.empty() ? nullptr : data.data();
+    VkResult r = vk_.CreatePipelineCache(device, &ci, nullptr, &pipelineCache);
+    if (r != VK_SUCCESS && !data.empty()) {
+        RLOG_E("pipeline cache rejected by the driver (%d): starting empty", (int)r);
+        data.clear();
+        ci.initialDataSize = 0;
+        ci.pInitialData = nullptr;
+        r = vk_.CreatePipelineCache(device, &ci, nullptr, &pipelineCache);
+    }
+    if (r != VK_SUCCESS) {
+        RLOG_E("vkCreatePipelineCache failed (%d): building pipelines without a cache", (int)r);
+        pipelineCache = VK_NULL_HANDLE;
+        return;
+    }
+    pipelineCacheSavedSize = data.size();
+    RLOG("pipeline cache: %zu bytes loaded from %s", data.size(),
+         pipelineCachePath.empty() ? "(not persisted)" : pipelineCachePath.c_str());
+}
+
+void VulkanRendererContext::savePipelineCache() {
+    if (pipelineCache == VK_NULL_HANDLE || pipelineCachePath.empty() || !vk_.GetPipelineCacheData) return;
+    std::lock_guard<std::mutex> lk(pipelineBuildMutex);
+
+    size_t size = 0;
+    if (vk_.GetPipelineCacheData(device, pipelineCache, &size, nullptr) != VK_SUCCESS) return;
+    if (size <= 16 + VK_UUID_SIZE || size == pipelineCacheSavedSize) return;   // empty, or nothing new
+    std::vector<uint8_t> data(size);
+    const VkResult r = vk_.GetPipelineCacheData(device, pipelineCache, &size, data.data());
+    if ((r != VK_SUCCESS && r != VK_INCOMPLETE) || size == 0 || size > data.size()) return;
+    data.resize(size);
+
+    // Written next to the target and renamed over it: a crash or a full disk mid-write leaves the
+    // previous cache intact instead of a truncated one.
+    const std::string tmp = pipelineCachePath + ".tmp";
+    FILE* f = fopen(tmp.c_str(), "wb");
+    if (!f) { RLOG_E("pipeline cache: cannot write %s", tmp.c_str()); return; }
+    const bool written = fwrite(data.data(), 1, data.size(), f) == data.size();
+    const bool closed = fclose(f) == 0;
+    if (!written || !closed || rename(tmp.c_str(), pipelineCachePath.c_str()) != 0) {
+        RLOG_E("pipeline cache: saving %s failed", pipelineCachePath.c_str());
+        remove(tmp.c_str());
+        return;
+    }
+    pipelineCacheSavedSize = data.size();
+    RLOG("pipeline cache saved: %zu bytes", data.size());
+}
+
+void VulkanRendererContext::createPipelineLayout() {
+    VkPushConstantRange pc{};
+    pc.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pc.size = sizeof(WindowPushConstantsSGSR);
+    VkPipelineLayoutCreateInfo li{};
+    li.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    li.setLayoutCount = 1;
+    li.pSetLayouts = &dsLayout;
+    li.pushConstantRangeCount = 1;
+    li.pPushConstantRanges = &pc;
+    if (vk_.CreatePipelineLayout(device, &li, nullptr, &pipeLayout) != VK_SUCCESS)
+        throw std::runtime_error("pipelayout");
+}
+
+VkPipeline VulkanRendererContext::buildPipeline(const uint32_t* fragCode, size_t fragSize,
+                                                bool blend, const char* name) {
+    VkShaderModule vert = makeShader(window_vert_code, sizeof(window_vert_code));
+    VkShaderModule frag = VK_NULL_HANDLE;
+    try {
+        frag = makeShader(fragCode, fragSize);
+    } catch (...) {
+        vk_.DestroyShaderModule(device, vert, nullptr);
+        throw;
+    }
 
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -221,12 +216,20 @@ void VulkanRendererContext::createNisPipeline() {
 
     VkPipelineColorBlendAttachmentState ba{};
     ba.colorWriteMask = 0xF;
-    ba.blendEnable = VK_FALSE;
+    ba.blendEnable = blend ? VK_TRUE : VK_FALSE;
+    if (blend) {
+        ba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        ba.colorBlendOp = VK_BLEND_OP_ADD;
+        ba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        ba.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
 
-    VkPipelineColorBlendStateCreateInfo blend{};
-    blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blend.attachmentCount = 1;
-    blend.pAttachments = &ba;
+    VkPipelineColorBlendStateCreateInfo cb{};
+    cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    cb.attachmentCount = 1;
+    cb.pAttachments = &ba;
 
     VkGraphicsPipelineCreateInfo pi{};
     pi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -237,29 +240,77 @@ void VulkanRendererContext::createNisPipeline() {
     pi.pViewportState = &vp;
     pi.pRasterizationState = &rast;
     pi.pMultisampleState = &ms;
-    pi.pColorBlendState = &blend;
+    pi.pColorBlendState = &cb;
     pi.pDynamicState = &dyn;
     pi.layout = pipeLayout;
     pi.renderPass = renderPass;
     pi.subpass = 0;
 
-    VkResult result = vk_.CreateGraphicsPipelines(
-        device, VK_NULL_HANDLE, 1, &pi, nullptr, &nisPipeline);
-
+    VkPipeline out = VK_NULL_HANDLE;
+    VkResult result;
+    {
+        // The cache is shared with savePipelineCache(), which reads it back.
+        std::lock_guard<std::mutex> lk(pipelineBuildMutex);
+        result = vk_.CreateGraphicsPipelines(device, pipelineCache, 1, &pi, nullptr, &out);
+    }
     vk_.DestroyShaderModule(device, frag, nullptr);
     vk_.DestroyShaderModule(device, vert, nullptr);
+    if (result != VK_SUCCESS) throw std::runtime_error(name);
+    return out;
+}
 
-    if (result != VK_SUCCESS) {
-        nisPipeline = VK_NULL_HANDLE;
-        throw std::runtime_error("nis_pipeline");
+VkPipeline& VulkanRendererContext::pipelineSlot(PipelineKind kind) {
+    switch (kind) {
+    case PipelineKind::Sgsr:    return sgsrPipeline;
+    case PipelineKind::Fsr1:    return fsr1Pipeline;
+    case PipelineKind::Lanczos: return lanczosPipeline;
+    case PipelineKind::SgsrHq:  return sgsrHqPipeline;
+    case PipelineKind::Nis:     return nisPipeline;
+    case PipelineKind::Stretch: return stretchPipeline;
+    case PipelineKind::PostFx:  return postfxPipeline;
     }
-    RLOG("createNisPipeline: done");
+    return postfxPipeline;   // not reached
+}
+
+VkPipeline VulkanRendererContext::prebuildPipeline(PipelineKind kind) {
+    if (pipelineSlot(kind) != VK_NULL_HANDLE) return VK_NULL_HANDLE;
+    const PipelineSource& src = kPipelineSources[(size_t)kind];
+    // The effect setters are called straight from JNI: an exception escaping there aborts the
+    // process. A failed build leaves the pipeline unset, and recordCmdBuf falls back to the plain
+    // blit; the next switch to that mode tries again.
+    try {
+        VkPipeline p = buildPipeline(src.code, src.size, false, src.name);
+        RLOG("%s pipeline built", src.name);
+        return p;
+    } catch (const std::exception& e) {
+        RLOG_E("%s pipeline build failed (%s): drawing with the plain blit", src.name, e.what());
+        return VK_NULL_HANDLE;
+    }
+}
+
+void VulkanRendererContext::adoptPipeline(PipelineKind kind, VkPipeline built) {
+    if (built == VK_NULL_HANDLE) return;
+    VkPipeline& slot = pipelineSlot(kind);
+    if (slot == VK_NULL_HANDLE) slot = built;
+    else vk_.DestroyPipeline(device, built, nullptr);   // lost a race with another builder
+}
+
+void VulkanRendererContext::createBasePipelines() {
+    // The window pipeline blends: the cursor needs it. Guest buffers are drawn through the same
+    // shader without blending (opaque), so a window's alpha channel never shows through.
+    pipeline = buildPipeline(window_frag_code, sizeof(window_frag_code), true, "window");
+    try {
+        opaquePipeline = buildPipeline(window_frag_code, sizeof(window_frag_code), false, "opaque window");
+        RLOG("opaque window pipeline built (blend off; cursor alpha isolated)");
+    } catch (const std::exception& e) {
+        opaquePipeline = VK_NULL_HANDLE;   // recordCmdBuf draws windows with the blending pipeline
+        RLOG_E("opaque window pipeline unavailable (%s): windows are drawn with blending", e.what());
+    }
 }
 
 void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     const std::vector<DrawEntry>& draws,
     std::vector<VkImageMemoryBarrier>& ahbTransitions,
-    std::vector<VkImageMemoryBarrier>& preUpload,
     std::vector<VkImageMemoryBarrier>& postUpload,
     VkBuffer cursorUpload, bool hasCursorUpload,
     float ox, float oy, float sx, float sy, float cw, float ch,
@@ -273,7 +324,6 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         throw std::runtime_error("begin cb");
 
     ahbTransitions.clear();
-    preUpload.clear();
     postUpload.clear();
 
     // A guest buffer is written outside this device (the guest's driver, another API in another
@@ -310,23 +360,6 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             b.srcAccessMask = 0;
             b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
             ahbTransitions.push_back(b);
-        } else if (d.needsTransition || d.upload != VK_NULL_HANDLE) {
-            VkImageMemoryBarrier b{};
-            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b.image = d.img;
-            b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-            b.srcAccessMask = 0;
-            b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            preUpload.push_back(b);
-
-            b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            postUpload.push_back(b);
         }
     }
 
@@ -335,21 +368,6 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr,
             (uint32_t)ahbTransitions.size(), ahbTransitions.data());
     }
-    if (!preUpload.empty()) {
-        vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-            (uint32_t)preUpload.size(), preUpload.data());
-    }
-
-    for (auto& d : draws) {
-        if (d.isAHB || d.upload == VK_NULL_HANDLE || d.img == VK_NULL_HANDLE) continue;
-        VkBufferImageCopy r{};
-        r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        r.imageExtent = {(uint32_t)d.w, (uint32_t)d.h, 1};
-        vk_.CmdCopyBufferToImage(cb, d.upload, d.img,
-                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r);
-    }
-
     const bool hasCursorCopy = hasCursorUpload && cursorImg != VK_NULL_HANDLE &&
                                cursorUpload != VK_NULL_HANDLE;
     // Not drawn before its first upload: a fresh texture holds nothing yet.
@@ -429,7 +447,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
                               : useColorBoost ? postfxPipeline
                               : usePostFX ? postfxPipeline
                               : useStretch ? stretchPipeline
-                              : VulkanRendererGetOpaquePipeline(this);
+                              : (opaquePipeline != VK_NULL_HANDLE ? opaquePipeline : pipeline);
     vk_.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
 
     for (auto& d : draws) {

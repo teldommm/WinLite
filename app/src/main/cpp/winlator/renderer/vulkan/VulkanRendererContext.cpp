@@ -8,13 +8,13 @@
 #include <algorithm>
 #include <inttypes.h>
 #include <dlfcn.h>
-#include "VulkanRendererPipelineOpt.h"
-#include "window_vert.h"
-#include "window_frag.h"
-#include "window_sgsr_frag.h"
-#include "window_fsr1_frag.h"
-#include "window_stretch_frag.h"
-#include "window_postfx_frag.h"
+#include <errno.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <sys/system_properties.h>
+#include <chrono>
 
 namespace {
 VKAPI_ATTR VkBool32 VKAPI_CALL logValidationMessage(
@@ -28,19 +28,74 @@ VKAPI_ATTR VkBool32 VKAPI_CALL logValidationMessage(
                         data && data->pMessage ? data->pMessage : "(no message)");
     return VK_FALSE;
 }
+
+// Surface transforms the renderer knows how to pre-rotate for; anything else is drawn as IDENTITY.
+VkSurfaceTransformFlagBitsKHR normalizePreTransform(VkSurfaceTransformFlagBitsKHR t) {
+    switch (t) {
+        case VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR:
+        case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:
+        case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR:
+        case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR:
+            return t;
+        default:
+            return VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    }
+}
+
+// The surface's size in the display's own orientation (before pre-rotation).
+VkExtent2D queryLogicalExtent(const VkSurfaceCapabilitiesKHR& caps, ANativeWindow* window,
+                              int fallbackW, int fallbackH) {
+    if (caps.currentExtent.width != 0xFFFFFFFF) return caps.currentExtent;
+    if (window) {
+        const int winW = ANativeWindow_getWidth(window);
+        const int winH = ANativeWindow_getHeight(window);
+        return {
+            (uint32_t)std::clamp(winW, (int)caps.minImageExtent.width, (int)caps.maxImageExtent.width),
+            (uint32_t)std::clamp(winH, (int)caps.minImageExtent.height, (int)caps.maxImageExtent.height)
+        };
+    }
+    return {(uint32_t)fallbackW, (uint32_t)fallbackH};
+}
+
+// A/B switch for the FIFO queue depth: `setprop debug.winlite.swapchain_extra 1` keeps the spare
+// swapchain image (minImageCount + 1), `0` drops it, unset lets the renderer decide. -1: unset.
+int swapchainExtraImageOverride() {
+    char value[PROP_VALUE_MAX] = {};
+    if (__system_property_get("debug.winlite.swapchain_extra", value) <= 0) return -1;
+    if (value[0] == '1') return 1;
+    if (value[0] == '0') return 0;
+    return -1;
+}
+
+// The render thread paces presentation: a normal-priority thread loses its slot to guest threads
+// that occupy every core, which shows up as frame-time jitter. Failing to raise the priority is
+// harmless (the thread just keeps the default).
+void boostRenderThread() {
+    pthread_setname_np(pthread_self(), "WinLiteRender");
+    errno = 0;
+    const pid_t tid = (pid_t)syscall(SYS_gettid);
+    if (setpriority(PRIO_PROCESS, (id_t)tid, -4) != 0) {
+        __android_log_print(ANDROID_LOG_WARN, "Winlator_Renderer",
+            "render thread priority not raised (errno=%d)", errno);
+    }
+}
 }
 
 VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
-                                             void* aHandle, bool enableValidation)
+                                             void* aHandle, bool enableValidation,
+                                             const char* cacheDir)
     : window(win), surfaceWidth(cW), surfaceHeight(cH),
       containerWidth(cW), containerHeight(cH),
-      adrenotoolsHandle(aHandle), validationRequested(enableValidation)
+      adrenotoolsHandle(aHandle), validationRequested(enableValidation),
+      cacheDirPath(cacheDir ? cacheDir : "")
 {
     createInstance(); createSurface(); pickPhysicalDevice(); createLogicalDevice();
+    createPipelineCache();
     createSwapchain(); createRenderPass(); createDSLayout();
-    createPipeline(true, pipeline);
+    createPipelineLayout(); createBasePipelines();
     createFramebuffers(); createCmdPool(); createSampler();
     createWinTexPool(); createCursorDS(); createCmdBufs(); createSyncObjects();
+    savePipelineCache();   // the window pipelines built above are on disk from the first run on
     isRunning = true;
     renderThread = std::thread(&VulkanRendererContext::renderLoop, this);
 }
@@ -50,18 +105,12 @@ VulkanRendererContext::~VulkanRendererContext() {
     if (renderThread.joinable()) renderThread.join();
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
-    VulkanRendererDestroyOpaquePipeline(this);
-    for (auto& [id, wt] : texMap) destroyWinTex(wt);
-    texMap.clear();
+    texMap.clear();   // aliases of the imported buffers freed below
 
-    for (auto& wt : deleteQueue) {
-        if (wt.ds   != VK_NULL_HANDLE) vk_.FreeDescriptorSets(device, winTexPool, 1, &wt.ds);
-        if (wt.view != VK_NULL_HANDLE) vk_.DestroyImageView(device, wt.view, nullptr);
-        if (wt.img  != VK_NULL_HANDLE) vk_.DestroyImage(device, wt.img, nullptr);
-        if (wt.mem  != VK_NULL_HANDLE) vk_.FreeMemory(device, wt.mem, nullptr);
-        if (wt.stg  != VK_NULL_HANDLE) { vk_.DestroyBuffer(device, wt.stg, nullptr); vk_.FreeMemory(device, wt.stgMem, nullptr); }
-    }
+    for (auto& wt : deleteQueue) freeWinTexVk(wt);
     deleteQueue.clear();
+    for (auto& r : retiring) freeWinTexVk(r.tex);
+    retiring.clear();
     // Imported window buffers: their Vulkan objects (the device is idle) and the references taken
     // at import. Nothing freed them when the renderer went away, so every re-created renderer
     // left all of its imports behind.
@@ -71,15 +120,13 @@ VulkanRendererContext::~VulkanRendererContext() {
 
     vk_.DestroySampler(device, sampler, nullptr);
     vk_.DestroyDescriptorPool(device, winTexPool, nullptr);
-    if (sgsrPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrPipeline, nullptr);
-    if (fsr1Pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fsr1Pipeline, nullptr);
-    if (lanczosPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, lanczosPipeline, nullptr);
-    if (sgsrHqPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrHqPipeline, nullptr);
-    if (nisPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, nisPipeline, nullptr);
-    if (stretchPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, stretchPipeline, nullptr);
-    if (postfxPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, postfxPipeline, nullptr);
-    vk_.DestroyPipeline(device, pipeline, nullptr);
+    for (VkPipeline p : {sgsrPipeline, fsr1Pipeline, lanczosPipeline, sgsrHqPipeline, nisPipeline,
+                         stretchPipeline, postfxPipeline, opaquePipeline})
+        if (p != VK_NULL_HANDLE) vk_.DestroyPipeline(device, p, nullptr);
+    if (pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, pipeline, nullptr);
     vk_.DestroyPipelineLayout(device, pipeLayout, nullptr);
+    savePipelineCache();
+    if (pipelineCache != VK_NULL_HANDLE) vk_.DestroyPipelineCache(device, pipelineCache, nullptr);
     vk_.DestroyDescriptorSetLayout(device, dsLayout, nullptr);
     for (auto sem : renderDoneSems) vk_.DestroySemaphore(device, sem, nullptr);
     for (auto sem : imgAvailSems) vk_.DestroySemaphore(device, sem, nullptr);
@@ -165,6 +212,9 @@ void VulkanRendererContext::loadDeviceDispatch() {
     LOAD_D2(DestroyShaderModule);
     LOAD_D2(CreateGraphicsPipelines);
     LOAD_D2(DestroyPipeline);
+    LOAD_D2(CreatePipelineCache);
+    LOAD_D2(DestroyPipelineCache);
+    LOAD_D2(GetPipelineCacheData);
     LOAD_D2(CreateCommandPool);
     LOAD_D2(DestroyCommandPool);
     LOAD_D2(AllocateCommandBuffers);
@@ -375,34 +425,11 @@ void VulkanRendererContext::createSwapchain() {
     VkSurfaceCapabilitiesKHR caps;
     vk_.GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice,surface,&caps);
 
-    VkExtent2D logicalExt;
-    if (caps.currentExtent.width != 0xFFFFFFFF) {
-        logicalExt = caps.currentExtent;
-    } else if (window) {
-        int winW = ANativeWindow_getWidth(window);
-        int winH = ANativeWindow_getHeight(window);
-        logicalExt = {
-            (uint32_t)std::clamp(winW, (int)caps.minImageExtent.width, (int)caps.maxImageExtent.width),
-            (uint32_t)std::clamp(winH, (int)caps.minImageExtent.height, (int)caps.maxImageExtent.height)
-        };
-    } else {
-        logicalExt = {(uint32_t)surfaceWidth, (uint32_t)surfaceHeight};
-    }
-
-    VkSurfaceTransformFlagBitsKHR pre;
-    switch (caps.currentTransform) {
-        case VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR:
-        case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:
-        case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR:
-        case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR:
-            pre = caps.currentTransform;
-            break;
-        default:
-
-            RLOG_E("createSwapchain: currentTransform inesperado (0x%x), usando IDENTITY",
-                (unsigned)caps.currentTransform);
-            pre = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-            break;
+    const VkExtent2D logicalExt = queryLogicalExtent(caps, window, surfaceWidth, surfaceHeight);
+    const VkSurfaceTransformFlagBitsKHR pre = normalizePreTransform(caps.currentTransform);
+    if (pre != caps.currentTransform) {
+        RLOG_E("createSwapchain: unexpected currentTransform (0x%x), using IDENTITY",
+            (unsigned)caps.currentTransform);
     }
     surfaceTransform = pre;
 
@@ -417,8 +444,6 @@ void VulkanRendererContext::createSwapchain() {
     swapchainFmt = VK_FORMAT_R8G8B8A8_UNORM;
     // WFG presents its generated frames from extra images, FIFO-paced, and writes them by transfer.
     const bool wantWfg = wfgRequested.load();
-    uint32_t imgCount=caps.minImageCount+1+(wantWfg?VKR_DIS_MAX_GENERATIONS:0u);
-    if (caps.maxImageCount>0&&imgCount>caps.maxImageCount) imgCount=caps.maxImageCount;
     swapchainMinImages = caps.minImageCount;
     wfgSwapchain = wantWfg;
     swapchainTransferDst = wantWfg && (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT);
@@ -430,6 +455,18 @@ void VulkanRendererContext::createSwapchain() {
     VkPresentModeKHR presentMode=VK_PRESENT_MODE_FIFO_KHR;
     if (!wantWfg)
         for (auto pm:availablePresentModes) if(pm==requestedPresentMode){presentMode=pm;break;}
+
+    // Image count. A FIFO queue is as deep as the images beyond the one on screen: the spare image
+    // minImageCount + 1 adds a frame of latency whenever the game outruns the display, for no
+    // gain in smoothness. Modes that can drop images (MAILBOX, IMMEDIATE) and WFG (which presents
+    // several images per frame) keep it. debug.winlite.swapchain_extra forces either way.
+    const bool fifoLike = presentMode==VK_PRESENT_MODE_FIFO_KHR || presentMode==VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+    bool spareImage = wantWfg || !fifoLike;
+    const int extraOverride = swapchainExtraImageOverride();
+    if (!wantWfg && extraOverride >= 0) spareImage = extraOverride != 0;
+    uint32_t imgCount=caps.minImageCount+(spareImage?1u:0u)+(wantWfg?VKR_DIS_MAX_GENERATIONS:0u);
+    if (caps.maxImageCount>0&&imgCount>caps.maxImageCount) imgCount=caps.maxImageCount;
+    if (imgCount<caps.minImageCount) imgCount=caps.minImageCount;
     if(verboseLog){
         std::string pmList;
         for(auto pm:availablePresentModes) pmList+=std::to_string((int)pm)+" ";
@@ -453,8 +490,9 @@ void VulkanRendererContext::createSwapchain() {
     ci.compositeAlpha=compositeAlpha; ci.presentMode=presentMode; ci.clipped=VK_TRUE;
     ci.oldSwapchain=oldSwapchain;
     if (vk_.CreateSwapchainKHR(device,&ci,nullptr,&swapchain)!=VK_SUCCESS) throw std::runtime_error("swapchain");
-    RLOG("swapchain created: %dx%d format=%d presentMode=%d compositeAlpha=%d imgCount=%u",
-        swapchainExt.width,swapchainExt.height,(int)swapchainFmt,(int)presentMode,(int)compositeAlpha,imgCount);
+    RLOG("swapchain created: %dx%d format=%d presentMode=%d compositeAlpha=%d imgCount=%u (min=%u spare=%d override=%d)",
+        swapchainExt.width,swapchainExt.height,(int)swapchainFmt,(int)presentMode,(int)compositeAlpha,imgCount,
+        caps.minImageCount,(int)spareImage,extraOverride);
     if (oldSwapchain!=VK_NULL_HANDLE) vk_.DestroySwapchainKHR(device,oldSwapchain,nullptr);
     vk_.GetSwapchainImagesKHR(device,swapchain,&imgCount,nullptr);
     swapchainImages.resize(imgCount); vk_.GetSwapchainImagesKHR(device,swapchain,&imgCount,swapchainImages.data());
@@ -506,151 +544,6 @@ VkShaderModule VulkanRendererContext::makeShader(const uint32_t* code, size_t sz
     return m;
 }
 
-void VulkanRendererContext::createPipeline(bool blend, VkPipeline& out) {
-    if (pipeLayout==VK_NULL_HANDLE) {
-        VkPushConstantRange pc{}; pc.stageFlags=VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT;
-        pc.size=sizeof(WindowPushConstantsSGSR);
-        VkPipelineLayoutCreateInfo li{}; li.sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        li.setLayoutCount=1; li.pSetLayouts=&dsLayout; li.pushConstantRangeCount=1; li.pPushConstantRanges=&pc;
-        if (vk_.CreatePipelineLayout(device,&li,nullptr,&pipeLayout)!=VK_SUCCESS) throw std::runtime_error("pipelayout");
-    }
-    auto vert=makeShader(window_vert_code,sizeof(window_vert_code));
-    auto frag=makeShader(window_frag_code,sizeof(window_frag_code));
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[0].stage=VK_SHADER_STAGE_VERTEX_BIT; stages[0].module=vert; stages[0].pName="main";
-    stages[1].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[1].stage=VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module=frag; stages[1].pName="main";
-    VkPipelineVertexInputStateCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VkPipelineInputAssemblyStateCreateInfo ia{}; ia.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO; ia.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo ds{}; ds.sType=VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO; ds.dynamicStateCount=2; ds.pDynamicStates=dyn;
-    VkPipelineViewportStateCreateInfo vp{}; vp.sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO; vp.viewportCount=1; vp.scissorCount=1;
-    VkPipelineRasterizationStateCreateInfo rast{}; rast.sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO; rast.polygonMode=VK_POLYGON_MODE_FILL; rast.lineWidth=1.f; rast.cullMode=VK_CULL_MODE_NONE; rast.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    VkPipelineMultisampleStateCreateInfo ms{}; ms.sType=VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO; ms.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState ba{}; ba.colorWriteMask=0xF; ba.blendEnable=blend?VK_TRUE:VK_FALSE;
-    if (blend){ba.srcColorBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;ba.dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;ba.colorBlendOp=VK_BLEND_OP_ADD;ba.srcAlphaBlendFactor=VK_BLEND_FACTOR_ONE;ba.dstAlphaBlendFactor=VK_BLEND_FACTOR_ZERO;ba.alphaBlendOp=VK_BLEND_OP_ADD;}
-    VkPipelineColorBlendStateCreateInfo cb{}; cb.sType=VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO; cb.attachmentCount=1; cb.pAttachments=&ba;
-    VkGraphicsPipelineCreateInfo pi{}; pi.sType=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
-    pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
-    pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&out)!=VK_SUCCESS) throw std::runtime_error("pipeline");
-    vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
-}
-
-void VulkanRendererContext::createCursorPipeline() {  }
-
-void VulkanRendererContext::createSgsrPipeline() {
-    if (sgsrPipeline != VK_NULL_HANDLE) return;
-    auto vert=makeShader(window_vert_code,sizeof(window_vert_code));
-    auto frag=makeShader(window_sgsr_frag_code,sizeof(window_sgsr_frag_code));
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[0].stage=VK_SHADER_STAGE_VERTEX_BIT; stages[0].module=vert; stages[0].pName="main";
-    stages[1].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[1].stage=VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module=frag; stages[1].pName="main";
-    VkPipelineVertexInputStateCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VkPipelineInputAssemblyStateCreateInfo ia{}; ia.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO; ia.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo ds{}; ds.sType=VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO; ds.dynamicStateCount=2; ds.pDynamicStates=dyn;
-    VkPipelineViewportStateCreateInfo vp{}; vp.sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO; vp.viewportCount=1; vp.scissorCount=1;
-    VkPipelineRasterizationStateCreateInfo rast{}; rast.sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO; rast.polygonMode=VK_POLYGON_MODE_FILL; rast.lineWidth=1.f; rast.cullMode=VK_CULL_MODE_NONE; rast.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    VkPipelineMultisampleStateCreateInfo ms{}; ms.sType=VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO; ms.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState ba{}; ba.colorWriteMask=0xF; ba.blendEnable=VK_FALSE;
-    VkPipelineColorBlendStateCreateInfo cb{}; cb.sType=VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO; cb.attachmentCount=1; cb.pAttachments=&ba;
-    VkGraphicsPipelineCreateInfo pi{}; pi.sType=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
-    pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
-    pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&sgsrPipeline)!=VK_SUCCESS) throw std::runtime_error("sgsr_pipeline");
-    vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
-    RLOG("createSgsrPipeline: done");
-}
-
-void VulkanRendererContext::createFsr1Pipeline() {
-    if (fsr1Pipeline != VK_NULL_HANDLE) return;
-    auto vert=makeShader(window_vert_code,sizeof(window_vert_code));
-    auto frag=makeShader(window_fsr1_frag_code,sizeof(window_fsr1_frag_code));
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[0].stage=VK_SHADER_STAGE_VERTEX_BIT; stages[0].module=vert; stages[0].pName="main";
-    stages[1].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[1].stage=VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module=frag; stages[1].pName="main";
-    VkPipelineVertexInputStateCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VkPipelineInputAssemblyStateCreateInfo ia{}; ia.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO; ia.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo ds{}; ds.sType=VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO; ds.dynamicStateCount=2; ds.pDynamicStates=dyn;
-    VkPipelineViewportStateCreateInfo vp{}; vp.sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO; vp.viewportCount=1; vp.scissorCount=1;
-    VkPipelineRasterizationStateCreateInfo rast{}; rast.sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO; rast.polygonMode=VK_POLYGON_MODE_FILL; rast.lineWidth=1.f; rast.cullMode=VK_CULL_MODE_NONE; rast.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    VkPipelineMultisampleStateCreateInfo ms{}; ms.sType=VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO; ms.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState ba{}; ba.colorWriteMask=0xF; ba.blendEnable=VK_FALSE;
-    VkPipelineColorBlendStateCreateInfo cb{}; cb.sType=VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO; cb.attachmentCount=1; cb.pAttachments=&ba;
-    VkGraphicsPipelineCreateInfo pi{}; pi.sType=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
-    pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
-    pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&fsr1Pipeline)!=VK_SUCCESS) throw std::runtime_error("fsr1_pipeline");
-    vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
-    RLOG("createFsr1Pipeline: done");
-}
-
-void VulkanRendererContext::createStretchPipeline() {
-    if (stretchPipeline != VK_NULL_HANDLE) return;
-    auto vert=makeShader(window_vert_code,sizeof(window_vert_code));
-    auto frag=makeShader(window_stretch_frag_code,sizeof(window_stretch_frag_code));
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[0].stage=VK_SHADER_STAGE_VERTEX_BIT; stages[0].module=vert; stages[0].pName="main";
-    stages[1].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[1].stage=VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module=frag; stages[1].pName="main";
-    VkPipelineVertexInputStateCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VkPipelineInputAssemblyStateCreateInfo ia{}; ia.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO; ia.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo ds{}; ds.sType=VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO; ds.dynamicStateCount=2; ds.pDynamicStates=dyn;
-    VkPipelineViewportStateCreateInfo vp{}; vp.sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO; vp.viewportCount=1; vp.scissorCount=1;
-    VkPipelineRasterizationStateCreateInfo rast{}; rast.sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO; rast.polygonMode=VK_POLYGON_MODE_FILL; rast.lineWidth=1.f; rast.cullMode=VK_CULL_MODE_NONE; rast.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    VkPipelineMultisampleStateCreateInfo ms{}; ms.sType=VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO; ms.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState ba{}; ba.colorWriteMask=0xF; ba.blendEnable=VK_FALSE;
-    VkPipelineColorBlendStateCreateInfo cb{}; cb.sType=VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO; cb.attachmentCount=1; cb.pAttachments=&ba;
-    VkGraphicsPipelineCreateInfo pi{}; pi.sType=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
-    pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
-    pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    if (vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&stretchPipeline)!=VK_SUCCESS) throw std::runtime_error("stretch_pipeline");
-    vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
-    RLOG("createStretchPipeline: done");
-}
-
-void VulkanRendererContext::createPostFXPipeline() {
-    if (postfxPipeline != VK_NULL_HANDLE) return;
-    auto vert = makeShader(window_vert_code,        sizeof(window_vert_code));
-    auto frag = makeShader(window_postfx_frag_code, sizeof(window_postfx_frag_code));
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[0].stage=VK_SHADER_STAGE_VERTEX_BIT;   stages[0].module=vert; stages[0].pName="main";
-    stages[1].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[1].stage=VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module=frag; stages[1].pName="main";
-    VkPipelineVertexInputStateCreateInfo   vi{}; vi.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VkPipelineInputAssemblyStateCreateInfo ia{}; ia.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO; ia.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo ds{}; ds.sType=VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO; ds.dynamicStateCount=2; ds.pDynamicStates=dyn;
-    VkPipelineViewportStateCreateInfo vp{}; vp.sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO; vp.viewportCount=1; vp.scissorCount=1;
-    VkPipelineRasterizationStateCreateInfo rast{}; rast.sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rast.polygonMode=VK_POLYGON_MODE_FILL; rast.lineWidth=1.f; rast.cullMode=VK_CULL_MODE_NONE; rast.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    VkPipelineMultisampleStateCreateInfo ms{}; ms.sType=VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO; ms.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState ba{}; ba.colorWriteMask=0xF; ba.blendEnable=VK_FALSE;
-    VkPipelineColorBlendStateCreateInfo cb{}; cb.sType=VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO; cb.attachmentCount=1; cb.pAttachments=&ba;
-    VkGraphicsPipelineCreateInfo pi{}; pi.sType=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
-    pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
-    pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=pipeLayout; pi.renderPass=renderPass; pi.subpass=0;
-    const VkResult res=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&postfxPipeline);
-    vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
-    if (res!=VK_SUCCESS) { postfxPipeline=VK_NULL_HANDLE; throw std::runtime_error("postfx_pipeline"); }
-    RLOG("createPostFXPipeline: done");
-}
-
-void VulkanRendererContext::tryCreatePipeline(void (VulkanRendererContext::*create)(), const char* name) {
-    // Pipelines are built from the UI setters, which are called straight from JNI: an exception
-    // escaping there aborts the process. A failed build leaves the handle null and recordCmdBuf
-    // falls back to the plain blit; the next switch to that mode tries again.
-    try { (this->*create)(); }
-    catch (const std::exception& e) {
-        RLOG_E("%s pipeline build failed (%s): drawing with the plain blit", name, e.what());
-    }
-}
-
 bool VulkanRendererContext::upscalerActive() const {
     switch (filterMode) {
     case 2: return sgsrPipeline != VK_NULL_HANDLE;
@@ -664,12 +557,11 @@ bool VulkanRendererContext::upscalerActive() const {
 
 void VulkanRendererContext::syncPostFXPipeline() {
     // The upscalers are single pass and apply the PostFX effect inline, so the postfx pipeline
-    // is bound only for ColorBoost (mode 5) and for an effect on the plain blit. Keep it built
-    // exactly when a frame would bind it. Called with the frame lock held exclusively.
+    // is bound only for ColorBoost (mode 5) and for an effect on the plain blit. Called with the
+    // frame lock held exclusively; the setters have built it (outside the lock) when it is needed,
+    // and a build that failed leaves the plain blit.
     const bool needed = filterMode == 5 || (postFXMode > 0 && !upscalerActive());
-    if (needed && postfxPipeline == VK_NULL_HANDLE) {
-        tryCreatePipeline(&VulkanRendererContext::createPostFXPipeline, "postfx");
-    } else if (!needed && postfxPipeline != VK_NULL_HANDLE) {
+    if (!needed && postfxPipeline != VK_NULL_HANDLE) {
         vk_.DeviceWaitIdle(device);
         vk_.DestroyPipeline(device, postfxPipeline, nullptr);
         postfxPipeline = VK_NULL_HANDLE;
@@ -678,13 +570,22 @@ void VulkanRendererContext::syncPostFXPipeline() {
 }
 
 void VulkanRendererContext::setPostFXMode(int mode) {
-    // Destroys a pipeline the render thread may be recording with: exclusive frame lock.
-    auto frameLock = lockFrameExclusive();
+    std::lock_guard<std::mutex> setterLock(setterMutex);
     RLOG("setPostFXMode: %d -> %d", postFXMode, mode);
     if (postFXMode == mode) return;
-    postFXMode = mode;
-    syncPostFXPipeline();
-    needsRender.store(true); wakeRender();
+    // Compile first, without the frame lock: the render thread keeps drawing meanwhile. Only the
+    // setters change the mode and the pipelines, and they run one at a time.
+    VkPipeline builtFx = VK_NULL_HANDLE;
+    if (filterMode == 5 || (mode > 0 && !upscalerActive())) builtFx = prebuildPipeline(PipelineKind::PostFx);
+    {
+        // Swaps pipelines the render thread may be recording with: exclusive frame lock.
+        auto frameLock = lockFrameExclusive();
+        postFXMode = mode;
+        adoptPipeline(PipelineKind::PostFx, builtFx);
+        syncPostFXPipeline();
+        needsRender.store(true); wakeRender();
+    }
+    savePipelineCache();
 }
 
 void VulkanRendererContext::setSharpness(float s) {
@@ -824,31 +725,6 @@ void VulkanRendererContext::transition(VkCommandBuffer cb, VkImage img,
     vk_.CmdPipelineBarrier(cb,ss,dss,0,0,nullptr,0,nullptr,1,&b);
 }
 
-bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
-    VkImageCreateInfo ii{}; ii.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; ii.imageType=VK_IMAGE_TYPE_2D;
-    ii.extent={(uint32_t)w,(uint32_t)h,1}; ii.mipLevels=1; ii.arrayLayers=1; ii.format=VK_FORMAT_B8G8R8A8_UNORM;
-    ii.tiling=VK_IMAGE_TILING_OPTIMAL; ii.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
-    ii.usage=VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT; ii.samples=VK_SAMPLE_COUNT_1_BIT; ii.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
-    if (vk_.CreateImage(device,&ii,nullptr,&wt.img)!=VK_SUCCESS) return false;
-    VkMemoryRequirements req; vk_.GetImageMemoryRequirements(device,wt.img,&req);
-    VkMemoryAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ai.allocationSize=req.size; ai.memoryTypeIndex=findMemType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vk_.AllocateMemory(device,&ai,nullptr,&wt.mem)!=VK_SUCCESS){vk_.DestroyImage(device,wt.img,nullptr);wt.img=VK_NULL_HANDLE;return false;}
-    vk_.BindImageMemory(device,wt.img,wt.mem,0);
-    VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; vi.image=wt.img; vi.viewType=VK_IMAGE_VIEW_TYPE_2D; vi.format=VK_FORMAT_B8G8R8A8_UNORM; vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-    if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){destroyWinTex(wt);return false;}
-    VkDescriptorSetAllocateInfo dsai{}; dsai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO; dsai.descriptorPool=winTexPool; dsai.descriptorSetCount=1; dsai.pSetLayouts=&dsLayout;
-    if (vk_.AllocateDescriptorSets(device,&dsai,&wt.ds)!=VK_SUCCESS){destroyWinTex(wt);return false;}
-    VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; dii.imageView=wt.view; dii.sampler=sampler;
-    VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wr.dstSet=wt.ds; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr.descriptorCount=1; wr.pImageInfo=&dii;
-    vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
-    VkDeviceSize stgSz=(VkDeviceSize)w*h*4;
-    createBuffer(stgSz,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,wt.stg,wt.stgMem);
-    vk_.MapMemory(device,wt.stgMem,0,stgSz,0,&wt.mapped);
-    wt.cap=stgSz; wt.w=w; wt.h=h; wt.needsTransition=true;
-    return true;
-}
-
 bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) {
     if (!vk_.GetAndroidHardwareBufferPropertiesANDROID)
         return false;
@@ -921,7 +797,7 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
                    VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY};
     vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
     if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){
-        destroyWinTex(wt);
+        freeWinTexVk(wt); wt = {};
         return false;
     }
 
@@ -931,10 +807,10 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     VkResult dsRes=vk_.AllocateDescriptorSets(device,&dsai,&wt.ds);
     if (dsRes==VK_ERROR_OUT_OF_POOL_MEMORY){
         RLOG_E("importAHBToWinTex: descriptor pool exhausted for AHB texture");
-        destroyWinTex(wt);
+        freeWinTexVk(wt); wt = {};
         return false;
     }
-    if (dsRes!=VK_SUCCESS){ destroyWinTex(wt); return false; }
+    if (dsRes!=VK_SUCCESS){ freeWinTexVk(wt); wt = {}; return false; }
 
     VkDescriptorImageInfo dii{};
     dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -954,14 +830,50 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     return true;
 }
 
-void VulkanRendererContext::destroyWinTex(WinTex& wt) {
-    if (wt.isAHB) { wt = {}; return; }
-    if (wt.img!=VK_NULL_HANDLE || wt.stg!=VK_NULL_HANDLE) {
-        WinTex deferred = wt;
-        deferred.isAHB = false;
-        deleteQueue.push_back(deferred);
+void VulkanRendererContext::freeWinTexVk(const WinTex& wt) {
+    if (wt.ds   != VK_NULL_HANDLE) vk_.FreeDescriptorSets(device, winTexPool, 1, &wt.ds);
+    if (wt.view != VK_NULL_HANDLE) vk_.DestroyImageView(device, wt.view, nullptr);
+    if (wt.img  != VK_NULL_HANDLE) vk_.DestroyImage(device, wt.img, nullptr);
+    if (wt.mem  != VK_NULL_HANDLE) vk_.FreeMemory(device, wt.mem, nullptr);
+}
+
+// Render thread, renderMutex held. Everything in deleteQueue is out of texMap and the import
+// cache, so no frame recorded from now on can name it; the frames submitted so far are the only
+// ones that can still sample it.
+void VulkanRendererContext::retireDeleteQueueLocked() {
+    for (auto& wt : deleteQueue) retiring.push_back({wt, submitSerial});
+    deleteQueue.clear();
+}
+
+// Render thread, renderMutex held. Frees what the GPU is provably done with, by polling the slot
+// fences - the render thread is the only one that submits and resets them, so the status is
+// stable. Frames complete in the order they were submitted per slot; a slot whose fence is still
+// pending only vouches for the frames before its own.
+void VulkanRendererContext::reapRetiredLocked() {
+    if (!retiring.empty()) {
+        uint64_t done = UINT64_MAX;
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            const bool signaled = i < inFlightFences.size() && vk_.GetFenceStatus &&
+                vk_.GetFenceStatus(device, inFlightFences[i]) == VK_SUCCESS;
+            const uint64_t vouched = signaled ? slotSerial[i] : (slotSerial[i] ? slotSerial[i] - 1 : 0);
+            done = std::min(done, vouched);
+        }
+        size_t kept = 0;
+        for (auto& r : retiring) {
+            if (r.retireAfter <= done) freeWinTexVk(r.tex);
+            else retiring[kept++] = r;
+        }
+        retiring.resize(kept);
     }
-    wt={};
+    hasRetired.store(!retiring.empty() || !deleteQueue.empty());
+}
+
+// Render thread, between frames: the render loop calls this while it has nothing to draw, so
+// textures are released without waiting for the next frame.
+void VulkanRendererContext::reapRetiredIdle() {
+    std::lock_guard<std::mutex> lk(renderMutex);
+    retireDeleteQueueLocked();
+    reapRetiredLocked();
 }
 
 void VulkanRendererContext::ensureCursorTex(short w, short h) {
@@ -1008,11 +920,18 @@ void VulkanRendererContext::ensureCursorStaging(uint32_t slot, VkDeviceSize sz) 
 }
 
 void VulkanRendererContext::renderLoop() {
+    boostRenderThread();
     while (isRunning) {
+        bool woken = true;
         { std::unique_lock<std::mutex> lk(dirtyMutex);
-          dirtyCV.wait(lk,[this]{
-              return !isRunning||(!surfaceDetached.load()&&(needsRender.load()||fbResized.load()))||cursorMoved.load(); }); }
+          auto pred = [this]{
+              return !isRunning||(!surfaceDetached.load()&&(needsRender.load()||fbResized.load()))||cursorMoved.load(); };
+          // While textures wait for the GPU to finish with them, look at the fences every few
+          // milliseconds instead of sleeping until the next frame.
+          if (hasRetired.load()) woken = dirtyCV.wait_for(lk,std::chrono::milliseconds(8),pred);
+          else dirtyCV.wait(lk,pred); }
         if (!isRunning) break;
+        if (!woken) { reapRetiredIdle(); continue; }
         // No swapchain guard here: renderFrame returns at once while the surface is detached
         // (clearing the wake flags) and is what retries a swapchain rebuild that failed.
         bool frameFailed = false;
@@ -1040,20 +959,6 @@ void VulkanRendererContext::renderLoop() {
             needsRender.store(true);
         }
     }
-}
-
-void VulkanRendererContext::flushDeleteQueue() {
-    std::lock_guard<std::mutex> lk(renderMutex);
-    if (deleteQueue.empty()) return;
-    vk_.DeviceWaitIdle(device);
-    for (auto& wt:deleteQueue) {
-        if (wt.ds  !=VK_NULL_HANDLE) vk_.FreeDescriptorSets(device,winTexPool,1,&wt.ds);
-        if (wt.view!=VK_NULL_HANDLE) vk_.DestroyImageView(device,wt.view,nullptr);
-        if (wt.img !=VK_NULL_HANDLE) vk_.DestroyImage(device,wt.img,nullptr);
-        if (wt.mem !=VK_NULL_HANDLE) vk_.FreeMemory(device,wt.mem,nullptr);
-        if (wt.stg !=VK_NULL_HANDLE){vk_.DestroyBuffer(device,wt.stg,nullptr);vk_.FreeMemory(device,wt.stgMem,nullptr);}
-    }
-    deleteQueue.clear();
 }
 
 void VulkanRendererContext::renderFrame() {
@@ -1132,20 +1037,10 @@ void VulkanRendererContext::renderFrame() {
     {
         std::lock_guard<std::mutex> lk(renderMutex);
 
-        if (!deleteQueue.empty()) {
-            // The previous frame (the other slot) may still be sampling these textures: this
-            // slot's fence only covers the frame before it. This thread is the only submitter,
-            // so waiting here is race-free.
-            for (auto& f:inFlightFences) vk_.WaitForFences(device,1,&f,VK_TRUE,UINT64_MAX);
-            for (auto& wt:deleteQueue) {
-                if (wt.ds  !=VK_NULL_HANDLE) vk_.FreeDescriptorSets(device,winTexPool,1,&wt.ds);
-                if (wt.view!=VK_NULL_HANDLE) vk_.DestroyImageView(device,wt.view,nullptr);
-                if (wt.img !=VK_NULL_HANDLE) vk_.DestroyImage(device,wt.img,nullptr);
-                if (wt.mem !=VK_NULL_HANDLE) vk_.FreeMemory(device,wt.mem,nullptr);
-                if (wt.stg !=VK_NULL_HANDLE){vk_.DestroyBuffer(device,wt.stg,nullptr);vk_.FreeMemory(device,wt.stgMem,nullptr);}
-            }
-            deleteQueue.clear();
-        }
+        // Textures other threads gave up are freed once the frames that could sample them have
+        // completed: polled, never waited for, so the X thread's updates are not held up here.
+        retireDeleteQueueLocked();
+        reapRetiredLocked();
 
         ox=sceneOffsetX; oy=sceneOffsetY; sx=sceneScaleX; sy=sceneScaleY;
         cw=(float)containerWidth; ch=(float)containerHeight;
@@ -1162,11 +1057,9 @@ void VulkanRendererContext::renderFrame() {
             if (it==texMap.end()) continue;
             WinTex& wt=it->second;
             if (wt.ds==VK_NULL_HANDLE) continue;
-            DrawEntry de{wt.img,wt.ds,VK_NULL_HANDLE,re.x,re.y,wt.w,wt.h};
+            DrawEntry de{wt.img,wt.ds,re.x,re.y,wt.w,wt.h};
             de.isAHB=wt.isAHB;
             if (wt.needsTransition) { de.needsTransition=true; wt.needsTransition=false; }
-            if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE) { de.upload=wt.stg; wt.dirty=false; }
-            else if (wt.isAHB) { wt.dirty=false; }
             frameDraws.push_back(de);
         }
 
@@ -1202,7 +1095,7 @@ void VulkanRendererContext::renderFrame() {
         } recordTargetReset{this};
         if (wf.active) { recordPass=wfgPass; recordFB=wfgCompositeFB; recordLeaveOpen=true; }
         recordCmdBuf(cmdBufs[currentFrame],imgIdx,frameDraws,
-            frameAhbTransitions,framePreUpload,framePostUpload,
+            frameAhbTransitions,framePostUpload,
             curUpload,hasCurUpload,
             ox,oy,sx,sy,cw,ch,ptrX,ptrY,curHotX,curHotY,curW,curH,curVis,
             effectiveScissor);
@@ -1235,6 +1128,7 @@ void VulkanRendererContext::renderFrame() {
         fbResized.store(true);   // the acquired image(s) were never presented: rebuild
         return;
     }
+    slotSerial[currentFrame]=++submitSerial;   // this slot's fence now stands for frame #submitSerial
     VkSwapchainKHR scs[]={swapchain};
     // Generated frames sit between the previous real frame and this one.
     for (uint32_t g=0; g<wf.genCount; g++) {
@@ -1252,8 +1146,44 @@ void VulkanRendererContext::renderFrame() {
     if (res==VK_SUCCESS||res==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
     if (wf.active) wfgNotePresented(1+wf.genCount,acquireWaitNs);
 
-    if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR||res==VK_SUBOPTIMAL_KHR) fbResized.store(true);
+    if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
+    // SUBOPTIMAL only says the surface could be matched better. Some drivers return it on every
+    // present, which would rebuild the swapchain (with a DeviceWaitIdle) on every frame: rebuild
+    // only when the transform or the size really differ from what the swapchain was built for.
+    else if (res==VK_SUBOPTIMAL_KHR && !swapchainStillMatchesSurface()) fbResized.store(true);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
+}
+
+bool VulkanRendererContext::swapchainStillMatchesSurface() {
+    using namespace std::chrono;
+    const uint64_t now = (uint64_t)duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+    if (lastSuboptimalCheckNs != 0 && now - lastSuboptimalCheckNs < 250000000ULL) {
+        suboptimalIgnored++;
+        return true;
+    }
+    lastSuboptimalCheckNs = now;
+    if (surface == VK_NULL_HANDLE) return true;
+
+    VkSurfaceCapabilitiesKHR caps;
+    if (vk_.GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &caps) != VK_SUCCESS)
+        return true;   // a lost surface is reported as OUT_OF_DATE / SURFACE_LOST by the presents themselves
+
+    const VkSurfaceTransformFlagBitsKHR pre = normalizePreTransform(caps.currentTransform);
+    VkExtent2D ext = queryLogicalExtent(caps, window, surfaceWidth, surfaceHeight);
+    if (pre == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR || pre == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
+        ext = { ext.height, ext.width };
+
+    const bool same = pre == surfaceTransform &&
+                      ext.width == swapchainExt.width && ext.height == swapchainExt.height;
+    if (same) {
+        if ((++suboptimalIgnored % 600) == 1)
+            RLOG("present returned SUBOPTIMAL but transform/extent are unchanged (%" PRIu64 " ignored): not rebuilding",
+                suboptimalIgnored);
+        return true;
+    }
+    RLOG("present returned SUBOPTIMAL and the surface changed (transform 0x%x->0x%x, %ux%u->%ux%u): rebuilding",
+        (unsigned)surfaceTransform, (unsigned)pre, swapchainExt.width, swapchainExt.height, ext.width, ext.height);
+    return false;
 }
 
 void VulkanRendererContext::onSurfaceResized(int w, int h) {
@@ -1345,34 +1275,6 @@ void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short 
     isCursorImageDirty.store(true); needsRender.store(true); wakeRender();
 }
 
-void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, short h, short stride, int, int) {
-    if (!px||w<=0||h<=0) return;
-    void* mapped=nullptr;
-    {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        WinTex& wt=texMap[id];
-        if (wt.img==VK_NULL_HANDLE || wt.w!=w || wt.h!=h) {
-            if (wt.img!=VK_NULL_HANDLE) destroyWinTex(wt);
-            if (!createWinTexResources(wt,w,h)) { texMap.erase(id); return; }
-        }
-        mapped=wt.mapped;
-    }
-    if (!mapped) return;
-    const size_t dstPitch=(size_t)w*4;
-    const int32_t srcStride=stride>0?stride:w;
-    uint32_t* src2=static_cast<uint32_t*>(px);
-    uint8_t*  dst2=static_cast<uint8_t*>(mapped);
-    for (int row=0;row<h;++row)
-        memcpy(dst2+(size_t)row*dstPitch, &src2[(size_t)row*srcStride], (size_t)w*4);
-    {
-        std::lock_guard<std::mutex> lk(renderMutex);
-        auto it=texMap.find(id);
-        if (it!=texMap.end()) it->second.dirty=true;
-        noteContentUpdate(id,w,h);
-    }
-    needsRender.store(true); wakeRender();
-}
-
 void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short, short, int, int) {
     if (!ahb) return;
     std::lock_guard<std::mutex> lk(renderMutex);
@@ -1391,20 +1293,18 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
             (void*)ahb, id, tmp.w, tmp.h);
     }
     WinTex& src = cit->second;
+    // A window that gets its first texture can start to hide what is under it (see
+    // rebuildRenderListFromTree), so the draw list has to be rebuilt then.
+    const auto prevTex = texMap.find(id);
+    const bool hadTexture = prevTex != texMap.end() && prevTex->second.ds != VK_NULL_HANDLE;
     WinTex& wt  = texMap[id];
     wt.img  = src.img; wt.mem  = src.mem; wt.view = src.view; wt.ds   = src.ds;
     wt.isAHB = true; wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
     if (src.needsTransition) { wt.needsTransition = true; src.needsTransition = false; }
+    if (!hadTexture) treeDirty = true;
     // This window may have just stopped showing a buffer that was only waiting for that.
     reapDeadAhbsLocked();
     noteContentUpdate(id,src.w,src.h);
-    needsRender.store(true); wakeRender();
-}
-
-void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, const int* ys, int count) {
-    std::lock_guard<std::mutex> lk(renderMutex);
-    renderList.resize(count);
-    for (int i=0;i<count;i++) renderList[i]={ids[i],xs[i],ys[i]};
     needsRender.store(true); wakeRender();
 }
 
@@ -1412,8 +1312,8 @@ void VulkanRendererContext::removeWindow(int64_t id) {
     std::lock_guard<std::mutex> lk(renderMutex);
     auto it = texMap.find(id);
     if (it != texMap.end()) {
-        if (!it->second.isAHB) destroyWinTex(it->second);
-        texMap.erase(it);
+        texMap.erase(it);   // an alias: the imported buffer is freed with the import cache entry
+        treeDirty = true;
     }
     auto wit = windowAhbs.find(id);
     if (wit != windowAhbs.end()) {
@@ -1451,8 +1351,10 @@ void VulkanRendererContext::reapDeadAhbsLocked() {
 
     for (auto it = texMap.begin(); it != texMap.end(); ) {
         const WinTex& wt = it->second;
-        if (wt.isAHB && wt.ahb && ahbDead.count(wt.ahb) && !liveContent.count(it->first))
+        if (wt.isAHB && wt.ahb && ahbDead.count(wt.ahb) && !liveContent.count(it->first)) {
             it = texMap.erase(it);
+            treeDirty = true;
+        }
         else ++it;
     }
 
@@ -1464,8 +1366,8 @@ void VulkanRendererContext::reapDeadAhbsLocked() {
         if (shown.count(ahb)) { ++it; continue; }
         auto cit = ahbImportCache.find(ahb);
         if (cit != ahbImportCache.end()) {
-            WinTex deferred = cit->second; deferred.isAHB = false;
-            deleteQueue.push_back(deferred);           // freed after the frames in flight are done
+            deleteQueue.push_back(cit->second);        // freed once the frames that may sample it are done
+            hasRetired.store(true);
             ahbImportCache.erase(cit);
             AHardwareBuffer_release(ahb);              // the reference taken at import
         }
@@ -1629,9 +1531,13 @@ void VulkanRendererContext::rebuildRenderListFromTree() {
     std::vector<std::pair<int,int>> sizes;
     collectWindowNodes(rootWindowId, 0, 0, flat, sizes);
 
+    // A full-screen window hides everything under it, but only once it has something to show:
+    // without a texture it draws nothing, and culling the windows below it left a black frame.
     int start = 0;
     for (int i = (int)flat.size() - 1; i >= 0; i--) {
         if (sizes[i].first >= treeScreenW && sizes[i].second >= treeScreenH) {
+            auto tit = texMap.find(flat[i].id);
+            if (tit == texMap.end() || tit->second.ds == VK_NULL_HANDLE) continue;
             start = i;
             break;
         }
@@ -1642,10 +1548,7 @@ void VulkanRendererContext::rebuildRenderListFromTree() {
 
 void VulkanRendererContext::cleanupAllAHBCache() {
     for (auto& [ahb, wt] : ahbImportCache) {
-        if (wt.ds   != VK_NULL_HANDLE) vk_.FreeDescriptorSets(device, winTexPool, 1, &wt.ds);
-        if (wt.view != VK_NULL_HANDLE) vk_.DestroyImageView(device, wt.view, nullptr);
-        if (wt.img  != VK_NULL_HANDLE) vk_.DestroyImage(device, wt.img, nullptr);
-        if (wt.mem  != VK_NULL_HANDLE) vk_.FreeMemory(device, wt.mem, nullptr);
+        freeWinTexVk(wt);
         AHardwareBuffer_release(ahb);
     }
     ahbImportCache.clear(); windowAhbs.clear();
@@ -1673,48 +1576,80 @@ void VulkanRendererContext::dumpRendererInfo() {
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,"=== END RENDERER INFO ===");
 }
 
+namespace {
+// The pipeline an upscaler filter mode draws with; false for the modes that use the plain blit.
+bool upscalerKindFor(int mode, VulkanRendererContext::PipelineKind& kind) {
+    using K = VulkanRendererContext::PipelineKind;
+    switch (mode) {
+    case 2: kind = K::Sgsr;    return true;
+    case 3: kind = K::Fsr1;    return true;
+    case 4: kind = K::Lanczos; return true;
+    case 6: kind = K::SgsrHq;  return true;
+    case 7: kind = K::Nis;     return true;
+    default: return false;
+    }
+}
+}
+
 void VulkanRendererContext::setFilterMode(int mode) {
-    // Replaces pipelines/sampler the render thread may be recording with: between frames.
-    auto frameLock = lockFrameExclusive();
-    std::lock_guard<std::mutex> mapLock(renderMutex);
+    // One setter at a time. The shader compiles run before the frame lock is taken, so the render
+    // thread keeps drawing while the driver works; under the lock there are only pointer swaps.
+    std::lock_guard<std::mutex> setterLock(setterMutex);
     auto modeName=[](int m){ return m==1?"NEAREST":m==2?"SGSR":m==3?"FSR":m==4?"LANCZOS2":m==5?"COLOR_BOOST":m==6?"SGSR_HQ":m==7?"NIS":"LINEAR"; };
     RLOG("setFilterMode: %d -> %d (%s->%s)", filterMode, mode, modeName(filterMode), modeName(mode));
     if (filterMode==mode) { RLOG("setFilterMode: already set, skipping"); return; }
-    filterMode=mode;
-    switch (mode) {
-    case 2: tryCreatePipeline(&VulkanRendererContext::createSgsrPipeline,    "SGSR");    break;
-    case 3: tryCreatePipeline(&VulkanRendererContext::createFsr1Pipeline,    "FSR");     break;
-    case 4: tryCreatePipeline(&VulkanRendererContext::createLanczosPipeline, "Lanczos"); break;
-    case 6: tryCreatePipeline(&VulkanRendererContext::createSgsrHqPipeline,  "SGSR HQ"); break;
-    case 7: tryCreatePipeline(&VulkanRendererContext::createNisPipeline,     "NIS");     break;
-    default: break;
+
+    PipelineKind kind = PipelineKind::Sgsr;
+    const bool isUpscaler = upscalerKindFor(mode, kind);
+    VkPipeline built = isUpscaler ? prebuildPipeline(kind) : VK_NULL_HANDLE;
+    const bool upscalerBuilt = isUpscaler && (built != VK_NULL_HANDLE || pipelineSlot(kind) != VK_NULL_HANDLE);
+    VkPipeline builtFx = VK_NULL_HANDLE;
+    if (mode == 5 || (postFXMode > 0 && !upscalerBuilt)) builtFx = prebuildPipeline(PipelineKind::PostFx);
+
+    {
+        // Replaces pipelines/sampler the render thread may be recording with: between frames.
+        auto frameLock = lockFrameExclusive();
+        std::lock_guard<std::mutex> mapLock(renderMutex);
+        // Only the nearest/linear choice lives in the sampler: the other modes share one.
+        const bool samplerChanges = (filterMode == 1) != (mode == 1);
+        filterMode=mode;
+        if (isUpscaler) adoptPipeline(kind, built);
+        adoptPipeline(PipelineKind::PostFx, builtFx);
+        syncPostFXPipeline();   // waits for the GPU itself if it releases the postfx pipeline
+        if (samplerChanges) {
+            vk_.DeviceWaitIdle(device);
+            if (sampler!=VK_NULL_HANDLE){vk_.DestroySampler(device,sampler,nullptr);sampler=VK_NULL_HANDLE;}
+            createSampler();
+            auto updateDS=[&](VkDescriptorSet ds, VkImageView view){
+                if(ds==VK_NULL_HANDLE||view==VK_NULL_HANDLE) return;
+                VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                dii.imageView=view; dii.sampler=sampler;
+                VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                wr.dstSet=ds; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                wr.descriptorCount=1; wr.pImageInfo=&dii;
+                vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
+            };
+            for (auto& [id,wt]:texMap) updateDS(wt.ds, wt.view);
+            for (auto& [ahb,wt]:ahbImportCache) updateDS(wt.ds, wt.view);
+            if (cursorDS!=VK_NULL_HANDLE&&cursorView!=VK_NULL_HANDLE) updateDS(cursorDS, cursorView);
+        }
+        needsRender.store(true); wakeRender();
     }
-    syncPostFXPipeline();   // waits for the GPU itself if it releases the postfx pipeline
-    vk_.DeviceWaitIdle(device);
-    if (sampler!=VK_NULL_HANDLE){vk_.DestroySampler(device,sampler,nullptr);sampler=VK_NULL_HANDLE;}
-    createSampler();
-    auto updateDS=[&](VkDescriptorSet ds, VkImageView view){
-        if(ds==VK_NULL_HANDLE||view==VK_NULL_HANDLE) return;
-        VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        dii.imageView=view; dii.sampler=sampler;
-        VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        wr.dstSet=ds; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        wr.descriptorCount=1; wr.pImageInfo=&dii;
-        vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
-    };
-    for (auto& [id,wt]:texMap) updateDS(wt.ds, wt.view);
-    for (auto& [ahb,wt]:ahbImportCache) updateDS(wt.ds, wt.view);
-    if (cursorDS!=VK_NULL_HANDLE&&cursorView!=VK_NULL_HANDLE) updateDS(cursorDS, cursorView);
-    needsRender.store(true); wakeRender();
+    savePipelineCache();
 }
 
 void VulkanRendererContext::setStretchMode(int mode) {
-    auto frameLock = lockFrameExclusive();
+    std::lock_guard<std::mutex> setterLock(setterMutex);
     RLOG("setStretchMode: %d -> %d", stretchMode, mode);
     if (stretchMode == mode) return;
-    stretchMode = mode;
-    if (mode == 1 && stretchPipeline == VK_NULL_HANDLE) tryCreatePipeline(&VulkanRendererContext::createStretchPipeline, "stretch");
-    needsRender.store(true); wakeRender();
+    VkPipeline built = mode == 1 ? prebuildPipeline(PipelineKind::Stretch) : VK_NULL_HANDLE;
+    {
+        auto frameLock = lockFrameExclusive();
+        stretchMode = mode;
+        adoptPipeline(PipelineKind::Stretch, built);
+        needsRender.store(true); wakeRender();
+    }
+    savePipelineCache();
 }
 
 void VulkanRendererContext::setPresentMode(VkPresentModeKHR mode) {

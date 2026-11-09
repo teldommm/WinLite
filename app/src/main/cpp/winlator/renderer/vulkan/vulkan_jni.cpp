@@ -61,7 +61,7 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
     JNIEnv* env, jobject ,
     jobject surface, jint w, jint h,
     jstring jDriverPath, jstring jLibraryName, jstring jNativeLibDir,
-    jboolean validationEnabled)
+    jboolean validationEnabled, jstring jCacheDir)
 {
     ANativeWindow* win = ANativeWindow_fromSurface(env, surface);
     if (!win) return 0;
@@ -92,10 +92,18 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
         env->ReleaseStringUTFChars(jNativeLibDir, nld);
     }
 
+    // Where the pipeline cache lives (the app's cache directory); null keeps it in memory only.
+    std::string cacheDir;
+    if (jCacheDir) {
+        const char* cd = env->GetStringUTFChars(jCacheDir, nullptr);
+        if (cd) { cacheDir = cd; env->ReleaseStringUTFChars(jCacheDir, cd); }
+    }
+
     try {
         return reinterpret_cast<jlong>(
             new VulkanRendererContext(win, w, h, adrenotoolsHandle,
-                                      validationEnabled == JNI_TRUE));
+                                      validationEnabled == JNI_TRUE,
+                                      cacheDir.empty() ? nullptr : cacheDir.c_str()));
     } catch (...) {
         ANativeWindow_release(win);
         if (adrenotoolsHandle) dlclose(adrenotoolsHandle);
@@ -116,18 +124,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeDestroy(
     JNIEnv*, jobject, jlong h)
 {
     delete reinterpret_cast<VulkanRendererContext*>(h);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContent(
-    JNIEnv* env, jobject, jlong handle, jlong id, jobject buf,
-    jshort w, jshort h, jshort stride, jint x, jint y)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || !buf) return;
-    void* px = env->GetDirectBufferAddress(buf);
-    if (px && env->GetDirectBufferCapacity(buf) >= (jlong)w * h * 4)
-        r->updateWindowContent(id, px, w, h, stride, x, y);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -177,23 +173,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateCursorImage(
     jlong required = (jlong)std::max((int)stride, (int)w) * h * 4;
     if (px && env->GetDirectBufferCapacity(buf) >= required)
         r->updateCursorImage(px, w, h, stride, hotX, hotY, rgba == JNI_TRUE);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetRenderList(
-    JNIEnv* env, jobject, jlong handle,
-    jlongArray jids, jintArray jxs, jintArray jys, jint count)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || count <= 0) return;
-
-    jlong* ids = (jlong*)env->GetPrimitiveArrayCritical(jids, nullptr);
-    jint*  xs  = (jint*) env->GetPrimitiveArrayCritical(jxs,  nullptr);
-    jint*  ys  = (jint*) env->GetPrimitiveArrayCritical(jys,  nullptr);
-    r->setRenderList(reinterpret_cast<const int64_t*>(ids), xs, ys, count);
-    env->ReleasePrimitiveArrayCritical(jys,  ys,  JNI_ABORT);
-    env->ReleasePrimitiveArrayCritical(jxs,  xs,  JNI_ABORT);
-    env->ReleasePrimitiveArrayCritical(jids, ids, JNI_ABORT);
 }
 
 extern "C" JNIEXPORT void JNICALL

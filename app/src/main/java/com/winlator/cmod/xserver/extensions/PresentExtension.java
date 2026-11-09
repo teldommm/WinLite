@@ -29,7 +29,11 @@ import com.winlator.cmod.xserver.events.PresentConfigureNotify;
 import com.winlator.cmod.xserver.events.PresentIdleNotify;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -45,6 +49,43 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     private final Object limiterLock = new Object();
     private HashMap<Integer, Long> limiterDeadlines;
     private ScheduledThreadPoolExecutor limiterExecutor;
+
+    // Without an FPS limit the pixmap a client presents is reported idle when the renderer no
+    // longer shows it, i.e. when the same window presents the next one - not right after the
+    // present, while the renderer has not even sampled it yet (the client would redraw it under
+    // the renderer's reads: tearing). Switch off with `setprop debug.winlite.present_idle_on_displace 0`
+    // to get the old immediate idle back for comparison.
+    private static final boolean IDLE_ON_DISPLACE = readFlag("debug.winlite.present_idle_on_displace", true);
+    // Safety net only: a client must not wait for a buffer's idle forever. Normally the next
+    // present of the window releases it; this fires for a client that never presents again while
+    // it still waits for that buffer. It is long on purpose: an earlier release would hand the
+    // buffer on screen back to a client that presents slowly.
+    private static final long PENDING_IDLE_TIMEOUT_NS = 1_000_000_000L;
+    private static final long PENDING_IDLE_SWEEP_MS = 100L;
+
+    private static class PendingIdle {
+        private final Window window;
+        private final Pixmap pixmap;
+        private final int serial;
+        private final int idleFence;
+        private final long timeNs;
+
+        private PendingIdle(Window window, Pixmap pixmap, int serial, int idleFence, long timeNs) {
+            this.window = window;
+            this.pixmap = pixmap;
+            this.serial = serial;
+            this.idleFence = idleFence;
+            this.timeNs = timeNs;
+        }
+    }
+
+    // The buffer each window shows right now, whose idle is still owed. Guarded by pendingLock.
+    private final Object pendingLock = new Object();
+    private final HashMap<Integer, PendingIdle> pendingIdle = new HashMap<>();
+    // Windows whose client presents one and the same pixmap over and over (single-buffered):
+    // nothing ever displaces that buffer, so these keep the immediate idle.
+    private final HashMap<Integer, Pixmap> singleBuffered = new HashMap<>();
+    private boolean sweeperStarted;
 
     private static abstract class ClientOpcodes {
         private static final byte QUERY_VERSION = 0;
@@ -96,8 +137,23 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         }
     }
 
+    private static boolean readFlag(String name, boolean defaultValue) {
+        try {
+            Class<?> properties = Class.forName("android.os.SystemProperties");
+            Object value = properties.getMethod("get", String.class, String.class).invoke(null, name, "");
+            if (value instanceof String) {
+                String text = ((String) value).trim();
+                if (text.equals("0") || text.equalsIgnoreCase("false")) return false;
+                if (text.equals("1") || text.equalsIgnoreCase("true")) return true;
+            }
+        } catch (Throwable ignored) {
+            // not readable on this device: keep the default
+        }
+        return defaultValue;
+    }
+
     private void sendIdleNotify(Window window, Pixmap pixmap, int serial, int idleFence) {
-        if (idleFence != 0) syncExtension.setTriggered(idleFence);
+        if (idleFence != 0 && syncExtension != null) syncExtension.setTriggered(idleFence);
 
         synchronized (events) {
             for (int i = 0; i < events.size(); i++) {
@@ -134,20 +190,125 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
                     ? now + frameDurationNs : previous + frameDurationNs;
             limiterDeadlines.put(window.id, deadline);
 
-            if (limiterExecutor == null) {
-                ThreadFactory factory = runnable -> {
-                    Thread thread = new Thread(runnable, "PresentFpsLimiter");
-                    thread.setDaemon(true);
-                    return thread;
-                };
-                limiterExecutor = new ScheduledThreadPoolExecutor(1, factory);
-                limiterExecutor.setRemoveOnCancelPolicy(true);
-            }
-            executor = limiterExecutor;
+            executor = limiterExecutorLocked();
         }
 
         executor.schedule(() -> sendIdleNotify(window, pixmap, serial, idleFence),
                 Math.max(0L, deadline - now), TimeUnit.NANOSECONDS);
+    }
+
+    // limiterLock held.
+    private ScheduledThreadPoolExecutor limiterExecutorLocked() {
+        if (limiterExecutor == null) {
+            ThreadFactory factory = runnable -> {
+                Thread thread = new Thread(runnable, "PresentFpsLimiter");
+                thread.setDaemon(true);
+                return thread;
+            };
+            limiterExecutor = new ScheduledThreadPoolExecutor(1, factory);
+            limiterExecutor.setRemoveOnCancelPolicy(true);
+        }
+        return limiterExecutor;
+    }
+
+    // Records `pixmap` as the buffer `window` shows now and reports the one it replaced as idle.
+    // A client that presents the same pixmap again and again has no second buffer to displace
+    // the first with, so for it idle stays immediate (as without this logic).
+    private void presentWithoutLimit(Window window, Pixmap pixmap, int serial, int idleFence) {
+        PendingIdle previous = null;
+        boolean immediate = false;
+        synchronized (pendingLock) {
+            Pixmap single = singleBuffered.get(window.id);
+            if (single != null && single != pixmap) {
+                singleBuffered.remove(window.id);   // another buffer showed up: not single-buffered
+                single = null;
+            }
+            final PendingIdle shown = pendingIdle.get(window.id);
+            if (single == null && shown != null && shown.pixmap == pixmap) {
+                // The client reused the buffer it presented last: it only does that if it is not
+                // waiting for that buffer to come back, i.e. there is only one.
+                singleBuffered.put(window.id, pixmap);
+                single = pixmap;
+            }
+            if (single != null) {
+                pendingIdle.remove(window.id);
+                immediate = true;
+            } else {
+                previous = pendingIdle.put(window.id,
+                        new PendingIdle(window, pixmap, serial, idleFence, System.nanoTime()));
+            }
+            if (!immediate && !sweeperStarted) {
+                sweeperStarted = true;
+                final ScheduledThreadPoolExecutor executor;
+                synchronized (limiterLock) {
+                    executor = limiterExecutorLocked();
+                }
+                executor.scheduleWithFixedDelay(this::sweepPendingIdle,
+                        PENDING_IDLE_SWEEP_MS, PENDING_IDLE_SWEEP_MS, TimeUnit.MILLISECONDS);
+            }
+        }
+        if (immediate) {
+            sendIdleNotify(window, pixmap, serial, idleFence);
+        } else if (previous != null && previous.pixmap != pixmap) {
+            sendIdleNotify(previous.window, previous.pixmap, previous.serial, previous.idleFence);
+        }
+    }
+
+    private void sweepPendingIdle() {
+        try {
+            final long now = System.nanoTime();
+            List<PendingIdle> expired = null;
+            synchronized (pendingLock) {
+                for (Iterator<Map.Entry<Integer, PendingIdle>> it = pendingIdle.entrySet().iterator(); it.hasNext(); ) {
+                    PendingIdle pending = it.next().getValue();
+                    if (now - pending.timeNs >= PENDING_IDLE_TIMEOUT_NS) {
+                        if (expired == null) expired = new ArrayList<>();
+                        expired.add(pending);
+                        it.remove();
+                    }
+                }
+            }
+            if (expired != null) {
+                for (PendingIdle pending : expired) {
+                    sendIdleNotify(pending.window, pending.pixmap, pending.serial, pending.idleFence);
+                }
+            }
+        } catch (Throwable t) {
+            // a throwing periodic task would never run again
+            Log.e("PresentExtension", "pending idle sweep failed", t);
+        }
+    }
+
+    // The window stopped showing its buffer (unmapped or destroyed): nothing displaces it any more.
+    private void flushPendingIdle(Window window) {
+        final PendingIdle pending;
+        synchronized (pendingLock) {
+            pending = pendingIdle.remove(window.id);
+            singleBuffered.remove(window.id);
+        }
+        if (pending != null) sendIdleNotify(pending.window, pending.pixmap, pending.serial, pending.idleFence);
+    }
+
+    // The client freed the pixmap: it is gone, there is nobody to tell - but a waiting idle fence
+    // must not stay untriggered.
+    private void dropPendingIdle(Pixmap pixmap) {
+        List<PendingIdle> dropped = null;
+        synchronized (pendingLock) {
+            for (Iterator<Map.Entry<Integer, PendingIdle>> it = pendingIdle.entrySet().iterator(); it.hasNext(); ) {
+                PendingIdle pending = it.next().getValue();
+                if (pending.pixmap == pixmap) {
+                    if (dropped == null) dropped = new ArrayList<>();
+                    dropped.add(pending);
+                    it.remove();
+                }
+            }
+            singleBuffered.values().removeIf(p -> p == pixmap);
+        }
+        if (dropped != null && syncExtension != null) {
+            for (PendingIdle pending : dropped) {
+                if (pending.idleFence != 0) syncExtension.setTriggered(pending.idleFence);
+            }
+        }
     }
 
     private static void queryVersion(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
@@ -190,7 +351,11 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             long msc = ust / FAKE_INTERVAL;
 
             pixmap.drawable.updateDirect();
-            sendIdleNotify(window, pixmap, serial, idleFence);
+            if (IDLE_ON_DISPLACE) {
+                presentWithoutLimit(window, pixmap, serial, idleFence);
+            } else {
+                sendIdleNotify(window, pixmap, serial, idleFence);
+            }
             sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
             return;
         }
@@ -239,9 +404,19 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     }
 
     @Override
+    public void onUnmapWindow(Window window) {
+        flushPendingIdle(window);
+    }
+
+    @Override
     public void onFreeResource(XResource resource) {
+        if (resource instanceof Pixmap) {
+            dropPendingIdle((Pixmap) resource);
+            return;
+        }
         if (resource instanceof Window) {
             Window window = (Window) resource;
+            flushPendingIdle(window);   // before the window's events go away
             synchronized (events) {
                 for (int i = events.size() - 1; i >= 0; i--) {
                     Event event = events.valueAt(i);
