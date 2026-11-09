@@ -490,12 +490,18 @@ private fun LibraryFilterChip(pill: SlidingPillState, key: LibraryFilter, label:
     )
     Surface(
         onClick = click,
-        modifier = Modifier.slidingPillTarget(pill, key),
         shape = WinZShapes.Small,
         color = Color.Transparent,
         contentColor = content,
         border = BorderStroke(1.dp, hairlineColor())
-    ) { Text(label, Modifier.padding(horizontal = 15.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge) }
+    ) {
+        // The target sits on the content, not on the Surface's modifier: a clickable Surface pads
+        // itself up to the 48dp touch target OUTSIDE its border, so a target on the Surface would
+        // make the pill taller than the outlined chip.
+        Box(Modifier.slidingPillTarget(pill, key)) {
+            Text(label, Modifier.padding(horizontal = 15.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge)
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

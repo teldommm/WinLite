@@ -2,10 +2,13 @@ package com.winlator.cmod.ui.onboarding
 
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -62,7 +65,13 @@ import com.winlator.cmod.ui.theme.destructiveColor
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import com.winlator.cmod.ui.theme.SlidingPillHost
+import com.winlator.cmod.ui.theme.SlidingPillState
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.WinZShapes
+import com.winlator.cmod.ui.theme.keepInViewWhen
+import com.winlator.cmod.ui.theme.rememberSlidingPillState
+import com.winlator.cmod.ui.theme.slidingPillTarget
 import com.winlator.cmod.ui.theme.hairlineColor
 
 private val bundledRuntimeId = "bundled:${ProtonPackageManager.DEFAULT_IDENTIFIER}"
@@ -469,22 +478,45 @@ private fun CategorySelector(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     select: (String) -> Unit
 ) {
+    val pill = rememberSlidingPillState()
     // Padding goes inside the scroll so chips scroll out to the screen edge instead of being
-    // clipped at the padded boundary.
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(contentPadding),
-        horizontalArrangement = Arrangement.spacedBy(7.dp)
-    ) {
-        componentCategories.forEach {
-            Surface(
-                onClick = { select(it) },
-                shape = WinZShapes.Small,
-                color = if (selected == it) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
-                contentColor = if (selected == it) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                border = BorderStroke(1.dp, hairlineColor())
-            ) {
-                Text(it, Modifier.padding(horizontal = 13.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge)
+    // clipped at the padded boundary. The pill host sits inside the scrolling Row, so the single
+    // selection pill scrolls with the chips and slides from one chip to the next.
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(contentPadding)) {
+        SlidingPillHost(
+            state = pill,
+            selectedKey = selected,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            cornerRadius = 10.dp // WinZShapes.Small
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                componentCategories.forEach { name ->
+                    CategoryChip(pill, name, selected == name) { select(name) }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip(pill: SlidingPillState, name: String, selected: Boolean, onClick: () -> Unit) {
+    val contentColor by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(WinZMotion.DurationSelectionTint),
+        label = "componentCategoryTint"
+    )
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.keepInViewWhen(selected),
+        shape = WinZShapes.Small,
+        color = Color.Transparent,
+        contentColor = contentColor,
+        border = BorderStroke(1.dp, hairlineColor())
+    ) {
+        // Target on the content, not the Surface: a clickable Surface pads itself up to the 48dp
+        // touch target outside its border, which would make the pill taller than the chip.
+        Box(Modifier.slidingPillTarget(pill, name)) {
+            Text(name, Modifier.padding(horizontal = 13.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge)
         }
     }
 }

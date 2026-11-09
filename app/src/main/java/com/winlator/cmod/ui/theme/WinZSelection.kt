@@ -5,6 +5,8 @@ import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -13,6 +15,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -83,6 +86,25 @@ fun rememberSlidingPillState(): SlidingPillState = remember { SlidingPillState()
 // graphicsLayer (wrap the scaled content in an outer node that carries this modifier).
 fun Modifier.slidingPillTarget(state: SlidingPillState, key: Any): Modifier =
     this.onGloballyPositioned { state.setTarget(key, it) }
+
+// Scrolls the nearest scrolling parent so this item is on screen when it becomes selected (a chip
+// half out of view in a horizontally scrolling row, an entry below the fold of a list). Waits
+// one frame so the node is laid out before it asks. Put it after slidingPillTarget in the chain.
+@Composable
+fun Modifier.keepInViewWhen(selected: Boolean): Modifier {
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(selected) {
+        if (selected) {
+            withFrameNanos { }
+            try {
+                requester.bringIntoView()
+            } catch (ignored: IllegalStateException) {
+                // Not attached any more (left while waiting): nothing to scroll to.
+            }
+        }
+    }
+    return this.bringIntoViewRequester(requester)
+}
 
 @Composable
 fun SlidingPillHost(

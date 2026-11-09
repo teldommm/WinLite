@@ -19,8 +19,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,10 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -136,25 +131,11 @@ private fun CategoryNavItem(
         label = "categoryNavTint"
     )
 
-    // Keep the selected item on screen (a chip scrolled half out of view in the portrait row, or
-    // an item below the fold in the landscape list). Waits one frame so the node is laid out.
-    val requester = remember { BringIntoViewRequester() }
-    LaunchedEffect(selected) {
-        if (selected) {
-            withFrameNanos { }
-            try {
-                requester.bringIntoView()
-            } catch (ignored: IllegalStateException) {
-                // Not attached any more (the page was left while waiting): nothing to scroll to.
-            }
-        }
-    }
-
     Surface(
         onClick = onClick,
         // Target bounds are measured after the caller's padding, so the pill covers exactly the
-        // item's own surface.
-        modifier = modifier.slidingPillTarget(pill, entry.key).bringIntoViewRequester(requester),
+        // item's own surface. keepInViewWhen scrolls a half-hidden chip / list entry into view.
+        modifier = modifier.slidingPillTarget(pill, entry.key).keepInViewWhen(selected),
         shape = WinZShapes.Small,
         color = Color.Transparent,
         contentColor = contentColor
