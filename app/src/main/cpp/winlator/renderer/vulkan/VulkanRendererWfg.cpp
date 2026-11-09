@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 qwertypower (DEVAR Entertainment LLC)
 // SPDX-License-Identifier: MIT
 //
+// WFG (WinNative/Winlator Frame Generator, MIT) in the Vulkan renderer.
+//
 // With WFG on, the scene is drawn into a composite image instead of the swapchain image. Each
 // new game frame (a window content update) goes to WFG, which interpolates frames between the
 // previous composite and this one straight into extra swapchain images; those are presented
@@ -392,7 +394,7 @@ void VulkanRendererContext::wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFr
         vkr_dis_process(wfg, cb, wfgComposite, w, h, wf.genCount);
         for (uint32_t g = 0; g < wf.genCount; g++) {
             const uint32_t idx = wf.genIdx[g];
-            vkr_dis_generate_into(wfg, cb, g, idx, swapchainImages[idx], VK_NULL_HANDLE, w, h, wfgComposite);
+            vkr_dis_generate_into(wfg, cb, g, swapchainImages[idx], w, h, wfgComposite);
             transition(cb, swapchainImages[idx], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);

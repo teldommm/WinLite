@@ -6,7 +6,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.view.Surface;
 import android.view.SurfaceHolder;
-import android.view.SurfaceView;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
@@ -14,8 +13,6 @@ import androidx.annotation.NonNull;
 
 import com.winlator.cmod.R;
 import java.io.File;
-import android.widget.Toast;
-import com.winlator.cmod.ui.toast.WinToast;
 import com.winlator.cmod.renderer.GPUImage;
 import com.winlator.cmod.xserver.Atom;
 import com.winlator.cmod.xserver.Bitmask;
@@ -38,7 +35,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import dalvik.annotation.optimization.FastNative;
@@ -812,7 +808,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         }
     }
 
-    public boolean isCursorVisible() { return cursorVisible; }
 
     public void setDriverInfo(String driverPath, String libraryName, String nativeLibDir) {
         this.driverPath = driverPath;
@@ -923,7 +918,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         }
     }
 
-    public boolean isWfgEnabled() { return pendingWfgEnabled; }
 
     private final long[] frameCounts = new long[2];
 
@@ -979,7 +973,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         screenOffsetYRelativeToCursor = b;
         synchronized (lock) { updateTransform(); }
     }
-    public boolean isScreenOffsetYRelativeToCursor() { return screenOffsetYRelativeToCursor; }
     @Override
     public void setMagnifierZoom(float zoom) {
         magnifierZoom = zoom;
@@ -1005,7 +998,5 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
     public void setFpsLimit(int limit) { this.fpsLimit = Math.max(0, Math.min(1000, limit)); }
     public void setPipMode(boolean pip) { inPipMode = pip; }
-    public int getSurfaceWidth() { return surfaceWidth; }
-    public int getSurfaceHeight() { return surfaceHeight; }
     public void requestRender() {}
 }

@@ -174,7 +174,6 @@ struct VkrDis {
     bool layouts_primed;
     bool formats_audited;
     bool manual_flow_filter;
-    bool debug_flow;
 
     DisImage color[DIS_SLOTS];
     DisImage flow_color[DIS_SLOTS];
@@ -1268,6 +1267,8 @@ static void dis_destroy_views(VkrDis* d) {
     }
 }
 
+static void dis_reset(VkrDis* d);
+
 static void dis_destroy_images(VkrDis* d) {
     dis_destroy_views(d);
     for (uint32_t s = 0; s < DIS_SLOTS; s++) {
@@ -1446,7 +1447,7 @@ static bool dis_create_resources(VkrDis* d, uint32_t w, uint32_t h, uint32_t ful
     if (!dis_create_view(d, d->splat_field.image, VK_FORMAT_R16G16B16A16_SFLOAT, 0, 1, &d->view_splat_field)) return false;
     if (!dis_create_view(d, d->fb_l1.image, VK_FORMAT_R32G32_SFLOAT, 0, 1, &d->view_fb_l1)) return false;
 
-    vkr_dis_reset(d);
+    dis_reset(d);
     dis_write_all_descriptors(d);
     return true;
 }
@@ -1795,11 +1796,6 @@ void vkr_dis_configure(VkrDis* d, uint32_t flow_min_side, uint32_t target_fps,
                   : (multiplier > VKR_DIS_MAX_GENERATIONS + 1u ? VKR_DIS_MAX_GENERATIONS + 1u
                                                                : multiplier);
     d->refresh_rate = refresh_rate > 0.0f ? refresh_rate : 0.0f;
-}
-
-void vkr_dis_set_debug_flow(VkrDis* d, bool debug_flow) {
-    if (!d) return;
-    d->debug_flow = debug_flow;
 }
 
 bool vkr_dis_needs_rebuild(const VkrDis* d, uint32_t width, uint32_t height, VkFormat format,
@@ -2335,7 +2331,7 @@ void vkr_dis_process(VkrDis* d, VkCommandBuffer cmd, VkImage source, uint32_t wi
                         (lh + DIS_LOCAL_SIZE - 1) / DIS_LOCAL_SIZE, 1);
     }
 
-    const bool wants_flow = generations > 0 || d->debug_flow;
+    const bool wants_flow = generations > 0;
     // The field splatted to every generated frame's time (dis_splat.comp): cleared here, under
     // the luma pass's barrier; splatted next to the pack pass and resolved after it.
     const uint32_t splat_gens =
@@ -2447,7 +2443,7 @@ void vkr_dis_process(VkrDis* d, VkCommandBuffer cmd, VkImage source, uint32_t wi
         }
     }
 
-    if (generations > 0 || d->debug_flow) {
+    if (generations > 0) {
         const uint32_t hist_w = full_w > 1u ? full_w / 2u : 1u;
         const uint32_t hist_h = full_h > 1u ? full_h / 2u : 1u;
         const uint32_t hist_dir = 1u - d->hist_parity;
@@ -2514,7 +2510,7 @@ static void dis_splat_pass(VkrDis* d, VkCommandBuffer cmd, uint32_t slot, uint32
                     (fh + DIS_LOCAL_SIZE - 1) / DIS_LOCAL_SIZE, 1);
 }
 
-static void dis_render_into(VkrDis* d, VkCommandBuffer cmd, float t, int layer, int debug_mode,
+static void dis_render_into(VkrDis* d, VkCommandBuffer cmd, float t, int layer,
                             VkImage target_image, uint32_t width, uint32_t height,
                             VkImage base_image) {
     const uint32_t w = d->content.width;
@@ -2522,7 +2518,7 @@ static void dis_render_into(VkrDis* d, VkCommandBuffer cmd, float t, int layer, 
 
     DisInterpPC ipc;
     ipc.t = t;
-    ipc.debugMode = debug_mode;
+    ipc.debugMode = 0;   // dis_interpolate.comp's flow-visualization path is not used
     ipc.layer = layer;
 
     vkd.CmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, d->pass_interp.pipeline);
@@ -2599,31 +2595,16 @@ static void dis_render_into(VkrDis* d, VkCommandBuffer cmd, float t, int layer, 
 }
 
 void vkr_dis_generate_into(VkrDis* d, VkCommandBuffer cmd, uint32_t generation,
-                           uint32_t target_index, VkImage target_image, VkImageView target_view,
-                           uint32_t width, uint32_t height, VkImage base_image) {
-    (void)target_index;
-    (void)target_view;
+                           VkImage target_image, uint32_t width, uint32_t height,
+                           VkImage base_image) {
     if (!d || !d->built || d->unavailable) return;
     if (d->last_generations == 0) return;
 
     const float t = (float)(generation + 1) / (float)(d->last_generations + 1);
-    dis_render_into(d, cmd, t, (int)generation, d->debug_flow ? 1 : 0, target_image, width, height,
-                    base_image);
+    dis_render_into(d, cmd, t, (int)generation, target_image, width, height, base_image);
 }
 
-void vkr_dis_debug_into(VkrDis* d, VkCommandBuffer cmd, VkImage target_image, uint32_t width,
-                        uint32_t height) {
-    if (!d || !d->built || d->unavailable || !d->debug_flow) return;
-    if (d->frame_count < 2) return;
-    dis_render_into(d, cmd, 0.5f, 0, 1, target_image, width, height, VK_NULL_HANDLE);
-}
-
-void vkr_dis_forget_targets(VkrDis* d) {
-    (void)d;
-}
-
-void vkr_dis_reset(VkrDis* d) {
-    if (!d) return;
+static void dis_reset(VkrDis* d) {
     d->frame_count = 0;
     d->last_generations = 0;
     d->prev_idx = 0;
