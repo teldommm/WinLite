@@ -24,7 +24,7 @@ plugins {
 // The two archives the app ships with (ImageFS and the bundled Proton) are downloaded on the first
 // build. Everything below can be overridden with -P<name>=... on the command line, in
 // gradle.properties or in ~/.gradle/gradle.properties, e.g. to build from your own mirror:
-//   -PimagefsUrlBase=https://host/path/imagefs.tar.zst.   (parts are <base>00, <base>01)
+//   -PimagefsUrl=https://host/path/imagefs.tar.zst
 //   -PimagefsSha256=<hex>  -PimagefsSize=<bytes>           (empty sha256 = don't verify)
 //   -PprotonUrl=https://host/proton-9.0-arm64ec.tar.zst  -PprotonSha256=<hex>  -PprotonSize=<bytes>
 def sourceProp = { String name, String fallback ->
@@ -51,11 +51,9 @@ def downloadToFile = { String address, File target ->
 tasks.register("downloadImageFS") {
     def assetDir = new File(project.rootDir, ["app","src","main","assets"].join(File.separator))
     File imageFS = new File(assetDir, "imagefs.tar.zst")
-    int parts = 2
-    // Pinned to a commit (not "main") so a later push to that repository cannot change what we build.
-    String urlBase = sourceProp("imagefsUrlBase", "https://github.com/teldommm/WinLite/releases/download/Assest/imagefs.tar.zst.")
-    String expectedSha = sourceProp("imagefsSha256", "7838756e6a05c91afff68f4bf12aa2780f815877753f8dd354e203e99b9caf8a").toLowerCase()
-    long expectedSize = sourceProp("imagefsSize", "193425249") as long
+    String imageFsUrl = sourceProp("imagefsUrl", "https://github.com/teldommm/WinLite/releases/download/Assest/imagefs.tar.zst")
+    String expectedSha = sourceProp("imagefsSha256", "937f55824e990bb02e366d8fc1b47dad3ef34b6f7629234c501c40ef620b2a54").toLowerCase()
+    long expectedSize = sourceProp("imagefsSize", "123162324") as long
 
     doLast {
         if (imageFS.exists()) {
@@ -67,23 +65,12 @@ tasks.register("downloadImageFS") {
         }
 
         println("ImageFS was not present, downloading...\n")
-        // Assemble into a temp file: an interrupted download must not leave a half-written
+        // Download into a temp file: an interrupted download must not leave a half-written
         // imagefs.tar.zst behind, because the next build would take it for a finished one.
         File tmp = new File(assetDir, "imagefs.tar.zst.download")
         tmp.delete()
         try {
-            tmp.withOutputStream { output ->
-                for (int i = 0; i < parts; i++) {
-                    String suffix = String.format("%02d", i)
-                    File partFile = new File(assetDir, "imagefs.tar.zst." + suffix)
-                    try {
-                        downloadToFile(urlBase + suffix, partFile)
-                        partFile.withInputStream { input -> output << input }
-                    } finally {
-                        partFile.delete()
-                    }
-                }
-            }
+            downloadToFile(imageFsUrl, tmp)
             if (expectedSize > 0 && tmp.length() != expectedSize) {
                 throw new GradleException("Downloaded ImageFS has the wrong size: expected " + expectedSize + " bytes, got " + tmp.length())
             }
