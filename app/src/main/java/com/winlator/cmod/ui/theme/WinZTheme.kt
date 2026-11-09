@@ -19,11 +19,13 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -445,7 +447,11 @@ fun WinlatorTheme(content: @Composable () -> Unit) {
             color = MaterialTheme.colorScheme.background,
             contentColor = MaterialTheme.colorScheme.onBackground
         ) {
-            content()
+            // Portrait: the status bar stays visible, so the app content starts below it. The
+            // inset is 0 while the bar is hidden (landscape), and windowInsetsPadding consumes it,
+            // so nothing inside pads for it a second time. The Surface's background still
+            // paints under the bar.
+            Box(Modifier.windowInsetsPadding(WindowInsets.statusBars), propagateMinConstraints = true) { content() }
         }
     }
 }
@@ -520,14 +526,13 @@ private fun ConfigureComposeHostFocus() {
 private fun HideSystemBars(theme: WinlatorThemeType) {
     val activity = LocalContext.current.findActivity()
     val colors = winlatorColorScheme(theme)
+    // Portrait keeps the status bar visible, landscape hides the bars (see WinZSystemBars).
+    ApplySystemBarsPolicy(activity?.window)
     DisposableEffect(activity, theme) {
         val window = activity?.window
         if (window != null) {
-            WindowCompat.setDecorFitsSystemWindows(window, false)
             window.setLegacySystemBarColors(colors.background.toArgb())
             val controller = WindowInsetsControllerCompat(window, window.decorView)
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             val light = theme == WinlatorThemeType.WHITE
             controller.isAppearanceLightStatusBars = light
             controller.isAppearanceLightNavigationBars = light

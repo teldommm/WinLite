@@ -9,6 +9,8 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import androidx.appcompat.app.AppCompatActivity
 import com.winlator.cmod.container.Shortcut
+import com.winlator.cmod.ui.theme.ApplySystemBarsPolicy
+import com.winlator.cmod.ui.theme.WinZSystemBars
 import com.winlator.cmod.ui.theme.WinZTheme
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -36,13 +38,12 @@ object ShortcutSettingsComposeDialog {
                     else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 }
             }
-            WindowInsetsControllerCompat(this, decorView).apply {
-                hide(WindowInsetsCompat.Type.systemBars())
-                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
+            // Portrait keeps the status bar visible, landscape is immersive; the composable
+            // below keeps it that way across rotation.
+            WinZSystemBars.apply(this, WinZSystemBars.isPortrait(activity.resources.configuration))
         }
         dialog.setContentView(ComposeView(activity).apply {
-            setContent { WinZTheme { ShortcutEditorV2(activity, shortcut, { onShortcutsChanged.run() }, dialog::dismiss, onMoved) } }
+            setContent { WinZTheme { ApplySystemBarsPolicy(dialog.window); ShortcutEditorV2(activity, shortcut, { onShortcutsChanged.run() }, dialog::dismiss, onMoved) } }
         })
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     }

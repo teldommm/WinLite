@@ -28,6 +28,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.winlator.cmod.MainActivity
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.WinZSystemBars
 import com.winlator.cmod.ui.theme.setLegacySystemBarColors
 
 fun applyAppFullscreen(activity: Activity?) {
@@ -47,10 +48,8 @@ fun applyAppFullscreen(activity: Activity?) {
         }
     }
 
-    WindowInsetsControllerCompat(window, window.decorView).apply {
-        hide(WindowInsetsCompat.Type.systemBars())
-        systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-    }
+    // Portrait keeps the status bar visible, landscape is fully immersive.
+    WinZSystemBars.apply(window, WinZSystemBars.isPortrait(activity.resources.configuration))
 }
 
 // Re-applies the app's fullscreen/immersive window setup while a landscape screen is shown
