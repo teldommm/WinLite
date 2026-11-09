@@ -67,7 +67,7 @@ namespace Logger {
 	}
 }
 
-void handle_sigint(int sig)  { 
+void handle_sigint(int /*sig*/)  { 
     stop_flag = 1;
 } 
 
@@ -580,8 +580,8 @@ EXPORT ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
     uint16_t slot = (uint16_t)get_event_number(controller->second);
     // Separate FF control events from regular input events.
     // FF events must not be written to the fake evdev file (see write() above).
-    struct iovec filtered[iovcnt];
-    int filtered_count = 0;
+    std::vector<struct iovec> filtered;
+    filtered.reserve((size_t)iovcnt);
     for (int i = 0; i < iovcnt; i++) {
       if (iov[i].iov_len == sizeof(struct input_event)) {
         const struct input_event *ev = (const struct input_event *)iov[i].iov_base;
@@ -589,11 +589,11 @@ EXPORT ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
         if (ev->type == EV_FF)
           continue;
       }
-      filtered[filtered_count++] = iov[i];
+      filtered.push_back(iov[i]);
     }
-    if (filtered_count == 0)
+    if (filtered.empty())
       return (ssize_t)(iovcnt * sizeof(struct input_event));
-    return syscall(SYS_writev, fd, filtered, filtered_count);
+    return syscall(SYS_writev, fd, filtered.data(), (int)filtered.size());
   }
   return syscall(SYS_writev, fd, iov, iovcnt);
 }

@@ -4,7 +4,12 @@ project(Winlator)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wno-unused-function -Wimplicit-function-declaration")
 
+# libadrenotools is third-party code (cloned by CI): its warnings are not ours to fix, so they
+# are muted for that directory only.
+set_property(DIRECTORY APPEND PROPERTY COMPILE_OPTIONS
+        -Wno-missing-designated-field-initializers -Wno-format-truncation)
 add_subdirectory(adrenotools)
+set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "")
 
 # Add Winlator shared library
 # NOTE: the DisplayX and EGL X-server renderer path (winlator/renderer/{egl,window,shader,
@@ -22,7 +27,8 @@ add_library(winlator SHARED
         winlator/vulkan.c
 )
 
-target_compile_options(winlator PRIVATE -Wall -Wextra)
+# JNI entry points have a fixed (env, obj) signature, so unused parameters are expected.
+target_compile_options(winlator PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
 target_link_libraries(winlator
         log

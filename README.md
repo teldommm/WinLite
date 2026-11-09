@@ -133,7 +133,7 @@ chmod +x gradlew
 
 **Frame generation:** WFG by [qwertypower](https://github.com/qwertypower) (DEVAR Entertainment LLC), the original author of the frame generator, MIT license. It builds on Dense Inverse Search optical flow (Till Kroeger et al., OF\_DIS; OpenCV `DISOpticalFlow`) and Farneback's polynomial-expansion optical flow (OpenCV, Apache-2.0). Full attribution is in `app/src/main/cpp/wfg/LICENSE`.
 
-[Wine](https://www.winehq.org/) · [Box86/Box64](https://github.com/ptitSeb) · [FEX-Emu](https://github.com/FEX-Emu/FEX) · [PRoot](https://proot-me.github.io) · [Mesa](https://www.mesa3d.org) · [DXVK](https://github.com/doitsujin/dxvk) · [VKD3D](https://gitlab.winehq.org/wine/vkd3d) · [D8VK](https://github.com/AlpyneDreams/d8vk) · [CNC DDraw](https://github.com/FunkyFr3sh/cnc-ddraw)
+[Wine](https://www.winehq.org/) · [Box86/Box64](https://github.com/ptitSeb) · [FEX-Emu](https://github.com/FEX-Emu/FEX) · [Mesa](https://www.mesa3d.org) · [DXVK](https://github.com/doitsujin/dxvk) · [VKD3D](https://gitlab.winehq.org/wine/vkd3d) · [D8VK](https://github.com/AlpyneDreams/d8vk) · [CNC DDraw](https://github.com/FunkyFr3sh/cnc-ddraw)
 
 ## License
 See [LICENSE](LICENSE). The frame-generation code in `app/src/main/cpp/wfg/` is by qwertypower and carries its own MIT license (`app/src/main/cpp/wfg/LICENSE`).

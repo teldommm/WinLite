@@ -160,6 +160,15 @@ public class LibraryScreenController {
                 };
     }
 
+    // Read by LibraryRoute (Kotlin property access: libraryController, callbacks).
+    public LibraryComposeController getLibraryController() {
+        return libraryController;
+    }
+
+    public LibraryCallbacks getCallbacks() {
+        return callbacks;
+    }
+
     // Set by LibraryRoute: launches the image picker (GetContent "image/*").
     public void setImagePickerLauncher(Runnable launcher) {
         imagePickerLauncher = launcher;
