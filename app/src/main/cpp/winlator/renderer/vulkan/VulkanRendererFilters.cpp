@@ -336,31 +336,29 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     // keeps the one-time transition.
     for (auto& d : draws) {
         if (d.img == VK_NULL_HANDLE) continue;
-        if (d.isAHB) {
-            if (!foreignQueueFamily_ && !d.needsTransition) continue;
-            auto dup = std::find_if(ahbTransitions.begin(), ahbTransitions.end(),
-                [&](const VkImageMemoryBarrier& o) { return o.image == d.img; });
-            if (dup != ahbTransitions.end()) {   // the same buffer drawn twice: one acquire per frame
-                if (d.needsTransition) dup->oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                continue;
-            }
-            VkImageMemoryBarrier b{};
-            b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.oldLayout = d.needsTransition ? VK_IMAGE_LAYOUT_UNDEFINED
-                                            : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            if (foreignQueueFamily_) {
-                b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-                b.dstQueueFamilyIndex = graphicsQueueFamilyIndex;
-            } else {
-                b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            }
-            b.image = d.img;
-            b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-            b.srcAccessMask = 0;
-            b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            ahbTransitions.push_back(b);
+        if (!foreignQueueFamily_ && !d.needsTransition) continue;
+        auto dup = std::find_if(ahbTransitions.begin(), ahbTransitions.end(),
+            [&](const VkImageMemoryBarrier& o) { return o.image == d.img; });
+        if (dup != ahbTransitions.end()) {   // the same buffer drawn twice: one acquire per frame
+            if (d.needsTransition) dup->oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            continue;
         }
+        VkImageMemoryBarrier b{};
+        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        b.oldLayout = d.needsTransition ? VK_IMAGE_LAYOUT_UNDEFINED
+                                        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (foreignQueueFamily_) {
+            b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
+            b.dstQueueFamilyIndex = graphicsQueueFamilyIndex;
+        } else {
+            b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        }
+        b.image = d.img;
+        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        b.srcAccessMask = 0;
+        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        ahbTransitions.push_back(b);
     }
 
     if (!ahbTransitions.empty()) {

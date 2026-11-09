@@ -46,7 +46,6 @@ struct VkTable {
     PFN_vkAllocateMemory AllocateMemory;
     PFN_vkFreeMemory FreeMemory;
     PFN_vkMapMemory MapMemory;
-    PFN_vkFlushMappedMemoryRanges FlushMappedMemoryRanges;
     PFN_vkBindBufferMemory BindBufferMemory;
     PFN_vkBindImageMemory BindImageMemory;
     PFN_vkGetBufferMemoryRequirements GetBufferMemoryRequirements;
@@ -182,9 +181,6 @@ public:
     // sampling it, so the Vulkan objects go through deleteQueue. Safe to call for a buffer that was
     // never imported, or one that is already gone.
     void releaseAhb(AHardwareBuffer* ahb);
-    void clearBackbuffer() {}
-    void beginBatch() {}
-    void endBatch() {}
     std::atomic<bool> surfaceDetached{false};
 
     void detachSurface();
@@ -194,13 +190,8 @@ public:
     void setVerboseLog(bool v) { verboseLog = v; }
     void dumpRendererInfo();
 
-    std::string adrenoDriverPath;
-    std::string adrenoDriverName;
-    std::string adrenoNativeLibDir;
-    void* vulkanHandle = nullptr;
     PFN_vkGetInstanceProcAddr gipa = nullptr;
     VkTable vk_ = {};
-    void loadCustomDriver();
     void loadInstanceDispatch();
     void loadDeviceDispatch();
 
@@ -240,7 +231,6 @@ private:
         VkDescriptorSet      ds             = VK_NULL_HANDLE;
         int                  w              = 0;
         int                  h              = 0;
-        bool                 isAHB          = false;
         bool                 needsTransition = false;
         AHardwareBuffer*     ahb            = nullptr;
     };
@@ -251,7 +241,6 @@ private:
         VkDescriptorSet ds             = VK_NULL_HANDLE;
         int             x=0, y=0, w=0, h=0;
         bool            needsTransition = false;
-        bool            isAHB          = false;
     };
 
     struct WinNode {
@@ -600,8 +589,6 @@ public:
     uint32_t        findMemType(uint32_t filter, VkMemoryPropertyFlags props);
     void            createBuffer(VkDeviceSize sz, VkBufferUsageFlags usage,
                                  VkMemoryPropertyFlags props, VkBuffer& buf, VkDeviceMemory& mem);
-    VkCommandBuffer beginOneTime();
-    void            endOneTime(VkCommandBuffer cmd);
     void            transition(VkCommandBuffer cmd, VkImage img,
                                VkImageLayout oldL, VkImageLayout newL,
                                VkAccessFlags srcA, VkAccessFlags dstA,

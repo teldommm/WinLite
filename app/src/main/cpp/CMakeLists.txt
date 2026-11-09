@@ -8,7 +8,7 @@ add_subdirectory(adrenotools)
 
 # Add Winlator shared library
 # NOTE: the DisplayX and EGL X-server renderer path (winlator/renderer/{egl,window,shader,
-# cursor,xform,view_transformation,displayx,renderer_jni}.* and renderer/effectcomposer/*)
+# cursor,displayx,renderer_jni}.* and renderer/effectcomposer/*)
 # was removed. Vulkan (vulkan_renderer, below) is now the only X-server presentation path.
 # The OpenXR/VR module (xr/*.c, OpenXR-SDK/) was also removed: it was already fully
 # disconnected in this fork (no Java call site ever invoked its native entry points, and

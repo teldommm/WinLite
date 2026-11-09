@@ -194,7 +194,6 @@ void VulkanRendererContext::loadDeviceDispatch() {
     LOAD_D2(AllocateMemory);
     LOAD_D2(FreeMemory);
     LOAD_D2(MapMemory);
-    LOAD_D2(FlushMappedMemoryRanges);
     LOAD_D2(BindBufferMemory);
     LOAD_D2(BindImageMemory);
     LOAD_D2(GetBufferMemoryRequirements);
@@ -698,23 +697,6 @@ void VulkanRendererContext::createBuffer(VkDeviceSize sz, VkBufferUsageFlags usa
     vk_.BindBufferMemory(device,buf,mem,0);
 }
 
-VkCommandBuffer VulkanRendererContext::beginOneTime() {
-    VkCommandBufferAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandPool=cmdPool; ai.commandBufferCount=1;
-    VkCommandBuffer cb; vk_.AllocateCommandBuffers(device,&ai,&cb);
-    VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO; bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vk_.BeginCommandBuffer(cb,&bi); return cb;
-}
-
-void VulkanRendererContext::endOneTime(VkCommandBuffer cb) {
-    vk_.EndCommandBuffer(cb);
-    VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO; si.commandBufferCount=1; si.pCommandBuffers=&cb;
-    VkFenceCreateInfo fi{}; fi.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; VkFence fence;
-    vk_.CreateFence(device,&fi,nullptr,&fence);
-    vk_.QueueSubmit(graphicsQueue,1,&si,fence); vk_.WaitForFences(device,1,&fence,VK_TRUE,UINT64_MAX);
-    vk_.DestroyFence(device,fence,nullptr); vk_.FreeCommandBuffers(device,cmdPool,1,&cb);
-}
-
 void VulkanRendererContext::transition(VkCommandBuffer cb, VkImage img,
     VkImageLayout ol, VkImageLayout nl, VkAccessFlags sa, VkAccessFlags da,
     VkPipelineStageFlags ss, VkPipelineStageFlags dss)
@@ -824,7 +806,6 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
 
     wt.needsTransition=true;
-    wt.isAHB=true;
     wt.w=(int)desc.width;
     wt.h=(int)desc.height;
     return true;
@@ -1058,7 +1039,6 @@ void VulkanRendererContext::renderFrame() {
             WinTex& wt=it->second;
             if (wt.ds==VK_NULL_HANDLE) continue;
             DrawEntry de{wt.img,wt.ds,re.x,re.y,wt.w,wt.h};
-            de.isAHB=wt.isAHB;
             if (wt.needsTransition) { de.needsTransition=true; wt.needsTransition=false; }
             frameDraws.push_back(de);
         }
@@ -1299,7 +1279,7 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
     const bool hadTexture = prevTex != texMap.end() && prevTex->second.ds != VK_NULL_HANDLE;
     WinTex& wt  = texMap[id];
     wt.img  = src.img; wt.mem  = src.mem; wt.view = src.view; wt.ds   = src.ds;
-    wt.isAHB = true; wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
+    wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
     if (src.needsTransition) { wt.needsTransition = true; src.needsTransition = false; }
     if (!hadTexture) treeDirty = true;
     // This window may have just stopped showing a buffer that was only waiting for that.
@@ -1351,7 +1331,7 @@ void VulkanRendererContext::reapDeadAhbsLocked() {
 
     for (auto it = texMap.begin(); it != texMap.end(); ) {
         const WinTex& wt = it->second;
-        if (wt.isAHB && wt.ahb && ahbDead.count(wt.ahb) && !liveContent.count(it->first)) {
+        if (wt.ahb && ahbDead.count(wt.ahb) && !liveContent.count(it->first)) {
             it = texMap.erase(it);
             treeDirty = true;
         }
@@ -1359,7 +1339,7 @@ void VulkanRendererContext::reapDeadAhbsLocked() {
     }
 
     std::unordered_set<AHardwareBuffer*> shown;
-    for (auto& [id, wt] : texMap) if (wt.isAHB && wt.ahb) shown.insert(wt.ahb);
+    for (auto& [id, wt] : texMap) if (wt.ahb) shown.insert(wt.ahb);
 
     for (auto it = ahbDead.begin(); it != ahbDead.end(); ) {
         AHardwareBuffer* ahb = *it;
