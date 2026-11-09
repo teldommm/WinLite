@@ -352,27 +352,6 @@ public class WinlatorHUD extends View {
         return "Vulkan";
     }
 
-    private String readShortcutExtra(String path, String key) {
-        if (path == null || path.isEmpty()) return null;
-        File file = new File(path);
-        if (!file.isFile()) return null;
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-            boolean inExtraData = false;
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (line.startsWith("[") && line.endsWith("]")) {
-                    inExtraData = "[Extra Data]".equals(line);
-                    continue;
-                }
-                if (!inExtraData) continue;
-                String prefix = key + "=";
-                if (line.startsWith(prefix)) return line.substring(prefix.length()).trim();
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
     private void refreshBackendRenderer(boolean relayout) {
         if (mesaRendererActive) return;
         rendererLabel = resolveBackendRenderer();
@@ -443,11 +422,6 @@ public class WinlatorHUD extends View {
 
     public void update() {
         onFrame();
-    }
-
-    public void setIsNative(boolean n) {
-        isNative = n;
-        if (!mesaRendererActive) uiHandler.post(() -> refreshBackendRenderer(true));
     }
 
     private void doStats() {
@@ -1632,27 +1606,6 @@ public class WinlatorHUD extends View {
         setVisibility(GONE);
     }
 
-    public void resetFromContainer() {
-        uiHandler.post(() -> {
-            uiHandler.removeCallbacks(redrawRunnable);
-            redrawScheduled = false;
-            frameAccum.set(0);
-            snapFps = 0;
-            lastFpsNs = 0;
-            mesaRendererActive = false;
-            refreshBackendRenderer(true);
-
-            if (userEnabled) {
-                setVisibility(VISIBLE);
-                scheduleRedraw();
-                startStatsThread();
-            } else {
-                setVisibility(GONE);
-                stopStatsThread();
-            }
-        });
-    }
-
     public void onRendererDetected(String name) {
         rendererActive = true;
         uiHandler.post(() -> {
@@ -1736,17 +1689,6 @@ public class WinlatorHUD extends View {
             requestRelayout();
         });
     }
-
-    public void toggleElement(int idx, boolean on) {
-        int bit = idxToMask(idx);
-        if (bit == 0) return;
-        if (on) showMask |= bit;
-        else showMask &= ~bit;
-        prefs.edit().putInt(KEY_SHOW, showMask).apply();
-        requestRelayout();
-    }
-
-    public void setDataSource(Object dataSource) {}
 
     public void setHudScale(float scale) {
         setHudScale(scale, true);
@@ -1833,23 +1775,5 @@ public class WinlatorHUD extends View {
         } catch (Exception ignored) {}
     }
 
-    private int idxToMask(int idx) {
-        switch (idx) {
-            case 0:
-                return SHOW_FPS;
-            case 2:
-                return SHOW_GPU_USAGE;
-            case 3:
-                return SHOW_CPU_USAGE;
-            case 4:
-                return SHOW_POWER;
-            case 6:
-                return SHOW_RENDERER;
-            case 7:
-                return SHOW_RAM;
-            default:
-                return 0;
-        }
-    }
 }
 

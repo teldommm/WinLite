@@ -50,12 +50,6 @@ public abstract class ProcessHelper {
         }
     }
 
-    public static void killAllWineProcesses() {
-        for (String process : listRunningWineProcesses()) {
-            killProcess(Integer.parseInt(process));
-        }
-    }
-
     public static void pauseAllWineProcesses() {
         for (String process : listRunningWineProcesses()) {
             suspendProcess(Integer.parseInt(process));
@@ -225,16 +219,6 @@ public abstract class ProcessHelper {
         }
 
         return result.toArray(new String[0]);
-    }
-
-    public static String getAffinityMaskAsHexString(String cpuList) {
-        String[] values = cpuList.split(",");
-        int affinityMask = 0;
-        for (String value : values) {
-            byte index = Byte.parseByte(value);
-            affinityMask |= (int)Math.pow(2, index);
-        }
-        return Integer.toHexString(affinityMask);
     }
 
     public static int getAffinityMask(String cpuList) {

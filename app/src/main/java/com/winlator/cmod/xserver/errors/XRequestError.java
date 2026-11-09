@@ -17,10 +17,6 @@ public class XRequestError extends Exception  {
         this.data = data;
     }
 
-    public byte getCode() {
-        return code;
-    }
-
     public int getData() {
         return data;
     }

@@ -4,18 +4,11 @@ import android.util.SparseArray;
 
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
-import java.util.ArrayList;
 
 public class CursorManager extends XResourceManager {
     private final SparseArray<Cursor> cursors = new SparseArray<>();
     private final DrawableManager drawableManager;
-    private ArrayList<OnCursorModificationListener> listeners = new ArrayList<>();
-    
-    public interface OnCursorModificationListener {
-        default void onCreateCursor(Cursor cursor) {}
-        default void onFreeCursor(Cursor cursor) {}
-    };
-    
+
     public CursorManager(DrawableManager drawableManager) {
         this.drawableManager = drawableManager;
     }
@@ -34,14 +27,12 @@ public class CursorManager extends XResourceManager {
         Cursor cursor = new Cursor(id, x, y, drawable, sourcePixmap.drawable, maskPixmap != null ? maskPixmap.drawable : null);
         cursors.put(id, cursor);
         triggerOnCreateResourceListener(cursor);
-        triggerOnCreateCursor(cursor);
         return cursor;
     }
 
     public void freeCursor(int id) {
         final Cursor cursor = cursors.get(id);
         triggerOnFreeResourceListener(cursor);
-        triggerOnFreeCursor(cursor);
         cursors.remove(id);
         if (cursor != null) {
             // cursorImage is left alone: a window may keep showing this cursor after FreeCursor.
@@ -70,22 +61,6 @@ public class CursorManager extends XResourceManager {
             boolean visible = !isEmptyMaskImage(cursor.maskImage);
             cursor.setVisible(visible);
             if (visible) cursor.cursorImage.drawAlphaMaskedBitmap(foreRed, foreGreen, foreBlue, backRed, backGreen, backBlue, cursor.sourceImage, cursor.maskImage);
-        }
-    }
-
-    public void addOnCursorModificationListener(OnCursorModificationListener listener) {
-        listeners.add(listener);
-    }
-
-    private void triggerOnCreateCursor(Cursor cursor) {
-        for (int i = listeners.size() - 1; i >= 0; i--) {
-            listeners.get(i).onCreateCursor(cursor);
-        }
-    }
-
-    private void triggerOnFreeCursor(Cursor cursor) {
-        for (int i = listeners.size() - 1; i >= 0; i--) {
-            listeners.get(i).onFreeCursor(cursor);
         }
     }
 }

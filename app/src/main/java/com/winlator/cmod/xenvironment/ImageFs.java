@@ -54,10 +54,6 @@ public class ImageFs {
         return imgVersionFile.exists() ? Integer.parseInt(FileUtils.readLines(imgVersionFile).get(0)) : 0;
     }
 
-    public String getFormattedVersion() {
-        return String.format(Locale.ENGLISH, "%.1f", (float)getVersion());
-    }
-
     public void createImgVersionFile(int version) {
         getConfigDir().mkdirs();
         File file = getImgVersionFile();
@@ -86,10 +82,6 @@ public class ImageFs {
         return new File(getConfigDir(), ".img_version");
     }
 
-    public File getInstalledWineDir() {
-        return new File(rootDir, "opt/installed-wine");
-    }
-
     public File getTmpDir() {
         return new File(rootDir, "usr/tmp");
     }
@@ -104,10 +96,6 @@ public class ImageFs {
         return new File(rootDir, "usr/share");
     }
     
-    public File getEtcDir() {
-        return new File(rootDir, "usr/etc");
-    }
-
     @NonNull
     @Override
     public String toString() {

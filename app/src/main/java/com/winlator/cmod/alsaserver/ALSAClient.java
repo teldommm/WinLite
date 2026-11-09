@@ -212,32 +212,12 @@ public class ALSAClient {
         this.sharedBuffer = sharedBuffer != null ? sharedBuffer.order(ByteOrder.LITTLE_ENDIAN) : null;
     }
 
-    public DataType getDataType() {
-        return dataType;
-    }
-
-    public byte getChannelCount() {
-        return channelCount;
-    }
-
-    public int getSampleRate() {
-        return sampleRate;
-    }
-
-    public int getBufferSize() {
-        return bufferSize;
-    }
-
     public int getBufferSizeInBytes() {
         return bufferSize * frameBytes;
     }
 
     private boolean isValidBufferSize() {
         return bufferSize > 0 && frameBytes > 0 && sampleRate > 0;
-    }
-
-    public int computeLatencyMillis() {
-        return (int)(((float)bufferSize / sampleRate) * 1000);
     }
 
     private native long create(int format, byte channelCount, int sampleRate, int bufferSize, int latencyFrames, int performanceMode);

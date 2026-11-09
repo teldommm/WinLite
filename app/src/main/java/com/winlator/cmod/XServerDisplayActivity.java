@@ -1223,12 +1223,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     }
 
-    private void createWrapperScript(String path, String content) {
-        File scriptFile = new File(path);
-        FileUtils.writeString(scriptFile, content);
-        scriptFile.setExecutable(true);
-    }
-
     private SurfaceFormat getSelectedSurfaceFormat() {
         if (shortcut != null) return shortcut.getSurfaceFormat();
         return container != null ? container.getSurfaceFormat() : SurfaceFormat.DEFAULT;
@@ -3026,19 +3020,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         container.putExtra("desktopTheme", null);
     }
 
-    public void setRefreshRate(float refreshRate) {
-        this.refreshRate = refreshRate;
-    }
-
-    /**
-     * Display mode for the window: one the FPS limit divides evenly when there is such a mode,
-     * otherwise the user's own refresh preference.
-     */
-    private float currentDisplayRefreshRate() {
-        android.view.Display display = getWindowManager().getDefaultDisplay();
-        return display != null ? display.getRefreshRate() : 60f;
-    }
-
     public float getRefreshRate() {
         return refreshRate;
     }
@@ -3046,12 +3027,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public boolean isShowFPS() {
         if (container == null) return false;
         return resolveHudMode() != 0;
-    }
-
-    public void updateFrameRating(Window window) {
-        if (window == null || frameRatingWindowId != window.id) return;
-        if (classicHud != null) classicHud.update();
-        if (modernHud != null) modernHud.onFrame();
     }
 
     private void assignTaskAffinity(Window window) {
@@ -3125,14 +3100,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
             if (modernHud != null) runOnUiThread(() -> modernHud.onRendererGone());
         }
-    }
-
-    public String getScreenEffectProfile() {
-        return screenEffectProfile;
-    }
-
-    public void setScreenEffectProfile(String screenEffectProfile) {
-        this.screenEffectProfile = screenEffectProfile;
     }
 
 }

@@ -66,14 +66,6 @@ public class WindowManager extends XResourceManager {
         return windows.get(id);
     }
 
-    public Window findWindowWithProcessId(int processId) {
-        for (int i = 0; i < windows.size(); i++) {
-            Window window = windows.valueAt(i);
-            if (window != null && window.getProcessId() == processId) return window;
-        }
-        return null;
-    }
-
     public Window findWindowByProcessName(String exeName) {
         if (exeName == null) return null;
         String exeBase = exeName.toLowerCase().replace(".exe", "");
@@ -351,10 +343,6 @@ public class WindowManager extends XResourceManager {
 
     public void addOnWindowModificationListener(OnWindowModificationListener onWindowModificationListener) {
         onWindowModificationListeners.add(onWindowModificationListener);
-    }
-
-    public void removeOnWindowModificationListener(OnWindowModificationListener onWindowModificationListener) {
-        onWindowModificationListeners.remove(onWindowModificationListener);
     }
 
     private void triggerOnMapWindow(Window window) {

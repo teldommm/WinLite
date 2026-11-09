@@ -99,10 +99,6 @@ public class Window extends XResource {
         return parent;
     }
 
-    public void setParent(Window parent) {
-        this.parent = parent;
-    }
-    
     public void setCompositeRedirected(boolean isCompositeRedirected) {
         this.compositeRedirected = isCompositeRedirected;
     }
@@ -184,11 +180,6 @@ public class Window extends XResource {
     public boolean isWoW64() {
         Property property = getProperty(Atom.getId("_NET_WM_WOW64"));
         return property != null && property.data.get(0) == 1;
-    }
-
-    public long getHandle() {
-        Property property = getProperty(Atom.getId("_NET_WM_HWND"));
-        return property != null ? property.getLong(0) : 0;
     }
 
     public boolean isApplicationWindow() {
@@ -422,12 +413,4 @@ public class Window extends XResource {
         }
     }
 
-    public String serializeProperties() {
-        String result = "";
-        for (int i = 0; i < properties.size(); i++) {
-            Property property = properties.valueAt(i);
-            result += property.nameAsString()+"="+property+"\n";
-        }
-        return result;
-    }
 }

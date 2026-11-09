@@ -118,10 +118,6 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
         return sequenceNumber;
     }
 
-    public int getRequestLength() {
-        return requestLength;
-    }
-
     public void setRequestLength(int requestLength) {
         this.requestLength = requestLength;
         initialLength = inputStream.available();

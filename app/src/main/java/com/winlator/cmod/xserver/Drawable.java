@@ -127,24 +127,12 @@ public class Drawable extends XResource {
         if (ahb != 0) releaseBuffer(ahb);
     }
 
-    public GPUImage getGPUImage() {
-        return this.gpuImage;
-    }
-
     public void setDirectScanout(boolean directScanout) {
         this.directScanout = directScanout;
     }
 
-    public boolean isDirectScanout() {
-        return directScanout;
-    }
-
     public short getStride() {
         return gpuImage != null ? gpuImage.getStride() : stride;
-    }
-
-    public Runnable getOnDrawListener() {
-        return onDrawListener;
     }
 
     public void setOnDrawListener(Runnable onDrawListener) {
@@ -153,10 +141,6 @@ public class Drawable extends XResource {
 
     public Callback<Drawable> getOnDestroyListener() {
         return onDestroyListener;
-    }
-
-    public void setOnDestroyListener(Callback<Drawable> onDestroyListener) {
-        this.onDestroyListener = onDestroyListener;
     }
 
     public void drawImage(short srcX, short srcY, short dstX, short dstY, short width, short height, byte depth, ByteBuffer data, short totalWidth, short totalHeight) {

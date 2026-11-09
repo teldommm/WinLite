@@ -68,7 +68,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private boolean validationEnabled = false;
     private Drawable rootCursorDrawable;
     private Cursor lastCursor = null;
-    private static volatile boolean gpuImageChecked = false;
 
     private int     pendingPresentMode    = 2;
     private int     pendingStretchMode    = 0;
@@ -127,7 +126,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeDestroy(long handle);
     private native void nativeDetachSurface(long handle);
     private native boolean nativeReattachSurface(long handle, Surface surface);
-    private native int[] nativeGetSwapchainSize(long handle);
 
     /* @FastNative only where the native side never waits: a thread in a @FastNative call cannot
      * be suspended, so one that blocks (renderMutex is held across texture imports, and across
@@ -231,7 +229,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void onSurfaceCreated(Surface surface) {
-        if (!gpuImageChecked) { GPUImage.checkIsSupported(); gpuImageChecked = true; }
         if (initExecutor != null) {
             initExecutor.shutdownNow();
             try { initExecutor.awaitTermination(3, TimeUnit.SECONDS); }

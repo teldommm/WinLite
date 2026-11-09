@@ -29,16 +29,6 @@ public class XForm {
         return xform;
     }
 
-    public static float[] makeTransform(float[] xform, float tx, float ty, float sx, float sy, float angle) {
-        float c = (float)Math.cos(angle);
-        float s = (float)Math.sin(angle);
-        return set(xform,
-            sx *  c,  sy * s,
-            sx * -s,  sy * c,
-            tx,  ty
-        );
-    }
-
     public static float[] makeTranslation(float[] xform, float x, float y) {
         return set(xform,
             1, 0,

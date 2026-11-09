@@ -395,10 +395,6 @@ public abstract class FileUtils {
         }
     }
 
-    public static void getSizeAsync(File file, Callback<Long> callback) {
-        Executors.newSingleThreadExecutor().execute(() -> getSize(file, callback));
-    }
-
     private static void getSize(File file, Callback<Long> callback) {
         if (file == null) return;
         if (file.isFile()) {
@@ -452,10 +448,6 @@ public abstract class FileUtils {
         }
     }
 
-    public static String toRelativePath(String basePath, String fullPath) {
-        return StringUtils.removeEndSlash((fullPath.startsWith("/") ? "/" : "")+(new File(basePath).toURI().relativize(new File(fullPath).toURI()).getPath()));
-    }
-
     public static int readInt(String path) {
         int result = 0;
         try {
@@ -474,26 +466,6 @@ public abstract class FileUtils {
         }
         catch (IOException e) {
             return "";
-        }
-    }
-
-    public static String readAssetsFile(Context context, String fileName) {
-        try {
-            String l;
-            AssetManager assetManager = context.getAssets();
-            InputStream is = assetManager.open(fileName);
-
-            BufferedReader reader = new BufferedReader(new InputStreamReader(is));
-            StringBuilder sb = new StringBuilder();
-
-            while ((l = reader.readLine()) != null) {
-                sb.append(l);
-            }
-
-            reader.close();
-            return sb.toString();
-        } catch (IOException e) {
-            return null;
         }
     }
 
@@ -557,25 +529,4 @@ public abstract class FileUtils {
         return fileName;
     }
 
-    public static boolean saveBitmapToFile(Bitmap bitmap, File file) {
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
-            out.flush();
-            return true;
-        } catch (IOException e) {
-            Log.e(TAG, "Error saving bitmap to file: " + file.getAbsolutePath(), e);
-            return false;
-        }
-    }
-
-    public static boolean writeToBinaryFile(String filename, int position, int data) {
-        try (RandomAccessFile file = new RandomAccessFile(filename, "rw")) {
-           file.seek(position);
-           file.write(data);
-           return true;
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to write data " + data + " at " + position + " to " + filename);
-            return false;
-        }
-    }
 }

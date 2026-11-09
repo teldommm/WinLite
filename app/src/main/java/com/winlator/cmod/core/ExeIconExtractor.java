@@ -32,10 +32,6 @@ public class ExeIconExtractor {
         return extractAndSave(exeFile, destinationFile, false);
     }
 
-    public static boolean extractCover(File exeFile, File destinationFile) {
-        return extractAndSave(exeFile, destinationFile, true);
-    }
-
     public static void extractAsync(File exeFile, File destinationFile, boolean isCover, Runnable onComplete) {
         executor.submit(() -> {
             boolean ok = extractAndSave(exeFile, destinationFile, isCover);

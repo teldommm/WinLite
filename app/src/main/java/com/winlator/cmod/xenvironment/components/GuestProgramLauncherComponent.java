@@ -63,9 +63,6 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     public void setWineInfo(WineInfo wineInfo) {
         this.wineInfo = wineInfo;
     }
-    public WineInfo getWineInfo() {
-        return this.wineInfo;
-    }
 
     public Container getContainer() { return this.container; }
     public void setContainer(Container container) { this.container = container; }
@@ -317,24 +314,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         return ldPreload;
    }
 
-    public Callback<Integer> getTerminationCallback() {
-        return terminationCallback;
-    }
-
     public void setTerminationCallback(Callback<Integer> terminationCallback) {
         this.terminationCallback = terminationCallback;
     }
 
-    public String getGuestExecutable() {
-        return guestExecutable;
-    }
-
     public void setGuestExecutable(String guestExecutable) {
         this.guestExecutable = guestExecutable;
-    }
-
-    public String[] getBindingPaths() {
-        return bindingPaths;
     }
 
     public void setBindingPaths(String[] bindingPaths) {

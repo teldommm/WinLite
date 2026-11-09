@@ -21,7 +21,4 @@ public abstract class Mathf {
         return (byte)(x < 0 ? -1 : (x > 0 ? 1 : 0));
     }
 
-    public static float lengthSq(float x, float y) {
-        return x * x + y * y;
-    }
 }

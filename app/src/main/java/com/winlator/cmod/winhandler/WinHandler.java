@@ -257,18 +257,6 @@ public class WinHandler {
         });
     }
 
-    public void keyboardEvent(byte vkey, int flags) {
-        if (!initReceived)
-            return;
-        addAction(() -> {
-            sendData.rewind();
-            sendData.put(RequestCodes.KEYBOARD_EVENT);
-            sendData.put(vkey);
-            sendData.putInt(flags);
-            sendPacket(CLIENT_PORT);
-        });
-    }
-
     public void bringToFront(final String processName) {
         bringToFront(processName, 0);
     }
@@ -297,10 +285,6 @@ public class WinHandler {
             actions.add(action);
             actions.notify();
         }
-    }
-
-    public OnGetProcessInfoListener getOnGetProcessInfoListener() {
-        return onGetProcessInfoListener;
     }
 
     public void setOnGetProcessInfoListener(OnGetProcessInfoListener onGetProcessInfoListener) {
@@ -745,13 +729,5 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
                 thread.setDaemon(true);
                 return thread;
             });
-
-    public void execWithDelay(String command, int delaySeconds) {
-        if (command == null || command.trim().isEmpty() || delaySeconds < 0)
-            return;
-
-        // One shared daemon scheduler: a new executor per call left a thread alive for good.
-        DELAYED_EXEC.schedule(() -> exec(command), delaySeconds, TimeUnit.SECONDS);
-    }
 
 }

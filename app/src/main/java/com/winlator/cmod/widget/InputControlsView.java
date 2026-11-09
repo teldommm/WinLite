@@ -202,11 +202,6 @@ public class InputControlsView extends View {
         return focusOnStick;
     }
 
-    public void setFocusOnStick(boolean focus) {
-        this.focusOnStick = focus;
-        invalidate(); // Redraw the view with the new focus setting
-    }
-
 
 
     @SuppressLint("ResourceType")
@@ -326,41 +321,9 @@ public class InputControlsView extends View {
     }
 
 
-    public void resetStickPosition() {
-        if (stickElement != null) {
-            Rect boundingBox = stickElement.getBoundingBox();
-            float centerX = boundingBox.centerX();
-            float centerY = boundingBox.centerY();
-
-            stickElement.setCurrentPosition(centerX, centerY); // Reset to the center of the bounding box
-            invalidate(); // Redraw the stick in the centered position
-        }
-    }
 
 
 
-    public void initializeStickElement(float x, float y, float scale) {
-        stickElement = new ControlElement(this);
-        stickElement.setType(ControlElement.Type.STICK); // Set type to STICK
-        stickElement.setX((int) x);
-        stickElement.setY((int) y);
-        stickElement.setScale(scale);
-        invalidate(); // Force the view to redraw with the stick
-    }
-
-
-    public void updateStickPosition(float x, float y) {
-        if (stickElement != null) {
-            stickElement.getCurrentPosition().x = x;  // Update the thumbstick's position
-            stickElement.getCurrentPosition().y = y;  // Update the thumbstick's position
-            invalidate(); // Redraw the view
-        }
-    }
-
-
-    public ControlElement getStickElement() {
-        return stickElement;
-    }
 
     private void drawGrid(Canvas canvas) {
         EditorCanvasColors colors = canvasColors != null ? canvasColors : EditorCanvasColors.resolve(getContext());
@@ -501,10 +464,6 @@ public class InputControlsView extends View {
         action.run();
         invalidate();
         return true;
-    }
-
-    public boolean canUndo() {
-        return undoAction != null;
     }
 
     // Records the element's current state as the one-step undo, for edits made outside the
@@ -661,16 +620,6 @@ public class InputControlsView extends View {
         runOnUi(this::resetAutoHide);
     }
 
-    public int getPrimaryColor() {
-        // Kept for compatibility with ControlElement; visual style now derives from secondary blue.
-        return Color.argb((int)(overlayOpacity * 255), 255, 255, 255);
-    }
-
-    public int getSecondaryColor() {
-        // Winlator-like electric blue used by the app UI. Alpha is handled per primitive.
-        return Color.argb(255, 33, 132, 255);
-    }
-
     private synchronized ControlElement intersectElement(float x, float y) {
         if (profile != null) {
             for (ControlElement element : profile.getElements()) {
@@ -686,10 +635,6 @@ public class InputControlsView extends View {
 
     public Path getPath() {
         return path;
-    }
-
-    public ColorFilter getColorFilter() {
-        return colorFilter;
     }
 
     public TouchpadView getTouchpadView() {
@@ -1144,10 +1089,6 @@ public class InputControlsView extends View {
     public void setAutoHideEnabled(boolean enabled) {
         autoHideEnabled = enabled;
         runOnUi(this::resetAutoHide);
-    }
-
-    public boolean isAutoHideEnabled() {
-        return autoHideEnabled;
     }
 
     private boolean isAutoHideActive() {

@@ -202,17 +202,6 @@ public class ControlElement {
         return bindings.length;
     }
 
-    public int getFirstBindingIndex() {
-        for (int i = 0; i < bindings.length; i++) if (bindings[i] != Binding.NONE) return i;
-        return 0;
-    }
-
-    public int getLastBindingIndex() {
-        int last = 0;
-        for (int i = 0; i < bindings.length; i++) if (bindings[i] != Binding.NONE) last = i;
-        return last;
-    }
-
     public void setBindingCount(int bindingCount) {
         bindings = new Binding[bindingCount];
         setBinding(Binding.NONE);
@@ -536,10 +525,6 @@ public class ControlElement {
     public void setCustomColor(int customColor) {
         this.customColor = customColor;
         this.customColorFilter = customColor != 0 ? new PorterDuffColorFilter(customColor, PorterDuff.Mode.SRC_IN) : null;
-    }
-
-    public boolean hasCustomColor() {
-        return customColor != 0;
     }
 
     public Rect getBoundingBox() {
@@ -1577,20 +1562,5 @@ public class ControlElement {
         return false;
     }
 
-    public PointF getCurrentPosition() {
-        if (currentPosition == null) {
-            currentPosition = new PointF(x, y); 
-        }
-        return currentPosition;
-    }
-
     
-    public void setCurrentPosition(float x, float y) {
-        if (currentPosition == null) {
-            currentPosition = new PointF();
-        }
-        currentPosition.set(x, y);
-        
-        invalidateSelf();
-    }
 }

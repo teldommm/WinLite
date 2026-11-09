@@ -16,7 +16,6 @@ add_subdirectory(adrenotools)
 add_library(winlator SHARED
         winlator/drawable.c
         winlator/gpu_image.c
-        winlator/process_helper.c
         winlator/sysvshared_memory.c
         winlator/xconnector_epoll.c
         winlator/alsa_client.c

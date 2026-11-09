@@ -92,10 +92,6 @@ public class Pointer {
         onPointerMotionListeners.add(onPointerMotionListener);
     }
 
-    public void removeOnPointerMotionListener(OnPointerMotionListener onPointerMotionListener) {
-        onPointerMotionListeners.remove(onPointerMotionListener);
-    }
-
     private void triggerOnPointerButtonPress(Button button) {
         for (int i = onPointerMotionListeners.size()-1; i >= 0; i--) {
             onPointerMotionListeners.get(i).onPointerButtonPress(button);

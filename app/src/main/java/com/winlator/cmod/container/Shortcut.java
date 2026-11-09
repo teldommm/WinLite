@@ -139,16 +139,6 @@ public class Shortcut {
         }
     }
 
-    public Bitmap getCoverArt() { return coverArt; }
-    public void setCoverArt(Bitmap coverArt) { this.coverArt = coverArt; }
-    public String getCustomCoverArtPath() { return customCoverArtPath; }
-
-    public void setCustomCoverArtPath(String customCoverArtPath) {
-        this.customCoverArtPath = customCoverArtPath;
-        putExtra("customCoverArtPath", customCoverArtPath);
-        saveData();
-    }
-
     public String getExtra(String name) { return getExtra(name, ""); }
 
     public String getExtra(String name, String fallback) {
@@ -224,35 +214,6 @@ public class Shortcut {
         }
     }
 
-    public void saveCustomCoverArt(Bitmap coverArt) {
-        try {
-            File coverArtDir = new File(container.getRootDir(), COVER_ART_DIR);
-            if (!coverArtDir.exists()) {
-                coverArtDir.mkdirs();
-            }
-
-            File coverFile = new File(coverArtDir, this.name + ".png");
-            if (FileUtils.saveBitmapToFile(coverArt, coverFile)) {
-                this.coverArt = coverArt;
-                setCustomCoverArtPath(coverFile.getPath());
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    public void removeCustomCoverArt() {
-        if (customCoverArtPath != null && !customCoverArtPath.isEmpty()) {
-            File customCoverArtFile = new File(customCoverArtPath);
-            if (customCoverArtFile.exists()) customCoverArtFile.delete();
-        }
-
-        this.customCoverArtPath = null;
-        this.coverArt = null;
-        putExtra("customCoverArtPath", null);
-        saveData();
-    }
-
     /**
      * Moves the shortcut to another container (the shortcut settings' container switch): the copy
      * is written first, the old .desktop and its .lnk/.bat go only once it is there. Everything in
@@ -311,10 +272,6 @@ public class Shortcut {
             Log.e("Shortcut", "Failed to clone shortcut to new container", e);
             return false;
         }
-    }
-
-    public int getContainerId() {
-        return container.id;
     }
 
     public String getExecutable() {

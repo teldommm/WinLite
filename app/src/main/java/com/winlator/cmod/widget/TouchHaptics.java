@@ -111,10 +111,6 @@ public final class TouchHaptics {
         }
     }
 
-    public boolean isAvailable() {
-        return vibrator != null;
-    }
-
     // ---------- Touch feedback ----------
 
     public void play(int kind) {

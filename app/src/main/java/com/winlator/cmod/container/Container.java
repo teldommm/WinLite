@@ -661,16 +661,4 @@ public class Container {
         return cpuList;
     }
 
-    // Check if a specific environment variable exists
-    public boolean hasEnvVar(String keyValue) {
-        if (envVars == null || envVars.isEmpty()) return false;
-        String[] vars = envVars.split(",");
-        for (String var : vars) {
-            if (var.trim().equalsIgnoreCase(keyValue.trim())) {
-                return true; // Found the variable
-            }
-        }
-        return false;
-    }
-
 }

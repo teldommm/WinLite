@@ -130,13 +130,4 @@ public class XOutputStream {
         }
     }
 
-    public void writeSuccessReply(int sequenceNumber, int replyLength) throws IOException {
-        try (XStreamLock lock = lock()) {
-            writeByte((byte) 1);
-            writeByte((byte) 0);
-            writeShort((short) sequenceNumber);
-            writeInt(replyLength);
-            writePad(24);
-        }
-    }
 }

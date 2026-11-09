@@ -217,16 +217,6 @@ public abstract class ImageFsInstaller {
         return false;
     }
 
-    private static void clearOptDir(File optDir) {
-        File[] files = optDir.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                if (file.getName().equals("installed-wine")) continue;
-                FileUtils.delete(file);
-            }
-        }
-    }
-
     private static void clearRootDir(File rootDir) {
         if (rootDir.isDirectory()) {
             File[] files = rootDir.listFiles();

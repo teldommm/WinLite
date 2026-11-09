@@ -48,10 +48,6 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         this.name = name;
     }
 
-    public float getCursorSpeed() {
-        return cursorSpeed;
-    }
-
     /**
      * Legacy "cursorSpeed" from the .icp. Nothing reads it at runtime any more: stick / D-pad /
      * button / external-gamepad MOUSE_MOVE bindings follow the global Cursor Speed (in-game

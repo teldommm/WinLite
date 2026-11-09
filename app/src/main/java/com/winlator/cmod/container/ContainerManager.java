@@ -311,16 +311,6 @@ public class ContainerManager {
         return result;
     }
 
-    public Container getContainerForShortcut(Shortcut shortcut) {
-        // Search for the container by its ID
-        for (Container container : containers) {
-            if (container.id == shortcut.getContainerId()) {
-                return container;
-            }
-        }
-        return null;  // Return null if no matching container is found
-    }
-
     // Utility method to run on UI thread
     private void runOnUiThread(Runnable action) {
         new Handler(Looper.getMainLooper()).post(action);

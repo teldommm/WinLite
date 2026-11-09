@@ -56,10 +56,6 @@ public final class D7VKManager {
         return entry;
     }
 
-    public static String getSignature(String selection) {
-        return "d7vk".equalsIgnoreCase(selection) ? ";d7vk-bundled=" + BUNDLED_VERSION : "";
-    }
-
     public static boolean isD7VKAssetRequest(String assetFile) {
         if (assetFile == null) return false;
         String normalized = assetFile.replace('\\', '/');

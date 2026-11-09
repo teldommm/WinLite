@@ -62,16 +62,6 @@ public class EnvVars implements Iterable<String> {
         return String.join(" ", toStringArray());
     }
 
-    public String toEscapedString() {
-        String result = "";
-        for (String key : data.keySet()) {
-            if (!result.isEmpty()) result += " ";
-            String value = data.get(key);
-            result += key+"="+value.replace(" ", "\\ ");
-        }
-        return result;
-    }
-
     public String[] toStringArray() {
         String[] stringArray = new String[data.size()];
         int index = 0;

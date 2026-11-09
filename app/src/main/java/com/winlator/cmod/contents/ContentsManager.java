@@ -119,10 +119,6 @@ public class ContentsManager {
         if (editor != null) editor.apply();
     }
 
-    public void setGraphicsDriverInstalled(String driverVersion, boolean installed) {
-        preferences.edit().putBoolean("graphics_driver_installed_" + driverVersion, installed).apply();
-    }
-
     public interface OnInstallFinishedCallback {
         void onFailed(InstallFailedReason reason, Exception e);
         void onSucceed(ContentProfile profile);
@@ -385,23 +381,10 @@ public class ContentsManager {
         return new File(context.getFilesDir(), "tmp/" + ContentDirName.CONTENT_MAIN_DIR_NAME);
     }
 
-    public static File getSourceFile(Context context, ContentProfile profile, String path) {
-        return new File(getInstallDir(context, profile), path);
-    }
-
     public static void cleanTmpDir(Context context) {
         File file = getTmpDir(context);
         FileUtils.delete(file);
         file.mkdirs();
-    }
-
-    public List<ContentProfile.ContentFile> getUnTrustedContentFiles(ContentProfile profile) {
-        createTrustedFilesMap();
-        List<ContentProfile.ContentFile> files = new ArrayList<>();
-        for (ContentProfile.ContentFile contentFile : profile.fileList) {
-            if (!trustedFilesMap.get(profile.type).contains(Paths.get(getPathFromTemplate(contentFile.target)).toAbsolutePath().normalize().toString())) files.add(contentFile);
-        }
-        return files;
     }
 
     private boolean isSubPath(String parent, String child) {
@@ -433,26 +416,6 @@ public class ContentsManager {
             dirTemplateMap.put("${syswow64}", drivecPath + "/windows/syswow64");
             dirTemplateMap.put("${bindir}", imagefsPath + "/usr/bin");
             dirTemplateMap.put("${sharedir}", imagefsPath + "/usr/share");
-        }
-    }
-
-    private void createTrustedFilesMap() {
-        if (trustedFilesMap == null) {
-            trustedFilesMap = new HashMap<>();
-            for (ContentProfile.ContentType type : ContentProfile.ContentType.values()) {
-                List<String> pathList = new ArrayList<>();
-                trustedFilesMap.put(type, pathList);
-                String[] paths = switch (type) {
-                    case CONTENT_TYPE_DXVK -> DXVK_TRUST_FILES;
-                    case CONTENT_TYPE_D7VK -> D7VK_TRUST_FILES;
-                    case CONTENT_TYPE_VKD3D -> VKD3D_TRUST_FILES;
-                    case CONTENT_TYPE_BOX64 -> BOX64_TRUST_FILES;
-                    case CONTENT_TYPE_WOWBOX64 -> WOWBOX64_TRUST_FILES;
-                    case CONTENT_TYPE_FEXCORE -> FEXCORE_TRUST_FILES;
-                    default -> new String[0];
-                };
-                for (String path : paths) pathList.add(Paths.get(getPathFromTemplate(path)).toAbsolutePath().normalize().toString());
-            }
         }
     }
 

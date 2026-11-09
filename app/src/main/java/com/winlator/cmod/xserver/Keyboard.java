@@ -80,10 +80,6 @@ public class Keyboard {
         onKeyboardListeners.add(onKeyboardListener);
     }
 
-    public void removeOnKeyboardListener(OnKeyboardListener onKeyboardListener) {
-        onKeyboardListeners.remove(onKeyboardListener);
-    }
-
     private void triggerOnKeyPress(byte keycode, int keysym) {
         for (int i = onKeyboardListeners.size()-1; i >= 0; i--) {
             onKeyboardListeners.get(i).onKeyPress(keycode, keysym);

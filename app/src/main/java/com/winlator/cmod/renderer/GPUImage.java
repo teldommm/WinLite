@@ -10,7 +10,6 @@ public class GPUImage {
     public int format;
     private ByteBuffer virtualData;
     private short stride;
-    private static boolean supported = false;
 
     static {
         System.loadLibrary("winlator");
@@ -55,25 +54,6 @@ public class GPUImage {
     @Keep
     private void setStride(short stride) {
         this.stride = stride;
-    }
-
-    public ByteBuffer getVirtualData() {
-        return virtualData;
-    }
-
-    public static boolean isSupported() {
-        return supported;
-    }
-
-    public static void checkIsSupported() {
-        final short size = 8;
-        GPUImage gpuImage = new GPUImage(size, size);
-        supported = gpuImage.hardwareBufferPtr != 0 && gpuImage.virtualData != null;
-        if (gpuImage.hardwareBufferPtr != 0) {
-            gpuImage.destroyHardwareBuffer(gpuImage.hardwareBufferPtr);
-            gpuImage.hardwareBufferPtr = 0;
-            gpuImage.virtualData = null;
-        }
     }
 
     private native long nativeHardwareBufferFromSocket(int fd);

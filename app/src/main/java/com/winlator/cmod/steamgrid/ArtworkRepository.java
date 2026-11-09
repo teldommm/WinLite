@@ -393,16 +393,6 @@ public final class ArtworkRepository {
         });
     }
 
-    /** Imports an image the user picked, scaled down to a sane size. */
-    public static void enqueueFromUri(Context context, Uri uri, File dest, int maxLongSide, Listener listener) {
-        EXECUTOR.execute(() -> {
-            Result result = new Result();
-            result.coverSaved = importFromUri(context, uri, dest, maxLongSide);
-            if (!result.coverSaved) result.message = "Could not read that image";
-            if (listener != null) listener.onFinished(result);
-        });
-    }
-
     /**
      * Synchronous version for a worker thread: reads the picked image and stores it (images within
      * maxLongSide as they are, larger ones scaled down). The same Uri can be imported several times,

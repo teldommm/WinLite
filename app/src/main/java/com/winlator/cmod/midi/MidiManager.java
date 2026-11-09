@@ -55,15 +55,6 @@ public class MidiManager {
         });
     }
 
-    private static List<File> getSF2Files(Context context) {
-        try {
-            return Arrays.asList(new File(context.getFilesDir(), SF_DIR).listFiles());
-        } catch (Exception e) {
-            return new ArrayList<>();
-        }
-
-    }
-
     public static File getSoundFontDir(Context context) {
         return new File(context.getFilesDir(), SF_DIR);
     }

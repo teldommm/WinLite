@@ -349,19 +349,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetSupportedPresentModes(
     return arr;
 }
 
-extern "C" JNIEXPORT jintArray JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetSwapchainSize(
-    JNIEnv* env, jobject, jlong handle)
-{
-    jintArray arr = env->NewIntArray(2);
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r) return arr;
-    VkExtent2D ext = r->getSwapchainExtent();
-    jint vals[2] = { (jint)ext.width, (jint)ext.height };
-    env->SetIntArrayRegion(arr, 0, 2, vals);
-    return arr;
-}
-
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeDetachSurface(
     JNIEnv*, jobject, jlong handle)

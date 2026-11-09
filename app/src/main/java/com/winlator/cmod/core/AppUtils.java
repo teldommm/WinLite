@@ -73,13 +73,6 @@ public abstract class AppUtils {
         return "armhf";
     }
 
-    public static void restartActivity(AppCompatActivity activity) {
-        Intent intent = activity.getIntent();
-        activity.finish();
-        activity.startActivity(intent);
-        activity.overridePendingTransition(0, 0);
-    }
-
     public static void restartApplication(Context context) {
         restartApplication(context, 0);
     }
@@ -127,22 +120,12 @@ public abstract class AppUtils {
         }
     }
 
-    public static boolean isUiThread() {
-        return Looper.getMainLooper().getThread() == Thread.currentThread();
-    }
-
     public static int getScreenWidth() {
         return Resources.getSystem().getDisplayMetrics().widthPixels;
     }
 
     public static int getScreenHeight() {
         return Resources.getSystem().getDisplayMetrics().heightPixels;
-    }
-
-    public static int getPreferredDialogWidth(Context context) {
-        int orientation = context.getResources().getConfiguration().orientation;
-        float scale = orientation == Configuration.ORIENTATION_PORTRAIT ? 0.8f : 0.5f;
-        return (int)UnitUtils.dpToPx(UnitUtils.pxToDp(AppUtils.getScreenWidth()) * scale);
     }
 
     public static int getVersionCode(Context context) {
@@ -193,23 +176,6 @@ public abstract class AppUtils {
 
     public static String getNativeLibDir(Context context) {
         return context.getApplicationInfo().nativeLibraryDir;
-    }
-
-    public static void runDelayed(Runnable callback, long delay) {
-        if (callback == null) {
-            return;
-        }
-
-        // Create a Timer to schedule the task
-        Timer timer = new Timer();
-
-        // Schedule the task with the specified delay
-        timer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-                callback.run();
-            }
-        }, delay);
     }
 
 }

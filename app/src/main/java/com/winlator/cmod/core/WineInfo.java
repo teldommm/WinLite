@@ -60,10 +60,6 @@ public class WineInfo implements Parcelable {
         return arch;
     }
 
-    public void setArch(String arch) {
-        this.arch = arch;
-    }
-
     public boolean isWin64() {
         return arch.equals("x86_64") || arch.equals("arm64ec");
     }

@@ -201,7 +201,6 @@ public:
     void setSharpness(float s);
     void setPresentMode(VkPresentModeKHR mode);
     std::vector<int> getSupportedPresentModes() const;
-    VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
     // WFG frame generation (VulkanRendererWfg.cpp). flowSide: pixels on the shorter side of
     // the frame the motion is analysed at; multiplier 2..4 fixes the output at that many frames

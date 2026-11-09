@@ -288,11 +288,6 @@ public class MainActivity extends AppCompatActivity {
         if (mainShell != null) mainShell.pushDetail(ShellDetail.ComponentManager.INSTANCE);
     }
 
-    // Asks the Library tab to reload (e.g. after a detail screen changed a shortcut).
-    public void refreshLibrary() {
-        if (mainShell != null) mainShell.requestRefresh(R.id.main_menu_shortcuts);
-    }
-
     private void applyImmersiveMode() {
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY

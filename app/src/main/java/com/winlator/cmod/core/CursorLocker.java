@@ -21,22 +21,6 @@ public class CursorLocker extends TimerTask {
         timer.scheduleAtFixedRate(this, 0, 1000 / 60);
     }
 
-    public short getMaxDistance() {
-        return maxDistance;
-    }
-
-    public void setMaxDistance(short maxDistance) {
-        this.maxDistance = maxDistance;
-    }
-
-    public float getDamping() {
-        return damping;
-    }
-
-    public void setDamping(float damping) {
-        this.damping = damping;
-    }
-
     public boolean isEnabled() {
         return enabled;
     }

@@ -707,10 +707,6 @@ public class TouchpadView extends View {
         return sensitivity;
     }
 
-    public float getDensity() {
-        return density;
-    }
-
     // Mouse-move buttons (ControlElement BUTTON with mouseMoveMode) drag the cursor like a
     // finger on the touch area, so they share the Cursor Speed.
     private float lastMouseMoveX;
@@ -925,10 +921,6 @@ public class TouchpadView extends View {
         if (touchMode == mode) return;
         touchMode = mode;
         resetInputState();
-    }
-
-    public int getTouchMode() {
-        return touchMode;
     }
 
     public void setTapToClickEnabled(boolean enabled) {

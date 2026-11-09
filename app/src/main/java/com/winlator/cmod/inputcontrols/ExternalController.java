@@ -213,17 +213,8 @@ public class ExternalController {
         if (getControllerBinding(controllerBinding.getKeyCode()) == null) controllerBindings.add(controllerBinding);
     }
 
-    public int getPosition(ExternalControllerBinding controllerBinding) {
-        return controllerBindings.indexOf(controllerBinding);
-    }
-
     public void removeControllerBinding(ExternalControllerBinding controllerBinding) {
         controllerBindings.remove(controllerBinding);
-    }
-
-    public void setButtonMapping(byte originalButton, byte mappedButton) {
-        buttonMappings.put(originalButton, mappedButton);
-        // Remove triggerType handling from here
     }
 
 
@@ -315,40 +306,6 @@ public class ExternalController {
         state.triggerR = hasAnalogTriggers ? Math.max(0f, Math.min(1f, triggerRAxis)) : (triggerRKey ? 1f : 0f);
         state.setPressed(IDX_BUTTON_L2, state.triggerL >= 0.5f);
         state.setPressed(IDX_BUTTON_R2, state.triggerR >= 0.5f);
-    }
-
-    public boolean isXboxController() {
-        InputDevice device = InputDevice.getDevice(getDeviceId());
-        if (device == null) return false;
-        int vendorId = device.getVendorId();
-        return vendorId == 0x045E; // Microsoft's Vendor ID for Xbox controllers
-    }
-
-    private void processXboxTriggerButton(MotionEvent event) {
-        // Retrieve axis values for triggers
-        float l = event.getAxisValue(MotionEvent.AXIS_LTRIGGER) == 0f
-                ? event.getAxisValue(MotionEvent.AXIS_BRAKE)
-                : event.getAxisValue(MotionEvent.AXIS_LTRIGGER);
-        float r = event.getAxisValue(MotionEvent.AXIS_RTRIGGER) == 0f
-                ? event.getAxisValue(MotionEvent.AXIS_GAS)
-                : event.getAxisValue(MotionEvent.AXIS_RTRIGGER);
-
-        // Simulate full press by setting trigger values to 1.0f when pulled
-        if (l > 0.0f) {
-            state.triggerL = 1.0f; // Simulate full press
-            state.setPressed(IDX_BUTTON_L2, true);
-        } else {
-            state.triggerL = 0.0f; // Simulate release
-            state.setPressed(IDX_BUTTON_L2, false);
-        }
-
-        if (r > 0.0f) {
-            state.triggerR = 1.0f; // Simulate full press
-            state.setPressed(IDX_BUTTON_R2, true);
-        } else {
-            state.triggerR = 0.0f; // Simulate release
-            state.setPressed(IDX_BUTTON_R2, false);
-        }
     }
 
 
@@ -664,37 +621,6 @@ public class ExternalController {
             case KeyEvent.KEYCODE_BUTTON_L2:
                 return IDX_BUTTON_L2;
             case KeyEvent.KEYCODE_BUTTON_R2:
-                return IDX_BUTTON_R2;
-            default:
-                return -1;
-        }
-    }
-
-    public static int getButtonIdxByName(String name) {
-        switch (name) {
-            case "A":
-                return IDX_BUTTON_A;
-            case "B":
-                return IDX_BUTTON_B;
-            case "X":
-                return IDX_BUTTON_X;
-            case "Y":
-                return IDX_BUTTON_Y;
-            case "L1":
-                return IDX_BUTTON_L1;
-            case "R1":
-                return IDX_BUTTON_R1;
-            case "SELECT":
-                return IDX_BUTTON_SELECT;
-            case "START":
-                return IDX_BUTTON_START;
-            case "L3":
-                return IDX_BUTTON_L3;
-            case "R3":
-                return IDX_BUTTON_R3;
-            case "L2":
-                return IDX_BUTTON_L2;
-            case "R2":
                 return IDX_BUTTON_R2;
             default:
                 return -1;

@@ -177,20 +177,6 @@ public class XCompositeExtension implements Extension, XResourceManager.OnResour
         }
     }
 
-    public void freeClientResources(XClient client) {
-        List<Window> affectedWindows = new java.util.ArrayList<>();
-        for (Redirect redirect : redirects) {
-            if (redirect.client == client && !affectedWindows.contains(redirect.window)) {
-                affectedWindows.add(redirect.window);
-            }
-        }
-
-        redirects.removeIf(redirect -> redirect.client == client);
-        for (Window window : affectedWindows) {
-            if (!hasRedirect(window)) setRedirectState(window, false);
-        }
-    }
-
     @Override
     public void onFreeResource(XResource resource) {
         if (resource instanceof Window) {

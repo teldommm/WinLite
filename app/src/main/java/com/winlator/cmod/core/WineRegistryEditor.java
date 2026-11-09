@@ -396,32 +396,4 @@ public class WineRegistryEditor implements Closeable {
         }
     }
 
-    public void importReg(String regFile) {
-        try {
-            JSONObject jobj = new JSONObject(regFile);
-            Iterator<String> iterator = jobj.keys();
-            while (iterator.hasNext()) {
-                String key = iterator.next();
-                JSONArray entries = jobj.getJSONArray(key);
-                for (int i = 0; i < entries.length(); i++) {
-                    JSONObject entry = entries.getJSONObject(i);
-                    String type = entry.getString("type");
-                    String name = (entry.getString("name").isEmpty()) ? null : entry.getString("name");
-                    String value = entry.getString("value");
-                    switch (type) {
-                        case "String":
-                            setStringValue(key, name, value);
-                            break;
-                        case "Dword":
-                            setDwordValue(key, name, Integer.parseInt(value));
-                            break;
-                        default:
-                            break;
-                    }
-                }
-            }
-        } catch (JSONException e) {
-            throw new RuntimeException(e);
-        }
-    }
 }

@@ -250,20 +250,8 @@ public class XConnectorEpoll implements Runnable {
         return initialOutputBufferCapacity;
     }
 
-    public void setInitialOutputBufferCapacity(int initialOutputBufferCapacity) {
-        this.initialOutputBufferCapacity = initialOutputBufferCapacity;
-    }
-
-    public boolean isMultithreadedClients() {
-        return multithreadedClients;
-    }
-
     public void setMultithreadedClients(boolean multithreadedClients) {
         this.multithreadedClients = multithreadedClients;
-    }
-
-    public boolean isCanReceiveAncillaryMessages() {
-        return canReceiveAncillaryMessages;
     }
 
     public void setCanReceiveAncillaryMessages(boolean canReceiveAncillaryMessages) {

@@ -220,16 +220,4 @@ public final class RemoteSources {
                 .apply();
     }
 
-    public static void resetAll(Context context) {
-        prefs(context).edit()
-                .remove(KEY_CONTENTS_URL)
-                .remove(KEY_DRIVER_REPOS)
-                .remove(KEY_INPUT_CONTROLS)
-                .remove(KEY_STEAMGRID)
-                .remove(KEY_GAMESDB_SEARCH)
-                .remove(KEY_GAMESDB_CDN)
-                .remove(KEY_STEAMGRID_API_KEY)
-                .apply();
-        dropLegacyKeys(context);
-    }
 }

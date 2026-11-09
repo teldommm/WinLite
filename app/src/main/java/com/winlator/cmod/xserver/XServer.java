@@ -90,8 +90,6 @@ public class XServer {
         this.relativeMouseMovement = relativeMouseMovement;
     }
 
-    public boolean isSimulateTouchScreen() { return simulateTouchScreen; }
-
     public void setSimulateTouchScreen(boolean simulateTouchScreen) {
         this.simulateTouchScreen = simulateTouchScreen;
     }
@@ -274,10 +272,6 @@ public class XServer {
         extensions.put(XCompositeExtension.MAJOR_OPCODE, new XCompositeExtension(this));
         xInputExtension = new XInputExtension(this);
         extensions.put(XInputExtension.MAJOR_OPCODE, xInputExtension);
-    }
-
-    public XInputExtension getXInputExtension() {
-        return xInputExtension;
     }
 
     public <T extends Extension> T getExtension(int opcode) {
