@@ -23,6 +23,12 @@ object WinZMotion {
     // Dialog scrim fade-in: kept at its long-standing 180ms.
     const val DurationScrim = 180
 
+    // Tint of a selected / unselected item (icon, label) — runs alongside the sliding pill.
+    const val DurationSelectionTint = 180
+
+    // Main tab switch (MainShell): the incoming tab slides in while the outgoing one slides out.
+    const val DurationTabSlide = 260
+
     private fun <T> spec(durationMillis: Int, delayMillis: Int): FiniteAnimationSpec<T> =
         androidx.compose.animation.core.tween(durationMillis, delayMillis, FastOutSlowInEasing)
 
@@ -35,6 +41,11 @@ object WinZMotion {
 
     fun <T> standard(durationMillis: Int = DurationM, delayMillis: Int = 0): FiniteAnimationSpec<T> =
         spec(durationMillis, delayMillis)
+
+    // Sliding selection pill (SlidingPillHost): a spring with almost no overshoot, so the pill
+    // settles softly on its item and a quick second tap redirects it without a visible jolt.
+    fun <T> selection(): FiniteAnimationSpec<T> =
+        androidx.compose.animation.core.spring(dampingRatio = 0.9f, stiffness = 460f)
 
     // The shared dialog pop (ThemedAlertHost, About, presets, services, saves, controls editor):
     // scrim fades, the card fades and grows from 90%. Same values every dialog already used.

@@ -60,8 +60,13 @@ import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.destructiveColor
+import com.winlator.cmod.ui.theme.SlidingPillHost
+import com.winlator.cmod.ui.theme.SlidingPillState
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.dividerColor
+import com.winlator.cmod.ui.theme.rememberSlidingPillState
 import com.winlator.cmod.ui.theme.sidebarRailHighlightColor
+import com.winlator.cmod.ui.theme.slidingPillTarget
 import kotlinx.coroutines.launch
 
 // One selectable rail entry (Graphics/Screen/Input/FPS/TaskManager). `id` reuses the
@@ -162,33 +167,47 @@ internal fun SidebarRail(
             .background(MaterialTheme.colorScheme.surface)
     ) {
         val metrics = railMetrics(maxHeight, items.size + 1, constraints.hasBoundedHeight)
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 5.dp, vertical = metrics.padding),
-            horizontalAlignment = Alignment.CenterHorizontally
+        // One highlight for the whole rail: it slides from the section you leave to the one you
+        // pick (instead of each cell fading its own highlight in and out). The Pause / Exit cell
+        // is not part of the group.
+        val pill = rememberSlidingPillState()
+        SlidingPillHost(
+            state = pill,
+            selectedKey = state.selectedId,
+            color = sidebarRailHighlightColor(),
+            cornerRadius = metrics.cell * (14f / 48f), // same radius as cellShape()
+            modifier = Modifier.fillMaxSize()
         ) {
-            items.forEachIndexed { index, item ->
-                if (index > 0) Spacer(Modifier.height(metrics.gap))
-                RailNavButton(
-                    iconRes = item.iconRes,
-                    contentDescription = item.contentDescription,
-                    selected = state.selectedId == item.id,
-                    cell = metrics.cell,
-                    onClick = { callbacks.onSelect(item.id) }
-                )
-            }
-            // Session control sits right under the sections, set apart by a divider.
-            HorizontalDivider(
+            Column(
                 modifier = Modifier
-                    .padding(vertical = dividerPadding(metrics.gap))
-                    .width(metrics.cell),
-                thickness = DIVIDER_THICKNESS.dp,
-                color = dividerColor()
-            )
-            RailSessionButton(state = state, callbacks = callbacks, cell = metrics.cell)
-            // Whatever height is left stays empty below.
-            Spacer(Modifier.weight(1f))
+                    .fillMaxSize()
+                    .padding(horizontal = 5.dp, vertical = metrics.padding),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                items.forEachIndexed { index, item ->
+                    if (index > 0) Spacer(Modifier.height(metrics.gap))
+                    RailNavButton(
+                        pill = pill,
+                        id = item.id,
+                        iconRes = item.iconRes,
+                        contentDescription = item.contentDescription,
+                        selected = state.selectedId == item.id,
+                        cell = metrics.cell,
+                        onClick = { callbacks.onSelect(item.id) }
+                    )
+                }
+                // Session control sits right under the sections, set apart by a divider.
+                HorizontalDivider(
+                    modifier = Modifier
+                        .padding(vertical = dividerPadding(metrics.gap))
+                        .width(metrics.cell),
+                    thickness = DIVIDER_THICKNESS.dp,
+                    color = dividerColor()
+                )
+                RailSessionButton(state = state, callbacks = callbacks, cell = metrics.cell)
+                // Whatever height is left stays empty below.
+                Spacer(Modifier.weight(1f))
+            }
         }
     }
 }
@@ -200,26 +219,20 @@ private fun iconSize(cell: Dp) = cell * 0.5f
 
 @Composable
 private fun RailCell(
-    selected: Boolean,
+    pill: SlidingPillState,
+    id: Int,
     description: String?,
     cell: Dp,
     onClick: () -> Unit,
     content: @Composable () -> Unit
 ) {
-    // Fade the highlight by alpha only. It used to animate the colour to Color.Transparent,
-    // which is transparent *black*: the colour interpolation passed through dark grey, so the
-    // cell you left flashed a black square for a moment.
-    val fillColor = sidebarRailHighlightColor()
-    val highlight by animateFloatAsState(
-        targetValue = if (selected) 1f else 0f,
-        animationSpec = tween(150),
-        label = "railCellHighlight"
-    )
+    // The highlight is not drawn here: SidebarRail's SlidingPillHost draws one pill behind all
+    // the cells and slides it to the cell marked with slidingPillTarget.
     Box(
         modifier = Modifier
             .size(cell)
+            .slidingPillTarget(pill, id)
             .clip(cellShape(cell))
-            .background(fillColor.copy(alpha = fillColor.alpha * highlight))
             .clickable(onClick = onClick)
             .semantics { if (description != null) contentDescription = description },
         contentAlignment = Alignment.Center
@@ -229,12 +242,21 @@ private fun RailCell(
 }
 
 @Composable
-private fun RailNavButton(iconRes: Int, contentDescription: String?, selected: Boolean, cell: Dp, onClick: () -> Unit) {
+private fun RailNavButton(
+    pill: SlidingPillState,
+    id: Int,
+    iconRes: Int,
+    contentDescription: String?,
+    selected: Boolean,
+    cell: Dp,
+    onClick: () -> Unit
+) {
     val tint by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(WinZMotion.DurationSelectionTint),
         label = "railItemTint"
     )
-    RailCell(selected = selected, description = contentDescription, cell = cell, onClick = onClick) {
+    RailCell(pill = pill, id = id, description = contentDescription, cell = cell, onClick = onClick) {
         Icon(painterResource(iconRes), contentDescription = null, tint = tint, modifier = Modifier.size(iconSize(cell)))
     }
 }

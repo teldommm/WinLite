@@ -138,6 +138,13 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.winlator.cmod.ui.theme.AnimatedCategoryContent
+import com.winlator.cmod.ui.theme.CategoryNavColumn
+import com.winlator.cmod.ui.theme.CategoryNavEntry
+import com.winlator.cmod.ui.theme.CategoryNavRow
 
 private val containerComponentRowsV2 = listOf(
     "direct3d" to "Direct3D",
@@ -622,6 +629,11 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
             }
         }
     ) { padding ->
+        val navEntries = categories.map { CategoryNavEntry(it, containerCategoryLabel(it)) }
+        // One list state for the page; it goes back to the top when the category changes (the
+        // outgoing page is animating out, so a leftover scroll offset would look wrong).
+        val pageListState = rememberLazyListState()
+        LaunchedEffect(category) { pageListState.scrollToItem(0) }
         if (landscape) {
             Row(
                 Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp, vertical = 10.dp),
@@ -633,56 +645,55 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, hairlineColor())
                 ) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(10.dp),
+                    // Scrolls as one column (title + items) so the sliding pill, which sits
+                    // inside it, moves with the items.
+                    Column(
+                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        item {
-                            Text(
-                                uiStr(R.string.ui_container_settings),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(8.dp)
-                            )
-                        }
-                        items(categories) { item -> ContainerNavItemV2(containerCategoryLabel(item), category == item) { category = item } }
+                        Text(
+                            uiStr(R.string.ui_container_settings),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                        CategoryNavColumn(navEntries, category, { category = it }, Modifier.fillMaxWidth())
                     }
                 }
                 LazyColumn(
                     Modifier.weight(1f).fillMaxHeight(),
+                    state = pageListState,
                     contentPadding = PaddingValues(bottom = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    item(category) {
-                        ContainerCategoryV2(
-                            category, state, runtimeChoices, arm64, screenEntries, graphicsEntries,
-                            wrapperEntries, audioEntries, localeEntries, soundFonts, fexPresets,
-                            boxPresets, catalog, installing, ::installWine, ::installDriver, ::installRuntime
-                        )
+                    item {
+                        AnimatedCategoryContent(category, categories, vertical = true) { page ->
+                            ContainerCategoryV2(
+                                page, state, runtimeChoices, arm64, screenEntries, graphicsEntries,
+                                wrapperEntries, audioEntries, localeEntries, soundFonts, fexPresets,
+                                boxPresets, catalog, installing, ::installWine, ::installDriver, ::installRuntime
+                            )
+                        }
                     }
                 }
             }
         } else {
             Column(Modifier.fillMaxSize().padding(padding)) {
-                LazyRow(
-                    Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(categories) { item -> ContainerNavItemV2(containerCategoryLabel(item), category == item) { category = item } }
-                }
+                CategoryNavRow(navEntries, category, { category = it })
                 LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                    state = pageListState,
                     contentPadding = PaddingValues(bottom = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    item(category) {
-                        ContainerCategoryV2(
-                            category, state, runtimeChoices, arm64, screenEntries, graphicsEntries,
-                            wrapperEntries, audioEntries, localeEntries, soundFonts, fexPresets,
-                            boxPresets, catalog, installing, ::installWine, ::installDriver, ::installRuntime
-                        )
+                    item {
+                        AnimatedCategoryContent(category, categories, vertical = false) { page ->
+                            ContainerCategoryV2(
+                                page, state, runtimeChoices, arm64, screenEntries, graphicsEntries,
+                                wrapperEntries, audioEntries, localeEntries, soundFonts, fexPresets,
+                                boxPresets, catalog, installing, ::installWine, ::installDriver, ::installRuntime
+                            )
+                        }
                     }
                 }
             }
@@ -701,23 +712,6 @@ private fun containerCategoryLabel(category: String): String = when (category) {
     "Environment" -> uiStr(R.string.ui_cat_environment)
     "Advanced" -> uiStr(R.string.ui_cat_advanced)
     else -> category
-}
-
-@Composable
-private fun ContainerNavItemV2(label: String, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = WinZShapes.Small,
-        color = if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
-        contentColor = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-    ) {
-        Text(
-            label,
-            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-        )
-    }
 }
 
 @Suppress("LongParameterList")

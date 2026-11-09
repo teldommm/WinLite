@@ -32,15 +32,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.SlidingPillState
+import com.winlator.cmod.ui.theme.SlidingPillHost
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.rememberSlidingPillState
+import com.winlator.cmod.ui.theme.slidingPillTarget
 
 // Portrait bottom navigation (Library / Input Controls / Settings). Rendered by MainShell
 // (ui/shell/MainShell.kt) as a floating bar over the tab content; it no longer has its own
@@ -48,49 +51,63 @@ import com.winlator.cmod.ui.theme.hairlineColor
 // PortraitBottomNavigationHost bridge are gone). Destinations are the same main_menu_* ids
 // MainActivity.navigateToMainDestination() routes.
 //
-// Selection now animates (pill fill + tint, 180ms — in step with the tab fade-through in
-// MainShell instead of snapping while the content is still moving), and a press gives a
-// small scale-down so a tap is acknowledged immediately.
+// Selection: one pill (SlidingPillHost) slides from the old item to the new one while the
+// icon/label tint cross-fades alongside it, in step with the tab slide in MainShell. When the
+// selected tab has no button here (File Manager) the pill fades out. A press gives a small
+// scale-down of the icon so a tap is acknowledged immediately.
+
+// Corner radius of the pill = WinZShapes.Medium.
+private val NAV_PILL_RADIUS = 14.dp
+
 @Composable
 internal fun PortraitBottomNavigation(
     selected: Int,
     onNavigate: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val pill = rememberSlidingPillState()
     Surface(
         modifier = modifier.fillMaxWidth().height(64.dp),
         shape = WinZShapes.ExtraLarge,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, hairlineColor())
     ) {
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            PortraitNavItem(Icons.Outlined.Home, stringResource(R.string.ui_library), selected == R.id.main_menu_shortcuts) {
-                onNavigate(R.id.main_menu_shortcuts)
-            }
-            PortraitNavItem(Icons.Outlined.SportsEsports, stringResource(R.string.ui_input_controls), selected == R.id.main_menu_input_controls) {
-                onNavigate(R.id.main_menu_input_controls)
-            }
-            PortraitNavItem(Icons.Outlined.Settings, stringResource(R.string.settings), selected == R.id.main_menu_settings) {
-                onNavigate(R.id.main_menu_settings)
+        SlidingPillHost(
+            state = pill,
+            selectedKey = selected,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = .12f),
+            cornerRadius = NAV_PILL_RADIUS,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                PortraitNavItem(pill, R.id.main_menu_shortcuts, Icons.Outlined.Home, stringResource(R.string.ui_library), selected == R.id.main_menu_shortcuts) {
+                    onNavigate(R.id.main_menu_shortcuts)
+                }
+                PortraitNavItem(pill, R.id.main_menu_input_controls, Icons.Outlined.SportsEsports, stringResource(R.string.ui_input_controls), selected == R.id.main_menu_input_controls) {
+                    onNavigate(R.id.main_menu_input_controls)
+                }
+                PortraitNavItem(pill, R.id.main_menu_settings, Icons.Outlined.Settings, stringResource(R.string.settings), selected == R.id.main_menu_settings) {
+                    onNavigate(R.id.main_menu_settings)
+                }
             }
         }
     }
 }
 
-private const val NAV_SELECTION_MS = 180
-
 @Composable
-private fun RowScope.PortraitNavItem(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+private fun RowScope.PortraitNavItem(
+    pill: SlidingPillState,
+    id: Int,
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
     val tint by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onBackground.copy(alpha = .68f),
-        animationSpec = tween(NAV_SELECTION_MS),
+        animationSpec = tween(WinZMotion.DurationSelectionTint),
         label = "navTint"
-    )
-    val pillColor by animateColorAsState(
-        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .12f) else MaterialTheme.colorScheme.primary.copy(alpha = 0f), // not Color.Transparent: that fades through black
-        animationSpec = tween(NAV_SELECTION_MS),
-        label = "navPill"
     )
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -104,20 +121,24 @@ private fun RowScope.PortraitNavItem(icon: ImageVector, label: String, selected:
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Surface(
-            shape = WinZShapes.Medium,
-            color = pillColor,
-            contentColor = tint,
-            modifier = Modifier
+        // The pill's target is this outer box: it carries no graphicsLayer of its own, so the
+        // press-scale below can't shift the measured bounds.
+        Box(
+            Modifier
                 .height(28.dp)
                 .width(52.dp)
-                .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
-                }
+                .slidingPillTarget(pill, id)
         ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(icon, label, modifier = Modifier.height(20.dp))
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = pressScale
+                        scaleY = pressScale
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, label, tint = tint, modifier = Modifier.height(20.dp))
             }
         }
         Spacer(Modifier.height(3.dp))

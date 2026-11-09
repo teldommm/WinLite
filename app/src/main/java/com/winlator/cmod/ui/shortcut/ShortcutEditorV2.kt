@@ -153,6 +153,13 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.winlator.cmod.ui.theme.AnimatedCategoryContent
+import com.winlator.cmod.ui.theme.CategoryNavColumn
+import com.winlator.cmod.ui.theme.CategoryNavEntry
+import com.winlator.cmod.ui.theme.CategoryNavRow
 
 private val shortcutComponentRowsV2 = listOf(
     "direct3d" to "Direct3D",
@@ -672,6 +679,12 @@ internal fun ShortcutEditorV2(
             )
         }
     ) { padding ->
+        val navEntries = categories.map { CategoryNavEntry(it.label, shortcutCategoryLabel(it.label), it.icon) }
+        val categoryOrder = categories.map { it.label }
+        // One list state for the page; it goes back to the top when the category changes (the
+        // outgoing page is animating out, so a leftover scroll offset would look wrong).
+        val pageListState = rememberLazyListState()
+        LaunchedEffect(category) { pageListState.scrollToItem(0) }
         if (landscape) {
             Row(
                 Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp, vertical = 10.dp),
@@ -683,88 +696,60 @@ internal fun ShortcutEditorV2(
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, hairlineColor())
                 ) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(10.dp),
+                    // Scrolls as one column (title + items) so the sliding pill, which sits
+                    // inside it, moves with the items.
+                    Column(
+                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        item {
-                            Text(
-                                uiStr(R.string.ui_shortcut_settings),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(8.dp)
-                            )
-                        }
-                        items(categories) { item ->
-                            ShortcutNavItemV2(shortcutCategoryLabel(item.label), item.icon, category == item.label) { category = item.label }
-                        }
+                        Text(
+                            uiStr(R.string.ui_shortcut_settings),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                        CategoryNavColumn(navEntries, category, { category = it }, Modifier.fillMaxWidth())
                     }
                 }
                 LazyColumn(
                     Modifier.weight(1f).fillMaxHeight(),
+                    state = pageListState,
                     contentPadding = PaddingValues(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    item(category) {
-                        ShortcutCategoryV2(
-                            category, state, catalog, screenEntries, graphicsEntries, audioEntries,
-                            wrapperEntries, localeEntries, soundFonts, fexPresets, boxPresets,
-                            profiles, containers, ::environmentLabel, ::changeContainer, ::enterContainer,
-                            ::installRuntime, ::installDriver, context
-                        )
+                    item {
+                        AnimatedCategoryContent(category, categoryOrder, vertical = true) { page ->
+                            ShortcutCategoryV2(
+                                page, state, catalog, screenEntries, graphicsEntries, audioEntries,
+                                wrapperEntries, localeEntries, soundFonts, fexPresets, boxPresets,
+                                profiles, containers, ::environmentLabel, ::changeContainer, ::enterContainer,
+                                ::installRuntime, ::installDriver, context
+                            )
+                        }
                     }
                 }
             }
         } else {
             Column(Modifier.fillMaxSize().padding(padding)) {
-                LazyRow(
-                    Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(categories) { item ->
-                        ShortcutNavItemV2(shortcutCategoryLabel(item.label), item.icon, category == item.label) { category = item.label }
-                    }
-                }
+                CategoryNavRow(navEntries, category, { category = it })
                 LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                    state = pageListState,
                     contentPadding = PaddingValues(bottom = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    item(category) {
-                        ShortcutCategoryV2(
-                            category, state, catalog, screenEntries, graphicsEntries, audioEntries,
-                            wrapperEntries, localeEntries, soundFonts, fexPresets, boxPresets,
-                            profiles, containers, ::environmentLabel, ::changeContainer, ::enterContainer,
-                            ::installRuntime, ::installDriver, context
-                        )
+                    item {
+                        AnimatedCategoryContent(category, categoryOrder, vertical = false) { page ->
+                            ShortcutCategoryV2(
+                                page, state, catalog, screenEntries, graphicsEntries, audioEntries,
+                                wrapperEntries, localeEntries, soundFonts, fexPresets, boxPresets,
+                                profiles, containers, ::environmentLabel, ::changeContainer, ::enterContainer,
+                                ::installRuntime, ::installDriver, context
+                            )
+                        }
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ShortcutNavItemV2(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        shape = WinZShapes.Small,
-        color = if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
-        contentColor = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(icon, null, modifier = Modifier.size(16.dp))
-            Text(
-                label,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-            )
         }
     }
 }

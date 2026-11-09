@@ -43,7 +43,10 @@ import com.winlator.cmod.ui.filemanager.FileManagerRoute
 import com.winlator.cmod.ui.inputcontrols.InputControlsRoute
 import com.winlator.cmod.ui.library.LibraryRoute
 import com.winlator.cmod.ui.settings.SettingsRoute
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.WinZTheme
+import kotlin.math.min
+import kotlin.math.sign
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.winlator.cmod.ui.settings.loadWineRuntimeOptions
@@ -84,6 +87,11 @@ class MainShellController internal constructor(
     internal val editControlsMode: Boolean
 ) {
     var selectedTab by mutableIntStateOf(initialTab)
+        private set
+
+    // The tab that was selected before the current one; the tab switch uses it to pick the
+    // direction of the slide (see ShellTab).
+    internal var previousTab by mutableIntStateOf(initialTab)
         private set
 
     internal val detailEntries = mutableStateListOf<DetailEntry>()
@@ -134,6 +142,7 @@ class MainShellController internal constructor(
     fun select(tabId: Int) {
         if (!isTab(tabId)) return
         if (tabId !in visitedTabs) visitedTabs.add(tabId)
+        if (tabId != selectedTab) previousTab = selectedTab
         selectedTab = tabId
     }
 
@@ -171,12 +180,37 @@ object MainShellHost {
     }
 }
 
-// Fade-through (Material motion for switching between peer destinations): the outgoing tab
-// fades out quickly, then the incoming one fades in while settling from a slight scale-down.
-// Nothing travels across the screen, so the shell's own chrome stays still.
+// Tab switch: a short directional shared-axis slide. The incoming tab slides in from the side
+// of the destination (tabs are ordered Library -> Input Controls -> Settings -> File Manager,
+// matching the nav bar, so the sliding pill and the content move the same way) while the
+// outgoing one slides out the opposite way. Both move at once with a cross-fade whose alphas
+// roughly add up to 1, so there is no blank frame between them (the old fade-through faded the
+// outgoing tab fully out first and then scaled the next one in from 96%, which read as the
+// whole screen blinking). Only graphicsLayer alpha/translation are animated — no recomposition
+// or relayout of the heavy tab content. The shell's own chrome (nav) stays still.
 private const val EXIT_MS = 90
 private const val ENTER_MS = 210
-private const val ENTER_SCALE = 0.96f
+
+// Travel distance: a twelfth of the screen width, capped, so full-bleed Library artwork is
+// nudged rather than swept across the screen.
+private const val TAB_SLIDE_FRACTION = 1f / 12f
+private val TAB_SLIDE_MAX = 56.dp
+private const val TAB_ALPHA_IN_MS = 170
+private const val TAB_ALPHA_OUT_MS = 150
+
+private fun tabOrder(tab: Int): Int = when (tab) {
+    R.id.main_menu_shortcuts -> 0
+    R.id.main_menu_input_controls -> 1
+    R.id.main_menu_settings -> 2
+    R.id.main_menu_file_manager -> 3
+    else -> 0
+}
+
+// +1: moving to a tab further along the nav (content travels right-to-left), -1: back.
+private fun slideDirection(from: Int, to: Int): Int {
+    val d = (tabOrder(to) - tabOrder(from)).sign
+    return if (d == 0) 1 else d
+}
 
 @Composable
 private fun MainShell(controller: MainShellController, listener: MainShellListener) {
@@ -194,7 +228,7 @@ private fun MainShell(controller: MainShellController, listener: MainShellListen
     LaunchedEffect(controller.selectedTab) {
         val tab = controller.selectedTab
         if (controller.shownOnce.add(tab)) return@LaunchedEffect
-        delay((EXIT_MS + ENTER_MS).toLong())
+        delay(WinZMotion.DurationTabSlide.toLong())
         controller.shownSerial[tab] = (controller.shownSerial[tab] ?: 0) + 1
     }
 
@@ -246,22 +280,28 @@ private fun ShellTab(controller: MainShellController, tab: Int) {
     val selected = controller.selectedTab == tab
 
     // Only the very first tab of the session starts fully visible. Every tab composed later is
-    // composed *because* it was just selected, and must fade in like any other switch — which
+    // composed *because* it was just selected, and must slide in like any other switch — which
     // animateFloatAsState can't do (it starts at its first target), hence Animatable.
     val initiallyShown = remember { selected && controller.visitedTabs.size == 1 }
     val alpha = remember { Animatable(if (initiallyShown) 1f else 0f) }
-    val scale = remember { Animatable(if (initiallyShown) 1f else ENTER_SCALE) }
+    // Horizontal position in units of the slide distance: 0 = in place, +1 = one step to the
+    // right, -1 = one step to the left.
+    val offset = remember {
+        Animatable(if (initiallyShown) 0f else slideDirection(controller.previousTab, tab).toFloat())
+    }
 
     LaunchedEffect(selected) {
         if (selected) {
-            // Wait for the outgoing tab to fade out, then fade in while settling to full size.
-            delay(EXIT_MS.toLong())
-            launch { alpha.animateTo(1f, tween(ENTER_MS, easing = LinearOutSlowInEasing)) }
-            scale.animateTo(1f, tween(ENTER_MS, easing = FastOutSlowInEasing))
+            // Entering from the side of the destination. A tab that is still partly visible
+            // (switched back mid-exit) continues from where it is instead of jumping.
+            if (alpha.value == 0f) offset.snapTo(slideDirection(controller.previousTab, tab).toFloat())
+            launch { alpha.animateTo(1f, tween(TAB_ALPHA_IN_MS, easing = LinearOutSlowInEasing)) }
+            offset.animateTo(0f, tween(WinZMotion.DurationTabSlide, easing = FastOutSlowInEasing))
         } else {
-            alpha.animateTo(0f, tween(EXIT_MS, easing = FastOutLinearInEasing))
-            // Reset for the next entrance only once it's invisible.
-            scale.snapTo(ENTER_SCALE)
+            // Leaving the opposite way to the one the new tab comes in from.
+            val direction = slideDirection(tab, controller.selectedTab)
+            launch { alpha.animateTo(0f, tween(TAB_ALPHA_OUT_MS, easing = FastOutLinearInEasing)) }
+            offset.animateTo(-direction.toFloat(), tween(WinZMotion.DurationTabSlide, easing = FastOutSlowInEasing))
         }
     }
 
@@ -276,8 +316,7 @@ private fun ShellTab(controller: MainShellController, tab: Int) {
             .zIndex(if (selected) 1f else 0f)
             .graphicsLayer {
                 this.alpha = alpha.value
-                scaleX = scale.value
-                scaleY = scale.value
+                translationX = offset.value * min(size.width * TAB_SLIDE_FRACTION, TAB_SLIDE_MAX.toPx())
             }
             // A fully faded-out tab can't take focus (D-pad/gamepad traversal would otherwise
             // walk into an invisible screen) and exposes no accessibility nodes.

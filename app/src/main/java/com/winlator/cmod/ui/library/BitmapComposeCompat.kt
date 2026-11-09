@@ -105,6 +105,13 @@ import androidx.compose.foundation.clickable
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import com.winlator.cmod.ui.theme.SlidingPillHost
+import com.winlator.cmod.ui.theme.SlidingPillState
+import com.winlator.cmod.ui.theme.WinZMotion
+import com.winlator.cmod.ui.theme.rememberSlidingPillState
+import com.winlator.cmod.ui.theme.slidingPillTarget
 
 internal fun Bitmap.asImageBitmap(): ImageBitmap = this.composeAsImageBitmap()
 
@@ -181,11 +188,7 @@ internal fun LibraryRoot(
                 onSearchQueryChanged = cb::onSearchQueryChanged,
                 onOpenFileManager = cb::onOpenFileManager
             )
-            Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(LIBRARY_CHIP_SPACING)) {
-                LibraryFilter.values().forEach { option ->
-                    LibraryFilterChip(libraryFilterLabel(option), option == filter) { filterName = option.name }
-                }
-            }
+            LibraryFilterChips(filter, { filterName = it.name }, Modifier.padding(vertical = 12.dp))
         }
         if (visible.isEmpty()) {
             if (query.isNotBlank() || (filter != LibraryFilter.All && items.isNotEmpty())) {
@@ -267,11 +270,7 @@ private fun LibraryLandscapeTop(
             onSearchQueryChanged = cb::onSearchQueryChanged
         )
         Spacer(Modifier.height(7.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(LIBRARY_CHIP_SPACING)) {
-            LibraryFilter.values().forEach { option ->
-                LibraryFilterChip(libraryFilterLabel(option), option == filter) { onFilter(option) }
-            }
-        }
+        LibraryFilterChips(filter, onFilter)
     }
 }
 
@@ -459,13 +458,42 @@ internal fun libraryFilterLabel(filter: LibraryFilter): String = when (filter) {
     LibraryFilter.Recent -> stringResource(R.string.ui_filter_recent)
 }
 
+// All / Favorites / Recent: one translucent pill slides between the chips (SlidingPillHost); the
+// chips themselves stay transparent and only cross-fade their text colour.
+// Corner radius of the pill = WinZShapes.Small.
+private val LIBRARY_CHIP_PILL_RADIUS = 10.dp
+
 @Composable
-private fun LibraryFilterChip(label: String, selected: Boolean, click: () -> Unit) {
+private fun LibraryFilterChips(filter: LibraryFilter, onFilter: (LibraryFilter) -> Unit, modifier: Modifier = Modifier) {
+    val pill = rememberSlidingPillState()
+    SlidingPillHost(
+        state = pill,
+        selectedKey = filter,
+        color = translucentControlFill(),
+        cornerRadius = LIBRARY_CHIP_PILL_RADIUS,
+        modifier = modifier
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(LIBRARY_CHIP_SPACING)) {
+            LibraryFilter.values().forEach { option ->
+                LibraryFilterChip(pill, option, libraryFilterLabel(option), option == filter) { onFilter(option) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryFilterChip(pill: SlidingPillState, key: LibraryFilter, label: String, selected: Boolean, click: () -> Unit) {
+    val content by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(WinZMotion.DurationSelectionTint),
+        label = "libraryChipTint"
+    )
     Surface(
         onClick = click,
+        modifier = Modifier.slidingPillTarget(pill, key),
         shape = WinZShapes.Small,
-        color = if (selected) translucentControlFill() else Color.Transparent,
-        contentColor = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = Color.Transparent,
+        contentColor = content,
         border = BorderStroke(1.dp, hairlineColor())
     ) { Text(label, Modifier.padding(horizontal = 15.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge) }
 }
