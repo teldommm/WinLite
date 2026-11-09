@@ -17,12 +17,8 @@ import androidx.compose.animation.scaleOut
 // animation onto these tokens keeps how it looks; only durations that were a few ms apart were
 // aligned to the nearest step.
 object WinZMotion {
-    // Durations, in milliseconds.
-    const val DurationXS = 100   // tiny state changes, flashes
     const val DurationS = 150    // exits, small fades
     const val DurationM = 200    // most enters
-    const val DurationL = 300    // large surfaces
-    const val DurationXL = 400   // slow blends (artwork motion strength)
 
     // Dialog scrim fade-in: kept at its long-standing 180ms.
     const val DurationScrim = 180

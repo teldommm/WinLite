@@ -197,7 +197,6 @@
     <string name="ui_must_contain">Must contain %1$s</string>
     <string name="ui_thegamesdb_images_url">TheGamesDB images URL</string>
     <string name="ui_turn_the_switch_off_to_go_back_to_the_def">Turn the switch off to go back to the defaults</string>
-    <string name="ui_unable_to_take_persistable_permissions">"Unable to take persistable permissions: "</string>
     <string name="ui_shortcut_export_folder">Shortcut export folder</string>
     <string name="ui_winlator_folder">Winlator folder</string>
     <string name="ui_updated">%1$s updated</string>
@@ -334,11 +333,6 @@
     <string name="ui_profile_downloaded">Profile downloaded</string>
     <string name="ui_profiles_downloaded">%1$s profiles downloaded</string>
     <string name="ui_no_profile_selected">No profile selected</string>
-    <string name="ui_wine">Wine %1$s</string>
-    <string name="ui_video">Video</string>
-    <string name="ui_audio">Audio</string>
-    <string name="ui_container_files">Container files</string>
-    <string name="ui_launch_environment">Launch Environment</string>
     <string name="ui_winlator_needs_storage_and_notification_a">Winlator needs storage and notification access to manage games and keep sessions running.</string>
     <string name="ui_choose_components">Choose components</string>
     <string name="ui_install_and_manage_runtime_versions">Install and manage runtime versions.</string>
@@ -388,18 +382,10 @@
     <string name="ui_sync_cpu_topology">Sync CPU Topology</string>
     <string name="ui_processor_affinity_32_bit_apps">Processor Affinity (32-bit apps)</string>
     <string name="ui_custom_image">Custom image</string>
-    <string name="ui_default_image">Default image</string>
-    <string name="ui_wine_2">Wine</string>
-    <string name="ui_container_name">Container name</string>
     <string name="ui_off">Off</string>
     <string name="ui_classic">Classic</string>
     <string name="ui_modern">Modern</string>
-    <string name="ui_background">Background</string>
-    <string name="ui_choose_image">Choose image</string>
-    <string name="ui_background_color">Background color</string>
     <string name="ui_mouse_warp_override">Mouse Warp Override</string>
-    <string name="ui_letter">Letter</string>
-    <string name="ui_target_path">Target Path</string>
     <string name="ui_changes_apply_to_this_container">Changes apply to this container</string>
     <string name="ui_drive_letters">Drive letters</string>
     <string name="ui_add_drive">Add drive</string>
@@ -440,7 +426,6 @@
     <string name="ui_gpu_spoof_driver_name">Driver name</string>
     <string name="ui_gpu_spoof_driver_info">Driver info</string>
     <string name="ui_gpu_spoof_driver_version">Driver version</string>
-    <string name="ui_blacklisted_extensions">Blacklisted Extensions</string>
     <string name="ui_dxvk_version">DXVK Version</string>
     <string name="ui_vkd3d_version">VKD3D Version</string>
     <string name="ui_vkd3d_feature_level">VKD3D Feature Level</string>
@@ -451,7 +436,6 @@
     <string name="ui_offscreen_rendering_mode">Offscreen Rendering Mode</string>
     <string name="ui_wine_renderer">Wine Renderer</string>
     <string name="ui_video_memory">Video Memory</string>
-    <string name="ui_runtime">Runtime</string>
     <string name="ui_32_bit_emulator">32-bit Emulator</string>
     <string name="ui_fexcore_version">FEXCore Version</string>
     <string name="ui_force_ssbs">Force SSBS</string>

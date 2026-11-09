@@ -13,10 +13,10 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.winlator.cmod.box64.Box64Preset
 import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
@@ -106,10 +106,6 @@ class OnboardingComposeController internal constructor(
         installingProgress.value = progress.coerceIn(-1, 100)
     }
 
-    fun updateInitialContainer(preparing: Boolean, ready: Boolean) {
-        initialContainerPreparing.value = preparing
-        initialContainerReady.value = ready
-    }
 }
 
 object OnboardingComposeHost {

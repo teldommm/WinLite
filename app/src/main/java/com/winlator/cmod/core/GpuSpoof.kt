@@ -38,8 +38,6 @@ data class GpuSpoof(
 
     val isEmpty: Boolean get() = fields().all { it.isBlank() }
 
-    val overriddenCount: Int get() = fields().count { it.isNotBlank() }
-
     /** Every field passes [isValidId] / [isValidDriverVersion]. */
     val isValid: Boolean
         get() = isValidId(vendorId) && isValidId(deviceId) && isValidId(driverId) &&
