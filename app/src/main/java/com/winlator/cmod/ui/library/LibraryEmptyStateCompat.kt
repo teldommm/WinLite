@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -33,6 +31,7 @@ import com.winlator.cmod.R
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 @Composable
 internal fun LibraryRootWithoutEmptyDescription(
@@ -102,7 +101,7 @@ internal fun LibraryRootWithoutEmptyDescription(
                         contentColor = androidx.compose.ui.graphics.Color.White
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Outlined.Add, null, modifier = Modifier.size(34.dp))
+                            Icon(TablerIcons.Plus, null, modifier = Modifier.size(34.dp))
                         }
                     }
                     Spacer(Modifier.height(16.dp))

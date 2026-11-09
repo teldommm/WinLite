@@ -20,18 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.FileDownload
-import androidx.compose.material.icons.outlined.FileUpload
-import androidx.compose.material.icons.outlined.Gamepad
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -68,6 +56,8 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import kotlin.math.roundToInt
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
+import androidx.compose.ui.graphics.vector.ImageVector
 
 @Immutable
 data class InputProfileItem(val id: Int, val name: String)
@@ -191,13 +181,13 @@ private fun ProfileSection(model: InputControlsModel, selectedName: String, call
         ProfilePicker(model, selectedName, callbacks)
         Spacer(Modifier.height(10.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            RoundAction(Icons.Outlined.Add, uiStr(R.string.ui_add_profile), callbacks::onAddProfile)
+            RoundAction(TablerIcons.Plus, uiStr(R.string.ui_add_profile), callbacks::onAddProfile)
             Spacer(Modifier.width(10.dp))
-            RoundAction(Icons.Outlined.Edit, uiStr(R.string.ui_edit_profile), callbacks::onEditProfile)
+            RoundAction(TablerIcons.Pencil, uiStr(R.string.ui_edit_profile), callbacks::onEditProfile)
             Spacer(Modifier.width(10.dp))
-            RoundAction(Icons.Outlined.ContentCopy, uiStr(R.string.ui_duplicate_profile), callbacks::onDuplicateProfile)
+            RoundAction(TablerIcons.Copy, uiStr(R.string.ui_duplicate_profile), callbacks::onDuplicateProfile)
             Spacer(Modifier.width(10.dp))
-            RoundAction(Icons.Outlined.Delete, uiStr(R.string.ui_remove_profile), callbacks::onRemoveProfile)
+            RoundAction(TablerIcons.Trash, uiStr(R.string.ui_remove_profile), callbacks::onRemoveProfile)
         }
     }
 }
@@ -212,14 +202,14 @@ private fun TransferActions(callbacks: InputControlsCallbacks) {
             shape = WinZShapes.Medium,
             colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = accent),
             border = BorderStroke(1.dp, accent)
-        ) { Icon(Icons.Outlined.FileDownload, null); Spacer(Modifier.width(8.dp)); Text(uiStr(R.string.ui_import)) }
+        ) { Icon(TablerIcons.Download, null); Spacer(Modifier.width(8.dp)); Text(uiStr(R.string.ui_import)) }
         OutlinedButton(
             onClick = callbacks::onExportProfile,
             modifier = Modifier.weight(1f).height(48.dp),
             shape = WinZShapes.Medium,
             colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = accent),
             border = BorderStroke(1.dp, accent)
-        ) { Icon(Icons.Outlined.FileUpload, null); Spacer(Modifier.width(8.dp)); Text(uiStr(R.string.export)) }
+        ) { Icon(TablerIcons.Upload, null); Spacer(Modifier.width(8.dp)); Text(uiStr(R.string.export)) }
     }
 }
 
@@ -231,7 +221,7 @@ private fun EditorButton(callbacks: InputControlsCallbacks) {
         shape = WinZShapes.Medium,
         colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
     ) {
-        Icon(Icons.Outlined.SportsEsports, null)
+        Icon(TablerIcons.DeviceGamepad2, null)
         Spacer(Modifier.width(10.dp))
         Text(uiStr(R.string.ui_controls_editor), style = MaterialTheme.typography.titleMedium)
     }
@@ -266,7 +256,7 @@ private fun ProfilePicker(model: InputControlsModel, selectedName: String, callb
         ) {
             Row(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(selectedName, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Icon(Icons.Outlined.KeyboardArrowDown, null)
+                Icon(TablerIcons.ChevronDown, null)
             }
         }
         DropdownMenu(
@@ -286,7 +276,7 @@ private fun ProfilePicker(model: InputControlsModel, selectedName: String, callb
                         fontWeight = if (nonePicked) FontWeight.SemiBold else FontWeight.Normal
                     )
                 },
-                trailingIcon = { if (nonePicked) Icon(Icons.Outlined.Check, null, tint = accent) },
+                trailingIcon = { if (nonePicked) Icon(TablerIcons.Check, null, tint = accent) },
                 onClick = { expanded = false; callbacks.onProfileSelected(0) }
             )
             model.profiles.forEach { profile ->
@@ -301,7 +291,7 @@ private fun ProfilePicker(model: InputControlsModel, selectedName: String, callb
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                         )
                     },
-                    trailingIcon = { if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent) },
+                    trailingIcon = { if (isSelected) Icon(TablerIcons.Check, null, tint = accent) },
                     onClick = { expanded = false; callbacks.onProfileSelected(profile.id) }
                 )
             }
@@ -346,7 +336,7 @@ private fun EmptyControllers() {
         border = BorderStroke(1.dp, hairlineColor())
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Outlined.Gamepad, null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(TablerIcons.DeviceGamepad, null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
             Text(uiStr(R.string.ui_no_controllers_connected), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -364,7 +354,7 @@ private fun ControllerCard(controller: InputControllerItem, callbacks: InputCont
         Row(modifier = Modifier.padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(modifier = Modifier.size(42.dp), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surfaceVariant) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.Gamepad, null, tint = if (controller.connected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
+                    Icon(TablerIcons.DeviceGamepad, null, tint = if (controller.connected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
                 }
             }
             Spacer(Modifier.width(13.dp))
@@ -372,8 +362,8 @@ private fun ControllerCard(controller: InputControllerItem, callbacks: InputCont
                 Text(controller.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(uiStr(R.string.ui_bindings_2, controller.bindings), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (controller.bindings > 0) IconButton(onClick = { callbacks.onRemoveController(controller.index) }) { Icon(Icons.Outlined.Delete, uiStr(R.string.ui_remove_controller)) }
-            Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (controller.bindings > 0) IconButton(onClick = { callbacks.onRemoveController(controller.index) }) { Icon(TablerIcons.Trash, uiStr(R.string.ui_remove_controller)) }
+            Icon(TablerIcons.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(8.dp))
         }
     }

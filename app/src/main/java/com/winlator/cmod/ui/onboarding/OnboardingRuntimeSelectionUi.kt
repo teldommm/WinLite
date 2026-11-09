@@ -15,9 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -42,6 +39,7 @@ import com.winlator.cmod.core.ProtonPackageManager
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 private val bundledRuntimeId = "bundled:${ProtonPackageManager.DEFAULT_IDENTIFIER}"
 private val bundledRuntimeName = ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER)?.title
@@ -120,13 +118,13 @@ internal fun OnboardingRuntimeSelectionScreen(
                     border = BorderStroke(1.dp, if (selected == id) accent else MaterialTheme.colorScheme.outlineVariant)
                 ) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Computer, null, modifier = Modifier.size(28.dp))
+                        Icon(TablerIcons.DeviceLaptop, null, modifier = Modifier.size(28.dp))
                         Spacer(Modifier.size(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(runtime.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(runtime.type, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (selected == id) Icon(Icons.Outlined.CheckCircle, null, tint = accent)
+                        if (selected == id) Icon(TablerIcons.CircleCheck, null, tint = accent)
                     }
                 }
             }

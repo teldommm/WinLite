@@ -34,7 +34,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -134,7 +133,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import androidx.compose.material3.TopAppBarDefaults
@@ -145,6 +143,7 @@ import com.winlator.cmod.ui.theme.AnimatedCategoryContent
 import com.winlator.cmod.ui.theme.CategoryNavColumn
 import com.winlator.cmod.ui.theme.CategoryNavEntry
 import com.winlator.cmod.ui.theme.CategoryNavRow
+import com.winlator.cmod.ui.theme.TablerIcons
 
 private val containerComponentRowsV2 = listOf(
     "direct3d" to "Direct3D",
@@ -603,7 +602,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         topBar = {
             TopAppBar(
                 title = { Text(if (editing == null) uiStr(R.string.ui_new_container) else state.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, uiStr(R.string.ui_back)) } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(TablerIcons.ArrowLeft, uiStr(R.string.ui_back)) } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     scrolledContainerColor = MaterialTheme.colorScheme.background

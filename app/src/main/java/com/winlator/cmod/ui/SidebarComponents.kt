@@ -17,9 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -47,6 +44,7 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.destructiveColor
 import com.winlator.cmod.ui.theme.sidebarCardFillColor
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // Single source of truth for every in-game sidebar panel (Graphics/Screen/Input/HUD/
 // TaskManager). Each panel used to carry its own private copy of PanelCard/PanelActionRow/
@@ -302,7 +300,7 @@ internal fun SidebarChoiceItem(label: String, selected: Boolean, onClick: () -> 
                 overflow = TextOverflow.Ellipsis
             )
         },
-        trailingIcon = { if (selected) Icon(Icons.Outlined.Check, contentDescription = null, tint = accent) },
+        trailingIcon = { if (selected) Icon(TablerIcons.Check, contentDescription = null, tint = accent) },
         onClick = onClick
     )
 }
@@ -361,7 +359,7 @@ internal fun SidebarDropdownField(
                     overflow = TextOverflow.Ellipsis
                 )
                 Icon(
-                    imageVector = Icons.Outlined.KeyboardArrowDown,
+                    imageVector = TablerIcons.ChevronDown,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)

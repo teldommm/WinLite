@@ -16,10 +16,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.FlipToFront
-import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +42,7 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.destructiveColor
 import com.winlator.cmod.ui.theme.sidebarCardFillColor
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // One process row. rawName is the exact name WinHandler/Windows reports (used for the
 // bring-to-front/kill/affinity calls); displayName additionally carries the " *32" suffix
@@ -221,7 +218,7 @@ private fun ProcessRow(row: ProcessRowData, callbacks: TaskManagerCallbacks) {
             SidebarMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 SidebarActionItem(
                     label = stringResource(R.string.processor_affinity),
-                    leadingIcon = { Icon(Icons.Outlined.Memory, null) },
+                    leadingIcon = { Icon(TablerIcons.Cpu, null) },
                     onClick = {
                         menuExpanded = false
                         callbacks.onProcessorAffinity(row.pid, row.rawName, row.affinityMask)
@@ -229,7 +226,7 @@ private fun ProcessRow(row: ProcessRowData, callbacks: TaskManagerCallbacks) {
                 )
                 SidebarActionItem(
                     label = stringResource(R.string.bring_to_front),
-                    leadingIcon = { Icon(Icons.Outlined.FlipToFront, null) },
+                    leadingIcon = { Icon(TablerIcons.StackFront, null) },
                     onClick = {
                         menuExpanded = false
                         callbacks.onBringToFront(row.pid, row.rawName)
@@ -237,7 +234,7 @@ private fun ProcessRow(row: ProcessRowData, callbacks: TaskManagerCallbacks) {
                 )
                 SidebarActionItem(
                     label = stringResource(R.string.end_process),
-                    leadingIcon = { Icon(Icons.Outlined.Close, null) },
+                    leadingIcon = { Icon(TablerIcons.X, null) },
                     onClick = {
                         menuExpanded = false
                         callbacks.onEndProcess(row.pid, row.rawName)

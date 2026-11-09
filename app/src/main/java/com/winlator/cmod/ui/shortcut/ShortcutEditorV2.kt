@@ -35,16 +35,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Extension
-import androidx.compose.material.icons.outlined.Gamepad
-import androidx.compose.material.icons.outlined.Monitor
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Terminal
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -149,7 +139,6 @@ import org.json.JSONArray
 import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import androidx.compose.material3.TopAppBarDefaults
@@ -160,6 +149,7 @@ import com.winlator.cmod.ui.theme.AnimatedCategoryContent
 import com.winlator.cmod.ui.theme.CategoryNavColumn
 import com.winlator.cmod.ui.theme.CategoryNavEntry
 import com.winlator.cmod.ui.theme.CategoryNavRow
+import com.winlator.cmod.ui.theme.TablerIcons
 
 private val shortcutComponentRowsV2 = listOf(
     "direct3d" to "Direct3D",
@@ -656,12 +646,12 @@ internal fun ShortcutEditorV2(
 
     var category by remember { mutableStateOf("General") }
     val categories = listOf(
-        ShortcutCategoryItemV2("General", Icons.Outlined.Settings),
-        ShortcutCategoryItemV2("Video", Icons.Outlined.Monitor),
-        ShortcutCategoryItemV2("Compatibility", Icons.Outlined.Tune),
-        ShortcutCategoryItemV2("Input", Icons.Outlined.Gamepad),
-        ShortcutCategoryItemV2("Environment", Icons.Outlined.Terminal),
-        ShortcutCategoryItemV2("Advanced", Icons.Outlined.Terminal)
+        ShortcutCategoryItemV2("General", TablerIcons.Settings),
+        ShortcutCategoryItemV2("Video", TablerIcons.DeviceDesktop),
+        ShortcutCategoryItemV2("Compatibility", TablerIcons.Adjustments),
+        ShortcutCategoryItemV2("Input", TablerIcons.DeviceGamepad),
+        ShortcutCategoryItemV2("Environment", TablerIcons.Terminal),
+        ShortcutCategoryItemV2("Advanced", TablerIcons.Terminal)
     )
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
 
@@ -671,7 +661,7 @@ internal fun ShortcutEditorV2(
         topBar = {
             TopAppBar(
                 title = { Text(state.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = ::closeEditor) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, uiStr(R.string.ui_back)) } },
+                navigationIcon = { IconButton(onClick = ::closeEditor) { Icon(TablerIcons.ArrowLeft, uiStr(R.string.ui_back)) } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     scrolledContainerColor = MaterialTheme.colorScheme.background
@@ -816,7 +806,7 @@ private fun ShortcutCategoryV2(
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
                 ) {
-                    Icon(Icons.Outlined.PlayArrow, null)
+                    Icon(TablerIcons.PlayerPlay, null)
                     Spacer(Modifier.size(7.dp))
                     Text(uiStr(R.string.ui_enter_container))
                 }
@@ -1248,7 +1238,7 @@ private fun ExecArgumentsEditorV2(value: String, onChanged: (String) -> Unit) {
                                     fontWeight = if (alreadyAdded) FontWeight.SemiBold else FontWeight.Normal
                                 )
                             },
-                            trailingIcon = { if (alreadyAdded) Icon(Icons.Outlined.Check, null, tint = accent) },
+                            trailingIcon = { if (alreadyAdded) Icon(TablerIcons.Check, null, tint = accent) },
                             onClick = {
                                 if (!alreadyAdded) onChanged(listOf(value.trim(), arg).filter(String::isNotBlank).joinToString(" "))
                                 open = false

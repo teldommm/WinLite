@@ -14,10 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -28,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.theme.SlidingPillHost
@@ -38,6 +33,8 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.rememberSlidingPillState
 import com.winlator.cmod.ui.theme.slidingPillTarget
+import com.winlator.cmod.ui.theme.TablerIcons
+import androidx.compose.ui.graphics.vector.ImageVector
 
 // Landscape counterpart of PortraitBottomNavigation: Library / Input Controls / Settings as one
 // floating group pinned top-end (MainShell places it in ShellChrome's header band). It used to be
@@ -67,16 +64,17 @@ internal fun LandscapeNavGroup(selected: Int, onNavigate: (Int) -> Unit, modifie
             selectedKey = selected,
             color = MaterialTheme.colorScheme.primary.copy(alpha = .12f),
             cornerRadius = NAV_PILL_RADIUS,
-            modifier = Modifier.padding(3.dp)
+            modifier = Modifier.padding(3.dp),
+            borderColor = MaterialTheme.colorScheme.primary.copy(alpha = .55f)
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                NavCell(pill, R.id.main_menu_shortcuts, Icons.Outlined.Home, stringResource(R.string.ui_library), selected == R.id.main_menu_shortcuts) {
+                NavCell(pill, R.id.main_menu_shortcuts, TablerIcons.Home, stringResource(R.string.ui_library), selected == R.id.main_menu_shortcuts) {
                     onNavigate(R.id.main_menu_shortcuts)
                 }
-                NavCell(pill, R.id.main_menu_input_controls, Icons.Outlined.SportsEsports, stringResource(R.string.ui_input_controls), selected == R.id.main_menu_input_controls) {
+                NavCell(pill, R.id.main_menu_input_controls, TablerIcons.DeviceGamepad2, stringResource(R.string.ui_input_controls), selected == R.id.main_menu_input_controls) {
                     onNavigate(R.id.main_menu_input_controls)
                 }
-                NavCell(pill, R.id.main_menu_settings, Icons.Outlined.Settings, stringResource(R.string.settings), selected == R.id.main_menu_settings) {
+                NavCell(pill, R.id.main_menu_settings, TablerIcons.Settings, stringResource(R.string.settings), selected == R.id.main_menu_settings) {
                     onNavigate(R.id.main_menu_settings)
                 }
             }

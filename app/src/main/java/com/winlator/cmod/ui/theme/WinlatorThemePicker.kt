@@ -17,10 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -94,7 +90,7 @@ private fun ThemeChoiceRow(
                 )
             }
             if (selected) {
-                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(22.dp), tint = accent)
+                Icon(TablerIcons.Check, contentDescription = null, modifier = Modifier.size(22.dp), tint = accent)
             }
         }
     }
@@ -156,14 +152,14 @@ fun WinlatorThemePreferenceCard(modifier: Modifier = Modifier) {
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f), WinZShapes.Small),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(TablerIcons.Palette, contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
                 Text(uiStr(R.string.ui_theme), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                 Text(current.displayName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(TablerIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 

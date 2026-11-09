@@ -16,9 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -53,6 +50,7 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.ThemedDialog
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 enum class EnvValueKind { CHECKBOX, SELECT, MULTI, TEXT, NUMBER }
 
@@ -215,7 +213,7 @@ fun EnvironmentVariablesEditor(
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
         ) {
-            Icon(Icons.Outlined.Add, null)
+            Icon(TablerIcons.Plus, null)
             Spacer(Modifier.width(7.dp))
             Text(uiStr(R.string.ui_add_variable))
         }
@@ -267,7 +265,7 @@ private fun EnvironmentVariableRow(
                     CustomTag()
                 }
             }
-            IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, uiStr(R.string.remove)) }
+            IconButton(onClick = onRemove) { Icon(TablerIcons.Trash, uiStr(R.string.remove)) }
         }
         EnvValueEditor(spec, row.value, onValue)
     }

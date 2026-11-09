@@ -24,12 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Pause
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +50,7 @@ import com.winlator.cmod.ui.theme.WinZOverlayTheme
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // Backing store for DebugDialog's live log stream. append() only grows the list when not
 // paused (matches the old LogView.append/DebugDialog.paused gating) — the file write in
@@ -134,7 +129,7 @@ private fun DebugLogContent(state: DebugLogState, onClose: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                Icons.Outlined.BugReport,
+                TablerIcons.Bug,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp)
@@ -147,17 +142,17 @@ private fun DebugLogContent(state: DebugLogState, onClose: () -> Unit) {
                 modifier = Modifier.weight(1f)
             )
             IconButton(onClick = { state.clear() }) {
-                Icon(Icons.Outlined.DeleteOutline, contentDescription = stringResource(R.string.ui_clear_logs), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(TablerIcons.Trash, contentDescription = stringResource(R.string.ui_clear_logs), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = { state.paused = !state.paused }) {
                 Icon(
-                    if (state.paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                    if (state.paused) TablerIcons.PlayerPlay else TablerIcons.PlayerPause,
                     contentDescription = if (state.paused) stringResource(R.string.ui_resume) else stringResource(R.string.ui_pause),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             IconButton(onClick = onClose) {
-                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.ui_close), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(TablerIcons.X, contentDescription = stringResource(R.string.ui_close), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Spacer(Modifier.height(8.dp))

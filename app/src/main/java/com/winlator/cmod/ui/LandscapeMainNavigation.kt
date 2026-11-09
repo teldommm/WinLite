@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.coerceAtLeast
@@ -65,15 +66,41 @@ fun KeepLandscapeChromeHidden(activity: MainActivity?) {
     }
 }
 
-// Shared geometry between MainShell's floating landscape navigation and the screens' own
-// landscape headers. The shell draws the destinations (Library / Input Controls / Settings) as
-// one static group pinned top-end, centred in the header band; each screen draws only its title
-// and its own actions, and keeps LandscapeNavReserve free at the end so they never sit under it.
+// Shared geometry between MainShell's floating landscape chrome and the screens' own landscape
+// headers. The shell draws the destinations (Library / Input Controls / Settings) as one static
+// group pinned top-end, centred in the header band, with the status card (clock / network /
+// battery) to its right; each screen draws only its title and its own actions, and keeps
+// LandscapeNavReserve free at the end so they never sit under either of them.
 object ShellChrome {
     val LandscapeHeaderHeight = 54.dp
 
-    // Nav group width (3 × 44dp cells + spacing + padding = 142dp) + its 14dp end margin + 8dp gap.
-    val LandscapeNavReserve = 164.dp
+    // Nav group: 3 × 44dp cells + 2 × 2dp spacing + 2 × 3dp padding = 142dp wide, 44 + 2 × 3 = 50dp
+    // tall. The status card uses the same height. Keep these in sync with LandscapeNavGroup.
+    val LandscapeNavWidth = 142.dp
+    val LandscapeNavHeight = 50.dp
+
+    // Gap between the nav group and the status card, and the margin from the screen's end edge.
+    val LandscapeChromeGap = 8.dp
+    val LandscapeChromeEndMargin = 14.dp
+
+    // Below this width (dp) the status card drops the battery percentage and the charging bolt.
+    private const val COMPACT_LANDSCAPE_WIDTH_DP = 700
+
+    @Composable
+    fun isCompactLandscape(): Boolean = LocalConfiguration.current.screenWidthDp < COMPACT_LANDSCAPE_WIDTH_DP
+
+    // Fixed per mode: the card's content (time, icons, percentage) never changes its width.
+    fun landscapeStatusWidth(compact: Boolean): Dp = if (compact) 116.dp else 160.dp
+
+    // Everything the shell pins top-end, plus an 8dp clearance, measured from the screen edge:
+    // nav group + gap + status card + end margin + clearance. Composable because the status card's
+    // width depends on the screen width; every caller already sits in a composable body.
+    val LandscapeNavReserve: Dp
+        @Composable get() = LandscapeNavWidth +
+            LandscapeChromeGap +
+            landscapeStatusWidth(isCompactLandscape()) +
+            LandscapeChromeEndMargin +
+            8.dp
 
     // Portrait: the bottom nav floats over tab content (64dp bar + 12dp bottom margin); anything
     // anchored to the bottom of a tab (FABs, last list rows) must clear it, plus a 12dp gap.

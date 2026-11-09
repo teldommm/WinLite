@@ -24,16 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -82,10 +72,10 @@ import java.util.ArrayDeque
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.winlator.cmod.ui.theme.findActivity
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // Containers list as a MainShell detail entry (replaces ContainersSettingsFragment). The
 // container editor opens as another detail entry on top (onOpenEditor); when it closes and this
@@ -178,7 +168,7 @@ private fun ContainersSettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text(uiStr(R.string.ui_containers)) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, uiStr(R.string.ui_back)) } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(TablerIcons.ArrowLeft, uiStr(R.string.ui_back)) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background, scrolledContainerColor = MaterialTheme.colorScheme.background)
             )
         },
@@ -187,7 +177,7 @@ private fun ContainersSettingsScreen(
                 onClick = onAdd,
                 containerColor = controlAccentColor(),
                 contentColor = androidx.compose.ui.graphics.Color.White
-            ) { Icon(Icons.Outlined.Add, uiStr(R.string.ui_new_container)) }
+            ) { Icon(TablerIcons.Plus, uiStr(R.string.ui_new_container)) }
         }
     ) { padding ->
         if (containers.isEmpty()) {
@@ -198,7 +188,7 @@ private fun ContainersSettingsScreen(
                         shape = WinZShapes.ExtraLarge,
                         color = MaterialTheme.colorScheme.surfaceVariant
                     ) {
-                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Dns, null, modifier = Modifier.size(36.dp)) }
+                        Box(contentAlignment = Alignment.Center) { Icon(TablerIcons.Server, null, modifier = Modifier.size(36.dp)) }
                     }
                     Spacer(Modifier.height(14.dp))
                     Text(uiStr(R.string.ui_no_containers), style = MaterialTheme.typography.titleLarge)
@@ -241,7 +231,7 @@ private fun SettingsContainerCard(
         Column {
             Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Surface(Modifier.size(50.dp), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surfaceVariant) {
-                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Dns, null, modifier = Modifier.size(26.dp)) }
+                    Box(contentAlignment = Alignment.Center) { Icon(TablerIcons.Server, null, modifier = Modifier.size(26.dp)) }
                 }
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
@@ -255,15 +245,15 @@ private fun SettingsContainerCard(
                     color = controlAccentColor(),
                     contentColor = androidx.compose.ui.graphics.Color.White
                 ) {
-                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, null) }
+                    Box(contentAlignment = Alignment.Center) { Icon(TablerIcons.PlayerPlay, null) }
                 }
             }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ActionButton(Icons.Outlined.Edit, uiStr(R.string.ui_edit), Modifier.weight(1f)) { onEdit(container.id) }
-                ActionButton(Icons.Outlined.Info, uiStr(R.string.ui_properties), Modifier.weight(1f)) { onProperties(container.id) }
+                ActionButton(TablerIcons.Pencil, uiStr(R.string.ui_edit), Modifier.weight(1f)) { onEdit(container.id) }
+                ActionButton(TablerIcons.InfoCircle, uiStr(R.string.ui_properties), Modifier.weight(1f)) { onProperties(container.id) }
                 ContainerMoreButton(
                     modifier = Modifier.weight(1f),
                     onDuplicate = { onDuplicate(container.id) },
@@ -302,7 +292,7 @@ private fun ContainerMoreButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
-        ActionButton(Icons.Outlined.MoreVert, uiStr(R.string.ui_more), Modifier.fillMaxWidth()) { expanded = true }
+        ActionButton(TablerIcons.DotsVertical, uiStr(R.string.ui_more), Modifier.fillMaxWidth()) { expanded = true }
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
@@ -311,7 +301,7 @@ private fun ContainerMoreButton(
         ) {
             DropdownMenuItem(
                 text = { Text(uiStr(R.string.duplicate)) },
-                leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
+                leadingIcon = { Icon(TablerIcons.Copy, null) },
                 onClick = {
                     expanded = false
                     onDuplicate()
@@ -319,7 +309,7 @@ private fun ContainerMoreButton(
             )
             DropdownMenuItem(
                 text = { Text(uiStr(R.string.remove), color = MaterialTheme.colorScheme.error) },
-                leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                leadingIcon = { Icon(TablerIcons.Trash, null, tint = MaterialTheme.colorScheme.error) },
                 onClick = {
                     expanded = false
                     onRemove()
@@ -364,7 +354,7 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
         .coerceIn(0, 100)
 
     ThemedDialog(onDismissRequest = onDismiss) {
-        ThemedDialogTitle(uiStr(R.string.ui_container_properties), leading = { Icon(Icons.Outlined.Storage, null) })
+        ThemedDialogTitle(uiStr(R.string.ui_container_properties), leading = { Icon(TablerIcons.Database, null) })
         ThemedDialogScrollBody(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(
                 container.name,

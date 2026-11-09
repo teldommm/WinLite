@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 @Composable
 internal fun ClassicCoreStatusCard(readyState: State<Boolean>, progressState: State<Int>, retry: () -> Unit) {
@@ -37,7 +36,7 @@ internal fun ClassicCoreStatusCard(readyState: State<Boolean>, progressState: St
     ) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (ready) {
-                Icon(Icons.Outlined.Check, null, Modifier.size(32.dp))
+                Icon(TablerIcons.Check, null, Modifier.size(32.dp))
             } else {
                 CircularProgressIndicator(
                     progress = { progress / 100f },

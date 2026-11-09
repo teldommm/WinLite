@@ -10,12 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -45,6 +39,7 @@ import com.winlator.cmod.ui.settings.SettingsDivider
 import com.winlator.cmod.ui.theme.controlAccentColor
 import kotlinx.coroutines.delay
 import com.winlator.cmod.ui.theme.WinZShapes
+import com.winlator.cmod.ui.theme.TablerIcons
 
 private data class ShortcutDriveEntryV2(
     val letter: String,
@@ -113,7 +108,7 @@ internal fun DriveLettersEditorV2(
                 onClick = { if (nextLetter != null) entries.add(ShortcutDriveEntryV2(nextLetter, "")) },
                 enabled = nextLetter != null
             ) {
-                Icon(Icons.Outlined.Add, uiStr(R.string.ui_add_drive))
+                Icon(TablerIcons.Plus, uiStr(R.string.ui_add_drive))
             }
         }
 
@@ -170,7 +165,7 @@ private fun ShortcutDriveLetterRowV2(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("${entry.letter}:", fontWeight = FontWeight.SemiBold)
-                    Icon(Icons.Outlined.KeyboardArrowDown, null)
+                    Icon(TablerIcons.ChevronDown, null)
                 }
             }
             DropdownMenu(
@@ -190,7 +185,7 @@ private fun ShortcutDriveLetterRowV2(
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
                         },
-                        trailingIcon = { if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent) },
+                        trailingIcon = { if (isSelected) Icon(TablerIcons.Check, null, tint = accent) },
                         onClick = {
                             onLetter(letter)
                             letterMenuOpen = false
@@ -209,7 +204,7 @@ private fun ShortcutDriveLetterRowV2(
             placeholder = { Text("/storage/emulated/0/...", maxLines = 1, overflow = TextOverflow.Ellipsis) },
             shape = WinZShapes.Small
         )
-        IconButton(onClick = onBrowse) { Icon(Icons.Outlined.FolderOpen, uiStr(R.string.ui_choose_folder)) }
-        IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, uiStr(R.string.ui_remove_drive)) }
+        IconButton(onClick = onBrowse) { Icon(TablerIcons.FolderOpen, uiStr(R.string.ui_choose_folder)) }
+        IconButton(onClick = onRemove) { Icon(TablerIcons.Trash, uiStr(R.string.ui_remove_drive)) }
     }
 }

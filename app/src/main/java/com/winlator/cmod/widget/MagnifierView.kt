@@ -16,11 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.OpenWith
-import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -46,6 +41,7 @@ import com.winlator.cmod.core.Callback
 import com.winlator.cmod.ui.sidebarPanelColor
 import com.winlator.cmod.ui.theme.WinZOverlayTheme
 import kotlin.math.roundToInt
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // Floating magnifier toolbar (shown over the X server surface from the in-game sidebar).
 // Layout/shape follows WinLite's Compose panel — narrow rounded column, Material outlined
@@ -186,14 +182,14 @@ private fun MagnifierPanel(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.OpenWith,
+                    imageVector = TablerIcons.ArrowsMove,
                     contentDescription = "Move",
                     tint = colors.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
                 )
             }
 
-            MagnifierIconButton(Icons.Outlined.Add, "Zoom in", enabled = zoom < MAX_ZOOM) {
+            MagnifierIconButton(TablerIcons.Plus, "Zoom in", enabled = zoom < MAX_ZOOM) {
                 onZoomChange(ZOOM_STEP)
             }
 
@@ -208,7 +204,7 @@ private fun MagnifierPanel(
                 modifier = Modifier.padding(vertical = 2.dp)
             )
 
-            MagnifierIconButton(Icons.Outlined.Remove, "Zoom out", enabled = zoom > MIN_ZOOM) {
+            MagnifierIconButton(TablerIcons.Minus, "Zoom out", enabled = zoom > MIN_ZOOM) {
                 onZoomChange(-ZOOM_STEP)
             }
 
@@ -220,7 +216,7 @@ private fun MagnifierPanel(
                     .background(colors.outlineVariant, CircleShape)
             )
 
-            MagnifierIconButton(Icons.Outlined.Close, "Hide", tint = colors.onSurfaceVariant, onClick = onHide)
+            MagnifierIconButton(TablerIcons.X, "Hide", tint = colors.onSurfaceVariant, onClick = onHide)
         }
     }
 }

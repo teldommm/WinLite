@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -23,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.theme.controlAccentColor
 import kotlin.math.roundToInt
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // One entry in the controls-profile dropdown. Plain data holder so this file doesn't need
 // to depend on com.winlator.cmod.inputcontrols.ControlsProfile — Java builds this list from it.
@@ -252,7 +251,7 @@ private fun ProfileRow(
         Spacer(Modifier.width(4.dp))
         IconButton(onClick = onEditClick) {
             Icon(
-                imageVector = Icons.Outlined.Settings,
+                imageVector = TablerIcons.Settings,
                 contentDescription = uiStr(R.string.ui_edit_profiles),
                 tint = controlAccentColor()
             )

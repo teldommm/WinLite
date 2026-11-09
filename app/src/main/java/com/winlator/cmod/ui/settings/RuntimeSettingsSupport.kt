@@ -21,9 +21,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -73,6 +70,7 @@ import kotlinx.coroutines.withContext
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 internal data class VersionCatalog(val all: List<String>, val installed: Set<String>)
 
@@ -514,7 +512,7 @@ internal fun SettingChoice(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Icon(Icons.Outlined.KeyboardArrowDown, null)
+                    Icon(TablerIcons.ChevronDown, null)
                 }
             }
             DropdownMenu(
@@ -537,7 +535,7 @@ internal fun SettingChoice(
                                 overflow = TextOverflow.Ellipsis
                             )
                         },
-                        trailingIcon = { if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent) },
+                        trailingIcon = { if (isSelected) Icon(TablerIcons.Check, null, tint = accent) },
                         onClick = {
                             expanded = false
                             onSelected(value)
@@ -592,7 +590,7 @@ internal fun SettingWineRuntimeChoice(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Icon(Icons.Outlined.KeyboardArrowDown, null)
+                Icon(TablerIcons.ChevronDown, null)
             }
         }
         DropdownMenu(
@@ -623,7 +621,7 @@ internal fun SettingWineRuntimeChoice(
                     },
                     trailingIcon = {
                         if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent)
+                        else if (isSelected) Icon(TablerIcons.Check, null, tint = accent)
                     },
                     onClick = {
                         if (option.installed) {
@@ -660,7 +658,7 @@ internal fun SettingInstallChoice(
                     Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(selected.ifBlank { uiStr(R.string.ui_choose_a_version) }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                 }
-                Icon(Icons.Outlined.KeyboardArrowDown, null)
+                Icon(TablerIcons.ChevronDown, null)
             }
         }
         DropdownMenu(
@@ -688,7 +686,7 @@ internal fun SettingInstallChoice(
                     },
                     trailingIcon = {
                         if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent)
+                        else if (isSelected) Icon(TablerIcons.Check, null, tint = accent)
                     },
                     onClick = {
                         if (available) {
@@ -731,7 +729,7 @@ internal fun SettingDriverChoice(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Icon(Icons.Outlined.KeyboardArrowDown, null)
+                Icon(TablerIcons.ChevronDown, null)
             }
         }
         DropdownMenu(
@@ -758,7 +756,7 @@ internal fun SettingDriverChoice(
                     },
                     trailingIcon = {
                         if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent)
+                        else if (isSelected) Icon(TablerIcons.Check, null, tint = accent)
                     },
                     onClick = {
                         if (option.installed) {

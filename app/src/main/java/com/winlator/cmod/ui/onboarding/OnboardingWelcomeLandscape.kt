@@ -12,9 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +22,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.TablerIcons
 
 @Composable
 internal fun ClassicWelcomeLandscape(
@@ -47,9 +45,9 @@ internal fun ClassicWelcomeLandscape(
             }
             Spacer(Modifier.width(36.dp))
             Column(Modifier.weight(1f)) {
-                ClassicWelcomeCard(Icons.Outlined.Apps, uiStr(R.string.ui_get_started), uiStr(R.string.ui_choose_components), start)
+                ClassicWelcomeCard(TablerIcons.Apps, uiStr(R.string.ui_get_started), uiStr(R.string.ui_choose_components), start)
                 Spacer(Modifier.height(10.dp))
-                ClassicWelcomeCard(Icons.Outlined.SkipNext, uiStr(R.string.ui_skip), uiStr(R.string.ui_use_the_components_bundled_with_winlator), skip)
+                ClassicWelcomeCard(TablerIcons.PlayerSkipForward, uiStr(R.string.ui_skip), uiStr(R.string.ui_use_the_components_bundled_with_winlator), skip)
                 Spacer(Modifier.height(10.dp))
                 ClassicCoreStatusCard(ready, progress, retry)
             }

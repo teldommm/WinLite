@@ -22,20 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.ContentCut
-import androidx.compose.material.icons.outlined.ContentPaste
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -80,15 +66,15 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import com.winlator.cmod.ui.ShellChrome
 import com.winlator.cmod.ui.library.LibraryImageCache
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // Icons the file manager shows for entries and for the drive header. The controller (Java) picks
-// one by meaning; the actual graphic is resolved in painter() below, so Material vectors (all
+// one by meaning; the actual graphic is resolved in painter() below, so Tabler vectors (all
 // 24dp-grid, so sizes stay consistent) and the two app-specific drawables can be mixed.
 enum class FileManagerIcon {
     FOLDER,            // directory row
@@ -100,11 +86,11 @@ enum class FileManagerIcon {
 
 @Composable
 private fun FileManagerIcon.painter(): Painter = when (this) {
-    FileManagerIcon.FOLDER -> rememberVectorPainter(Icons.Outlined.Folder)
-    FileManagerIcon.FILE -> rememberVectorPainter(Icons.Outlined.Description)
+    FileManagerIcon.FOLDER -> rememberVectorPainter(TablerIcons.Folder)
+    FileManagerIcon.FILE -> rememberVectorPainter(TablerIcons.FileDescription)
     FileManagerIcon.WINE -> painterResource(R.drawable.icon_wine)
     FileManagerIcon.INTERNAL_STORAGE -> painterResource(R.drawable.ic_internal_storage)
-    FileManagerIcon.SYSTEM_DRIVE -> rememberVectorPainter(Icons.Outlined.Storage)
+    FileManagerIcon.SYSTEM_DRIVE -> rememberVectorPainter(TablerIcons.Database)
 }
 
 // One row in the file listing — a file or a folder in the current directory.
@@ -182,7 +168,7 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = callbacks::onUpDir) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, uiStr(R.string.ui_up_directory))
+                Icon(TablerIcons.ArrowLeft, uiStr(R.string.ui_up_directory))
             }
             Spacer(Modifier.width(4.dp))
             Surface(
@@ -209,7 +195,7 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Icon(Icons.Outlined.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(TablerIcons.ChevronDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -257,7 +243,7 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
                     containerColor = controlAccentColor(),
                     contentColor = Color.White
                 ) {
-                    Icon(Icons.Outlined.ContentPaste, uiStr(R.string.ui_paste))
+                    Icon(TablerIcons.Clipboard, uiStr(R.string.ui_paste))
                 }
             }
         }
@@ -364,34 +350,34 @@ private fun FileRow(entry: FileEntryUiModel, callbacks: FileManagerCallbacks) {
             if (entry.isExecutable) {
                 DropdownMenuItem(
                     text = { Text(uiStr(R.string.ui_run_open)) },
-                    leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
+                    leadingIcon = { Icon(TablerIcons.PlayerPlay, null) },
                     onClick = { menuExpanded = false; callbacks.onRunFile(entry.path) }
                 )
                 DropdownMenuItem(
                     text = { Text(uiStr(R.string.ui_add_this_game)) },
-                    leadingIcon = { Icon(Icons.Outlined.Add, null) },
+                    leadingIcon = { Icon(TablerIcons.Plus, null) },
                     onClick = { menuExpanded = false; callbacks.onAddGame(entry.path) }
                 )
             }
             DropdownMenuItem(
                 text = { Text(uiStr(R.string.ui_copy)) },
-                leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
+                leadingIcon = { Icon(TablerIcons.Copy, null) },
                 onClick = { menuExpanded = false; callbacks.onCopyFile(entry.path) }
             )
             DropdownMenuItem(
                 text = { Text(uiStr(R.string.ui_cut_move)) },
-                leadingIcon = { Icon(Icons.Outlined.ContentCut, null) },
+                leadingIcon = { Icon(TablerIcons.Cut, null) },
                 onClick = { menuExpanded = false; callbacks.onCutFile(entry.path) }
             )
             DropdownMenuItem(
                 text = { Text(uiStr(R.string.ui_rename)) },
-                leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                leadingIcon = { Icon(TablerIcons.Pencil, null) },
                 onClick = { menuExpanded = false; callbacks.onRenameFile(entry.path) }
             )
             DropdownMenuItem(
                 text = { Text(uiStr(R.string.ui_delete), color = MaterialTheme.colorScheme.error) },
                 leadingIcon = {
-                    Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
+                    Icon(TablerIcons.Trash, null, tint = MaterialTheme.colorScheme.error)
                 },
                 onClick = { menuExpanded = false; callbacks.onDeleteFile(entry.path) }
             )
@@ -500,7 +486,7 @@ private fun DriveSelectorSheet(
                     ) {
                         if (isScan) {
                             Icon(
-                                Icons.Outlined.Refresh,
+                                TablerIcons.Refresh,
                                 null,
                                 tint = accent,
                                 modifier = Modifier.padding(end = 12.dp)
@@ -525,7 +511,7 @@ private fun DriveSelectorSheet(
                                 )
                             }
                         }
-                        if (option.selected) Icon(Icons.Outlined.Check, null, tint = accent)
+                        if (option.selected) Icon(TablerIcons.Check, null, tint = accent)
                     }
                 }
             }

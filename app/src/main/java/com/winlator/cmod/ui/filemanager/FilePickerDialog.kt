@@ -33,10 +33,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -80,6 +76,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // Receives the file or folder the person picked. A fun interface so Kotlin callers pass a lambda
 // and Java callers (OnboardingActivity, ControlsEditorActivity) pass a plain lambda too.
@@ -439,7 +436,7 @@ private fun ColumnScope.FilePickerPanel(
 
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = state::up, enabled = state.canGoUp()) {
-            Icon(Icons.AutoMirrored.Outlined.ArrowBack, uiStr(R.string.ui_up_directory))
+            Icon(TablerIcons.ArrowLeft, uiStr(R.string.ui_up_directory))
         }
         Text(
             state.dir.absolutePath,
@@ -562,7 +559,7 @@ private fun PickerRow(entry: PickerEntry, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            if (entry.isDirectory) Icons.Outlined.Folder else Icons.Outlined.Description,
+            if (entry.isDirectory) TablerIcons.Folder else TablerIcons.FileDescription,
             null,
             modifier = Modifier.size(28.dp),
             tint = if (entry.isDirectory) controlAccentColor() else MaterialTheme.colorScheme.onSurfaceVariant

@@ -17,9 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -51,8 +48,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBarDefaults
@@ -63,6 +58,7 @@ import com.winlator.cmod.ui.theme.ThemedDialog
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 data class ExternalControllerBindingItem(
     val keyCode: Int,
@@ -139,7 +135,7 @@ private fun ExternalControllerBindingsScreen(
                 navigationIcon = {
                     IconButton(onClick = callbacks::onBack) {
                         Icon(
-                            Icons.AutoMirrored.Outlined.ArrowBack,
+                            TablerIcons.ArrowLeft,
                             stringResource(androidx.appcompat.R.string.abc_action_bar_up_description)
                         )
                     }
@@ -212,7 +208,7 @@ private fun ExternalControllerBindingsScreen(
                                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                                                     )
                                                 },
-                                                trailingIcon = { if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent) },
+                                                trailingIcon = { if (isSelected) Icon(TablerIcons.Check, null, tint = accent) },
                                                 onClick = {
                                                     choosingType = false
                                                     if (index != item.type) {
@@ -227,7 +223,7 @@ private fun ExternalControllerBindingsScreen(
                             }
                             IconButton(onClick = { callbacks.onRemove(item.keyCode) }) {
                                 Icon(
-                                    Icons.Outlined.Delete,
+                                    TablerIcons.Trash,
                                     stringResource(R.string.remove) + ": " + item.title,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -268,7 +264,7 @@ private fun ExternalControllerBindingsScreen(
                             color = if (isSelected) accent else MaterialTheme.colorScheme.onSurface,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                         )
-                        if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent)
+                        if (isSelected) Icon(TablerIcons.Check, null, tint = accent)
                     }
                 }
             }
@@ -301,7 +297,7 @@ private fun BindingField(value: String, onClick: () -> Unit) {
     ) {
         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(value, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Icon(Icons.Outlined.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(TablerIcons.ChevronDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

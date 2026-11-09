@@ -30,21 +30,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Favorite
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.FileUpload
-import androidx.compose.material.icons.outlined.GridView
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Photo
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -91,15 +76,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import androidx.compose.ui.graphics.asImageBitmap as composeAsImageBitmap
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import com.winlator.cmod.ui.theme.WinZShapes
@@ -112,6 +94,7 @@ import com.winlator.cmod.ui.theme.SlidingPillState
 import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.rememberSlidingPillState
 import com.winlator.cmod.ui.theme.slidingPillTarget
+import com.winlator.cmod.ui.theme.TablerIcons
 
 internal fun Bitmap.asImageBitmap(): ImageBitmap = this.composeAsImageBitmap()
 
@@ -160,7 +143,7 @@ internal fun LibraryRoot(
                 )
             },
             footerActions = { item ->
-                IconButton(onClick = { menu = item }) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.ui_more_options), tint = Color.White) }
+                IconButton(onClick = { menu = item }) { Icon(TablerIcons.DotsVertical, stringResource(R.string.ui_more_options), tint = Color.White) }
             }
         )
         menu?.let { LibraryItemMenuCompat(it, cb) { menu = null } }
@@ -223,7 +206,7 @@ internal fun LibraryRoot(
                                 color = controlAccentColor(),
                                 contentColor = Color.White
                             ) {
-                                Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Add, null, modifier = Modifier.size(34.dp)) }
+                                Box(contentAlignment = Alignment.Center) { Icon(TablerIcons.Plus, null, modifier = Modifier.size(34.dp)) }
                             }
                             Spacer(Modifier.height(16.dp))
                             Text(stringResource(R.string.ui_add_games), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -303,7 +286,7 @@ internal fun LibraryLandscapeHeader(
                 .padding(end = (ShellChrome.LandscapeNavReserve - containerEndPadding).coerceAtLeast(0.dp)),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            LibraryTopIcon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ui_close_search), false) {
+            LibraryTopIcon(TablerIcons.ArrowLeft, stringResource(R.string.ui_close_search), false) {
                 searchActive = false
                 onSearchQueryChanged("")
             }
@@ -317,11 +300,11 @@ internal fun LibraryLandscapeHeader(
             startPadding = 0.dp,
             containerEndPadding = containerEndPadding
         ) {
-            LibraryTopIcon(Icons.Outlined.Search, stringResource(R.string.ui_search), false) { searchActive = true }
-            LibraryTopIcon(if (grid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView, if (grid) stringResource(R.string.ui_list_view) else stringResource(R.string.ui_grid_view), false) {
+            LibraryTopIcon(TablerIcons.Search, stringResource(R.string.ui_search), false) { searchActive = true }
+            LibraryTopIcon(if (grid) TablerIcons.LayoutList else TablerIcons.LayoutGrid, if (grid) stringResource(R.string.ui_list_view) else stringResource(R.string.ui_grid_view), false) {
                 onGridViewChanged(!grid)
             }
-            LibraryTopIcon(Icons.Outlined.Add, stringResource(R.string.ui_add_games), false) { activity?.navigateToMainDestination(R.id.main_menu_file_manager) }
+            LibraryTopIcon(TablerIcons.Plus, stringResource(R.string.ui_add_games), false) { activity?.navigateToMainDestination(R.id.main_menu_file_manager) }
             LibraryOrientationMenu(activity)
         }
     }
@@ -351,7 +334,7 @@ internal fun LibraryPortraitHeader(
             Modifier.fillMaxWidth().height(ShellChrome.PortraitHeaderHeight),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            LibraryTopIcon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ui_close_search), false) {
+            LibraryTopIcon(TablerIcons.ArrowLeft, stringResource(R.string.ui_close_search), false) {
                 searchActive = false
                 onSearchQueryChanged("")
             }
@@ -364,11 +347,11 @@ internal fun LibraryPortraitHeader(
                 modifier = Modifier.align(Alignment.CenterEnd),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                LibraryTopIcon(Icons.Outlined.Search, stringResource(R.string.ui_search), false) { searchActive = true }
-                LibraryTopIcon(if (grid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView, if (grid) stringResource(R.string.ui_list_view) else stringResource(R.string.ui_grid_view), false) {
+                LibraryTopIcon(TablerIcons.Search, stringResource(R.string.ui_search), false) { searchActive = true }
+                LibraryTopIcon(if (grid) TablerIcons.LayoutList else TablerIcons.LayoutGrid, if (grid) stringResource(R.string.ui_list_view) else stringResource(R.string.ui_grid_view), false) {
                     onGridViewChanged(!grid)
                 }
-                LibraryTopIcon(Icons.Outlined.Add, stringResource(R.string.ui_add_games), false) { onOpenFileManager() }
+                LibraryTopIcon(TablerIcons.Plus, stringResource(R.string.ui_add_games), false) { onOpenFileManager() }
                 LibraryOrientationMenu(activity)
             }
         }
@@ -379,7 +362,7 @@ internal fun LibraryPortraitHeader(
 private fun LibraryOrientationMenu(activity: MainActivity?) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        LibraryTopIcon(Icons.Outlined.MoreVert, stringResource(R.string.ui_more_options), false) { expanded = true }
+        LibraryTopIcon(TablerIcons.DotsVertical, stringResource(R.string.ui_more_options), false) { expanded = true }
         LibraryOrientationDropdown(activity, expanded) { expanded = false }
     }
 }
@@ -426,7 +409,7 @@ private fun OrientationToggleMenuItem(label: String, checked: Boolean, onClick: 
                 fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Normal
             )
         },
-        trailingIcon = { if (checked) Icon(Icons.Outlined.Check, null, tint = accent) },
+        trailingIcon = { if (checked) Icon(TablerIcons.Check, null, tint = accent) },
         onClick = onClick
     )
 }
@@ -467,8 +450,8 @@ internal fun libraryFilterLabel(filter: LibraryFilter): String = when (filter) {
 
 // All / Favorites / Recent: one translucent pill slides between the chips (SlidingPillHost); the
 // chips themselves stay transparent and only cross-fade their text colour.
-// Corner radius of the pill = WinZShapes.Small.
-private val LIBRARY_CHIP_PILL_RADIUS = 10.dp
+// Corner radius of the pill = WinZShapes.Medium (same 14dp as the landscape nav / status cards).
+private val LIBRARY_CHIP_PILL_RADIUS = 14.dp
 
 @Composable
 private fun LibraryFilterChips(
@@ -499,12 +482,17 @@ private fun LibraryFilterChip(pill: SlidingPillState, key: LibraryFilter, label:
         animationSpec = tween(WinZMotion.DurationSelectionTint),
         label = "libraryChipTint"
     )
+    val outline by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .55f) else hairlineColor(),
+        animationSpec = tween(WinZMotion.DurationSelectionTint),
+        label = "libraryChipOutline"
+    )
     Surface(
         onClick = click,
-        shape = WinZShapes.Small,
+        shape = WinZShapes.Medium,
         color = Color.Transparent,
         contentColor = content,
-        border = BorderStroke(1.dp, hairlineColor())
+        border = BorderStroke(1.dp, outline)
     ) {
         // The target sits on the content, not on the Surface's modifier: a clickable Surface pads
         // itself up to the 48dp touch target OUTSIDE its border, so a target on the Surface would
@@ -622,7 +610,7 @@ private fun PlayCompat(item: LibraryItem, cb: LibraryCallbacks, overlay: Boolean
         shape = CircleShape,
         color = controlAccentColor(),
         contentColor = Color.White
-    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.ui_play)) } }
+    ) { Box(contentAlignment = Alignment.Center) { Icon(TablerIcons.PlayerPlay, stringResource(R.string.ui_play)) } }
 }
 
 @Composable
@@ -637,7 +625,7 @@ private fun MenuButtonCompat(item: LibraryItem, cb: LibraryCallbacks, light: Boo
         else if (whiteTheme) MaterialTheme.colorScheme.onSurface
         else Color.White
     IconButton(onClick = { open = true }) {
-        Icon(Icons.Outlined.MoreVert, stringResource(R.string.ui_more_options), tint = tint)
+        Icon(TablerIcons.DotsVertical, stringResource(R.string.ui_more_options), tint = tint)
     }
     if (open) LibraryItemMenuCompat(item, cb) { open = false }
 }
@@ -687,7 +675,7 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 LibraryActionTileCompat(
-                    if (item.favorite) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
+                    if (item.favorite) TablerIcons.HeartFilled else TablerIcons.Heart,
                     favoriteLabel,
                     Modifier.weight(1f),
                     horizontal = landscape
@@ -695,11 +683,11 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_FAVORITE)
                 }
-                LibraryActionTileCompat(Icons.Outlined.Settings, stringResource(R.string.ui_configure), Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(TablerIcons.Settings, stringResource(R.string.ui_configure), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_SETTINGS)
                 }
-                LibraryActionTileCompat(Icons.Outlined.Photo, stringResource(R.string.ui_artwork), Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(TablerIcons.Photo, stringResource(R.string.ui_artwork), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_ICON)
                 }
@@ -708,21 +696,21 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                LibraryActionTileCompat(Icons.Outlined.Home, stringResource(R.string.ui_home_screen), Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(TablerIcons.Home, stringResource(R.string.ui_home_screen), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_HOME)
                 }
-                LibraryActionTileCompat(Icons.Outlined.ContentCopy, stringResource(R.string.ui_clone), Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(TablerIcons.Copy, stringResource(R.string.ui_clone), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_CLONE)
                 }
-                LibraryActionTileCompat(Icons.Outlined.FileUpload, stringResource(R.string.ui_export), Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(TablerIcons.Upload, stringResource(R.string.ui_export), Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_EXPORT)
                 }
             }
             LibraryActionTileCompat(
-                Icons.Outlined.DeleteOutline,
+                TablerIcons.Trash,
                 stringResource(R.string.ui_remove_from_library),
                 Modifier.fillMaxWidth().padding(top = 8.dp),
                 destructive = true,
@@ -802,7 +790,7 @@ private fun LibrarySearchField(query: String, onQueryChange: (String) -> Unit, m
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    Icons.Outlined.Search,
+                    TablerIcons.Search,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
@@ -831,7 +819,7 @@ private fun LibrarySearchField(query: String, onQueryChange: (String) -> Unit, m
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Outlined.Close,
+                            TablerIcons.X,
                             contentDescription = stringResource(R.string.ui_clear),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)

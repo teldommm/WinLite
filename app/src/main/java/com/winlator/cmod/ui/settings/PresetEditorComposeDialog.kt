@@ -43,9 +43,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -79,10 +76,10 @@ import com.winlator.cmod.ui.theme.ThemedDialogSurface
 import com.winlator.cmod.ui.theme.WinZOverlayTheme
 import com.winlator.cmod.ui.theme.accentSwitchColors
 import com.winlator.cmod.ui.theme.controlAccentColor
-import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 data class PresetEditorVariable(
     val name: String,
@@ -323,7 +320,7 @@ private fun PresetVariableRow(
             if (!variable.help.isNullOrBlank()) {
                 IconButton(onClick = onHelp, modifier = Modifier.size(36.dp)) {
                     Icon(
-                        Icons.AutoMirrored.Outlined.HelpOutline,
+                        TablerIcons.HelpCircle,
                         contentDescription = uiStr(R.string.ui_help),
                         modifier = Modifier.size(20.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
@@ -365,7 +362,7 @@ private fun PresetVariableRow(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(value, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                            Icon(Icons.Outlined.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(TablerIcons.ChevronDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     // Small anchored DropdownMenu, same as SettingChoice (audio driver, wine
@@ -391,7 +388,7 @@ private fun PresetVariableRow(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 },
-                                trailingIcon = { if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent) },
+                                trailingIcon = { if (isSelected) Icon(TablerIcons.Check, null, tint = accent) },
                                 onClick = {
                                     expanded = false
                                     onValueChange(option)

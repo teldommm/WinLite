@@ -31,21 +31,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.SportsEsports
-import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Star
-import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -90,10 +75,10 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.destructiveColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import kotlin.math.roundToInt
+import com.winlator.cmod.ui.theme.TablerIcons
 
 interface GameDetailCallbacks {
     fun onBack()
@@ -136,18 +121,18 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
         callbacks.onFavorite(favorite)
     }
     val items = listOf(
-        DetailActionItem(Icons.Outlined.Settings, stringResource(R.string.ui_configure), stringResource(R.string.ui_configure), callbacks::onConfigure),
-        DetailActionItem(Icons.Outlined.Dns, stringResource(R.string.ui_container), stringResource(R.string.ui_enter_container), callbacks::onArguments),
-        DetailActionItem(Icons.Outlined.Backup, stringResource(R.string.ui_backup), stringResource(R.string.ui_backup), callbacks::onSaves),
+        DetailActionItem(TablerIcons.Settings, stringResource(R.string.ui_configure), stringResource(R.string.ui_configure), callbacks::onConfigure),
+        DetailActionItem(TablerIcons.Server, stringResource(R.string.ui_container), stringResource(R.string.ui_enter_container), callbacks::onArguments),
+        DetailActionItem(TablerIcons.CloudUpload, stringResource(R.string.ui_backup), stringResource(R.string.ui_backup), callbacks::onSaves),
         DetailActionItem(
-            Icons.Outlined.Home,
+            TablerIcons.Home,
             if (homePinned) stringResource(R.string.ui_unpin) else stringResource(R.string.ui_home),
             if (homePinned) stringResource(R.string.ui_remove_from_home) else stringResource(R.string.ui_add_to_home),
             // The route asks "Remove ...?" with the app's standard confirm dialog before unpinning.
             if (homePinned) callbacks::onUnpinHome else callbacks::onPinHome,
             accent = homePinned
         ),
-        DetailActionItem(Icons.Outlined.DeleteOutline, stringResource(R.string.remove), stringResource(R.string.remove), callbacks::onRemove, destructive = true)
+        DetailActionItem(TablerIcons.Trash, stringResource(R.string.remove), stringResource(R.string.remove), callbacks::onRemove, destructive = true)
     )
     if (landscape) LandscapeDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, favorite, stats, items, callbacks, toggle)
     else PortraitDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, fallback, favorite, stats, items, callbacks, toggle)
@@ -200,7 +185,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
             ArtPlateButton(
                 onClick = callbacks::onBack,
                 modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 16.dp)
-            ) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp)) }
+            ) { Icon(TablerIcons.ArrowLeft, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp)) }
 
             // 74dp = 18 margin + 44 plate + 12 gap, on both sides, so a long title never runs under a plate.
             Column(Modifier.align(Alignment.TopStart).padding(start = 74.dp, end = 74.dp, top = 15.dp)) {
@@ -239,7 +224,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                         shape = WinZShapes.Medium,
                         colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
                     ) {
-                        Icon(Icons.Outlined.PlayArrow, null, modifier = Modifier.size(30.dp))
+                        Icon(TablerIcons.PlayerPlay, null, modifier = Modifier.size(30.dp))
                         Spacer(Modifier.size(8.dp))
                         Text(stringResource(R.string.ui_play), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
@@ -272,7 +257,7 @@ private fun ArtPlateButton(onClick: () -> Unit, modifier: Modifier, content: @Co
 private fun FavoriteButton(favorite: Boolean, onToggle: () -> Unit, modifier: Modifier) {
     ArtPlateButton(onClick = onToggle, modifier = modifier) {
         Icon(
-            if (favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+            if (favorite) TablerIcons.StarFilled else TablerIcons.Star,
             if (favorite) stringResource(R.string.ui_remove_from_favorites) else stringResource(R.string.ui_add_to_favorites),
             modifier = Modifier.size(24.dp),
             tint = if (favorite) controlAccentColor() else LocalContentColor.current
@@ -403,7 +388,7 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, ar
             ArtPlateButton(
                 onClick = callbacks::onBack,
                 modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 14.dp)
-            ) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp)) }
+            ) { Icon(TablerIcons.ArrowLeft, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp)) }
             FavoriteButton(favorite, toggleFavorite, Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 14.dp))
             Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -420,7 +405,7 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, ar
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = WinZShapes.Medium,
                 colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
-            ) { Icon(Icons.Outlined.PlayArrow, null); Spacer(Modifier.size(8.dp)); Text(stringResource(R.string.ui_play), fontWeight = FontWeight.Bold) }
+            ) { Icon(TablerIcons.PlayerPlay, null); Spacer(Modifier.size(8.dp)); Text(stringResource(R.string.ui_play), fontWeight = FontWeight.Bold) }
             items.forEach { DetailAction(it, Modifier.fillMaxWidth()) }
             Spacer(Modifier.height(12.dp))
         }
@@ -465,10 +450,10 @@ private fun StatChips(stats: GameStats, modifier: Modifier = Modifier) {
     val sizeLabel = stringResource(R.string.ui_stat_size)
     val entries = remember(stats, playtimeLabel) {
         buildList {
-            if (stats.playtimeMillis > 0L) add(StatEntry(Icons.Outlined.Schedule, playtimeLabel, formatPlaytime(stats.playtimeMillis)))
-            if (stats.playCount > 0) add(StatEntry(Icons.Outlined.SportsEsports, playsLabel, stats.playCount.toString()))
-            if (stats.lastPlayedMillis > 0L) add(StatEntry(Icons.Outlined.History, lastPlayedLabel, formatLastPlayed(stats.lastPlayedMillis)))
-            stats.sizeText?.let { add(StatEntry(Icons.Outlined.Storage, sizeLabel, it)) }
+            if (stats.playtimeMillis > 0L) add(StatEntry(TablerIcons.Clock, playtimeLabel, formatPlaytime(stats.playtimeMillis)))
+            if (stats.playCount > 0) add(StatEntry(TablerIcons.DeviceGamepad2, playsLabel, stats.playCount.toString()))
+            if (stats.lastPlayedMillis > 0L) add(StatEntry(TablerIcons.History, lastPlayedLabel, formatLastPlayed(stats.lastPlayedMillis)))
+            stats.sizeText?.let { add(StatEntry(TablerIcons.Database, sizeLabel, it)) }
         }
     }
     if (entries.isEmpty()) return

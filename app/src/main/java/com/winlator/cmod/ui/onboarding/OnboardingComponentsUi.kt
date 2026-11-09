@@ -24,11 +24,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,9 +57,7 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import com.winlator.cmod.core.ProtonPackageManager
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.destructiveColor
-import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material3.IconButton
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import com.winlator.cmod.ui.theme.SlidingPillHost
 import com.winlator.cmod.ui.theme.SlidingPillState
 import com.winlator.cmod.ui.theme.WinZMotion
@@ -73,6 +66,7 @@ import com.winlator.cmod.ui.theme.keepInViewWhen
 import com.winlator.cmod.ui.theme.rememberSlidingPillState
 import com.winlator.cmod.ui.theme.slidingPillTarget
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 private val bundledRuntimeId = "bundled:${ProtonPackageManager.DEFAULT_IDENTIFIER}"
 private val bundledRuntimeName = ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER)?.title
@@ -395,8 +389,8 @@ private fun SourceSelector(compact: Boolean = false, servers: () -> Unit, local:
     ) {
         Row(Modifier.height(if (compact) 44.dp else 56.dp)) {
             val part = if (compact) Modifier else Modifier.weight(1f)
-            SourcePart(Icons.Outlined.Dns, uiStr(R.string.ui_winlator_servers), true, servers, part)
-            SourcePart(Icons.Outlined.Folder, uiStr(R.string.ui_local_package), false, local, part, accent = true)
+            SourcePart(TablerIcons.Server, uiStr(R.string.ui_winlator_servers), true, servers, part)
+            SourcePart(TablerIcons.Folder, uiStr(R.string.ui_local_package), false, local, part, accent = true)
         }
     }
 }
@@ -445,7 +439,7 @@ private fun LandscapeComponentsHeader(
     ) {
         if (managerMode) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = uiStr(R.string.ui_back))
+                Icon(TablerIcons.ArrowLeft, contentDescription = uiStr(R.string.ui_back))
             }
             Spacer(Modifier.width(4.dp))
         }
@@ -539,7 +533,7 @@ private fun CoreComponentCard(
         border = BorderStroke(1.dp, hairlineColor())
     ) {
         Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, null, modifier = Modifier.size(28.dp))
+            Icon(TablerIcons.File, null, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 ScrollableName(bundledRuntimeName)
@@ -566,7 +560,7 @@ private fun CoreComponentCard(
                     enabled = !locked,
                     colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
                 ) {
-                    Icon(Icons.Outlined.Download, null)
+                    Icon(TablerIcons.Download, null)
                     Spacer(Modifier.width(5.dp))
                     Text(uiStr(R.string.install))
                 }
@@ -628,7 +622,7 @@ private fun ComponentCard(
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, null, modifier = Modifier.size(28.dp))
+                Icon(TablerIcons.File, null, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     ScrollableName(item.name)
@@ -697,7 +691,7 @@ private fun InstallProgressCard(label: String?, progress: Int) {
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, null, modifier = Modifier.size(28.dp))
+                Icon(TablerIcons.File, null, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(uiStr(R.string.ui_component_installation), fontWeight = FontWeight.SemiBold)
@@ -747,7 +741,7 @@ private fun ManagerTopBar(onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = uiStr(R.string.ui_back))
+            Icon(TablerIcons.ArrowLeft, contentDescription = uiStr(R.string.ui_back))
         }
         Spacer(Modifier.width(4.dp))
         Text(

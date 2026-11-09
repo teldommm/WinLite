@@ -22,9 +22,11 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
@@ -129,6 +131,10 @@ fun SlidingPillHost(
     color: Color,
     cornerRadius: Dp,
     modifier: Modifier = Modifier,
+    // Optional outline drawn on the pill itself (it travels and fades with it), e.g. the accent
+    // ring of the selected navigation item. Unspecified = fill only.
+    borderColor: Color = Color.Unspecified,
+    borderWidth: Dp = 1.dp,
     content: @Composable BoxScope.() -> Unit
 ) {
     val rect = state.rect
@@ -181,6 +187,18 @@ fun SlidingPillHost(
                         size = r.size,
                         cornerRadius = CornerRadius(cornerRadius.toPx())
                     )
+                    if (borderColor != Color.Unspecified) {
+                        // Stroke is centred on its path: inset by half the width so the ring stays
+                        // inside the pill's bounds like the fill.
+                        val w = borderWidth.toPx()
+                        drawRoundRect(
+                            color = borderColor.copy(alpha = borderColor.alpha * a),
+                            topLeft = r.topLeft + Offset(w / 2, w / 2),
+                            size = androidx.compose.ui.geometry.Size(r.width - w, r.height - w),
+                            cornerRadius = CornerRadius((cornerRadius.toPx() - w / 2).coerceAtLeast(0f)),
+                            style = Stroke(w)
+                        )
+                    }
                 }
             },
         content = content

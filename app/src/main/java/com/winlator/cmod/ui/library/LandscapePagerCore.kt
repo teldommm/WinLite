@@ -28,8 +28,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -60,6 +58,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 import kotlin.math.absoluteValue
 import com.winlator.cmod.ui.theme.WinZShapes
+import com.winlator.cmod.ui.theme.TablerIcons
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -203,7 +202,7 @@ internal fun LandscapePagerCore(
                             shape = CircleShape,
                             color = controlAccentColor(),
                             contentColor = Color.White
-                        ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.ui_play)) } }
+                        ) { Box(contentAlignment = Alignment.Center) { Icon(TablerIcons.PlayerPlay, stringResource(R.string.ui_play)) } }
                         footerActions(item)
                     }
                 }

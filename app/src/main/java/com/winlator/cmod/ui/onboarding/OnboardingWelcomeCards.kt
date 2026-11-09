@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -22,6 +20,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 @Composable
 internal fun ClassicWelcomeCard(icon: ImageVector, title: String, description: String, click: () -> Unit) {
@@ -48,7 +47,7 @@ internal fun ClassicWelcomeCard(icon: ImageVector, title: String, description: S
                 Spacer(Modifier.height(4.dp))
                 Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(Icons.Outlined.ChevronRight, null)
+            Icon(TablerIcons.ChevronRight, null)
         }
     }
 }

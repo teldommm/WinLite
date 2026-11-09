@@ -12,9 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.NotificationsNone
-import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -29,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 @Composable
 internal fun OnboardingAccessScreen(back: () -> Unit, next: () -> Unit) {
@@ -36,7 +34,7 @@ internal fun OnboardingAccessScreen(back: () -> Unit, next: () -> Unit) {
     val action = "Grant " + "per" + "mis" + "sions"
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
         Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Outlined.Security, null, modifier = Modifier.size(52.dp))
+            Icon(TablerIcons.Shield, null, modifier = Modifier.size(52.dp))
             Spacer(Modifier.height(14.dp))
             Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(uiStr(R.string.ui_winlator_needs_storage_and_notification_a), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -46,7 +44,7 @@ internal fun OnboardingAccessScreen(back: () -> Unit, next: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
             ) {
-                Icon(Icons.Outlined.NotificationsNone, null)
+                Icon(TablerIcons.Bell, null)
                 Spacer(Modifier.size(8.dp))
                 Text(action)
             }

@@ -36,9 +36,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -87,6 +84,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // "Backup" window of a game (the Backup button on the game page): backups of its saves in
 // Winlator/backups — the latest one, the automatic-backup switch, what a backup covers, Back up and
@@ -331,7 +329,7 @@ private fun ColumnScope.GameSavesPanel(
                     stringResource(R.string.ui_open_save_folder),
                     Modifier.fillMaxWidth(),
                     enabled = !busy && profileDir != null,
-                    icon = Icons.Outlined.FolderOpen
+                    icon = TablerIcons.FolderOpen
                 ) { openProfileFolder() }
                 HorizontalDivider(color = dividerColor())
             }
@@ -403,7 +401,7 @@ private fun ColumnScope.GameSavesPanel(
                 }
             }
             if (!ownProfile) {
-                SavesOutlinedButton(stringResource(R.string.ui_rescan_save_locations), Modifier.fillMaxWidth(), enabled = !busy && !loading, icon = Icons.Outlined.Refresh) { rescan() }
+                SavesOutlinedButton(stringResource(R.string.ui_rescan_save_locations), Modifier.fillMaxWidth(), enabled = !busy && !loading, icon = TablerIcons.Refresh) { rescan() }
             }
 
             message?.let {

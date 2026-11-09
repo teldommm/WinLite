@@ -32,24 +32,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.MusicNote
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -100,6 +82,7 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.core.RemoteSources
 import com.winlator.cmod.ui.theme.dividerColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 @Immutable
 data class SettingChoice(val id: String, val name: String)
@@ -186,17 +169,17 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
 
             item("environment-title") { SectionTitle("ENVIRONMENTS") }
             item("containers") {
-                NavigationRow(Icons.Outlined.Dns, uiStr(R.string.ui_containers), uiStr(R.string.ui_create_and_manage_windows_environments), callbacks::onOpenContainers)
+                NavigationRow(TablerIcons.Server, uiStr(R.string.ui_containers), uiStr(R.string.ui_create_and_manage_windows_environments), callbacks::onOpenContainers)
             }
             item("components") {
-                NavigationRow(Icons.Outlined.Apps, uiStr(R.string.ui_components), uiStr(R.string.ui_wine_proton_dxvk_vkd3d_and_runtimes), callbacks::onOpenComponents)
+                NavigationRow(TablerIcons.Apps, uiStr(R.string.ui_components), uiStr(R.string.ui_wine_proton_dxvk_vkd3d_and_runtimes), callbacks::onOpenComponents)
             }
 
             item("presets-title") { SectionTitle("PRESETS") }
             item("presets") {
                 GroupCard {
                     PresetChoiceRow(
-                        icon = Icons.Outlined.Memory,
+                        icon = TablerIcons.Cpu,
                         title = stringResource(R.string.box64_preset),
                         choices = model.box64Presets,
                         selectedId = model.selectedBox64Preset,
@@ -206,7 +189,7 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
                     )
                     GroupDivider()
                     PresetChoiceRow(
-                        icon = Icons.Outlined.Speed,
+                        icon = TablerIcons.Gauge,
                         title = stringResource(R.string.fexcore_preset),
                         choices = model.fexPresets,
                         selectedId = model.selectedFexPreset,
@@ -223,8 +206,8 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
             }
 
             item("paths-title") { SectionTitle(uiStr(R.string.ui_path_settings)) }
-            item("winlator-path") { NavigationRow(Icons.Outlined.Storage, uiStr(R.string.ui_winlator_path), model.winlatorPath, callbacks::onChooseWinlatorPath) }
-            item("shortcut-path") { NavigationRow(Icons.Outlined.FolderOpen, uiStr(R.string.ui_shortcut_export_path), model.shortcutPath, callbacks::onChooseShortcutPath) }
+            item("winlator-path") { NavigationRow(TablerIcons.Database, uiStr(R.string.ui_winlator_path), model.winlatorPath, callbacks::onChooseWinlatorPath) }
+            item("shortcut-path") { NavigationRow(TablerIcons.FolderOpen, uiStr(R.string.ui_shortcut_export_path), model.shortcutPath, callbacks::onChooseShortcutPath) }
 
             item("cover-art-title") { SectionTitle(uiStr(R.string.ui_cover_art)) }
             item("cover-art") {
@@ -290,11 +273,11 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
             }
 
             item("imagefs-title") { SectionTitle(stringResource(R.string.imagefs)) }
-            item("imagefs") { NavigationRow(Icons.Outlined.Refresh, stringResource(R.string.reinstall_imagefs), null) { confirmReinstallImageFs = true } }
+            item("imagefs") { NavigationRow(TablerIcons.Refresh, stringResource(R.string.reinstall_imagefs), null) { confirmReinstallImageFs = true } }
 
             item("about-title") { SectionTitle("ABOUT") }
             item("about") {
-                NavigationRow(Icons.Outlined.Info, uiStr(R.string.ui_about), null) { activity?.showAboutDialog() }
+                NavigationRow(TablerIcons.InfoCircle, uiStr(R.string.ui_about), null) { activity?.showAboutDialog() }
             }
         }
     }
@@ -366,7 +349,7 @@ private fun NavigationRow(icon: ImageVector, title: String, subtitle: String?, o
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                 if (!subtitle.isNullOrBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(TablerIcons.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -456,12 +439,12 @@ private fun PresetChoiceRow(
                     Text(title, fontWeight = FontWeight.Medium)
                     Text(selected?.name.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Icon(Icons.Outlined.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(TablerIcons.ChevronDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Box {
             IconButton(onClick = { actionsOpen = true }) {
-                Icon(Icons.Outlined.MoreVert, uiStr(R.string.ui_preset_actions))
+                Icon(TablerIcons.DotsVertical, uiStr(R.string.ui_preset_actions))
             }
             DropdownMenu(
                 expanded = actionsOpen,
@@ -471,7 +454,7 @@ private fun PresetChoiceRow(
             ) {
                 DropdownMenuItem(
                     text = { Text(uiStr(R.string.ui_create_new)) },
-                    leadingIcon = { Icon(Icons.Outlined.Add, null) },
+                    leadingIcon = { Icon(TablerIcons.Plus, null) },
                     onClick = {
                         actionsOpen = false
                         onAction(kind, "", "add")
@@ -480,7 +463,7 @@ private fun PresetChoiceRow(
                 if (selectedId.isNotBlank()) {
                     DropdownMenuItem(
                         text = { Text(uiStr(R.string.ui_clone)) },
-                        leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
+                        leadingIcon = { Icon(TablerIcons.Copy, null) },
                         onClick = {
                             actionsOpen = false
                             onAction(kind, selectedId, "duplicate")
@@ -488,7 +471,7 @@ private fun PresetChoiceRow(
                     )
                     DropdownMenuItem(
                         text = { Text(uiStr(R.string.ui_edit)) },
-                        leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                        leadingIcon = { Icon(TablerIcons.Pencil, null) },
                         onClick = {
                             actionsOpen = false
                             onAction(kind, selectedId, "edit")
@@ -496,7 +479,7 @@ private fun PresetChoiceRow(
                     )
                     DropdownMenuItem(
                         text = { Text(uiStr(R.string.ui_delete), color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(TablerIcons.Trash, null, tint = MaterialTheme.colorScheme.error) },
                         onClick = {
                             actionsOpen = false
                             onAction(kind, selectedId, "remove")
@@ -554,7 +537,7 @@ private fun PresetChoiceRow(
                                     color = if (isSelected) accent else MaterialTheme.colorScheme.onSurface,
                                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                                 )
-                                if (isSelected) Icon(Icons.Outlined.Check, null, tint = accent)
+                                if (isSelected) Icon(TablerIcons.Check, null, tint = accent)
                             }
                         }
                     }
@@ -597,7 +580,7 @@ private fun WineDebugChannelsRow(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(TablerIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 
     if (dialogOpen) {
@@ -688,10 +671,10 @@ private fun SoundFontCard(choices: List<SettingChoice>, onInstall: () -> Unit, o
     GroupCard {
         choices.forEachIndexed { index, choice ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.MusicNote, null)
+                Icon(TablerIcons.Music, null)
                 Spacer(Modifier.width(10.dp))
                 Text(choice.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                IconButton(onClick = { onRemove(choice.name) }) { Icon(Icons.Outlined.DeleteOutline, uiStr(R.string.ui_remove, choice.name)) }
+                IconButton(onClick = { onRemove(choice.name) }) { Icon(TablerIcons.Trash, uiStr(R.string.ui_remove, choice.name)) }
             }
             if (index != choices.lastIndex) GroupDivider()
         }
@@ -700,7 +683,7 @@ private fun SoundFontCard(choices: List<SettingChoice>, onInstall: () -> Unit, o
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = androidx.compose.ui.graphics.Color.White)
         ) {
-            Icon(Icons.Outlined.Add, null)
+            Icon(TablerIcons.Plus, null)
             Spacer(Modifier.width(7.dp))
             Text(uiStr(R.string.ui_install_soundfont))
         }

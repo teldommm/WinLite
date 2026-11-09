@@ -39,11 +39,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -81,6 +76,7 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.dividerColor
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // "Winlator servers" (the button in the component manager): one window for the remote addresses of
 // components, drivers and input controls (component catalog, driver repositories, input-controls
@@ -231,7 +227,7 @@ private fun ColumnScope.ServicesScreen(
                     repos.clear()
                     repos.addAll(RemoteSources.defaultDriverRepos())
                 }) {
-                    Icon(Icons.Outlined.Refresh, null, modifier = Modifier.size(16.dp))
+                    Icon(TablerIcons.Refresh, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(uiStr(R.string.ui_default))
                 }
@@ -252,7 +248,7 @@ private fun ColumnScope.ServicesScreen(
                 colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
                 border = BorderStroke(1.dp, hairlineColor())
             ) {
-                Icon(Icons.Outlined.Add, null, modifier = Modifier.size(18.dp))
+                Icon(TablerIcons.Plus, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(uiStr(R.string.ui_add_repository))
             }
@@ -405,7 +401,7 @@ private fun ServiceField(
         trailingIcon = if (differs) ({
             IconButton(onClick = { onChange(default) }) {
                 Icon(
-                    if (default.isEmpty()) Icons.Outlined.Close else Icons.Outlined.Refresh,
+                    if (default.isEmpty()) TablerIcons.X else TablerIcons.Refresh,
                     contentDescription = if (default.isEmpty()) uiStr(R.string.ui_clear) else uiStr(R.string.ui_restore_default),
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
@@ -445,7 +441,7 @@ private fun RepoRow(repo: DriverRepo, onRemove: () -> Unit) {
             }
             IconButton(onClick = onRemove) {
                 Icon(
-                    Icons.Outlined.DeleteOutline,
+                    TablerIcons.Trash,
                     contentDescription = uiStr(R.string.ui_remove_repository),
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant

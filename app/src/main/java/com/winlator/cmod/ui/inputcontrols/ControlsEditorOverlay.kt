@@ -25,17 +25,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Undo
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.DragIndicator
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.clickable
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.ripple
 import com.winlator.cmod.ui.SidebarChoiceItem
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +61,7 @@ import com.winlator.cmod.widget.InputControlsView
 import kotlin.math.hypot
 import kotlin.math.max
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 // Toolbar actions the Activity handles (all of them touch the profile / InputControlsView).
 interface ControlsEditorActions {
@@ -428,7 +420,7 @@ private fun EditorToolbar(
                         .padding(start = 2.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Outlined.DragIndicator, contentDescription = uiStr(R.string.ui_move_toolbar), tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                    Icon(TablerIcons.GripVertical, contentDescription = uiStr(R.string.ui_move_toolbar), tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
                     Column {
                         Text(
@@ -448,7 +440,7 @@ private fun EditorToolbar(
                         )
                     }
                     Icon(
-                        Icons.Outlined.ExpandMore,
+                        TablerIcons.ChevronDown,
                         contentDescription = uiStr(R.string.ui_switch_profile),
                         tint = if (profileMenuOpen) controlAccentColor() else colors.onSurfaceVariant,
                         modifier = Modifier.padding(start = 2.dp).size(18.dp)
@@ -461,16 +453,16 @@ private fun EditorToolbar(
                 }
             }
             ToolbarDivider()
-            ToolbarButton(Icons.Outlined.Add, uiStr(R.string.ui_add_element), iconSize = 24.dp, onClick = onAdd)
-            ToolbarButton(Icons.Outlined.Delete, uiStr(R.string.ui_remove_element), iconSize = 22.dp, enabled = hasSelection, onClick = onRemove)
-            ToolbarButton(Icons.Outlined.ContentCopy, uiStr(R.string.ui_duplicate_element), iconSize = 20.dp, enabled = hasSelection, onClick = onDuplicate)
-            ToolbarButton(Icons.AutoMirrored.Outlined.Undo, uiStr(R.string.ui_undo), iconSize = 23.dp, enabled = undoAvailable, onClick = onUndo)
+            ToolbarButton(TablerIcons.Plus, uiStr(R.string.ui_add_element), iconSize = 24.dp, onClick = onAdd)
+            ToolbarButton(TablerIcons.Trash, uiStr(R.string.ui_remove_element), iconSize = 22.dp, enabled = hasSelection, onClick = onRemove)
+            ToolbarButton(TablerIcons.Copy, uiStr(R.string.ui_duplicate_element), iconSize = 20.dp, enabled = hasSelection, onClick = onDuplicate)
+            ToolbarButton(TablerIcons.ArrowBackUp, uiStr(R.string.ui_undo), iconSize = 23.dp, enabled = undoAvailable, onClick = onUndo)
             ToolbarDivider()
-            ToolbarButton(Icons.Outlined.Tune, uiStr(R.string.ui_element_settings_2), iconSize = 21.dp, enabled = hasSelection || settingsOpen, active = settingsOpen, onClick = onSettings)
+            ToolbarButton(TablerIcons.Adjustments, uiStr(R.string.ui_element_settings_2), iconSize = 21.dp, enabled = hasSelection || settingsOpen, active = settingsOpen, onClick = onSettings)
 
             var schemeOpen by remember { mutableStateOf(false) }
             Box {
-                ToolbarButton(Icons.Outlined.Palette, uiStr(R.string.ui_scheme_color), iconSize = 20.dp, active = schemeOpen) { schemeOpen = true }
+                ToolbarButton(TablerIcons.Palette, uiStr(R.string.ui_scheme_color), iconSize = 20.dp, active = schemeOpen) { schemeOpen = true }
                 SidebarMenu(expanded = schemeOpen, onDismissRequest = { schemeOpen = false }) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
                         Text(

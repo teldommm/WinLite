@@ -17,8 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -46,6 +44,7 @@ import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 /** Parses the stored "A,B,C" blacklist. */
 internal fun parseExtensionBlacklist(blacklisted: String): Set<String> =
@@ -92,7 +91,7 @@ internal fun VulkanExtensionsDialog(
             label = { Text(uiStr(R.string.ui_name)) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, uiStr(R.string.ui_clear_search)) }
+                    IconButton(onClick = { query = "" }) { Icon(TablerIcons.X, uiStr(R.string.ui_clear_search)) }
                 }
             },
             singleLine = true,

@@ -10,9 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +21,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.TablerIcons
 
 @Composable
 internal fun ClassicWinlatorWelcome(
@@ -66,14 +64,14 @@ internal fun ClassicWinlatorWelcome(
             )
             Spacer(Modifier.height(26.dp))
             ClassicWelcomeCard(
-                Icons.Outlined.Apps,
+                TablerIcons.Apps,
                 uiStr(R.string.ui_get_started),
                 uiStr(R.string.ui_choose_components),
                 start
             )
             Spacer(Modifier.height(12.dp))
             ClassicWelcomeCard(
-                Icons.Outlined.SkipNext,
+                TablerIcons.PlayerSkipForward,
                 uiStr(R.string.ui_skip),
                 uiStr(R.string.ui_use_the_components_bundled_with_winlator),
                 skip

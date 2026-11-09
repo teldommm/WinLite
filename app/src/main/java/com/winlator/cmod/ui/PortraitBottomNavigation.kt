@@ -19,10 +19,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -33,7 +29,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
@@ -44,6 +39,8 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.rememberSlidingPillState
 import com.winlator.cmod.ui.theme.slidingPillTarget
+import com.winlator.cmod.ui.theme.TablerIcons
+import androidx.compose.ui.graphics.vector.ImageVector
 
 // Portrait bottom navigation (Library / Input Controls / Settings). Rendered by MainShell
 // (ui/shell/MainShell.kt) as a floating bar over the tab content; it no longer has its own
@@ -77,16 +74,17 @@ internal fun PortraitBottomNavigation(
             selectedKey = selected,
             color = MaterialTheme.colorScheme.primary.copy(alpha = .12f),
             cornerRadius = NAV_PILL_RADIUS,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            borderColor = MaterialTheme.colorScheme.primary.copy(alpha = .55f)
         ) {
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                PortraitNavItem(pill, R.id.main_menu_shortcuts, Icons.Outlined.Home, stringResource(R.string.ui_library), selected == R.id.main_menu_shortcuts) {
+                PortraitNavItem(pill, R.id.main_menu_shortcuts, TablerIcons.Home, stringResource(R.string.ui_library), selected == R.id.main_menu_shortcuts) {
                     onNavigate(R.id.main_menu_shortcuts)
                 }
-                PortraitNavItem(pill, R.id.main_menu_input_controls, Icons.Outlined.SportsEsports, stringResource(R.string.ui_input_controls), selected == R.id.main_menu_input_controls) {
+                PortraitNavItem(pill, R.id.main_menu_input_controls, TablerIcons.DeviceGamepad2, stringResource(R.string.ui_input_controls), selected == R.id.main_menu_input_controls) {
                     onNavigate(R.id.main_menu_input_controls)
                 }
-                PortraitNavItem(pill, R.id.main_menu_settings, Icons.Outlined.Settings, stringResource(R.string.settings), selected == R.id.main_menu_settings) {
+                PortraitNavItem(pill, R.id.main_menu_settings, TablerIcons.Settings, stringResource(R.string.settings), selected == R.id.main_menu_settings) {
                     onNavigate(R.id.main_menu_settings)
                 }
             }

@@ -31,10 +31,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -75,6 +71,7 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.destructiveColor
 import kotlin.math.roundToInt
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.TablerIcons
 
 enum class ControlElementIconTint { NONE, INVERT, BLUE }
 
@@ -163,7 +160,7 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
             modifier = Modifier.weight(1f)
         )
         IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Outlined.Close, contentDescription = uiStr(R.string.ui_close), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            Icon(TablerIcons.X, contentDescription = uiStr(R.string.ui_close), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
         }
     }
     Spacer(Modifier.height(10.dp))
@@ -318,11 +315,11 @@ private fun Stepper(value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
     val disabled = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = { if (value > min) onChange(value - 1) }, enabled = value > min, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Outlined.Remove, uiStr(R.string.ui_fewer), tint = if (value > min) MaterialTheme.colorScheme.onSurface else disabled, modifier = Modifier.size(20.dp))
+            Icon(TablerIcons.Minus, uiStr(R.string.ui_fewer), tint = if (value > min) MaterialTheme.colorScheme.onSurface else disabled, modifier = Modifier.size(20.dp))
         }
         Text(value.toString(), style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
         IconButton(onClick = { if (value < max) onChange(value + 1) }, enabled = value < max, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Outlined.Add, uiStr(R.string.ui_more), tint = if (value < max) MaterialTheme.colorScheme.onSurface else disabled, modifier = Modifier.size(20.dp))
+            Icon(TablerIcons.Plus, uiStr(R.string.ui_more), tint = if (value < max) MaterialTheme.colorScheme.onSurface else disabled, modifier = Modifier.size(20.dp))
         }
     }
 }

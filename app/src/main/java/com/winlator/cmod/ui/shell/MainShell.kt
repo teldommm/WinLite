@@ -13,7 +13,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -39,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.PortraitBottomNavigation
+import com.winlator.cmod.ui.ShellChrome
 import com.winlator.cmod.ui.filemanager.FileManagerRoute
 import com.winlator.cmod.ui.inputcontrols.InputControlsRoute
 import com.winlator.cmod.ui.library.LibraryRoute
@@ -229,21 +232,28 @@ private fun MainShell(controller: MainShellController, listener: MainShellListen
             )
         }
 
-        // Landscape: the nav is one static group in the header band; screens reserve its space
-        // (ShellChrome) and draw only their title and actions.
+        // Landscape: the nav group and the status card (clock / network / battery — the system
+        // bars are hidden in landscape) are one static row in the header band; screens reserve
+        // its space (ShellChrome.LandscapeNavReserve) and draw only their title and actions.
         AnimatedVisibility(
             visible = landscape && !controller.detailActive,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .zIndex(2f)
-                .padding(top = 2.dp, end = 14.dp),
+                .padding(top = 2.dp, end = ShellChrome.LandscapeChromeEndMargin),
             enter = fadeIn(tween(ENTER_MS)),
             exit = fadeOut(tween(EXIT_MS))
         ) {
-            LandscapeNavGroup(
-                selected = controller.selectedTab,
-                onNavigate = { listener.onNavigate(it) }
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(ShellChrome.LandscapeChromeGap),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LandscapeNavGroup(
+                    selected = controller.selectedTab,
+                    onNavigate = { listener.onNavigate(it) }
+                )
+                LandscapeStatusCluster()
+            }
         }
 
         Box(Modifier.fillMaxSize().zIndex(3f)) {
