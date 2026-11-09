@@ -125,6 +125,10 @@ internal fun LibraryRoot(
 ) {
     var filterName by rememberSaveable { mutableStateOf(LibraryFilter.All.name) }
     val filter = LibraryFilter.valueOf(filterName)
+    // Hoisted here, above the layout branches below: the pager layout and the grid/empty layout
+    // each have their own chips, and a filter with no games switches between them. The same pill
+    // state in both lets the pill glide across that switch instead of appearing at the new chip.
+    val chipPill = rememberSlidingPillState()
     val visible = remember(items, filter, query) {
         val source = when (filter) {
             LibraryFilter.All -> items
@@ -150,6 +154,7 @@ internal fun LibraryRoot(
                     onArtwork = true,
                     query = query,
                     filter = filter,
+                    pill = chipPill,
                     onFilter = { filterName = it.name },
                     cb = cb
                 )
@@ -174,6 +179,7 @@ internal fun LibraryRoot(
                     onArtwork = false,
                     query = query,
                     filter = filter,
+                    pill = chipPill,
                     onFilter = { filterName = it.name },
                     cb = cb
                 )
@@ -188,7 +194,7 @@ internal fun LibraryRoot(
                 onSearchQueryChanged = cb::onSearchQueryChanged,
                 onOpenFileManager = cb::onOpenFileManager
             )
-            LibraryFilterChips(filter, { filterName = it.name }, Modifier.padding(vertical = 12.dp))
+            LibraryFilterChips(filter, chipPill, { filterName = it.name }, Modifier.padding(vertical = 12.dp))
         }
         if (visible.isEmpty()) {
             if (query.isNotBlank() || (filter != LibraryFilter.All && items.isNotEmpty())) {
@@ -256,6 +262,7 @@ private fun LibraryLandscapeTop(
     onArtwork: Boolean,
     query: String,
     filter: LibraryFilter,
+    pill: SlidingPillState,
     onFilter: (LibraryFilter) -> Unit,
     cb: LibraryCallbacks
 ) {
@@ -270,7 +277,7 @@ private fun LibraryLandscapeTop(
             onSearchQueryChanged = cb::onSearchQueryChanged
         )
         Spacer(Modifier.height(7.dp))
-        LibraryFilterChips(filter, onFilter)
+        LibraryFilterChips(filter, pill, onFilter)
     }
 }
 
@@ -464,8 +471,12 @@ internal fun libraryFilterLabel(filter: LibraryFilter): String = when (filter) {
 private val LIBRARY_CHIP_PILL_RADIUS = 10.dp
 
 @Composable
-private fun LibraryFilterChips(filter: LibraryFilter, onFilter: (LibraryFilter) -> Unit, modifier: Modifier = Modifier) {
-    val pill = rememberSlidingPillState()
+private fun LibraryFilterChips(
+    filter: LibraryFilter,
+    pill: SlidingPillState,
+    onFilter: (LibraryFilter) -> Unit,
+    modifier: Modifier = Modifier
+) {
     SlidingPillHost(
         state = pill,
         selectedKey = filter,

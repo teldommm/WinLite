@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 
 // Sliding selection pill — one highlight shape that travels between the items of an exclusive
@@ -57,6 +58,18 @@ class SlidingPillState {
     // Bumped whenever a measurement arrives, so snapshotFlow in the host re-reads the rect.
     private var tick by mutableIntStateOf(0)
 
+    // The pill's own animation state lives here, not in the host composable, so a state hoisted
+    // above the host keeps the pill's position when the host leaves the composition and a new
+    // one takes its place (e.g. the Library switching between its pager and grid layouts when a
+    // filter has no games) — the pill then glides to the new spot instead of appearing there.
+    internal val rect = Animatable(Rect.Zero, Rect.VectorConverter)
+    internal val alpha = Animatable(0f)
+
+    internal fun hasTarget(key: Any): Boolean {
+        if (tick < 0) return false // read to subscribe the caller's snapshot
+        return targets.containsKey(key)
+    }
+
     internal fun setContainer(coordinates: LayoutCoordinates) {
         container = coordinates
         tick++
@@ -78,6 +91,9 @@ class SlidingPillState {
         return Rect(host.localPositionOf(item, Offset.Zero), size)
     }
 }
+
+// Marker (compared by identity) for "the selected key has no item".
+private val NO_TARGET = Rect(-1f, -1f, -1f, -1f)
 
 @Composable
 fun rememberSlidingPillState(): SlidingPillState = remember { SlidingPillState() }
@@ -115,16 +131,25 @@ fun SlidingPillHost(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val rect = remember { Animatable(Rect.Zero, Rect.VectorConverter) }
-    val alpha = remember { Animatable(0f) }
+    val rect = state.rect
+    val alpha = state.alpha
 
     LaunchedEffect(state, selectedKey) {
-        snapshotFlow { selectedKey?.let { state.rectOf(it) } }
+        snapshotFlow {
+            when {
+                // Nothing to highlight: no selection, or the selection has no item in this group.
+                selectedKey == null || !state.hasTarget(selectedKey) -> NO_TARGET
+                // null = the item exists but isn't measured in the current host yet (right after
+                // the host was replaced); wait for the real position instead of fading out.
+                else -> state.rectOf(selectedKey)
+            }
+        }
+            .filterNotNull()
             .distinctUntilChanged()
             .collectLatest { target ->
                 when {
                     // Nothing to highlight (selection has no item in this group).
-                    target == null -> alpha.animateTo(0f, tween(WinZMotion.DurationS))
+                    target === NO_TARGET -> alpha.animateTo(0f, tween(WinZMotion.DurationS))
                     // Very first placement: appear in place, no slide from the corner.
                     rect.value == Rect.Zero -> {
                         rect.snapTo(target)
