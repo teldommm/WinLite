@@ -69,6 +69,7 @@ import com.winlator.cmod.core.OnExtractFileListener;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.core.ProcessHelper;
 import com.winlator.cmod.core.StringUtils;
+import com.winlator.cmod.core.ThreadPlacementController;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineRegistryEditor;
@@ -282,6 +283,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String screenEffectProfile;
 
     private GuestProgramLauncherComponent guestProgramLauncherComponent;
+    private ThreadPlacementController threadPlacementController;
     private EnvVars overrideEnvVars;
 
     @Override
@@ -812,6 +814,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         super.onResume();
 
         if (environment != null) xServerView.onResume();
+        if (environment != null) startThreadPlacement();
 
         // Thaw only what onPause() froze, and never a game the player paused by hand.
         if (backgroundSuspended && !isPaused) resumeGame();
@@ -825,6 +828,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onPause() {
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
+        stopThreadPlacement(false);
         super.onPause();
 
         if (!isInPictureInPictureMode()) {
@@ -927,6 +931,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         savePlaytimeData();
         handler.removeCallbacks(savePlaytimeRunnable);
 
+        stopThreadPlacement(true);
+
         if (midiHandler != null)
             midiHandler.stop();
 
@@ -986,6 +992,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             winlatorLogcatLogger = null;
         }
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
+        stopThreadPlacement(true);
         super.onDestroy();
     }
 
@@ -1229,6 +1236,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         if (wineRequestHandler != null)
             wineRequestHandler.start();
+
+        startThreadPlacement();
 
         dxwrapperConfig = null;
 
@@ -3038,6 +3047,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public boolean isShowFPS() {
         if (container == null) return false;
         return resolveHudMode() != 0;
+    }
+
+    // Thread Placement: per-container option, a shortcut can override it. Off unless switched on.
+    private boolean isThreadPlacementEnabled() {
+        String fallback = container != null ? container.getExtra("threadPlacement", "0") : "0";
+        String value = shortcut != null ? shortcut.getExtra("threadPlacement", fallback) : fallback;
+        return "1".equals(value);
+    }
+
+    private void startThreadPlacement() {
+        if (!isThreadPlacementEnabled()) return;
+        if (threadPlacementController == null) threadPlacementController = ThreadPlacementController.create();
+        if (threadPlacementController != null) threadPlacementController.start();
+    }
+
+    // Wine is about to be killed (release) or the app left the foreground (stop, resumed later).
+    private void stopThreadPlacement(boolean release) {
+        if (threadPlacementController == null) return;
+        if (release) {
+            threadPlacementController.release();
+            threadPlacementController = null;
+        } else {
+            threadPlacementController.stop();
+        }
     }
 
     private void assignTaskAffinity(Window window) {

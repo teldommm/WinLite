@@ -245,6 +245,8 @@ private class ContainerEditorStateV2(
     var xinput by mutableStateOf(editing?.let { (it.inputType and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0 } ?: true)
     var dinput by mutableStateOf(editing?.let { (it.inputType and WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()) != 0 } ?: false)
     var syncCpu by mutableStateOf(editing?.isSyncCpuTopology ?: false)
+    // Off by default; stored in the container's extra data ("1" = on).
+    var threadPlacement by mutableStateOf(editing?.getExtra("threadPlacement", "0") == "1")
 
     private val cpuCount = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
     val cpu64 = mutableStateListOf<Boolean>().apply {
@@ -333,7 +335,7 @@ private class ContainerEditorStateV2(
         renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat, surfaceUbwc,
         graphicsDriver, graphicsConfig,
         wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, forceSsbs, boxPreset, exclusive, xinput, dinput,
-        syncCpu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
+        syncCpu, threadPlacement, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
         cpu64.joinToString(), cpu32.joinToString(), components.entries.sortedBy { it.key }.joinToString()
     ).joinToString("|")
 }
@@ -477,6 +479,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.setCPUList(state.cpu64.indices.filter { state.cpu64[it] }.joinToString(","))
         container.setCPUListWoW64(state.cpu32.indices.filter { state.cpu32[it] }.joinToString(","))
         container.setSyncCpuTopology(state.syncCpu)
+        container.putExtra("threadPlacement", if (state.threadPlacement) "1" else "0")
         container.setGraphicsDriver(state.graphicsDriver)
         container.setGraphicsDriverConfig(state.graphicsConfig)
         container.setRendererPresentMode(state.rendererPresentMode)
@@ -578,6 +581,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     .put("oboeExclusive", if (state.oboeExclusive) "1" else "0")
                     .put(DirectAudioDriver.EXTRA_MIC, if (state.directAudioMic) "1" else "0")
                     .put("openGlDefaultInitialized", if (state.openGlDefaultInitialized) "1" else "0")
+                    .put("threadPlacement", if (state.threadPlacement) "1" else "0")
                     .put("autoMesaGlVersionOverride", if (state.autoMesaGlVersionOverride) "1" else "0"))
             }
             manager.createContainerAsync(data, contents) { created ->
@@ -1109,6 +1113,8 @@ private fun ContainerCategoryV2(
             }
             SettingsCard {
                 SettingToggle(uiStr(R.string.ui_sync_cpu_topology), s.syncCpu) { s.syncCpu = it }
+                SettingsDivider()
+                SettingToggle(uiStr(R.string.ui_thread_placement), s.threadPlacement) { s.threadPlacement = it }
                 SettingsDivider()
                 CpuSelectorRow(uiStr(R.string.processor_affinity), s.cpu64) { index, checked -> s.cpu64[index] = checked }
                 SettingsDivider()

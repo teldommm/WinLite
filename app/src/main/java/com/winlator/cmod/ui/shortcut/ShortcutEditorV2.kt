@@ -279,6 +279,8 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     // On by default; stored only when turned off, like the other mouse toggles.
     var tapToClick by mutableStateOf(shortcut.getExtra("tapToClick", "1") != "0")
     var syncCpu by mutableStateOf(shortcut.getExtra("syncCpuTopology", if (container.isSyncCpuTopology()) "1" else "0") == "1")
+    // Follows the container until the shortcut saves its own choice.
+    var threadPlacement by mutableStateOf(shortcut.getExtra("threadPlacement", container.getExtra("threadPlacement", "0")) == "1")
     val cpu = mutableStateListOf<Boolean>().apply {
         val count = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         val selected = shortcut.getExtra("cpuList", container.getCPUList(true)).split(',').map(String::trim).toSet()
@@ -490,6 +492,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     fun saveCpu() {
         shortcut.putExtra("cpuList", cpu.indices.filter { cpu[it] }.joinToString(","))
         shortcut.putExtra("syncCpuTopology", if (syncCpu) "1" else "0")
+        shortcut.putExtra("threadPlacement", if (threadPlacement) "1" else "0")
         save()
     }
 
@@ -1152,6 +1155,8 @@ private fun ShortcutCategoryV2(
             }
             SettingsCard {
                 SettingToggle(uiStr(R.string.ui_sync_cpu_topology), s.syncCpu) { s.syncCpu = it; s.saveCpu() }
+                SettingsDivider()
+                SettingToggle(uiStr(R.string.ui_thread_placement), s.threadPlacement) { s.threadPlacement = it; s.saveCpu() }
                 SettingsDivider()
                 CpuSelectorRow(uiStr(R.string.processor_affinity), s.cpu) { index, checked -> s.cpu[index] = checked; s.saveCpu() }
             }

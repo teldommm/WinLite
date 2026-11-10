@@ -380,6 +380,7 @@
     <string name="ui_enable_xinput">Enable XInput</string>
     <string name="ui_enable_dinput">Enable DInput</string>
     <string name="ui_sync_cpu_topology">Sync CPU Topology</string>
+    <string name="ui_thread_placement">Thread Placement (experimental)</string>
     <string name="ui_processor_affinity_32_bit_apps">Processor Affinity (32-bit apps)</string>
     <string name="ui_custom_image">Custom image</string>
     <string name="ui_off">Off</string>
