@@ -847,7 +847,7 @@ public class ControlElement {
         Paint paint = inputControlsView.getPaint();
         float unit = inputControlsView.getSnappingSize() * scale;
 
-        setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 94), 0);
+        setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 92), 0);
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
 
         drawInnerFade(canvas, false, left, top, right, bottom, radius, Math.min(right - left, bottom - top) * 0.30f, active ? 70f : 58f);
@@ -863,7 +863,7 @@ public class ControlElement {
         Paint paint = inputControlsView.getPaint();
         float unit = inputControlsView.getSnappingSize() * scale;
 
-        setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 98), 0);
+        setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 96), 0);
         canvas.drawCircle(cx, cy, radius, paint);
 
         drawInnerFade(canvas, true, cx - radius, cy - radius, cx + radius, cy + radius, radius, radius * 0.58f, active ? 70f : 58f);
@@ -1079,10 +1079,10 @@ public class ControlElement {
                 setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
                 paint.setShader(new RadialGradient(cx, cy, outer,
                         new int[] {
-                                withAlpha(0xff020202, active ? 126 : 105),
-                                withAlpha(0xff050505, active ? 130 : 109),
-                                withAlpha(0xff151516, active ? 142 : 118),
-                                withAlpha(mixColor(0xff2e2e30, isNeutralTint() ? 0xff2e2e30 : getThemeColor(), 0.22f), active ? 152 : 126)
+                                withAlpha(0xff020202, active ? 123 : 103),
+                                withAlpha(0xff050505, active ? 127 : 107),
+                                withAlpha(0xff151516, active ? 139 : 116),
+                                withAlpha(mixColor(0xff2e2e30, isNeutralTint() ? 0xff2e2e30 : getThemeColor(), 0.22f), active ? 149 : 123)
                         },
                         new float[] {0f, 0.5f, 0.8f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(cx, cy, outer, paint);
@@ -1113,11 +1113,12 @@ public class ControlElement {
                 setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
                 paint.setShader(new RadialGradient(thumbstickX, thumbstickY, thumbRadius,
                         new int[] {
-                                withAlpha(mixColor(core, 0xff000000, 0.28f), 225),
-                                withAlpha(core, 228),
-                                withAlpha(mixColor(edge, 0xffffffff, 0.12f), 238)
+                                withAlpha(core, 242),
+                                withAlpha(core, 242),
+                                withAlpha(mixColor(edge, 0xffffffff, 0.22f), 248)
                         },
-                        new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+                        // Solid grey in the middle, easing to the lighter rim over most of the radius.
+                        new float[] {0f, 0.22f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(thumbstickX, thumbstickY, thumbRadius, paint);
 
                 setupPaint(paint, Paint.Style.STROKE, withAlpha(tintedFade(), active ? 70 : 38), Math.max(1f, snappingSize * 0.10f * scale));
