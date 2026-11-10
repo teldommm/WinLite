@@ -475,7 +475,10 @@ void VulkanRendererContext::wfgPlanPresentTimes(WfgFrame& wf) {
 //    quarter refresh, a run of on-time ones gives 0.1 ms back), so a GPU that needs longer gets
 //    it and one that does not is not padded. The schedule itself aims a cushion past 'need'
 //    (three times the arrivals' jitter), so a frame that comes a little late still makes it;
-//  - each image snaps onto the display grid (never two on one refresh);
+//  - each image snaps onto the display grid: the first refresh at or after its target less the
+//    cushion (an image may come early by at most the slack it has before 'need', never more), so
+//    a schedule whose phase cannot lock to the grid (30 fps on 165 Hz: 5.5 refreshes a frame) does
+//    not round below 'need' and get pushed a refresh late; never two images on one refresh;
 //  - how far the arrival was from the phase that puts need + cushion exactly on a refresh (the
 //    least latency that still absorbs the jitter) is published for the FPS limiters, which slew
 //    their release of the game toward it.
@@ -548,16 +551,20 @@ void VulkanRendererContext::paceSchedule(PaceState& st, uint32_t n, uint64_t int
         st.late++;
     }
 
-    // Snap onto the grid: the nearest refresh, never before 'need' after the arrival, never on
-    // or before the previous real frame's refresh. SurfaceFlinger shows a buffer at the first
-    // refresh at or after its time, so the time handed over is half a refresh before.
+    // Snap onto the grid: the first refresh at or after target - cushion, never before 'need'
+    // after the arrival, never on or before the previous real frame's refresh. With the phase
+    // locked (target on a refresh) that is the target's own refresh; otherwise the image comes
+    // early by less than the cushion rather than past 'need' and a refresh late. SurfaceFlinger
+    // shows a buffer at the first refresh at or after its time, so the time handed over is half
+    // a refresh before.
     uint64_t floorNs = std::max(now + half, arrival + need);
     if (st.lastRealDisp && st.lastRealDisp + period > floorNs) floorNs = st.lastRealDisp + period;
     for (uint32_t k = 0; k < n; k++) {
         const uint64_t at = start + (uint64_t)k * step;
         uint64_t d = at;
         if (grid) {
-            d = anchor + ((at - anchor + half) / period) * period;
+            const uint64_t from = at - cushion;   // at >= now + period > anchor + cushion
+            d = anchor + ((from - anchor + period - 1) / period) * period;
             while (d < floorNs) d += period;
         } else if (d < floorNs) {
             d = floorNs;
