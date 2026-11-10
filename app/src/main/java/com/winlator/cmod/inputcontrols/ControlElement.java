@@ -1113,12 +1113,13 @@ public class ControlElement {
                 setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
                 paint.setShader(new RadialGradient(thumbstickX, thumbstickY, thumbRadius,
                         new int[] {
-                                withAlpha(core, 242),
-                                withAlpha(core, 242),
-                                withAlpha(mixColor(edge, 0xffffffff, 0.22f), 248)
+                                withAlpha(mixColor(core, 0xffffffff, 0.05f), 252),
+                                withAlpha(core, 252),
+                                withAlpha(mixColor(edge, 0xffffffff, 0.08f), 255)
                         },
-                        // Solid grey in the middle, easing to the lighter rim over most of the radius.
-                        new float[] {0f, 0.22f, 1f}, Shader.TileMode.CLAMP));
+                        // Filled grey right to the middle (no darker hollow); only the outer half
+                        // eases up to the lighter rim.
+                        new float[] {0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(thumbstickX, thumbstickY, thumbRadius, paint);
 
                 setupPaint(paint, Paint.Style.STROKE, withAlpha(tintedFade(), active ? 70 : 38), Math.max(1f, snappingSize * 0.10f * scale));

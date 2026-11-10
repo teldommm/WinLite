@@ -54,6 +54,20 @@ public class ClientSocket {
         else Log.d("ClientSocket", "Failed to write data.");
     }
 
+    public static final int EAGAIN = 11;
+
+    /** Writes data[position, limit) without blocking and advances position past what was sent.
+     *  Returns the bytes written (0 when the socket is full), or -errno for a dead connection. */
+    public int writeNonBlocking(ByteBuffer data) {
+        int position = data.position();
+        int n = writeNonBlocking(fd, data, position, data.remaining());
+        if (n > 0) {
+            data.position(position + n);
+            return n;
+        }
+        return n == -EAGAIN ? 0 : n;
+    }
+
     public int recvAncillaryMsg(ByteBuffer data) throws IOException {
         int position = data.position();
         int bytesRead = recvAncillaryMsg(fd, data, position, data.remaining());
@@ -78,6 +92,8 @@ public class ClientSocket {
     private native int read(int fd, ByteBuffer data, int offset, int length);
 
     private native int write(int fd, ByteBuffer data, int length);
+
+    private native int writeNonBlocking(int fd, ByteBuffer data, int offset, int length);
 
     private native int recvAncillaryMsg(int clientFd, ByteBuffer data, int offset, int length);
 

@@ -29,6 +29,7 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
         this.xServer = xServer;
         this.inputStream = inputStream;
         this.outputStream = outputStream;
+        outputStream.setCoalesceMotionEvents(true);
 
         try (XLock lock = xServer.lockAll()) {
             resourceIDBase = xServer.resourceIDs.get();

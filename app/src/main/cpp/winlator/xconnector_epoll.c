@@ -128,6 +128,18 @@ Java_com_winlator_cmod_xconnector_ClientSocket_write(JNIEnv *env, jobject obj, j
     return write(fd, dataAddr, length);
 }
 
+// Sends without ever blocking: returns the bytes written, or -errno (-EAGAIN when the socket is full
+// because the client has stopped reading). Lets the X server queue output instead of stalling the
+// thread that produced it (the UI thread, for touch input).
+JNIEXPORT jint JNICALL
+Java_com_winlator_cmod_xconnector_ClientSocket_writeNonBlocking(JNIEnv *env, jobject obj, jint fd, jobject data,
+                                                                jint offset, jint length) {
+    char *dataAddr = (*env)->GetDirectBufferAddress(env, data);
+    if (!dataAddr) return -EINVAL;
+    ssize_t n = send(fd, dataAddr + offset, length, MSG_DONTWAIT | MSG_NOSIGNAL);
+    return n >= 0 ? (jint)n : -errno;
+}
+
 JNIEXPORT jint JNICALL
 Java_com_winlator_cmod_xconnector_XConnectorEpoll_createEventFd(JNIEnv *env, jobject obj) {
     return eventfd(0, EFD_NONBLOCK);
