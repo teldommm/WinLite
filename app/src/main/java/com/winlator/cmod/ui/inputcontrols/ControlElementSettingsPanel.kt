@@ -1,6 +1,7 @@
 package com.winlator.cmod.ui.inputcontrols
 
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
@@ -170,16 +171,16 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
             .verticalScroll(rememberScrollState())
     ) {
         SidebarDropdownField(uiStr(R.string.ui_type), model.typeOptions, model.typeIndex, cb::onTypeChanged)
-        if (model.showShape) {
+        RevealSection(visible = model.showShape) {
             Spacer(Modifier.height(10.dp))
             SidebarDropdownField(uiStr(R.string.ui_shape), model.shapeOptions, model.shapeIndex, cb::onShapeChanged)
         }
-        if (model.showRange) {
+        RevealSection(visible = model.showRange) {
             Spacer(Modifier.height(10.dp))
             SidebarDropdownField(uiStr(R.string.ui_range), model.rangeOptions, model.rangeIndex, cb::onRangeChanged)
         }
 
-        if (model.showOrientation) {
+        RevealSection(visible = model.showOrientation) {
             Spacer(Modifier.height(14.dp))
             SidebarCaption(uiStr(R.string.orientation))
             Spacer(Modifier.height(6.dp))
@@ -189,7 +190,7 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
             }
         }
 
-        if (model.showColumns) {
+        RevealSection(visible = model.showColumns) {
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { SidebarCaption(uiStr(R.string.ui_columns)) }
@@ -202,10 +203,10 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
         Spacer(Modifier.height(6.dp))
         PercentSlider(uiStr(R.string.ui_opacity), model.opacityPercent, 0f..100f, cb::onOpacityPreview, cb::onOpacityChanged)
 
-        if (model.showDynamicStick) {
+        RevealSection(visible = model.showDynamicStick) {
             Spacer(Modifier.height(6.dp))
             SettingSwitchRow(uiStr(R.string.ui_dynamic_stick), model.dynamicStick, cb::onDynamicStickChanged)
-            if (model.dynamicStick) {
+            RevealSection(visible = model.dynamicStick) {
                 Spacer(Modifier.height(8.dp))
                 PercentSlider(
                     uiStr(R.string.ui_zone_size),
@@ -233,27 +234,29 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
         Spacer(Modifier.height(10.dp))
         HexColorField(model.selectedColor, cb::onColorSelected)
 
-        if (model.showToggleSwitch) {
+        RevealSection(visible = model.showToggleSwitch) {
             Spacer(Modifier.height(10.dp))
             SettingSwitchRow(uiStr(R.string.ui_toggle_switch), model.toggleSwitch, cb::onToggleSwitchChanged)
         }
-        if (model.showMouseMoveMode) {
+        RevealSection(visible = model.showMouseMoveMode) {
             SettingSwitchRow(uiStr(R.string.ui_relative_mouse_move), model.mouseMoveMode, cb::onMouseMoveModeChanged)
         }
-        if (model.showSwipeable) {
+        RevealSection(visible = model.showSwipeable) {
             if (!model.showToggleSwitch) Spacer(Modifier.height(10.dp))
             SettingSwitchRow(uiStr(R.string.ui_swipe_between_buttons), model.swipeable, cb::onSwipeableChanged)
         }
 
-        if (model.showTextAndIcon) {
+        RevealSection(visible = model.showTextAndIcon) {
             Spacer(Modifier.height(10.dp))
             ThemedTextField(uiStr(R.string.ui_custom_text), model.text, cb::onTextChanged)
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { SidebarCaption(uiStr(R.string.ui_icon)) }
-                if (model.hasCustomIcon) {
-                    SmallOutlineButton(uiStr(R.string.remove), destructive = true, onClick = cb::onRemoveIcon)
-                    Spacer(Modifier.width(8.dp))
+                RevealSection(visible = model.hasCustomIcon) {
+                    Row {
+                        SmallOutlineButton(uiStr(R.string.remove), destructive = true, onClick = cb::onRemoveIcon)
+                        Spacer(Modifier.width(8.dp))
+                    }
                 }
                 SmallOutlineButton(uiStr(R.string.ui_browse_2026), onClick = cb::onBrowseIcon)
             }
@@ -261,7 +264,7 @@ internal fun ColumnScope.ControlElementSettingsPanelContent(
             IconRow(model.icons, cb)
         }
 
-        if (model.bindings.isNotEmpty()) {
+        RevealSection(visible = model.bindings.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))
             Text(uiStr(R.string.ui_bindings), style = MaterialTheme.typography.titleMedium)
             model.bindings.forEachIndexed { index, binding ->

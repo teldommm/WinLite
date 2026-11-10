@@ -110,10 +110,10 @@ internal fun VulkanExtensionsDialog(
         // buttons stay on-screen in landscape (also with the keyboard open); the list scrolls.
         LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 280.dp)) {
             if (visible.isEmpty()) {
-                item {
+                item(key = "no-match") {
                     Text(
                         uiStr(R.string.ui_no_extensions_match, query.trim()),
-                        modifier = Modifier.padding(vertical = 16.dp),
+                        modifier = Modifier.animateItem().padding(vertical = 16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -123,6 +123,7 @@ internal fun VulkanExtensionsDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .animateItem()
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() }

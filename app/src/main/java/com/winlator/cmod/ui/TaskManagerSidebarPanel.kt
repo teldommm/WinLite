@@ -1,6 +1,9 @@
 package com.winlator.cmod.ui
 
 import android.graphics.Bitmap
+import androidx.compose.runtime.SideEffect
+import com.winlator.cmod.ui.theme.AppearOnAdd
+import com.winlator.cmod.ui.theme.FadeInOnShow
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -101,22 +104,30 @@ private fun TaskManagerPanel(state: TaskManagerPanelState, callbacks: TaskManage
         Spacer(Modifier.height(8.dp))
 
         if (state.processes.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(160.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = stringResource(R.string.no_items_to_display),
-                    style = SidebarText.caption(),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            FadeInOnShow {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.no_items_to_display),
+                        style = SidebarText.caption(),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         } else {
+            // A process that starts while the panel is open unfolds into the list.
+            val seenPids = remember { mutableSetOf<Int>().apply { addAll(state.processes.map { it.pid }) } }
             state.processes.forEach { row ->
                 key(row.pid) {
-                    Column {
-                        ProcessRow(row = row, callbacks = callbacks)
-                        SidebarGap()
+                    val isNew = remember { row.pid !in seenPids }
+                    SideEffect { seenPids.add(row.pid) }
+                    AppearOnAdd(isNew) {
+                        Column {
+                            ProcessRow(row = row, callbacks = callbacks)
+                            SidebarGap()
+                        }
                     }
                 }
             }

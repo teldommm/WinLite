@@ -138,8 +138,8 @@ internal fun InputControlsScreen(model: InputControlsModel, callbacks: InputCont
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    if (model.controllers.isEmpty()) item { EmptyControllers() }
-                    else items(model.controllers, key = { "controller-${it.index}-${it.name}" }) { ControllerCard(it, callbacks) }
+                    if (model.controllers.isEmpty()) item(key = "no-controllers") { Box(Modifier.animateItem()) { EmptyControllers() } }
+                    else items(model.controllers, key = { "controller-${it.index}-${it.name}" }) { Box(Modifier.animateItem()) { ControllerCard(it, callbacks) } }
                 }
             }
         } else {
@@ -170,8 +170,8 @@ private fun PortraitContent(model: InputControlsModel, selectedName: String, cal
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (model.controllers.isEmpty()) item { EmptyControllers() }
-        else items(model.controllers, key = { "controller-${it.index}-${it.name}" }) { ControllerCard(it, callbacks) }
+        if (model.controllers.isEmpty()) item(key = "no-controllers") { Box(Modifier.animateItem()) { EmptyControllers() } }
+        else items(model.controllers, key = { "controller-${it.index}-${it.name}" }) { Box(Modifier.animateItem()) { ControllerCard(it, callbacks) } }
     }
 }
 

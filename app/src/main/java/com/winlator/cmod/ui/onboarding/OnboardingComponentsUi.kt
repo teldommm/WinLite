@@ -1,6 +1,7 @@
 package com.winlator.cmod.ui.onboarding
 
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.ui.uiStr
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -243,7 +244,7 @@ internal fun OnboardingComponentsScreen(
                 contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 12.dp)
             ) {
                 if (showBundled) item(key = "bundled-runtime") {
-                    CoreComponentCard(
+                    Box(Modifier.animateItem()) { CoreComponentCard(
                         ready = ready,
                         progress = progress,
                         installed = bundledInstalled.value,
@@ -252,20 +253,20 @@ internal fun OnboardingComponentsScreen(
                         locked = installing != null,
                         onInstall = cb::onInstallBundledRuntime,
                         onRemove = cb::onRemoveBundledRuntime
-                    )
+                    ) }
                 }
                 if (!managerMode && !hasInstalledRuntime) item(key = "runtime-hint") {
                     // Right under the bundled runtime: it's the reason Continue is disabled.
                     Text(
                         if (!ready.value) uiStr(R.string.ui_wait_for_to_finish_installing_or_install, bundledRuntimeName)
                         else uiStr(R.string.ui_install_at_least_one_wine_or_proton_versi),
-                        Modifier.padding(horizontal = 4.dp),
+                        Modifier.animateItem().padding(horizontal = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 if (showLocalInstallProgress) item(key = "local-progress") {
-                    InstallProgressCard(installingLabel, installingProgress)
+                    Box(Modifier.animateItem()) { InstallProgressCard(installingLabel, installingProgress) }
                 }
             }
         } else {
@@ -294,9 +295,11 @@ internal fun OnboardingComponentsScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     SourceSelector(servers = { cb.onOpenServers() }, local = { cb.onBrowseLocal() })
-                    if (showLocalInstallProgress) {
-                        Spacer(Modifier.height(10.dp))
-                        InstallProgressCard(installingLabel, installingProgress)
+                    RevealSection(visible = showLocalInstallProgress) {
+                        Column {
+                            Spacer(Modifier.height(10.dp))
+                            InstallProgressCard(installingLabel, installingProgress)
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                     CategorySelector(category) { category = it }
@@ -314,7 +317,7 @@ internal fun OnboardingComponentsScreen(
                         )
                     }
                 }
-                if (all.isEmpty()) item { LoadingCard() }
+                if (all.isEmpty()) item(key = "loading") { Box(Modifier.animateItem()) { LoadingCard() } }
                 else itemsIndexed(visible, key = { _, c -> c.id }) { index, component ->
                     RevealOnEnter(component.id, index, revealed, Modifier.animateItem(fadeInSpec = null)) {
                         ComponentCard(
@@ -328,10 +331,11 @@ internal fun OnboardingComponentsScreen(
                     }
                 }
                 if (!managerMode && !hasInstalledRuntime) {
-                    item {
+                    item(key = "runtime-hint") {
                         Text(
                             if (!ready.value) uiStr(R.string.ui_continue_unlocks_when_finishes_installing, bundledRuntimeName)
                             else uiStr(R.string.ui_install_at_least_one_wine_or_proton_versi),
+                            modifier = Modifier.animateItem(),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -367,9 +371,9 @@ private fun ComponentList(
     val revealed = remember { HashSet<String>() }
     LazyColumn(modifier, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         header()
-        if (loading) item { LoadingCard() }
-        else if (list.isEmpty()) item {
-            Surface(Modifier.fillMaxWidth(), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surface) {
+        if (loading) item(key = "loading") { Box(Modifier.animateItem()) { LoadingCard() } }
+        else if (list.isEmpty()) item(key = "empty") {
+            Surface(Modifier.fillMaxWidth().animateItem(), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surface) {
                 Text(
                     uiStr(R.string.ui_no_components_available_in_this_category),
                     Modifier.padding(16.dp),

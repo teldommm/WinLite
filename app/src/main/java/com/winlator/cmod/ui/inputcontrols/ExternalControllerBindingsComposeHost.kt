@@ -177,7 +177,7 @@ private fun ExternalControllerBindingsScreen(
                     // Same card as every other list in the app; the "button pressed" flash is the
                     // shared accent instead of the (near-white) primary.
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().animateItem(),
                         shape = WinZShapes.Medium,
                         color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, hairlineColor())

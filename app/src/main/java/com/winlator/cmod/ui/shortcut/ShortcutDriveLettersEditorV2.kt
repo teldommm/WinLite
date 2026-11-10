@@ -1,6 +1,9 @@
 package com.winlator.cmod.ui.shortcut
 
 import com.winlator.cmod.R
+import androidx.compose.runtime.SideEffect
+import com.winlator.cmod.ui.theme.AppearOnAdd
+import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.filemanager.FilePickerDialog
 import androidx.compose.foundation.layout.Arrangement
@@ -112,14 +115,19 @@ internal fun DriveLettersEditorV2(
             }
         }
 
-        if (entries.isEmpty()) {
+        RevealSection(visible = entries.isEmpty()) {
             Text(
                 uiStr(R.string.ui_no_custom_drives),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        } else {
+        }
+        // Rows past the count seen last time are the ones just added: they unfold in.
+        val knownRows = remember { intArrayOf(entries.size) }
+        SideEffect { knownRows[0] = entries.size }
+        run {
             entries.forEachIndexed { index, entry ->
+                AppearOnAdd(isNew = index >= knownRows[0]) {
                 SettingsDivider()
                 ShortcutDriveLetterRowV2(
                     entry = entry,
@@ -131,6 +139,7 @@ internal fun DriveLettersEditorV2(
                     onBrowse = { browseDrive(index) },
                     onRemove = { entries.removeAt(index) }
                 )
+                }
             }
         }
     }

@@ -1,6 +1,10 @@
 package com.winlator.cmod.ui.settings
 
 import com.winlator.cmod.R
+import androidx.compose.runtime.key
+import androidx.compose.runtime.SideEffect
+import com.winlator.cmod.ui.theme.AppearOnAdd
+import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.WinZMotion
@@ -160,7 +164,10 @@ object WinlatorServicesDialog {
                                     )
                                 }
                             }
-                            if (addRepoOpen) {
+                            // The add-repository window fades in and out over the servers window.
+                            AddRepoOverlayHost(
+                                visible = addRepoOpen,
+                                content = {
                                 AddRepoOverlay(
                                     existing = repos,
                                     onDismiss = { addRepoOpen = false },
@@ -172,7 +179,8 @@ object WinlatorServicesDialog {
                                         addRepoOpen = false
                                     }
                                 )
-                            }
+                                }
+                            )
                         }
                     }
                 }
@@ -232,15 +240,21 @@ private fun ColumnScope.ServicesScreen(
                     Text(uiStr(R.string.ui_default))
                 }
             }
-            if (repos.isEmpty()) {
+            RevealSection(visible = repos.isEmpty()) {
                 Text(
                     uiStr(R.string.ui_no_repositories_the_driver_list_will_be_e),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            // A repository that is added (or restored by "Default") unfolds into the list.
+            val seenRepos = remember { mutableSetOf<String>().apply { addAll(repos.map { it.apiUrl }) } }
             repos.toList().forEachIndexed { index, repo ->
-                RepoRow(repo) { repos.removeAt(index) }
+                key(repo.apiUrl) {
+                    val isNew = remember { repo.apiUrl !in seenRepos }
+                    SideEffect { seenRepos.add(repo.apiUrl) }
+                    AppearOnAdd(isNew) { RepoRow(repo) { repos.removeAt(index) } }
+                }
             }
             OutlinedButton(
                 onClick = onAddRepo,
@@ -281,6 +295,15 @@ private fun ColumnScope.ServicesScreen(
             colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
         ) { Text(uiStr(R.string.ui_save)) }
     }
+}
+
+@Composable
+private fun AddRepoOverlayHost(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(200)),
+        exit = fadeOut(tween(150))
+    ) { content() }
 }
 
 // The "add a driver repository" window: name (optional) and address. Drawn over the servers window

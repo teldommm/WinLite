@@ -72,3 +72,17 @@ fun RevealSection(visible: Boolean, modifier: Modifier = Modifier, content: @Com
         Column { content() }
     }
 }
+
+// A row that is new (just added to a list) unfolds and fades in; a row that was already there
+// (first composition, scrolling back) is shown at once. `isNew` is read once, when the row enters.
+@Composable
+fun AppearOnAdd(isNew: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val state = remember { androidx.compose.animation.core.MutableTransitionState(!isNew).apply { targetState = true } }
+    AnimatedVisibility(
+        visibleState = state,
+        modifier = modifier,
+        enter = expandVertically(tween(260, easing = FastOutSlowInEasing)) + fadeIn(tween(220, delayMillis = 40))
+    ) {
+        Column { content() }
+    }
+}

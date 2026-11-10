@@ -632,6 +632,7 @@ private fun WineDebugChannelsDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .animateItem()
                             .clickable {
                                 selected = selected.toMutableSet().apply {
                                     if (!add(channel)) remove(channel)

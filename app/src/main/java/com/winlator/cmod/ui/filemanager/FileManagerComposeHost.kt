@@ -74,6 +74,10 @@ import com.winlator.cmod.ui.theme.dividerColor
 import com.winlator.cmod.ui.theme.TablerIcons
 import com.winlator.cmod.ui.theme.DialogSystemBarsPolicy
 import androidx.compose.animation.AnimatedContent
+import com.winlator.cmod.ui.theme.FadeInOnShow
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -231,8 +235,10 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
                 label = "folderListing"
             ) { shown ->
             if (shown.entries.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(uiStr(R.string.ui_this_folder_is_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FadeInOnShow {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(uiStr(R.string.ui_this_folder_is_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             } else {
                 LazyColumn(
@@ -240,28 +246,26 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
                     contentPadding = PaddingValues(bottom = 92.dp + navClearance)
                 ) {
                     items(shown.entries, key = { it.path }) { entry ->
-                        FileRow(entry = entry, callbacks = callbacks)
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 73.dp),
-                            color = dividerColor()
-                        )
+                        // Rows slide into place when one is deleted, renamed or pasted.
+                        Column(Modifier.animateItem()) {
+                            FileRow(entry = entry, callbacks = callbacks)
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = 73.dp),
+                                color = dividerColor()
+                            )
+                        }
                     }
                 }
             }
             }
 
-            if (model.pasteVisible) {
-                FloatingActionButton(
-                    onClick = callbacks::onPasteClick,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(start = 18.dp, top = 18.dp, end = 18.dp, bottom = 18.dp + navClearance),
-                    containerColor = controlAccentColor(),
-                    contentColor = Color.White
-                ) {
-                    Icon(TablerIcons.Clipboard, uiStr(R.string.ui_paste))
-                }
-            }
+            PasteFab(
+                visible = model.pasteVisible,
+                onClick = callbacks::onPasteClick,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(start = 18.dp, top = 18.dp, end = 18.dp, bottom = 18.dp + navClearance)
+            )
         }
     }
 
@@ -532,6 +536,25 @@ private fun DriveSelectorSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+// The paste button pops in (and out) instead of appearing at once.
+@Composable
+private fun PasteFab(visible: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(tween(180)) + scaleIn(tween(200), initialScale = 0.7f),
+        exit = fadeOut(tween(130)) + scaleOut(tween(150), targetScale = 0.7f)
+    ) {
+        FloatingActionButton(
+            onClick = onClick,
+            containerColor = controlAccentColor(),
+            contentColor = Color.White
+        ) {
+            Icon(TablerIcons.Clipboard, uiStr(R.string.ui_paste))
         }
     }
 }

@@ -88,6 +88,14 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
 import androidx.compose.animation.animateColorAsState
+import com.winlator.cmod.ui.theme.FadeInOnShow
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import com.winlator.cmod.ui.theme.SlidingPillHost
 import com.winlator.cmod.ui.theme.SlidingPillState
@@ -182,11 +190,13 @@ internal fun LibraryRoot(
         }
         if (visible.isEmpty()) {
             if (query.isNotBlank() || (filter != LibraryFilter.All && items.isNotEmpty())) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        if (query.isNotBlank()) stringResource(R.string.ui_no_games_match_search) else stringResource(R.string.ui_no_games_in_section),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                FadeInOnShow {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            if (query.isNotBlank()) stringResource(R.string.ui_no_games_match_search) else stringResource(R.string.ui_no_games_in_section),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             } else {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -282,7 +292,13 @@ internal fun LibraryLandscapeHeader(
 ) {
     var searchActive by LocalLibrarySearchActive.current
 
-    if (searchActive) {
+    // Title row <-> search row: a quick cross-fade instead of an instant swap.
+    AnimatedContent(
+        targetState = searchActive,
+        transitionSpec = { fadeIn(tween(170)) togetherWith fadeOut(tween(90)) },
+        label = "libraryHeader"
+    ) { searching ->
+    if (searching) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -312,6 +328,7 @@ internal fun LibraryLandscapeHeader(
             LibraryOrientationMenu(activity)
         }
     }
+    }
 }
 
 // Portrait counterpart to LibraryLandscapeHeader: replaces the old native Toolbar options-menu
@@ -333,7 +350,12 @@ internal fun LibraryPortraitHeader(
     // Both states share one fixed-height band. The search row used to be a 56dp OutlinedTextField
     // plus 14dp vertical padding — taller than the title row — so opening search pushed the
     // filter chips and the games below it down.
-    if (searchActive) {
+    AnimatedContent(
+        targetState = searchActive,
+        transitionSpec = { fadeIn(tween(170)) togetherWith fadeOut(tween(90)) },
+        label = "libraryHeaderPortrait"
+    ) { searching ->
+    if (searching) {
         Row(
             Modifier.fillMaxWidth().height(ShellChrome.PortraitHeaderHeight),
             verticalAlignment = Alignment.CenterVertically
@@ -359,6 +381,7 @@ internal fun LibraryPortraitHeader(
                 LibraryOrientationMenu(activity)
             }
         }
+    }
     }
 }
 
@@ -811,7 +834,11 @@ private fun LibrarySearchField(query: String, onQueryChange: (String) -> Unit, m
                     }
                     innerTextField()
                 }
-                if (query.isNotEmpty()) {
+                AnimatedVisibility(
+                    visible = query.isNotEmpty(),
+                    enter = fadeIn(tween(130)) + scaleIn(tween(130), initialScale = 0.8f),
+                    exit = fadeOut(tween(100)) + scaleOut(tween(100), targetScale = 0.8f)
+                ) {
                     // The touch area is the field's full height and 36dp wide (it used to be just
                     // the 20dp glyph). Shifted 8dp into the end padding so the cross stays exactly
                     // where it was drawn before.
