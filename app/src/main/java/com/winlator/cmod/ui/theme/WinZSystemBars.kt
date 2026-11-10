@@ -29,6 +29,15 @@ object WinZSystemBars {
         // Some screens use a theme with windowFullscreen=true (e.g. onboarding); that flag keeps
         // the status bar hidden no matter what the insets controller asks for.
         if (portrait) window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        // The fullscreen themes (onboarding / setup) also set windowTranslucentStatus/Navigation.
+        // While those flags are on, the system draws its own dark gradient behind the clock,
+        // Wi-Fi and battery and ignores statusBarColor, so the area looked different from the
+        // WinLite theme. Clear them and let the bars paint the theme colour (setLegacySystemBarColors).
+        window.clearFlags(
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or
+                WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
+        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.navigationBars())
