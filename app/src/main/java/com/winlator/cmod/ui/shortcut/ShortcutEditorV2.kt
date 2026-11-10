@@ -674,8 +674,9 @@ internal fun ShortcutEditorV2(
         val categoryOrder = categories.map { it.label }
         // One list state for the page; it goes back to the top when the category changes (the
         // outgoing page is animating out, so a leftover scroll offset would look wrong).
-        val pageListState = rememberLazyListState()
-        LaunchedEffect(category) { pageListState.scrollToItem(0) }
+        // A fresh state per category: the new page starts at the top in the same frame it appears
+        // (resetting the scroll afterwards showed one frame at the old offset, then a jump).
+        val pageListState = remember(category) { androidx.compose.foundation.lazy.LazyListState() }
         if (landscape) {
             Row(
                 Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp, vertical = 10.dp),

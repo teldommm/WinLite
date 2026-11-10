@@ -173,18 +173,6 @@ fun AnimatedCategoryContent(
     modifier: Modifier = Modifier,
     content: @Composable (String) -> Unit
 ) {
-    val shiftPx = with(LocalDensity.current) { 18.dp.roundToPx() }
-    AnimatedContent(
-        targetState = target,
-        modifier = modifier.fillMaxWidth(),
-        transitionSpec = {
-            val sign = if (order.indexOf(targetState) >= order.indexOf(initialState)) 1 else -1
-            // No movement: the page just changes in place. The old one leaves at once and the new
-            // one eases up from 60% opacity (fading through empty looked like a blink).
-            fadeIn(tween(140, easing = LinearOutSlowInEasing), initialAlpha = 0.6f)
-                .togetherWith(ExitTransition.None)
-                .using(SizeTransform(clip = false) { _, _ -> snap() })
-        },
-        label = "categoryContent"
-    ) { category -> content(category) }
+    // Switching categories is an instant swap: any fade or slide here read as the list flickering.
+    androidx.compose.foundation.layout.Box(modifier.fillMaxWidth()) { content(target) }
 }
