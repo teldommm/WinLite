@@ -953,9 +953,17 @@ void VulkanRendererContext::renderLoop() {
                 return !isRunning||surfaceDetached.load(); });
         }
         if (wfgDeferredRender.exchange(false)) {
-            // A render WFG skipped: show it with the next game frame, or on its own if none comes.
+            // A skipped render: show it with the next game frame, or on its own if none comes -
+            // after 100 ms (WFG), or once the paced frame it waited for is on screen (plain path).
+            auto wait = std::chrono::nanoseconds(100000000LL);
+            const uint64_t until = renderDeferUntilNs.exchange(0);
+            if (until) {
+                const uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                wait = std::chrono::nanoseconds(until > now ? std::min<uint64_t>(until - now, 100000000ull) : 0);
+            }
             std::unique_lock<std::mutex> lk(dirtyMutex);
-            dirtyCV.wait_for(lk,std::chrono::milliseconds(100),[this]{
+            dirtyCV.wait_for(lk,wait,[this]{
                 return !isRunning||needsRender.load()||fbResized.load(); });
             needsRender.store(true);
         }
@@ -992,6 +1000,7 @@ void VulkanRendererContext::renderFrame() {
         return;
     }
     if (wfgSkipRender()) return;
+    if (limitSkipRender()) return;
     if (currentFrame >= cmdBufs.size() || cmdBufs[currentFrame] == VK_NULL_HANDLE) return;
     bool currentFenceWaited = false;
     if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, inFlightFences[currentFrame]) == VK_NOT_READY) {
@@ -1088,10 +1097,7 @@ void VulkanRendererContext::renderFrame() {
     }
 
     // The display clock: feedback from earlier presents, every frame, whatever path presents.
-    if (displayTiming_) {
-        const uint32_t mhz = wfgRefreshMhz.load();
-        wfgPollDisplayTiming(mhz > 1000 ? (uint64_t)(1.0e12 / (double)mhz) : 0);
-    }
+    if (displayTiming_) wfgPollDisplayTiming();
     WfgFrame wf = wfgBeginFrame(frameDraws,ox,oy,sx,sy,cw,ch);
     // Without WFG, a new game frame under an FPS limit gets its own target on the refresh grid.
     const uint64_t plainAt = wf.active ? 0 : limitPlanPresent();
@@ -1140,17 +1146,31 @@ void VulkanRendererContext::renderFrame() {
     VkSwapchainKHR scs[]={swapchain};
     // With VK_GOOGLE_display_timing every present carries a presentID, so the display reports
     // when each image was shown (the display clock). A paced image (WFG, or a game frame under an
-    // FPS limit) also carries the time it should reach the display; the rest go as soon as
-    // possible (desiredPresentTime 0).
+    // FPS limit) carries the time it should reach the display and the paced bit in its ID; a
+    // supersede (limitSkipRender) carries its paced image's time and the supersede bit. The rest
+    // carry kAutoPresentTime: the window's timestamp goes back to automatic (the swapchain sets it
+    // only for a non-zero time and the window keeps the last one, so 0 would hand them the last
+    // paced image's time), and SurfaceFlinger shows them one per refresh, FIFO.
     VkPresentTimeGOOGLE ptime{};
     VkPresentTimesInfoGOOGLE ptimes{};
     ptimes.sType=VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE;
     ptimes.swapchainCount=1; ptimes.pTimes=&ptime;
+    const bool supersede = !wf.active && plainAt==0 && lpSupersedeNow && lpPace.lastPresentAt;
+    lpSupersedeNow = false;
     auto pacedNext=[&](uint64_t at) -> const void* {
         if (!displayTiming_) return nullptr;
         if (!wf.paced) at = plainAt;
-        ptime.presentID=++wfgPresentId;
-        ptime.desiredPresentTime=at;
+        const uint32_t id=(uint32_t)(++presentSeq) & kPresentSeqMask;
+        if (at) {
+            ptime.presentID=id|kPacedPresentBit;
+            ptime.desiredPresentTime=at;
+        } else if (supersede) {
+            ptime.presentID=id|kSupersedePresentBit;
+            ptime.desiredPresentTime=lpPace.lastPresentAt;
+        } else {
+            ptime.presentID=id;
+            ptime.desiredPresentTime=kAutoPresentTime;
+        }
         return &ptimes;
     };
     // Generated frames sit between the previous real frame and this one.

@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <stdexcept>
 
@@ -67,29 +68,45 @@ bool VulkanRendererContext::getDisplayClock(int64_t out[3]) const {
     const uint64_t now = nowNs();
     if (!stamp || now < stamp || now - stamp > 1000000000ull) return false;
     out[0] = (int64_t)clockPeriodNs.load(std::memory_order_relaxed);
-    out[1] = clockArrivalErrNs.load(std::memory_order_relaxed);
-    out[2] = (int64_t)clockErrSeq.load(std::memory_order_relaxed);
+    const uint64_t err = clockErr.load(std::memory_order_acquire);
+    out[1] = (int64_t)(int32_t)(uint32_t)(err >> 32);
+    out[2] = (int64_t)(uint32_t)err;
     return out[0] > 0;
 }
 
-// Reads VK_GOOGLE_display_timing feedback (every frame, from renderFrame): the exact refresh
-// cycle and when images really reached the display. The latest such time anchors the refresh
-// grid; the grid is published for the limiters while it is fresh.
-void VulkanRendererContext::wfgPollDisplayTiming(uint64_t javaPeriod) {
-    if (getRefreshCycleGOOGLE_) {
+// The full sequence number of a presentID from the last 2^30 presents.
+uint64_t VulkanRendererContext::seqOfPresentId(uint32_t id) const {
+    const uint32_t low = id & kPresentSeqMask;
+    const uint32_t cur = (uint32_t)presentSeq & kPresentSeqMask;
+    return presentSeq - (uint64_t)((cur - low) & kPresentSeqMask);
+}
+
+// Reads VK_GOOGLE_display_timing feedback (every frame, from renderFrame): when images really
+// reached the display, and (twice a second, or on a mode change) the exact refresh cycle. The
+// latest such time anchors the refresh grid; the grid is published for the limiters while it
+// is fresh. Android reports an image only five presents after it was issued.
+void VulkanRendererContext::wfgPollDisplayTiming() {
+    const uint64_t now = nowNs();
+    const uint32_t mhz = wfgRefreshMhz.load();
+    if (getRefreshCycleGOOGLE_ &&
+        (mhz != refreshPollMhz || !refreshPollNs || now - refreshPollNs >= 500000000ull)) {
+        refreshPollMhz = mhz;
+        refreshPollNs = now;
         VkRefreshCycleDurationGOOGLE rc{};
-        if (getRefreshCycleGOOGLE_(device, swapchain, &rc) == VK_SUCCESS && rc.refreshDuration > 0) {
-            if (wfgRefreshNs && (rc.refreshDuration * 100 < wfgRefreshNs * 99 ||
-                                 rc.refreshDuration * 100 > wfgRefreshNs * 101))
-                wfgVsyncAnchorNs = 0;   // a new mode: the old grid no longer holds
+        if (getRefreshCycleGOOGLE_(device, swapchain, &rc) == VK_SUCCESS && rc.refreshDuration > 0)
             wfgRefreshNs = rc.refreshDuration;
-        }
     }
-    // The period in use differs from Java's mode (a switch in progress, or a swapchain cycle
-    // that lags it): the grid belongs to the old mode, drop it until feedback arrives again.
+    // A new period (the panel switched modes; wfgPeriodNs follows the swapchain's cycle and
+    // Java's mode): the grid belongs to the old mode. It is dropped, and feedback for images
+    // presented before the switch neither anchors the new grid nor counts against the plan.
     const uint64_t period = wfgPeriodNs();
-    if (javaPeriod && (period * 100 < javaPeriod * 97 || period * 100 > javaPeriod * 103))
+    if (wfgGridPeriodNs && (period * 100 < wfgGridPeriodNs * 99 || period * 100 > wfgGridPeriodNs * 101)) {
         wfgVsyncAnchorNs = 0;
+        wfgModeSeq = presentSeq;
+        WLOG_I("Display clock: refresh %.3f -> %.3f ms, grid dropped",
+               (double)wfgGridPeriodNs / 1.0e6, (double)period / 1.0e6);
+    }
+    wfgGridPeriodNs = period;
     VkPastPresentationTimingGOOGLE past[16];
     for (int round = 0; getPastPresentTimingGOOGLE_ && round < 4; round++) {
         uint32_t count = 16;
@@ -97,21 +114,29 @@ void VulkanRendererContext::wfgPollDisplayTiming(uint64_t javaPeriod) {
         if (r != VK_SUCCESS && r != VK_INCOMPLETE) break;
         for (uint32_t i = 0; i < count; i++) {
             const VkPastPresentationTimingGOOGLE& t = past[i];
-            if (!t.actualPresentTime) continue;
+            if (!t.actualPresentTime) continue;   // dropped, or no present fence
+            const uint64_t seq = seqOfPresentId(t.presentID);
+            if (seq <= wfgModeSeq) continue;
             if (t.actualPresentTime > wfgVsyncAnchorNs) wfgVsyncAnchorNs = t.actualPresentTime;
-            if (t.desiredPresentTime) {   // a paced image: count it against its plan
+            if (t.presentID & kPacedPresentBit) {   // a paced image: count it against its plan
                 wfgPresentTimed++;
                 // Planned for the refresh at desired + half a period.
                 wfgShowLagNs = (int64_t)t.actualPresentTime -
                                (int64_t)(t.desiredPresentTime + period / 2);
-                // The target was the refresh at desired + half a period.
-                if (t.actualPresentTime > t.desiredPresentTime + period) wfgPresentLate++;
+                if (t.actualPresentTime > t.desiredPresentTime + period) {
+                    wfgPresentLate++;
+                    if (seq > wfgLateSeq) wfgLateSeq = seq;
+                }
+            } else if (t.presentID & kSupersedePresentBit) {
+                // A supersede shown on its paced image's refresh stands in for that image (which
+                // never reached the display). One that missed it was a render issued late on
+                // purpose: it says nothing about the game frames' lead and is not counted.
+                if (t.actualPresentTime <= t.desiredPresentTime + period) wfgPresentTimed++;
             }
         }
         if (r != VK_INCOMPLETE) break;
     }
     uint64_t anchor = 0, gridPeriod = 0;
-    const uint64_t now = nowNs();
     if (displayGrid(now, anchor, gridPeriod)) {
         clockPeriodNs.store(gridPeriod, std::memory_order_relaxed);
         clockStampNs.store(now, std::memory_order_release);
@@ -128,6 +153,7 @@ bool VulkanRendererContext::wfgSkipRender() {
     const uint64_t last = lastGameFrameNs.load();
     if (!last || nowNs() - last >= kGameActiveNs) return false;
     wfgSkippedRenders++;
+    renderDeferUntilNs.store(0);
     wfgDeferredRender.store(true);
     return true;
 }
@@ -501,21 +527,45 @@ void VulkanRendererContext::paceSchedule(PaceState& st, uint32_t n, uint64_t int
     interval = snapToRefreshes(interval, period);
     const uint64_t step = interval / n;
 
-    // Lead learned from the display's feedback.
-    const uint64_t lateNow = wfgPresentLate, timedNow = wfgPresentTimed;
+    // Lead learned from the display's feedback. A late image raises it a quarter refresh, once
+    // per raise: images issued before the raise were planned with the old lead, and their
+    // feedback (five presents behind) would otherwise raise it again for the same shortfall.
+    // The lead an image was late at is remembered for kLateMemoryNs; until then the lead comes
+    // back down (an eighth of a refresh per 120 on-time images) to just above it, afterwards
+    // to nothing. A one-off hitch costs a quarter refresh for 120 images, then an eighth for
+    // the rest of half a minute (it was: up to a whole refresh for minutes); a GPU that needs a
+    // little more lead keeps it, with at most one probe (a late image) per half minute.
+    constexpr uint64_t kLateMemoryNs = 30000000000ull;
+    constexpr uint64_t kReleaseImages = 120;
+    const uint64_t lateSeq = wfgLateSeq, timedNow = wfgPresentTimed;
+    if (st.resync) {
+        st.seenLateSeq = lateSeq;
+        st.seenTimed = timedNow;
+        st.resync = false;
+    }
     if (st.frames > 0) {
-        if (lateNow > st.seenLate) {
-            st.leadExtraNs = std::min(st.leadExtraNs + period / 4, period);
+        if (lateSeq > st.seenLateSeq) {
+            if (lateSeq > st.holdSeq) {
+                st.lateLevelNs = std::max(st.lateLevelNs, (int64_t)st.leadExtraNs);
+                st.lateUntilNs = now + kLateMemoryNs;
+                st.leadExtraNs = std::min(st.leadExtraNs + period / 4, period);
+                st.holdSeq = presentSeq;   // the images issued so far had the old lead
+            }
             st.onTime = 0;
         } else if (timedNow > st.seenTimed) {
             st.onTime += timedNow - st.seenTimed;
-            if (st.onTime >= 240) {
-                st.leadExtraNs = st.leadExtraNs > 100000 ? st.leadExtraNs - 100000 : 0;
+            if (st.onTime >= kReleaseImages) {
                 st.onTime = 0;
+                if (st.lateLevelNs >= 0 && now >= st.lateUntilNs) st.lateLevelNs = -1;
+                const uint64_t floorLead =
+                    st.lateLevelNs >= 0 ? std::min((uint64_t)st.lateLevelNs + period / 8, period) : 0;
+                const uint64_t release = period / 8;
+                if (st.leadExtraNs > floorLead)
+                    st.leadExtraNs = st.leadExtraNs > floorLead + release ? st.leadExtraNs - release : floorLead;
             }
         }
     }
-    st.seenLate = lateNow;
+    st.seenLateSeq = lateSeq;
     st.seenTimed = timedNow;
     st.frames++;
 
@@ -583,6 +633,9 @@ void VulkanRendererContext::paceSchedule(PaceState& st, uint32_t n, uint64_t int
     }
     st.lastNs = start + (uint64_t)(n - 1) * step;   // unsnapped: no rounding drift
     st.lastRealDisp = disp[n - 1];
+    st.lastPresentAt = presentAt[n - 1];
+    st.lastNeedNs = need;
+    st.lastCushionNs = cushion;
 
     // For the limiters: how far this arrival was from the phase that puts need + cushion exactly
     // on a refresh (> 0: it came late).
@@ -590,9 +643,59 @@ void VulkanRendererContext::paceSchedule(PaceState& st, uint32_t n, uint64_t int
         const uint64_t x = (arrival + need + cushion - anchor) % period;   // past the last refresh
         int64_t e = (int64_t)x;
         if (e >= (int64_t)half) e -= (int64_t)period;
-        clockArrivalErrNs.store(e, std::memory_order_relaxed);
-        clockErrSeq.fetch_add(1, std::memory_order_release);
+        e = std::clamp<int64_t>(e, INT32_MIN, INT32_MAX);   // |e| <= half a refresh anyway
+        clockErr.store(((uint64_t)(uint32_t)(int32_t)e << 32) | (uint64_t)++clockErrSeq,
+                       std::memory_order_release);
     }
+}
+
+// The plain path under a paced FPS limit, before the acquire: a render that carries no new
+// game frame (the cursor, a UI update) while the last paced game frame N still waits for its
+// refresh T. SurfaceFlinger applies one surface's buffers in order, so such a render cannot
+// show before T: on T it either replaces N (it is ready by T's latch) or comes a refresh
+// later. Rendering every such change would hold a swapchain image each (the plain FIFO
+// swapchain has three: the one on screen, N's, one free) and block the render thread in the
+// acquire until T. So:
+//  - one render per pending frame goes as a supersede: it carries N's target time, so it
+//    replaces N on T. It is rendered as late as the game frame's own lead allows
+//    (T - need - cushion, the pointer is read after the acquire), so it shows the freshest
+//    cursor that still makes T; if that moment has passed, at once (should it miss T it shows
+//    a refresh later, N having been shown on T). Not when the next game frame is due before T
+//    (it would find no free image: FPS limit near the refresh rate, where the game frames
+//    carry the cursor every refresh anyway), nor with fewer than three images;
+//  - any other render waits until a millisecond past T, and then goes as soon as possible.
+// A new game frame renders at once and shows the change with it.
+bool VulkanRendererContext::limitSkipRender() {
+    lpSupersedeNow = false;
+    if (wfg || wfgRequested.load() || !displayTiming_ || !swapchainFifo || fbResized.load())
+        return false;
+    const uint32_t limit = wfgFpsLimit.load(std::memory_order_relaxed);
+    if (limit == 0 || !lpPace.lastRealDisp) return false;
+    if (contentFrames.load() != lpSeenFrames) return false;
+    const uint64_t now = nowNs();
+    const uint64_t disp = lpPace.lastRealDisp;
+    const uint64_t due = disp + 1000000ull;   // a millisecond past T
+    if (now >= due || due - now > 2 * kGameActiveNs) return false;
+
+    if (lpSupersededDisp != disp && now < disp && swapchainImages.size() >= 3) {
+        const uint64_t interval = snapToRefreshes(1000000000ull / limit, wfgPeriodNs());
+        const bool nextFrameAfterT = lpPace.lastArrival && lpPace.lastArrival + interval > due;
+        if (nextFrameAfterT) {
+            const uint64_t lead = lpPace.lastNeedNs + lpPace.lastCushionNs;
+            const uint64_t latest = disp > lead ? disp - lead : 0;
+            if (now >= latest) {
+                lpSupersededDisp = disp;
+                lpSupersedeNow = true;
+                return false;
+            }
+            renderDeferUntilNs.store(latest);
+            wfgDeferredRender.store(true);
+            return true;
+        }
+    }
+    renderDeferUntilNs.store(due);
+    wfgDeferredRender.store(true);
+    return true;
 }
 
 // The plain path (no WFG) with an FPS limit: each new game frame gets a target on the refresh

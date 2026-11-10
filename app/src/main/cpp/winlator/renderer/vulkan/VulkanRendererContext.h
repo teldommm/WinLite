@@ -466,8 +466,30 @@ public:
     uint64_t              wfgPresentLate   = 0;   // paced images shown a refresh or more late
     uint64_t              wfgPresentTimed  = 0;   // paced images with display feedback
     int64_t               wfgShowLagNs     = 0;   // latest paced image: shown minus planned
-    uint32_t              wfgPresentId     = 0;
-    void     wfgPollDisplayTiming(uint64_t javaPeriod);
+    // Presents issued so far. A presentID carries the low 30 bits of its sequence number, and
+    // in its top bits what the image is: paced (a target refresh it is planned for), or a
+    // supersede (a render without a new game frame given the pending paced image's target, see
+    // limitSkipRender). Every present carries a desiredPresentTime: the Android swapchain sets
+    // the window's timestamp only when it is non-zero, and the window keeps the last one, so 0
+    // would hand an unpaced image the previous paced image's time. Unpaced images carry
+    // kAutoPresentTime, which the swapchain hands over as NATIVE_WINDOW_TIMESTAMP_AUTO
+    // (INT64_MIN): SurfaceFlinger's backpressure then shows them one per refresh (FIFO). An
+    // explicit time ("now") would let it drop an image whenever two are ready in one frame.
+    uint64_t              presentSeq       = 0;
+    static constexpr uint32_t kPacedPresentBit     = 0x80000000u;
+    static constexpr uint32_t kSupersedePresentBit = 0x40000000u;
+    static constexpr uint32_t kPresentSeqMask      = 0x3fffffffu;
+    static constexpr uint64_t kAutoPresentTime     = 0x8000000000000000ull;
+    uint64_t seqOfPresentId(uint32_t id) const;
+    uint64_t              wfgLateSeq       = 0;   // sequence number of the latest late paced image
+    // Feedback for presents up to this sequence number belongs to the previous display mode.
+    uint64_t              wfgModeSeq       = 0;
+    uint64_t              wfgGridPeriodNs  = 0;   // the period the grid was last built on
+    // vkGetRefreshCycleDurationGOOGLE is a synchronous call into SurfaceFlinger on Android:
+    // polled twice a second and whenever Java reports another mode, not every frame.
+    uint64_t              refreshPollNs    = 0;
+    uint32_t              refreshPollMhz   = 0;
+    void     wfgPollDisplayTiming();
     // The grid when it is fresh (feedback within the last second): the one rule every user of
     // the clock goes by.
     bool     displayGrid(uint64_t now, uint64_t& anchor, uint64_t& period) const;
@@ -477,8 +499,10 @@ public:
     // Published for the limiters (any thread): the refresh period, and how far the latest paced
     // game frame arrived from the phase that lands it on a refresh with the least latency.
     std::atomic<uint64_t> clockPeriodNs{0};
-    std::atomic<int64_t>  clockArrivalErrNs{0};
-    std::atomic<uint64_t> clockErrSeq{0};         // bumps with each new arrival error
+    // The arrival error (int32 ns, high half) and its sequence number (low half) in one word,
+    // so a reader never pairs a new sequence number with the previous error.
+    std::atomic<uint64_t> clockErr{0};
+    uint32_t              clockErrSeq = 0;        // render thread only
     std::atomic<uint64_t> clockStampNs{0};        // when the grid was last known fresh
     // {period, arrival error, its sequence number}; false while the grid is not fresh.
     bool getDisplayClock(int64_t out[3]) const;
@@ -491,16 +515,29 @@ public:
         uint64_t lastNs       = 0;   // unsnapped target of the last real frame
         int64_t  integ        = 0;   // PLL integral: ns per frame of steady rate error
         uint64_t lastRealDisp = 0;   // the refresh the last real frame is planned for
+        uint64_t lastPresentAt = 0;  // and its desiredPresentTime
+        uint64_t lastNeedNs   = 0;   // the lead and cushion it was planned with
+        uint64_t lastCushionNs = 0;
         uint64_t lastArrival  = 0;
         uint64_t jitterNs     = 0;   // EMA of the arrivals' deviation from the interval
         uint64_t leadExtraNs  = 0;   // learned from late presents: extra lead the GPU needs
-        uint64_t seenLate     = 0;   // feedback counters already accounted for
+        uint64_t seenLateSeq  = 0;   // feedback already accounted for
         uint64_t seenTimed    = 0;
+        // Feedback lags the presents by several images: a late image planned before the last
+        // raise of the lead says nothing about the raised lead and does not raise it again.
+        uint64_t holdSeq      = 0;
+        // The lead an image was late at: the lead stays above it for a while (kLateMemoryNs),
+        // so a GPU that needs a little more is not probed with a late frame every few seconds.
+        int64_t  lateLevelNs  = -1;
+        uint64_t lateUntilNs  = 0;
         uint64_t onTime       = 0;
         uint64_t resets       = 0;   // schedule restarted (hitch, rate change)
         uint64_t late         = 0;   // schedule fell behind 'now' (frame came late)
         uint64_t frames       = 0;
-        void restart() { lastNs = 0; integ = 0; lastRealDisp = 0; lastArrival = 0; }
+        // Feedback counters are taken afresh after a restart: what arrived meanwhile is about
+        // images of another path or of a schedule given up.
+        bool     resync       = true;
+        void restart() { lastNs = 0; integ = 0; lastRealDisp = 0; lastArrival = 0; resync = true; }
     };
     PaceState             wfgPace;
     PaceState             lpPace;
@@ -516,6 +553,14 @@ public:
     uint64_t              wfgAcqWaitSum    = 0;   // real image acquire wait, per log window
     // Plain path (no WFG) paced to the game's FPS limit; see limitPlanPresent.
     uint64_t limitPlanPresent();
+    // A plain-path render without a new game frame while a paced one waits for its refresh:
+    // one per pending frame goes as a supersede, the rest wait for that refresh (see
+    // limitSkipRender).
+    bool     limitSkipRender();
+    uint64_t              lpSupersededDisp = 0;   // the refresh a supersede was issued for
+    bool                  lpSupersedeNow   = false; // this render is that supersede
+    // When renderLoop re-renders a deferred render; 0 = after kGameActiveNs.
+    std::atomic<uint64_t> renderDeferUntilNs{0};
     bool                  swapchainFifo  = false; // the swapchain presents FIFO (pacing applies)
     uint64_t              lpSeenFrames   = 0;
     uint64_t              lpLastArrival  = 0;
