@@ -721,6 +721,21 @@ public class ControlElement {
         paint.setAntiAlias(true);
     }
 
+    // Smooth inner glow: many 1px-ish strokes, quadratic fade, so no visible steps.
+    private void drawInnerGlow(Canvas canvas, boolean circle, float l, float t, float r, float b, float radius, float depth, int maxAlpha) {
+        Paint paint = inputControlsView.getPaint();
+        final int n = 14;
+        float step = depth / n;
+        for (int i = 0; i < n; i++) {
+            float f = 1f - (float) i / n;
+            float inset = step * (i + 0.5f);
+            setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, Math.round(maxAlpha * f * f)), step * 1.3f);
+            float rr = Math.max(0f, radius - inset);
+            if (circle) canvas.drawCircle((l + r) / 2f, (t + b) / 2f, rr, paint);
+            else canvas.drawRoundRect(l + inset, t + inset, r - inset, b - inset, rr, rr, paint);
+        }
+    }
+
     // Outline brighter at the bottom than at the top: a soft light from below, as on the reference
     // controls. The paint's shader is cleared by the next setupPaint().
     private void useEdgeGradient(Paint paint, float top, float bottom, int topAlpha, int bottomAlpha) {
@@ -748,17 +763,10 @@ public class ControlElement {
         setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 64 : 16), Math.max(1f, unit * 0.55f));
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
 
-        setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 135), 0);
+        setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 80), 0);
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
 
-        // Soft glow just inside the edge: three hairlines stepping inwards and fading out.
-        float glow = Math.max(1f, unit * 0.30f);
-        int[] glowAlpha = active ? new int[] {46, 26, 12} : new int[] {30, 16, 7};
-        for (int i = 0; i < 3; i++) {
-            float inset = glow * (i + 0.5f) + Math.max(1f, unit * 0.12f);
-            setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, glowAlpha[i]), glow);
-            canvas.drawRoundRect(left + inset, top + inset, right - inset, bottom - inset, Math.max(0, radius - inset), Math.max(0, radius - inset), paint);
-        }
+        drawInnerGlow(canvas, false, left, top, right, bottom, radius, Math.max(3f, unit * 2.2f), active ? 70 : 46);
 
         // The outline on top, brighter along the bottom.
         setupPaint(paint, Paint.Style.STROKE, 0xff000000, Math.max(1f, unit * 0.24f));
@@ -774,16 +782,10 @@ public class ControlElement {
         setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 72 : 18), Math.max(1f, unit * 0.55f));
         canvas.drawCircle(cx, cy, radius, paint);
 
-        setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 140), 0);
+        setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 85), 0);
         canvas.drawCircle(cx, cy, radius, paint);
 
-        float glow = Math.max(1f, unit * 0.30f);
-        int[] glowAlpha = active ? new int[] {46, 26, 12} : new int[] {30, 16, 7};
-        for (int i = 0; i < 3; i++) {
-            float inset = glow * (i + 0.5f) + Math.max(1f, unit * 0.12f);
-            setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, glowAlpha[i]), glow);
-            canvas.drawCircle(cx, cy, Math.max(0, radius - inset), paint);
-        }
+        drawInnerGlow(canvas, true, cx - radius, cy - radius, cx + radius, cy + radius, radius, Math.max(3f, unit * 2.2f), active ? 70 : 46);
 
         setupPaint(paint, Paint.Style.STROKE, 0xff000000, Math.max(1f, unit * 0.22f));
         useEdgeGradient(paint, cy - radius, cy + radius, active ? 74 : 36, active ? 140 : 96);
@@ -996,9 +998,9 @@ public class ControlElement {
                 setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
                 paint.setShader(new RadialGradient(cx, cy, outer,
                         new int[] {
-                                withAlpha(0xff020202, active ? 150 : 120),
-                                withAlpha(0xff060606, active ? 155 : 125),
-                                withAlpha(0xff2a2a2d, active ? 190 : 150)
+                                withAlpha(0xff020202, active ? 105 : 80),
+                                withAlpha(0xff060606, active ? 110 : 85),
+                                withAlpha(0xff2a2a2d, active ? 150 : 110)
                         },
                         new float[] {0f, 0.6f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(cx, cy, outer, paint);
