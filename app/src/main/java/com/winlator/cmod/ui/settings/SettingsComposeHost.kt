@@ -1,6 +1,7 @@
 package com.winlator.cmod.ui.settings
 
 import com.winlator.cmod.ui.uiStr
+import com.winlator.cmod.ui.theme.RevealSection
 import androidx.compose.material3.LocalTextStyle
 import com.winlator.cmod.ui.theme.tabularNumbers
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
@@ -215,7 +216,7 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
                 // One card, like LOGS: the key toggle (with its field while on), then the two switches.
                 GroupCard {
                     ToggleRow(uiStr(R.string.ui_custom_artwork_sources), model.customArtworkSources) { callbacks.onBooleanChanged("enable_custom_api_key", it) }
-                    if (model.customArtworkSources) {
+                    RevealSection(visible = model.customArtworkSources) {
                         GroupDivider()
                         ArtworkSourcesEditor(model, callbacks)
                     }
@@ -241,7 +242,7 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
             item("logs") {
                 GroupCard {
                     ToggleRow(stringResource(R.string.enable_wine_debug), model.wineDebug) { callbacks.onBooleanChanged("enable_wine_debug", it) }
-                    if (model.wineDebug) {
+                    RevealSection(visible = model.wineDebug) {
                         GroupDivider()
                         WineDebugChannelsRow(
                             selectedValue = model.wineDebugChannels,

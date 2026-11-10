@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.ui.theme.controlAccentColor
 import kotlin.math.roundToInt
 import com.winlator.cmod.ui.theme.TablerIcons
@@ -112,7 +113,7 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
                 onEditClick = { callbacks.onEditProfiles(profileId) }
             )
             // Opacity belongs to the selected layout, so it only shows while one is selected.
-            if (profileId != -1) {
+            RevealSection(visible = profileId != -1) {
                 Spacer(Modifier.height(6.dp))
                 var opacityDraft by remember {
                     mutableStateOf(state.controlsOpacityPercent.coerceIn(10, 100).toFloat())
@@ -207,7 +208,7 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
         // presses the button), so it is hidden while Touch Mode is Off. Its value is kept as is and
         // applies again when a mode is picked. Relative Mouse stays: it also drives Trackpad
         // elements, stick/button mouse and a physical mouse.
-        if (touchMode != 2) {
+        RevealSection(visible = touchMode != 2) {
             SidebarGap()
             SidebarToggleRow(
                 label = uiStr(R.string.ui_tap_to_click),

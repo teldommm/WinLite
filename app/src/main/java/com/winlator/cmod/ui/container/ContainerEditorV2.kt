@@ -3,6 +3,7 @@
 package com.winlator.cmod.ui.container
 
 import com.winlator.cmod.ui.uiStr
+import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.contentdialog.DXVKConfig
 import com.winlator.cmod.directaudio.DirectAudioDriver
 import com.winlator.cmod.ssbs.ForceSsbs
@@ -771,7 +772,7 @@ private fun ContainerCategoryV2(
                     visibleAudioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio,
                     visibleAudioEntries
                 ) { s.audio = StringUtils.parseIdentifier(it) }
-                if (DirectAudioDriver.isSelected(s.audio)) {
+                RevealSection(visible = DirectAudioDriver.isSelected(s.audio)) {
                     val micContext = LocalContext.current
                     SettingsDivider()
                     SettingToggle(uiStr(R.string.ui_microphone), s.directAudioMic) {
@@ -779,7 +780,7 @@ private fun ContainerCategoryV2(
                         if (it) DirectAudioDriver.requestMicPermission(micContext)
                     }
                 }
-                if (s.audio == "oboe") {
+                RevealSection(visible = s.audio == "oboe") {
                     SettingsDivider()
                     val latencyLabel = when (s.oboeProfile) {
                         "ultra" -> uiStr(R.string.ui_low_latency)
@@ -828,7 +829,7 @@ private fun ContainerCategoryV2(
                 SettingChoice(uiStr(R.string.ui_desktop_theme), s.desktopTheme, listOf("Dark", "Light")) { s.desktopTheme = it }
                 SettingsDivider()
                 SettingChoice("Desktop Background", s.desktopBackground, listOf("Image", "Solid Color")) { s.desktopBackground = it }
-                if (s.desktopBackground == "Image") {
+                RevealSection(visible = s.desktopBackground == "Image") {
                     SettingsDivider()
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
@@ -871,7 +872,7 @@ private fun ContainerCategoryV2(
                         s.screen = normalizeResolution(it)
                     }
                 }
-                if (shownScreen == "Custom") {
+                RevealSection(visible = shownScreen == "Custom") {
                     SettingsDivider()
                     ResolutionField(s.screen) { s.screen = it }
                 }
@@ -886,7 +887,7 @@ private fun ContainerCategoryV2(
                     SurfaceFormat.values().map { it.label }
                 ) { s.surfaceFormat = SurfaceFormat.fromLabel(it) }
                 // UBWC compression only works with RGBA buffers (and only on proprietary Adreno).
-                if (s.surfaceFormat == SurfaceFormat.RGBA) {
+                RevealSection(visible = s.surfaceFormat == SurfaceFormat.RGBA) {
                     SettingsDivider()
                     SettingToggle(uiStr(R.string.ui_surface_ubwc), s.surfaceUbwc) { s.surfaceUbwc = it }
                 }
@@ -1019,11 +1020,11 @@ private fun ContainerCategoryV2(
                         s.wrapperValue("lodBias", DXVKConfig.LOD_BIAS_VALUES[DXVKConfig.LOD_BIAS_LABELS.indexOf(it).coerceAtLeast(0)])
                     }
                     val asyncMode = dxvkAsyncMode(s.dxvkVersion)
-                    if (asyncMode != DxvkAsyncMode.NONE) {
+                    RevealSection(visible = asyncMode != DxvkAsyncMode.NONE) {
                         SettingsDivider()
                         SettingToggle(uiStr(R.string.ui_async), s.async) { s.async = it; s.wrapperValue("async", if (it) "1" else "0") }
                     }
-                    if (asyncMode == DxvkAsyncMode.GPL_ASYNC) {
+                    RevealSection(visible = asyncMode == DxvkAsyncMode.GPL_ASYNC) {
                         SettingsDivider()
                         SettingToggle(uiStr(R.string.ui_async_cache), s.asyncCache) { s.asyncCache = it; s.wrapperValue("asyncCache", if (it) "1" else "0") }
                     }
@@ -1044,12 +1045,12 @@ private fun ContainerCategoryV2(
                     }
                     SettingsDivider()
                     SettingMappedChoice(uiStr(R.string.fexcore_preset), s.fexPreset, fexPresets) { s.fexPreset = it }
-                    if (ForceSsbs.isSupportedWine(s.runtime)) {
+                    RevealSection(visible = ForceSsbs.isSupportedWine(s.runtime)) {
                         SettingsDivider()
                         SettingToggle(uiStr(R.string.ui_force_ssbs), s.forceSsbs) { s.forceSsbs = it }
                     }
                 }
-                if (!arm64 || s.emulator == "WOWBox64") {
+                RevealSection(visible = !arm64 || s.emulator == "WOWBox64") {
                     catalog?.let { c ->
                         val type = if (arm64) "WOWBox64" else "Box64"
                         val versions = if (arm64) c.wow else c.box

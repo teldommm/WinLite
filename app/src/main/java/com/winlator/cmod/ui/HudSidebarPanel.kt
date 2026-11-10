@@ -1,6 +1,7 @@
 package com.winlator.cmod.ui
 
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.RevealSection
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
@@ -102,7 +103,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
             }
         )
 
-        if (hudOn) {
+        RevealSection(visible = hudOn) {
             SidebarGap()
             SidebarCard {
                 SidebarDropdownField(
@@ -121,7 +122,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
         // Metrics only exist on the Modern HUD. Everything below is shown only while the HUD is on
         // (previously gated on isModern alone, so it stayed visible under a disabled HUD while the
         // Style picker right above was already hidden).
-        if (hudOn && isModern) {
+        RevealSection(visible = hudOn && isModern) {
             SidebarGap()
             SidebarCard {
                 SidebarSectionTitle(uiStr(R.string.ui_hud_metrics))
@@ -131,7 +132,7 @@ private fun HudSidebarPanel(state: HudPanelState, callbacks: HudPanelCallbacks) 
         }
 
         // Size and opacity: both styles, each with its own saved values.
-        if (hudOn) {
+        RevealSection(visible = hudOn) {
             SidebarGap()
             SidebarCard {
                 SidebarSlider(

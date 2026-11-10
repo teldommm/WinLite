@@ -3,6 +3,7 @@
 package com.winlator.cmod.ui.shortcut
 
 import com.winlator.cmod.ui.uiStr
+import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.contentdialog.DXVKConfig
 import com.winlator.cmod.directaudio.DirectAudioDriver
 import com.winlator.cmod.ssbs.ForceSsbs
@@ -816,7 +817,7 @@ private fun ShortcutCategoryV2(
                 SettingChoice(uiStr(R.string.ui_audio_driver), visibleAudioEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.audio, true) } ?: s.audio, visibleAudioEntries) {
                     s.audio = StringUtils.parseIdentifier(it); s.extra("audioDriver", s.audio)
                 }
-                if (DirectAudioDriver.isSelected(s.audio)) {
+                RevealSection(visible = DirectAudioDriver.isSelected(s.audio)) {
                     SettingsDivider()
                     SettingToggle(uiStr(R.string.ui_microphone), s.directAudioMic) {
                         s.directAudioMic = it
@@ -824,7 +825,7 @@ private fun ShortcutCategoryV2(
                         if (it) DirectAudioDriver.requestMicPermission(context)
                     }
                 }
-                if (s.audio == "oboe") {
+                RevealSection(visible = s.audio == "oboe") {
                     SettingsDivider()
                     val latencyLabel = when (s.oboeProfile) {
                         "ultra" -> uiStr(R.string.ui_low_latency)
@@ -898,7 +899,7 @@ private fun ShortcutCategoryV2(
                         s.extra("screenSize", s.screen)
                     }
                 }
-                if (screenChoice == "Custom") {
+                RevealSection(visible = screenChoice == "Custom") {
                     SettingsDivider()
                     ResolutionField(s.screen) { value ->
                         s.screen = value
@@ -920,7 +921,7 @@ private fun ShortcutCategoryV2(
                     s.saveRenderer()
                 }
                 // UBWC compression only works with RGBA buffers (and only on proprietary Adreno).
-                if (s.surfaceFormat == SurfaceFormat.RGBA) {
+                RevealSection(visible = s.surfaceFormat == SurfaceFormat.RGBA) {
                     SettingsDivider()
                     SettingToggle(uiStr(R.string.ui_surface_ubwc), s.surfaceUbwc) {
                         s.surfaceUbwc = it
@@ -963,7 +964,7 @@ private fun ShortcutCategoryV2(
                 ShortcutVulkanExtensionsV2(context, s.driverVersion, s.blacklistedExtensions) {
                     s.blacklistedExtensions = it; s.graphics("blacklistedExtensions", it)
                 }
-                if (isTurnipDriver(s.driverVersion)) {
+                RevealSection(visible = isTurnipDriver(s.driverVersion)) {
                     SettingsDivider()
                     SettingChoice("Rendering Mode", s.renderingMode, listOf("None", "Sysmem", "Gmem", "Autotuner Profiled")) { s.applyRenderingMode(it) }
                 }
@@ -1033,11 +1034,11 @@ private fun ShortcutCategoryV2(
                         s.wrapperValue("lodBias", DXVKConfig.LOD_BIAS_VALUES[DXVKConfig.LOD_BIAS_LABELS.indexOf(it).coerceAtLeast(0)])
                     }
                     val asyncMode = dxvkAsyncMode(s.dxvkVersion)
-                    if (asyncMode != DxvkAsyncMode.NONE) {
+                    RevealSection(visible = asyncMode != DxvkAsyncMode.NONE) {
                         SettingsDivider()
                         SettingToggle(uiStr(R.string.ui_async), s.async) { s.async = it; s.wrapperValue("async", if (it) "1" else "0") }
                     }
-                    if (asyncMode == DxvkAsyncMode.GPL_ASYNC) {
+                    RevealSection(visible = asyncMode == DxvkAsyncMode.GPL_ASYNC) {
                         SettingsDivider()
                         SettingToggle(uiStr(R.string.ui_async_cache), s.asyncCache) { s.asyncCache = it; s.wrapperValue("asyncCache", if (it) "1" else "0") }
                     }
@@ -1070,12 +1071,12 @@ private fun ShortcutCategoryV2(
                     }
                     SettingsDivider()
                     SettingMappedChoice(uiStr(R.string.fexcore_preset), s.fexPreset, fexPresets) { s.fexPreset = it; s.extra("fexcorePreset", it) }
-                    if (ForceSsbs.isSupportedWine(s.container.getWineVersion())) {
+                    RevealSection(visible = ForceSsbs.isSupportedWine(s.container.getWineVersion())) {
                         SettingsDivider()
                         SettingToggle(uiStr(R.string.ui_force_ssbs), s.forceSsbs) { s.forceSsbs = it; s.extra("forceSsbs", if (it) "1" else "0") }
                     }
                 }
-                if (!s.arm64 || s.emulator == "WOWBox64") {
+                RevealSection(visible = !s.arm64 || s.emulator == "WOWBox64") {
                     catalog?.let { c ->
                         val versionCatalog = if (s.arm64) c.wow else c.box
                         val type = if (s.arm64) "WOWBox64" else "Box64"
@@ -1118,7 +1119,7 @@ private fun ShortcutCategoryV2(
                 SettingsDivider()
                 SettingToggle(uiStr(R.string.ui_relative_mouse), s.relativeMouse) { s.relativeMouse = it; s.extra("enableRelativeMouse", if (it) "1" else null) }
                 // Touch-surface only, so hidden while Touch Mode is Off (value kept).
-                if (s.touchMode != 2) {
+                RevealSection(visible = s.touchMode != 2) {
                     SettingsDivider()
                     SettingToggle(uiStr(R.string.ui_tap_to_click), s.tapToClick) { s.tapToClick = it; s.extra("tapToClick", if (it) null else "0") }
                 }
@@ -1157,7 +1158,7 @@ private fun ShortcutCategoryV2(
                 SettingChoice(uiStr(R.string.ui_sharpness_effect), s.sharpnessEffect, listOf("None", "CAS", "DLS")) {
                     s.sharpnessEffect = it; s.extra("sharpnessEffect", it)
                 }
-                if (s.sharpnessEffect != "None") {
+                RevealSection(visible = s.sharpnessEffect != "None") {
                     SettingsDivider()
                     SharpnessSliderV2(uiStr(R.string.ui_sharpness_level), s.sharpnessLevel) {
                         s.sharpnessLevel = it; s.extra("sharpnessLevel", it)

@@ -4,7 +4,23 @@ import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateMapOf
+import com.winlator.cmod.ui.theme.RevealSection
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -164,47 +180,76 @@ fun EnvironmentVariablesEditor(
         mutableStateListOf<EditableEnvVariable>().apply { addAll(parseEnvironmentVariables(value)) }
     }
     var addOpen by remember { mutableStateOf(false) }
+    val leaving = remember { mutableStateMapOf<String, Pair<Int, EditableEnvVariable>>() }
+    val seen = remember { mutableSetOf<String>().apply { addAll(rows.map { it.name }) } }
 
     fun commit() = onChanged(serializeEnvironmentVariables(rows))
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (rows.isEmpty()) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = WinZShapes.Medium,
-                border = BorderStroke(1.dp, hairlineColor()),
-                color = MaterialTheme.colorScheme.surface
-            ) {
-                Text(
-                    uiStr(R.string.ui_no_environment_variables_added),
-                    modifier = Modifier.padding(14.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            SettingsCard {
-                rows.forEachIndexed { index, row ->
-                    // Keyed by name so text-field state follows its row when another row is removed.
-                    key(row.name) {
-                        EnvironmentVariableRow(
-                            row = row,
-                            onValue = { newValue ->
-                                val at = rows.indexOfFirst { it.name == row.name }
-                                if (at >= 0) {
-                                    rows[at] = rows[at].copy(value = newValue)
-                                    commit()
-                                }
-                            },
-                            onRemove = {
-                                val at = rows.indexOfFirst { it.name == row.name }
-                                if (at >= 0) {
-                                    rows.removeAt(at)
-                                    commit()
+        // Rows that were just removed stay on screen (as ghosts) until their exit animation ends.
+        val items = ArrayList<Triple<EditableEnvVariable, Boolean, Int>>()
+        rows.forEach { items.add(Triple(it, false, 0)) }
+        leaving.values.sortedBy { it.first }.forEach { (idx, row) ->
+            items.add(idx.coerceIn(0, items.size), Triple(row, true, idx))
+        }
+        AnimatedContent(
+            targetState = items.isEmpty(),
+            modifier = Modifier.fillMaxWidth().animateContentSize(tween(260, easing = FastOutSlowInEasing)),
+            transitionSpec = {
+                (fadeIn(tween(220, delayMillis = 80)) togetherWith fadeOut(tween(140)))
+                    .using(SizeTransform(clip = false) { _, _ -> tween(260, easing = FastOutSlowInEasing) })
+            },
+            label = "envList"
+        ) { empty ->
+            if (empty) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = WinZShapes.Medium,
+                    border = BorderStroke(1.dp, hairlineColor()),
+                    color = MaterialTheme.colorScheme.surface
+                ) {
+                    Text(
+                        uiStr(R.string.ui_no_environment_variables_added),
+                        modifier = Modifier.padding(14.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                SettingsCard {
+                    items.forEachIndexed { index, (row, ghost, _) ->
+                        // Keyed by name so text-field state follows its row when another row is removed.
+                        key(row.name) {
+                            val startVisible = remember { row.name in seen }
+                            SideEffect { seen.add(row.name) }
+                            EnvRowReveal(
+                                visible = !ghost,
+                                startVisible = startVisible,
+                                onGone = { leaving.remove(row.name) }
+                            ) {
+                                Column {
+                                    if (index != 0) SettingsDivider()
+                                    EnvironmentVariableRow(
+                                        row = row,
+                                        onValue = { newValue ->
+                                            val at = rows.indexOfFirst { it.name == row.name }
+                                            if (at >= 0) {
+                                                rows[at] = rows[at].copy(value = newValue)
+                                                commit()
+                                            }
+                                        },
+                                        onRemove = {
+                                            val at = rows.indexOfFirst { it.name == row.name }
+                                            if (at >= 0) {
+                                                leaving[row.name] = at to rows[at]
+                                                rows.removeAt(at)
+                                                commit()
+                                            }
+                                        }
+                                    )
                                 }
                             }
-                        )
+                        }
                     }
-                    if (index != rows.lastIndex) SettingsDivider()
                 }
             }
         }
@@ -225,6 +270,7 @@ fun EnvironmentVariablesEditor(
             onDismiss = { addOpen = false },
             onAdd = { added ->
                 added.forEach { entry ->
+                    leaving.remove(entry.name)
                     val at = rows.indexOfFirst { it.name == entry.name }
                     if (at >= 0) rows[at] = entry else rows.add(entry)
                 }
@@ -232,6 +278,27 @@ fun EnvironmentVariablesEditor(
                 addOpen = false
             }
         )
+    }
+}
+
+// One list row that unfolds when it is added and folds away when removed; `onGone` fires once the
+// exit has finished so the caller can drop the ghost.
+@Composable
+private fun EnvRowReveal(
+    visible: Boolean,
+    startVisible: Boolean,
+    onGone: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val state = remember { MutableTransitionState(startVisible) }
+    state.targetState = visible
+    AnimatedVisibility(
+        visibleState = state,
+        enter = expandVertically(tween(260, easing = FastOutSlowInEasing)) + fadeIn(tween(220, delayMillis = 40)),
+        exit = shrinkVertically(tween(210, easing = FastOutSlowInEasing)) + fadeOut(tween(140))
+    ) { content() }
+    LaunchedEffect(state.currentState, state.isIdle, visible) {
+        if (!visible && state.isIdle && !state.currentState) onGone()
     }
 }
 
@@ -406,7 +473,17 @@ private fun AddEnvironmentVariableDialog(
         ModeSwitch(mode, presetEnabled = available.isNotEmpty()) { mode = it }
         Spacer(Modifier.height(10.dp))
         ThemedDialogScrollBody(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            when (mode) {
+            AnimatedContent(
+                targetState = mode,
+                modifier = Modifier.fillMaxWidth().animateContentSize(tween(260, easing = FastOutSlowInEasing)),
+                transitionSpec = {
+                    (fadeIn(tween(220, delayMillis = 70)) togetherWith fadeOut(tween(120)))
+                        .using(SizeTransform(clip = false) { _, _ -> tween(260, easing = FastOutSlowInEasing) })
+                },
+                label = "addMode"
+            ) { shownMode ->
+              Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            when (shownMode) {
                 AddMode.PRESET -> {
                     SettingChoice(uiStr(R.string.ui_variable), presetName, available.map { it.name }) { presetName = it }
                     if (presetSpec != null) EnvValueEditor(presetSpec, presetValue) { presetValue = it }
@@ -430,8 +507,20 @@ private fun AddEnvironmentVariableDialog(
                         // Only shown when there is something to say (no idle tip line).
                         supportingText = if (customMessage != null) { { Text(customMessage) } } else null
                     )
-                    if (!custom.bulk) {
-                        if (customSpec != null) {
+                    // 0 = known variable's own editor, 1 = plain value field, 2 = pasted list.
+                    val customView = when {
+                        custom.bulk -> 2
+                        customSpec != null -> 0
+                        else -> 1
+                    }
+                    AnimatedContent(
+                        targetState = customView,
+                        modifier = Modifier.fillMaxWidth().animateContentSize(tween(240, easing = FastOutSlowInEasing)),
+                        transitionSpec = { fadeIn(tween(200, delayMillis = 60)) togetherWith fadeOut(tween(110)) },
+                        label = "customValue"
+                    ) { view ->
+                    if (view != 2) {
+                        if (view == 0 && customSpec != null) {
                             // Known name typed by hand: offer the proper editor right away.
                             val v = customValue.ifEmpty { defaultValueFor(customSpec) }
                             EnvValueEditor(customSpec, v) { customValue = it }
@@ -459,9 +548,12 @@ private fun AddEnvironmentVariableDialog(
                             }
                         }
                     }
+                    }
                 }
             }
-            if (replacing > 0) {
+              }
+            }
+            RevealSection(visible = replacing > 0) {
                 Text(
                     if (toAdd.size == 1) uiStr(R.string.ui_already_added_its_value_will_be_replaced)
                     else uiStr(R.string.ui_already_added_their_values_will_be_replac, replacing),

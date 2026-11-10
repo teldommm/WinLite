@@ -1,6 +1,9 @@
 package com.winlator.cmod.ui
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateDpAsState
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.RevealSection
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -226,7 +229,7 @@ private fun GraphicsSidebarPanel(
                     callbacks.onFsrToggled(it)
                 }
             )
-            if (fsrEnabled) {
+            RevealSection(visible = fsrEnabled) {
                 Spacer(Modifier.height(8.dp))
                 SidebarDropdownField(
                     caption = uiStr(R.string.ui_upscaler_mode),
@@ -239,7 +242,7 @@ private fun GraphicsSidebarPanel(
                     }
                 )
             }
-            if (sharpnessVisible) {
+            RevealSection(visible = sharpnessVisible) {
                 Spacer(Modifier.height(12.dp))
                 var sharpnessDraft by remember(sharpnessVisible) { mutableStateOf(sharpness.toFloat()) }
                 SidebarSlider(
@@ -255,7 +258,8 @@ private fun GraphicsSidebarPanel(
                     valueRange = 0f..100f
                 )
             }
-            Spacer(Modifier.height(if (sharpnessVisible) 4.dp else 12.dp))
+            val postFxGap by animateDpAsState(if (sharpnessVisible) 4.dp else 12.dp, tween(260), label = "postFxGap")
+            Spacer(Modifier.height(postFxGap))
             SidebarDropdownField(
                 caption = uiStr(R.string.ui_post_effect),
                 options = POSTFX_LABELS,
@@ -297,7 +301,7 @@ private fun GraphicsSidebarPanel(
                     callbacks.onReshadeEffectChanged(index)
                 }
             )
-            if (reshadeIndex > 0) {
+            RevealSection(visible = reshadeIndex > 0) {
                 Spacer(Modifier.height(12.dp))
                 SidebarSlider(
                     label = uiStr(R.string.ui_strength),
@@ -324,7 +328,7 @@ private fun GraphicsSidebarPanel(
                     pushWfg()
                 }
             )
-            if (wfgEnabled) {
+            RevealSection(visible = wfgEnabled) {
                 Spacer(Modifier.height(8.dp))
                 SidebarDropdownField(
                     caption = uiStr(R.string.ui_wfg_motion_quality),
@@ -345,7 +349,7 @@ private fun GraphicsSidebarPanel(
                         pushWfg()
                     }
                 )
-                if (WfgSettings.isTarget(wfgModeIndex)) {
+                RevealSection(visible = WfgSettings.isTarget(wfgModeIndex)) {
                     Spacer(Modifier.height(10.dp))
                     WfgTargetField(
                         text = wfgTargetText,

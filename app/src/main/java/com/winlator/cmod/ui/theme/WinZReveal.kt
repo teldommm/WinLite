@@ -1,9 +1,15 @@
 package com.winlator.cmod.ui.theme
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -51,4 +57,18 @@ fun FadeInOnShow(enabled: Boolean = true, durationMillis: Int = 260, content: @C
     val alpha = remember { Animatable(if (enabled) 0f else 1f) }
     LaunchedEffect(Unit) { if (enabled) alpha.animateTo(1f, tween(durationMillis, easing = FastOutSlowInEasing)) }
     Box(Modifier.graphicsLayer { this.alpha = alpha.value }) { content() }
+}
+
+// A row (or group of rows) that appears or disappears when a setting changes: it unfolds in height
+// and fades, so the rows below slide instead of jumping. Put the leading gap/divider inside.
+@Composable
+fun RevealSection(visible: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = expandVertically(tween(260, easing = FastOutSlowInEasing)) + fadeIn(tween(220, delayMillis = 40)),
+        exit = shrinkVertically(tween(210, easing = FastOutSlowInEasing)) + fadeOut(tween(140))
+    ) {
+        Column { content() }
+    }
 }
