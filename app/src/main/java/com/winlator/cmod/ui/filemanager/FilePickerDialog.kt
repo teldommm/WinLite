@@ -11,7 +11,16 @@ import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -343,6 +352,8 @@ private class FilePickerState(val roots: List<PickerRoot>, start: File) {
     }
 }
 
+private data class ListKey(val path: String, val showAll: Boolean)
+
 private class PickerEntry(val file: File, val isDirectory: Boolean)
 
 private fun listEntries(
@@ -391,9 +402,6 @@ private fun ColumnScope.FilePickerPanel(
         onPauseOrDispose { }
     }
     val hasAccess = remember(refreshTick) { hasStorageAccess() }
-    val entries = remember(state.dir, state.showAll, extensions, folderMode, refreshTick) {
-        listEntries(state.dir, extensions, state.showAll, folderMode)
-    }
 
     Text(
         title,
@@ -450,46 +458,74 @@ private fun ColumnScope.FilePickerPanel(
     }
     HorizontalDivider(color = dividerColor())
 
-    Box(Modifier.weight(1f, fill = false).heightIn(min = 160.dp)) {
-        if (!hasAccess) {
-            Column(
-                Modifier.fillMaxWidth().heightIn(min = 160.dp).padding(vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    uiStr(R.string.ui_storage_access_needed),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.size(12.dp))
-                Button(
-                    onClick = { openStorageAccessSettings(context) },
-                    shape = WinZShapes.Medium,
-                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color.White)
+    // The listing changes with the folder / the "show all" switch / the storage. Going into a folder
+    // slides the new list in from the right, going up from the left (a switch or another storage
+    // just cross-fades), and the card's height follows instead of jumping.
+    val listKey = ListKey(state.dir.path, state.showAll)
+    AnimatedContent(
+        targetState = listKey,
+        modifier = Modifier.weight(1f, fill = false),
+        transitionSpec = {
+            val deeper = targetState.path.startsWith(initialState.path + File.separator)
+            val higher = initialState.path.startsWith(targetState.path + File.separator)
+            val enter = fadeIn(tween(200, easing = FastOutSlowInEasing))
+            val exit = fadeOut(tween(140, easing = FastOutSlowInEasing))
+            val spec = when {
+                deeper -> (enter + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 8 }) togetherWith
+                    (exit + slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 8 })
+                higher -> (enter + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 8 }) togetherWith
+                    (exit + slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 8 })
+                else -> enter togetherWith exit
+            }
+            spec.using(SizeTransform(clip = true) { _, _ -> tween(260, easing = FastOutSlowInEasing) })
+        },
+        label = "pickerList"
+    ) { key ->
+        // Built from the key this slot belongs to, so the outgoing list keeps its own entries.
+        val entries = remember(key, extensions, folderMode, refreshTick) {
+            listEntries(File(key.path), extensions, key.showAll, folderMode)
+        }
+        Box(Modifier.heightIn(min = 160.dp)) {
+            if (!hasAccess) {
+                Column(
+                    Modifier.fillMaxWidth().heightIn(min = 160.dp).padding(vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Text(uiStr(R.string.ui_grant_access))
-                }
-            }
-        } else if (entries.isEmpty()) {
-            Box(Modifier.fillMaxWidth().heightIn(min = 160.dp), contentAlignment = Alignment.Center) {
-                Text(
-                    uiStr(
-                        when {
-                            folderMode -> R.string.ui_no_subfolders
-                            state.showAll -> R.string.ui_this_folder_is_empty
-                            else -> R.string.ui_no_matching_files
-                        }
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            LazyColumn(Modifier.fillMaxWidth()) {
-                items(entries, key = { it.file.absolutePath }) { entry ->
-                    PickerRow(entry) {
-                        if (entry.isDirectory) state.open(entry.file) else onPick(entry.file)
+                    Text(
+                        uiStr(R.string.ui_storage_access_needed),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.size(12.dp))
+                    Button(
+                        onClick = { openStorageAccessSettings(context) },
+                        shape = WinZShapes.Medium,
+                        colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color.White)
+                    ) {
+                        Text(uiStr(R.string.ui_grant_access))
                     }
-                    HorizontalDivider(modifier = Modifier.padding(start = 48.dp), color = dividerColor())
+                }
+            } else if (entries.isEmpty()) {
+                Box(Modifier.fillMaxWidth().heightIn(min = 160.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        uiStr(
+                            when {
+                                folderMode -> R.string.ui_no_subfolders
+                                key.showAll -> R.string.ui_this_folder_is_empty
+                                else -> R.string.ui_no_matching_files
+                            }
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxWidth()) {
+                    items(entries, key = { it.file.absolutePath }) { entry ->
+                        PickerRow(entry) {
+                            if (entry.isDirectory) state.open(entry.file) else onPick(entry.file)
+                        }
+                        HorizontalDivider(modifier = Modifier.padding(start = 48.dp), color = dividerColor())
+                    }
                 }
             }
         }
