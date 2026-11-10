@@ -1,0 +1,54 @@
+package com.winlator.cmod.ui.theme
+
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+
+// Entrance animations for content that arrives after the screen is already on display (a list
+// loaded from disk, a catalog fetched from the network). Without them the content "teleports" in.
+
+// A list card: fades in and rises ~14dp, staggered by position (first 8 rows).
+// `revealed` remembers which ids already played it, so a card scrolled out of a LazyColumn and
+// back, or the same card after a filter / category switch, appears at once instead of replaying.
+@Composable
+fun RevealOnEnter(
+    id: String,
+    index: Int,
+    revealed: MutableSet<String>,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val already = remember(id) { id in revealed }
+    val progress = remember(id) { Animatable(if (already) 1f else 0f) }
+    LaunchedEffect(id) {
+        if (!already) {
+            revealed.add(id)
+            delay(index.coerceAtMost(8) * 35L)
+            progress.animateTo(1f, tween(340, easing = FastOutSlowInEasing))
+        }
+    }
+    Box(
+        modifier.graphicsLayer {
+            alpha = progress.value
+            translationY = (1f - progress.value) * 14.dp.toPx()
+        }
+    ) { content() }
+}
+
+// A whole screen body: fades in once, when it first enters the composition (e.g. when the
+// "model is still loading" placeholder is replaced by the real screen). Later updates of the
+// same screen don't replay it.
+@Composable
+fun FadeInOnShow(enabled: Boolean = true, durationMillis: Int = 260, content: @Composable () -> Unit) {
+    val alpha = remember { Animatable(if (enabled) 0f else 1f) }
+    LaunchedEffect(Unit) { if (enabled) alpha.animateTo(1f, tween(durationMillis, easing = FastOutSlowInEasing)) }
+    Box(Modifier.graphicsLayer { this.alpha = alpha.value }) { content() }
+}

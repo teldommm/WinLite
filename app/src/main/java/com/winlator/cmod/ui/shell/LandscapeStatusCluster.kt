@@ -14,7 +14,6 @@ import android.text.format.DateFormat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -132,29 +131,33 @@ internal fun LandscapeStatusCluster(modifier: Modifier = Modifier) {
                 modifier = Modifier.size(18.dp)
             )
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                // The bolt slot is always reserved (regular mode) so plugging in doesn't shift the
-                // other items; compact mode has no room for it and shows charging by colour only.
-                if (!compact) {
-                    Box(Modifier.size(11.dp), contentAlignment = Alignment.Center) {
-                        if (state.charging) {
-                            Icon(TablerIcons.Bolt, null, tint = primary, modifier = Modifier.size(11.dp))
-                        }
-                    }
-                }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 BatteryGlyph(
                     percent = state.percent,
                     outline = onBg.copy(alpha = .55f),
                     fill = batteryColor
                 )
                 if (!compact) {
-                    StatusText(
-                        if (state.percent >= 0) "${state.percent}%" else "",
-                        Modifier.width(32.dp).padding(start = 2.dp),
-                        12,
-                        FontWeight.Medium,
-                        if (low) MaterialTheme.colorScheme.error else textColor
-                    )
+                    // The bolt lives inside the fixed-width percentage box, after the glyph, so it no
+                    // longer needs its own always-reserved slot between the network icon and the
+                    // battery (that empty slot was what made the gap look too wide). The box is a fixed
+                    // width, so plugging in only moves the number inside it, never the other items.
+                    Row(
+                        Modifier.width(44.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Start
+                    ) {
+                        if (state.charging) {
+                            Icon(TablerIcons.Bolt, null, tint = primary, modifier = Modifier.size(11.dp))
+                        }
+                        StatusText(
+                            if (state.percent >= 0) "${state.percent}%" else "",
+                            Modifier,
+                            12,
+                            FontWeight.Medium,
+                            if (low) MaterialTheme.colorScheme.error else textColor
+                        )
+                    }
                 }
             }
         }

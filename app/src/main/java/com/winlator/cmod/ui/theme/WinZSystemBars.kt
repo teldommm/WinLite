@@ -6,6 +6,8 @@ import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -45,4 +47,16 @@ fun ApplySystemBarsPolicy(window: Window?) {
         if (window != null) WinZSystemBars.apply(window, portrait)
         onDispose { }
     }
+}
+
+// ModalBottomSheet (material3) and Dialog live in their own window, which does not inherit the
+// activity's immersive state: opening a sheet in landscape made the system status bar (clock,
+// battery, Wi-Fi) slide back in and shove the layout. Call this first thing inside the sheet /
+// dialog content to put that window on the same policy as the activity. The window provider is
+// either the hosting view itself (material3 sheet) or its parent (Compose Dialog).
+@Composable
+fun DialogSystemBarsPolicy() {
+    val view = LocalView.current
+    val window = ((view as? DialogWindowProvider) ?: (view.parent as? DialogWindowProvider))?.window
+    ApplySystemBarsPolicy(window)
 }

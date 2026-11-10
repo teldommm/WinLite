@@ -40,6 +40,11 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.TablerIcons
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 
 private val bundledRuntimeId = "bundled:${ProtonPackageManager.DEFAULT_IDENTIFIER}"
 private val bundledRuntimeName = ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER)?.title
@@ -90,7 +95,8 @@ internal fun OnboardingRuntimeSelectionScreen(
         ) {
             item {
                 Text(uiStr(R.string.ui_choose_environment), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-                if (preparing) {
+                AnimatedVisibility(preparing, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                  Column {
                     Spacer(Modifier.height(18.dp))
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -103,6 +109,7 @@ internal fun OnboardingRuntimeSelectionScreen(
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
+                  }
                 }
                 Spacer(Modifier.height(12.dp))
             }

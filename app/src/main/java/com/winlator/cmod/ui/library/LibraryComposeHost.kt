@@ -3,6 +3,8 @@ package com.winlator.cmod.ui.library
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableStateOf
@@ -16,6 +18,7 @@ import com.winlator.cmod.MainActivity
 import com.winlator.cmod.ui.applyAppFullscreen
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.winlator.cmod.ui.theme.FadeInOnShow
 
 @Immutable
 data class LibraryItem(
@@ -58,6 +61,9 @@ class LibraryComposeController internal constructor(
     // False until the first item list arrives. Items are loaded off the main thread now, so
     // without this the "empty library" state would flash for a frame on every cold start.
     internal val loaded = mutableStateOf(false)
+
+    // Set once the Library has been shown (see LibraryContent): later entries don't replay the fade-in.
+    internal var revealedOnce = false
 
     // Search bar open/closed. Lives here (not in the header's rememberSaveable) so the shell can
     // close it when the user leaves the Library tab — tabs persist now, so a local flag would
@@ -130,14 +136,20 @@ internal fun LibraryContent(controller: LibraryComposeController, callbacks: Lib
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
         return
     }
-    CompositionLocalProvider(LocalLibrarySearchActive provides controller.searchActive) {
-        LibraryRootWithoutEmptyDescription(
-            controller.items.value,
-            controller.grid.value,
-            controller.query.value,
-            controller.selectedShortcutPath,
-            callbacks
-        )
+    // Fades in once when the first item list replaces the blank loading frame.
+    // The controller outlives the composition (tab switches), so only the first reveal animates.
+    val animateReveal = remember { !controller.revealedOnce }
+    LaunchedEffect(Unit) { controller.revealedOnce = true }
+    FadeInOnShow(enabled = animateReveal) {
+        CompositionLocalProvider(LocalLibrarySearchActive provides controller.searchActive) {
+            LibraryRootWithoutEmptyDescription(
+                controller.items.value,
+                controller.grid.value,
+                controller.query.value,
+                controller.selectedShortcutPath,
+                callbacks
+            )
+        }
     }
 }
 

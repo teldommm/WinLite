@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.winlator.cmod.ui.theme.findActivity
+import com.winlator.cmod.ui.theme.FadeInOnShow
 
 // File Manager as a plain composable tab of MainShell (replaces FileManagerFragment). It is now
 // a tab in both orientations — Library's "Add" navigates to it instead of pushing a second
@@ -37,7 +38,7 @@ fun FileManagerRoute(shownSerial: Int) {
 
     val current = model
     if (current != null) {
-        FileManagerScreen(current, callbacks)
+        FadeInOnShow { FileManagerScreen(current, callbacks) }
     } else {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
     }

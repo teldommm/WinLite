@@ -42,7 +42,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
@@ -51,6 +50,7 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
 import com.winlator.cmod.ui.theme.TablerIcons
+import com.winlator.cmod.ui.theme.WinZMonoFontFamily
 
 // Backing store for DebugDialog's live log stream. append() only grows the list when not
 // paused (matches the old LogView.append/DebugDialog.paused gating) — the file write in
@@ -180,7 +180,7 @@ private fun DebugLogContent(state: DebugLogState, onClose: () -> Unit) {
                 itemsIndexed(state.lines) { index, line ->
                     Text(
                         line,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = WinZMonoFontFamily),
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier
                             .fillMaxWidth()

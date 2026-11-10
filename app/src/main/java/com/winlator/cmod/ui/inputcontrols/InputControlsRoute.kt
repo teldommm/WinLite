@@ -44,6 +44,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
+import com.winlator.cmod.ui.theme.FadeInOnShow
 
 // Input Controls as a plain composable tab of MainShell — the first screen moved off Fragments.
 // Everything InputControlsFragment did lives in InputControlsScreenState below, with the same
@@ -74,7 +75,7 @@ fun InputControlsRoute(initialProfileId: Int, shownSerial: Int) {
 
     val model = state.model
     if (model != null) {
-        InputControlsScreen(model, state)
+        FadeInOnShow { InputControlsScreen(model, state) }
     } else {
         // First load is in flight (a few ms of disk IO off the main thread).
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))

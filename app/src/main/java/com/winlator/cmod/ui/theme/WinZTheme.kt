@@ -373,6 +373,14 @@ private val WinZFontFamily = FontFamily(
     Font(R.font.inter_variable, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700)))
 )
 
+// Monospace face for logs and value fields (replaces the system FontFamily.Monospace).
+// JetBrains Mono, static Regular / Medium / Bold from res/font. SIL OFL 1.1, (c) JetBrains.
+val WinZMonoFontFamily = FontFamily(
+    Font(R.font.jetbrains_mono_regular, FontWeight.Normal),
+    Font(R.font.jetbrains_mono_medium, FontWeight.Medium),
+    Font(R.font.jetbrains_mono_bold, FontWeight.Bold)
+)
+
 // Inter's own size-dependent tracking ("dynamic metrics", rsms.me/inter/dynmetrics): a little
 // tighter as the text grows (about -0.1sp at 14sp, -0.4sp at 22sp, -1sp at 52sp), ~0 at 12sp.
 // In em, not sp: many Texts override only fontSize (nav labels at 11sp, chips at 9sp); an absolute

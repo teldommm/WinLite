@@ -95,6 +95,7 @@ import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.rememberSlidingPillState
 import com.winlator.cmod.ui.theme.slidingPillTarget
 import com.winlator.cmod.ui.theme.TablerIcons
+import com.winlator.cmod.ui.theme.DialogSystemBarsPolicy
 
 internal fun Bitmap.asImageBitmap(): ImageBitmap = this.composeAsImageBitmap()
 
@@ -223,7 +224,10 @@ internal fun LibraryRoot(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(visible, key = { it.id }) { item ->
-                    if (grid) CoverArtworkCard(item, cb) else CompactArtworkCard(item, cb)
+                    // Filter / search changes: cards fade in and slide to their new cells.
+                    Box(Modifier.animateItem()) {
+                        if (grid) CoverArtworkCard(item, cb) else CompactArtworkCard(item, cb)
+                    }
                 }
             }
         }
@@ -648,6 +652,7 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
             ) {}
         }
     ) {
+        DialogSystemBarsPolicy()
         Column(
             Modifier
                 .fillMaxWidth()

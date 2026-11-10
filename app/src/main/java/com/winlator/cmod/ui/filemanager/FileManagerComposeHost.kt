@@ -72,6 +72,12 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
 import com.winlator.cmod.ui.theme.TablerIcons
+import com.winlator.cmod.ui.theme.DialogSystemBarsPolicy
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 
 // Icons the file manager shows for entries and for the drive header. The controller (Java) picks
 // one by meaning; the actual graphic is resolved in painter() below, so Tabler vectors (all
@@ -215,7 +221,16 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
         // last rows above it (File Manager used to be a detail screen in portrait, without the nav).
         val navClearance = if (landscape) 0.dp else ShellChrome.PortraitNavClearance
         Box(Modifier.weight(1f)) {
-            if (model.entries.isEmpty()) {
+            // Entering another folder cross-fades the listing instead of swapping it. The key is the
+            // path, so refreshes of the same folder (paste, delete, rename) update in place.
+            AnimatedContent(
+                targetState = model,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = { fadeIn(tween(220, delayMillis = 40)) togetherWith fadeOut(tween(110)) },
+                contentKey = { it.currentPath },
+                label = "folderListing"
+            ) { shown ->
+            if (shown.entries.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(uiStr(R.string.ui_this_folder_is_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -224,7 +239,7 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 92.dp + navClearance)
                 ) {
-                    items(model.entries, key = { it.path }) { entry ->
+                    items(shown.entries, key = { it.path }) { entry ->
                         FileRow(entry = entry, callbacks = callbacks)
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 73.dp),
@@ -232,6 +247,7 @@ internal fun FileManagerScreen(model: FileManagerModel, callbacks: FileManagerCa
                         )
                     }
                 }
+            }
             }
 
             if (model.pasteVisible) {
@@ -461,6 +477,7 @@ private fun DriveSelectorSheet(
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp
     ) {
+        DialogSystemBarsPolicy()
         val accent = controlAccentColor()
         Column(
             Modifier

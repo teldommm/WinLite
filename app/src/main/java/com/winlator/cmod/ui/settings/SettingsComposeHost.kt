@@ -83,6 +83,7 @@ import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.core.RemoteSources
 import com.winlator.cmod.ui.theme.dividerColor
 import com.winlator.cmod.ui.theme.TablerIcons
+import com.winlator.cmod.ui.theme.DialogSystemBarsPolicy
 
 @Immutable
 data class SettingChoice(val id: String, val name: String)
@@ -498,6 +499,7 @@ private fun PresetChoiceRow(
             containerColor = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp
         ) {
+            DialogSystemBarsPolicy()
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 20.dp)) {
                 Text(
                     title,

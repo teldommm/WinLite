@@ -28,6 +28,17 @@ import com.winlator.cmod.fexcore.FEXCorePreset
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.theme.WinZTheme
 import org.json.JSONObject
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 
 @Immutable
 data class OnboardingComponent @JvmOverloads constructor(
@@ -220,11 +231,16 @@ private fun prepareInitialContainer(
         }
 
         manager.createContainerAsync(data, contents) { created ->
-            preparing.value = false
             if (created == null) {
+                preparing.value = false
                 ready.value = false
                 WinToast.show(activity, uiStr(R.string.ui_unable_to_create_the_first_container), Toast.LENGTH_LONG)
             } else {
+                // `preparing` deliberately stays true on success: OnboardingFlow moves on to the
+                // permissions page in an effect, one frame later. Clearing it here showed the
+                // Runtime page's idle state (card gone, buttons back, list shifted up) for that
+                // frame, which read as a micro-jump before the page changed. The flow clears it
+                // when the Runtime page is shown again (Back from permissions).
                 ready.value = true
             }
         }
@@ -271,7 +287,28 @@ private fun OnboardingFlow(
         }
     }
 
-    when (page) {
+    // Back from permissions: the container exists, so the Runtime page is idle again.
+    LaunchedEffect(page) {
+        if (page == OnboardingPage.Runtime && containerReady.value) containerPreparing.value = false
+    }
+
+    // Steps slide in the direction of travel (forward = from the right, back = from the left)
+    // with a short cross-fade, instead of swapping instantly.
+    AnimatedContent(
+        targetState = page,
+        modifier = Modifier.fillMaxSize(),
+        transitionSpec = {
+            val forward = targetState.ordinal >= initialState.ordinal
+            val dir = if (forward) 1 else -1
+            (fadeIn(tween(300, delayMillis = 70, easing = FastOutSlowInEasing)) +
+                slideInHorizontally(tween(380, easing = FastOutSlowInEasing)) { dir * it / 9 }) togetherWith
+                (fadeOut(tween(160)) +
+                    slideOutHorizontally(tween(380, easing = FastOutSlowInEasing)) { -dir * it / 9 }) using
+                SizeTransform(clip = false)
+        },
+        label = "onboardingPage"
+    ) { shownPage ->
+    when (shownPage) {
         OnboardingPage.Welcome -> ClassicWinlatorWelcome(
             ready,
             progress,
@@ -330,5 +367,6 @@ private fun OnboardingFlow(
             back = { page = OnboardingPage.Runtime },
             next = { cb.onRequestPermissions() }
         )
+    }
     }
 }

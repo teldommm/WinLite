@@ -58,7 +58,6 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -72,6 +71,7 @@ import com.winlator.cmod.ui.theme.destructiveColor
 import kotlin.math.roundToInt
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.TablerIcons
+import com.winlator.cmod.ui.theme.WinZMonoFontFamily
 
 enum class ControlElementIconTint { NONE, INVERT, BLUE }
 
@@ -425,7 +425,7 @@ internal fun HexColorField(color: Int, onColor: (Int) -> Unit) {
             singleLine = true,
             prefix = { Text("#", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             placeholder = { Text(uiStr(R.string.ui_default)) },
-            textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = WinZMonoFontFamily),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false, imeAction = ImeAction.Done),
             shape = MaterialTheme.shapes.small,
             modifier = Modifier.weight(1f),

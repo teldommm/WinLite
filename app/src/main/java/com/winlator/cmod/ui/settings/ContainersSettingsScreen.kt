@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -76,6 +75,14 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.dividerColor
 import com.winlator.cmod.ui.theme.TablerIcons
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.winlator.cmod.ui.theme.RevealOnEnter
 
 // Containers list as a MainShell detail entry (replaces ContainersSettingsFragment). The
 // container editor opens as another detail entry on top (onOpenEditor); when it closes and this
@@ -83,7 +90,9 @@ import com.winlator.cmod.ui.theme.TablerIcons
 @Composable
 fun ContainersSettingsRoute(isTop: Boolean, onBack: () -> Unit, onOpenEditor: (Int?) -> Unit) {
     val activity = LocalContext.current.findActivity() as AppCompatActivity
-    var containers by remember { mutableStateOf<List<Container>>(emptyList()) }
+    // Read up front (not from emptyList() + an effect): the list used to start empty, which put
+    // the "No containers" state on screen for a frame before the real cards popped in.
+    var containers by remember { mutableStateOf(ContainerManager(activity).containers.toList()) }
     var propertiesContainer by remember { mutableStateOf<Container?>(null) }
     val refresh = { containers = ContainerManager(activity).containers.toList() }
 
@@ -196,13 +205,16 @@ private fun ContainersSettingsScreen(
                 }
             }
         } else {
+            val revealed = remember { HashSet<String>() }
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(containers, key = { it.id }) { container ->
-                    SettingsContainerCard(container, onEdit, onProperties, onRun, onDuplicate, onRemove)
+                itemsIndexed(containers, key = { _, c -> c.id }) { index, container ->
+                    RevealOnEnter(container.id.toString(), index, revealed, Modifier.animateItem(fadeInSpec = null)) {
+                        SettingsContainerCard(container, onEdit, onProperties, onRun, onDuplicate, onRemove)
+                    }
                 }
             }
         }
@@ -364,7 +376,15 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
                 overflow = TextOverflow.Ellipsis
             )
             HorizontalDivider(color = dividerColor())
-            if (loading) {
+            // Spinner -> values cross-fade (and the dialog eases to the new height) instead of swapping.
+            AnimatedContent(
+                targetState = loading,
+                transitionSpec = {
+                    fadeIn(tween(240, delayMillis = 60)) togetherWith fadeOut(tween(120)) using SizeTransform()
+                },
+                label = "containerStorage"
+            ) { isLoading ->
+            if (isLoading) {
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 18.dp),
                     horizontalArrangement = Arrangement.Center,
@@ -395,6 +415,7 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
                         }
                     }
                 }
+            }
             }
         }
         Spacer(Modifier.height(18.dp))

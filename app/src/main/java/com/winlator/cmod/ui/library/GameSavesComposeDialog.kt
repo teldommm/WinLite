@@ -85,6 +85,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.winlator.cmod.ui.theme.TablerIcons
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.togetherWith
 
 // "Backup" window of a game (the Backup button on the game page): backups of its saves in
 // Winlator/backups — the latest one, the automatic-backup switch, what a backup covers, Back up and
@@ -377,13 +380,26 @@ private fun ColumnScope.GameSavesPanel(
 
             HorizontalDivider(color = dividerColor())
             SavesLabel(stringResource(R.string.ui_save_locations))
-            when {
-                ownProfile -> Text(
+            // The detection result replaces the spinner with a cross-fade (and a height ease).
+            AnimatedContent(
+                targetState = when {
+                    ownProfile -> 0
+                    loading -> 1
+                    roots.isEmpty() -> 2
+                    else -> 3
+                },
+                transitionSpec = {
+                    fadeIn(tween(240, delayMillis = 60)) togetherWith fadeOut(tween(120)) using SizeTransform()
+                },
+                label = "savesLocations"
+            ) { savesState ->
+            when (savesState) {
+                0 -> Text(
                     stringResource(R.string.ui_save_locations_own),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                1 -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = controlAccentColor())
                     Text(
                         "  " + stringResource(R.string.ui_detecting),
@@ -391,14 +407,15 @@ private fun ColumnScope.GameSavesPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                roots.isEmpty() -> Text(
+                2 -> Text(
                     stringResource(R.string.ui_no_specific_folder),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                else -> roots.forEach {
+                else -> Column { roots.forEach {
                     Text("• $it", style = MaterialTheme.typography.bodySmall)
-                }
+                } }
+            }
             }
             if (!ownProfile) {
                 SavesOutlinedButton(stringResource(R.string.ui_rescan_save_locations), Modifier.fillMaxWidth(), enabled = !busy && !loading, icon = TablerIcons.Refresh) { rescan() }

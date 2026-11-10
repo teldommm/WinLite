@@ -7,6 +7,18 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -41,12 +53,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,9 +87,9 @@ internal fun LandscapePagerCore(
     }
     val pager = rememberPagerState(initialPage = initialPage, pageCount = { items.size })
     val item = items[pager.currentPage.coerceIn(items.indices)]
-    // Resolved on the Library loader thread (LibraryScreenController) — no second async pass here.
-    val environmentLabel = item.containerName
+    // containerName is resolved on the Library loader thread (LibraryScreenController) — no second async pass here.
     val activity = LocalContext.current as? MainActivity
+    val scope = rememberCoroutineScope()
 
     KeepLandscapeChromeHidden(activity)
 
@@ -114,12 +126,22 @@ internal fun LandscapePagerCore(
     }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        ArtBackdrop(
-            item.bannerPath,
-            item.coverPath ?: item.generatedCoverPath,
-            item.coverPath != null && item.coverIsUser,
-            Modifier.fillMaxSize()
-        )
+        // Backdrop cross-fades between games instead of swapping instantly. contentKey = id keeps
+        // late-arriving artwork of the *same* game updating in place (no fade for that).
+        AnimatedContent(
+            targetState = item,
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = { fadeIn(tween(420)) togetherWith fadeOut(tween(420)) },
+            contentKey = { it.id },
+            label = "libraryBackdrop"
+        ) { shown ->
+            ArtBackdrop(
+                shown.bannerPath,
+                shown.coverPath ?: shown.generatedCoverPath,
+                shown.coverPath != null && shown.coverIsUser,
+                Modifier.fillMaxSize()
+            )
+        }
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color.Black.copy(.84f), Color.Black.copy(.48f), Color.Black.copy(.20f)))))
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(.18f), Color.Transparent, Color.Black.copy(.72f)))))
         // No top padding: the header is a fixed 54dp band at the very top, aligned with
@@ -153,22 +175,48 @@ internal fun LandscapePagerCore(
                         key = { page -> items.getOrNull(page)?.id ?: "stale-library-page-$page" }
                     ) { page ->
                         val candidate = items.getOrNull(page) ?: return@HorizontalPager
-                        val pageOffset = ((pager.currentPage - page) + pager.currentPageOffsetFraction)
-                            .absoluteValue
-                            .coerceIn(0f, 1f)
-                        val cardScale = 1f - (0.30f * pageOffset)
+                        // Signed distance from the focused page: > 0 for cards on the right of it.
+                        val signedOffset = (page - pager.currentPage) - pager.currentPageOffsetFraction
+                        val pageOffset = signedOffset.absoluteValue.coerceIn(0f, 1f)
                         val selected = pageOffset < 0.5f
+                        val cameraDistance = with(LocalDensity.current) { 18.dp.toPx() }
                         // Only the focused card moves; fading the strength keeps the swipe free of a jump.
                         val motion by animateFloatAsState(if (selected) 1f else 0f, tween(400), label = "pageMotion")
+                        val borderWidth by animateDpAsState(if (selected) 2.dp else 1.dp, tween(260), label = "pageBorderWidth")
+                        val borderColor by animateColorAsState(
+                            if (selected) OnArtwork.CardBorderSelected else OnArtwork.CardBorder,
+                            tween(260),
+                            label = "pageBorderColor"
+                        )
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Surface(
-                                onClick = { callbacks.onOpen(candidate.shortcutPath) },
+                                onClick = {
+                                    if (page == pager.currentPage) callbacks.onOpen(candidate.shortcutPath)
+                                    else scope.launch {
+                                        // A non-focused card only brings itself into focus; the game
+                                        // opens on a tap of the focused card (or "View details").
+                                        pager.animateScrollToPage(
+                                            page,
+                                            animationSpec = spring(dampingRatio = 0.86f, stiffness = Spring.StiffnessLow)
+                                        )
+                                    }
+                                },
                                 modifier = Modifier
                                     .size(206.dp, 322.dp)
-                                    .scale(cardScale),
+                                    // Cover-flow feel: side cards shrink, dim and turn slightly toward
+                                    // the focused one, all driven by the scroll position so a swipe,
+                                    // a fling and a tap-to-focus animate the same way.
+                                    .graphicsLayer {
+                                        val scale = 1f - 0.30f * pageOffset
+                                        scaleX = scale
+                                        scaleY = scale
+                                        alpha = 1f - 0.40f * pageOffset
+                                        rotationY = -14f * signedOffset.coerceIn(-1f, 1f)
+                                        this.cameraDistance = cameraDistance
+                                    },
                                 shape = WinZShapes.Large,
                                 color = OnArtwork.CardFill,
-                                border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) OnArtwork.CardBorderSelected else OnArtwork.CardBorder)
+                                border = BorderStroke(borderWidth, borderColor)
                             ) {
                                 val pageCover = candidate.coverPath ?: candidate.generatedCoverPath
                                 if (pageCover != null) {
@@ -185,8 +233,20 @@ internal fun LandscapePagerCore(
                 }
                 Spacer(Modifier.width(26.dp))
                 Column(Modifier.weight(.9f)) {
-                    Text(item.name, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(environmentLabel, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                    AnimatedContent(
+                        targetState = item,
+                        transitionSpec = {
+                            (fadeIn(tween(300, delayMillis = 90)) + slideInVertically(tween(360)) { it / 6 }) togetherWith
+                                fadeOut(tween(160))
+                        },
+                        contentKey = { it.id },
+                        label = "libraryTitle"
+                    ) { shown ->
+                        Column {
+                            Text(shown.name, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(shown.containerName, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                     Spacer(Modifier.size(13.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(

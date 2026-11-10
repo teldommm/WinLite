@@ -4,6 +4,12 @@ import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.lazy.itemsIndexed
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -22,7 +28,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,7 +41,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -67,6 +74,7 @@ import com.winlator.cmod.ui.theme.rememberSlidingPillState
 import com.winlator.cmod.ui.theme.slidingPillTarget
 import com.winlator.cmod.ui.theme.hairlineColor
 import com.winlator.cmod.ui.theme.TablerIcons
+import com.winlator.cmod.ui.theme.RevealOnEnter
 
 private val bundledRuntimeId = "bundled:${ProtonPackageManager.DEFAULT_IDENTIFIER}"
 private val bundledRuntimeName = ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER)?.title
@@ -264,6 +272,7 @@ internal fun OnboardingComponentsScreen(
             // Opened from Settings (manager mode): a top bar with a back arrow, like Containers,
             // instead of the first-run wizard's Back/Done footer.
             if (managerMode) ManagerTopBar(onBack)
+            val revealed = remember { HashSet<String>() }
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 // Manager mode: 12dp under the 64dp top bar, same as the Containers list, so the
@@ -306,15 +315,17 @@ internal fun OnboardingComponentsScreen(
                     }
                 }
                 if (all.isEmpty()) item { LoadingCard() }
-                else items(visible, key = { it.id }) {
-                    ComponentCard(
-                        it,
-                        installing == it.id,
-                        installing != null,
-                        installingLabel,
-                        installingProgress,
-                        cb
-                    )
+                else itemsIndexed(visible, key = { _, c -> c.id }) { index, component ->
+                    RevealOnEnter(component.id, index, revealed, Modifier.animateItem(fadeInSpec = null)) {
+                        ComponentCard(
+                            component,
+                            installing == component.id,
+                            installing != null,
+                            installingLabel,
+                            installingProgress,
+                            cb
+                        )
+                    }
                 }
                 if (!managerMode && !hasInstalledRuntime) {
                     item {
@@ -353,6 +364,7 @@ private fun ComponentList(
     contentPadding: PaddingValues = PaddingValues(bottom = 8.dp),
     header: LazyListScope.() -> Unit = {}
 ) {
+    val revealed = remember { HashSet<String>() }
     LazyColumn(modifier, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         header()
         if (loading) item { LoadingCard() }
@@ -365,15 +377,17 @@ private fun ComponentList(
                 )
             }
         }
-        else items(list, key = { it.id }) {
-            ComponentCard(
-                it,
-                installing == it.id,
-                installing != null,
-                installingLabel,
-                installingProgress,
-                cb
-            )
+        else itemsIndexed(list, key = { _, c -> c.id }) { index, component ->
+            RevealOnEnter(component.id, index, revealed, Modifier.animateItem(fadeInSpec = null)) {
+                ComponentCard(
+                    component,
+                    installing == component.id,
+                    installing != null,
+                    installingLabel,
+                    installingProgress,
+                    cb
+                )
+            }
         }
     }
 }
@@ -721,11 +735,21 @@ private fun InstallProgressCard(label: String?, progress: Int) {
 
 @Composable
 private fun LoadingCard() {
-    Surface(Modifier.fillMaxWidth(), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surface) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
-            Spacer(Modifier.width(12.dp))
-            Text(uiStr(R.string.ui_loading_component_catalog))
+    // The catalog usually arrives within a few frames. Showing the card straight away made it
+    // flash for a split second before the list popped in, so it only appears (with a fade) if the
+    // load actually takes a moment.
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(300)
+        visible = true
+    }
+    AnimatedVisibility(visible, enter = fadeIn(tween(250))) {
+        Surface(Modifier.fillMaxWidth(), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surface) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
+                Spacer(Modifier.width(12.dp))
+                Text(uiStr(R.string.ui_loading_component_catalog))
+            }
         }
     }
 }

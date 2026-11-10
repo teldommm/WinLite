@@ -171,6 +171,7 @@ fun WinlatorThemePreferenceCard(modifier: Modifier = Modifier) {
             containerColor = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp
         ) {
+            DialogSystemBarsPolicy()
             Column(
                 Modifier
                     .fillMaxWidth()
