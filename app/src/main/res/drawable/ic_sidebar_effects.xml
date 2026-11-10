@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tabler Icons "sparkles" (https://tabler.io/icons, MIT) - same set as TablerIcons.kt. Tinted by the caller. -->
+<!-- Tabler Icons "device-desktop" (https://tabler.io/icons, MIT) - same set as TablerIcons.kt. Tinted by the caller. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="28dp"
     android:height="28dp"
@@ -11,5 +11,26 @@
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M16 18 a2 2 0 0 1 2 2 a2 2 0 0 1 2 -2 a2 2 0 0 1 -2 -2 a2 2 0 0 1 -2 2 Z m0 -12 a2 2 0 0 1 2 2 a2 2 0 0 1 2 -2 a2 2 0 0 1 -2 -2 a2 2 0 0 1 -2 2 Z m-7 12 a6 6 0 0 1 6 -6 a6 6 0 0 1 -6 -6 a6 6 0 0 1 -6 6 a6 6 0 0 1 6 6 Z" />
+        android:pathData="M3 5 a1 1 0 0 1 1 -1 h16 a1 1 0 0 1 1 1 v10 a1 1 0 0 1 -1 1 h-16 a1 1 0 0 1 -1 -1 v-10 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7 20 h10" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M9 16 v4" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M15 16 v4" />
 </vector>
