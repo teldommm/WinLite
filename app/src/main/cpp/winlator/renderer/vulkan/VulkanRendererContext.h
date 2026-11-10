@@ -206,7 +206,7 @@ public:
     // the frame the motion is analysed at; multiplier 2..4 fixes the output at that many frames
     // per game frame, 0 chases targetFps instead (0 = the display refresh rate).
     void setWfgEnabled(bool enabled);
-    void setWfgConfig(int flowSide, int targetFps, int multiplier, float refreshHz);
+    void setWfgConfig(int flowSide, bool fastInterp, int targetFps, int multiplier, float refreshHz);
     void setWfgFpsLimit(int fps);
     uint64_t getWfgGeneratedFrames() const { return wfgMadeFrames.load(std::memory_order_relaxed); }
     uint64_t getPresentedFrames() const { return presentedFrames.load(std::memory_order_relaxed); }
@@ -526,6 +526,7 @@ public:
     uint64_t              lpLogLate      = 0;
     std::atomic<bool>     wfgRequested{false};
     std::atomic<uint32_t> wfgFlowSide{180};
+    std::atomic<bool>     wfgFastInterp{true};    // the Fast preset's cheaper interpolation
     std::atomic<uint32_t> wfgTargetFps{0};
     std::atomic<uint32_t> wfgMultiplier{0};
     std::atomic<uint32_t> wfgRefreshMhz{0};
@@ -556,6 +557,10 @@ public:
     bool             swapchainTransferDst = false;
     uint32_t         swapchainMinImages = 0;
     uint64_t         wfgSeenFrames    = 0;
+    // WFG generates nothing and does not need the frames (vkr_dis_idle): the scene goes straight
+    // to the swapchain, as without WFG, until a new game frame's plan says otherwise.
+    bool             wfgIdle          = false;
+    uint64_t         wfgGenFallbacks  = 0;   // generated frames WFG did not write (a repeat shown)
     uint64_t         wfgRealFrames    = 0;
     uint64_t         wfgLogReal       = 0;
     uint64_t         wfgLogMade       = 0;

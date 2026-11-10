@@ -76,6 +76,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private float   pendingSharpness      = 0.5f;
     private boolean pendingWfgEnabled     = false;
     private int     pendingWfgFlowSide    = 180;
+    private boolean pendingWfgFastInterp  = true;
     private int     pendingWfgTargetFps   = 0;
     private int     pendingWfgMultiplier  = 0;
     private int     savedDisplayModeId    = -1;   // the window's mode before WFG raised it
@@ -146,8 +147,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeReleaseBuffer(long handle, long ahbPtr);
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
-    private native void nativeSetWfg(long handle, boolean enabled, int flowSide, int targetFps,
-                                     int multiplier, float refreshHz);
+    private native void nativeSetWfg(long handle, boolean enabled, int flowSide, boolean fastInterp,
+                                     int targetFps, int multiplier, float refreshHz);
     // The game's FPS limit (0 = none): WFG paces its presents to it while the game holds it.
     @FastNative private native void nativeSetWfgFpsLimit(long handle, int fps);
     @FastNative private native boolean nativeGetDisplayClock(long handle, long[] out);
@@ -847,14 +848,18 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     /**
      * WFG (WinNative/Winlator Frame Generator) frame interpolation.
      * @param flowSide  pixels on the shorter side of the frame the motion is analysed at
+     * @param fastInterp the cheaper interpolation (bilinear warp, one source step) of the Fast
+     *                  preset instead of the Catmull-Rom warp with two steps
      * @param targetFps output rate to reach; 0 follows the display refresh rate. Ignored while
      *                  multiplier is set.
      * @param multiplier 2..4 fixes the output at that many frames per game frame (x2 = one
      *                  generated frame); 0 chases targetFps instead
      */
-    public void setWfg(boolean enabled, int flowSide, int targetFps, int multiplier) {
+    public void setWfg(boolean enabled, int flowSide, boolean fastInterp, int targetFps,
+                       int multiplier) {
         pendingWfgEnabled = enabled;
         pendingWfgFlowSide = flowSide;
+        pendingWfgFastInterp = fastInterp;
         pendingWfgTargetFps = targetFps;
         pendingWfgMultiplier = multiplier;
         requestDisplayMode();
@@ -1003,8 +1008,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         float refreshHz = 60f;
         android.view.Display display = getDisplay();
         if (display != null && display.getRefreshRate() > 1f) refreshHz = display.getRefreshRate();
-        nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgTargetFps,
-                pendingWfgMultiplier, refreshHz);
+        nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgFastInterp,
+                pendingWfgTargetFps, pendingWfgMultiplier, refreshHz);
         nativeSetWfgFpsLimit(nativeHandle, fpsLimit);
     }
 

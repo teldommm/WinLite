@@ -51,6 +51,14 @@ typedef struct VkDispatch {
     PFN_vkCmdPipelineBarrier CmdPipelineBarrier;
     PFN_vkCmdBlitImage CmdBlitImage;
     PFN_vkCmdDispatch CmdDispatch;
+    PFN_vkCreateRenderPass CreateRenderPass;
+    PFN_vkDestroyRenderPass DestroyRenderPass;
+    PFN_vkCreateGraphicsPipelines CreateGraphicsPipelines;
+    PFN_vkCmdBeginRenderPass CmdBeginRenderPass;
+    PFN_vkCmdEndRenderPass CmdEndRenderPass;
+    PFN_vkCmdSetViewport CmdSetViewport;
+    PFN_vkCmdSetScissor CmdSetScissor;
+    PFN_vkCmdDraw CmdDraw;
 } VkDispatch;
 
 extern VkDispatch vkd;
@@ -98,3 +106,11 @@ bool vkd_bind_proc(PFN_vkGetInstanceProcAddr gipa, VkInstance instance);
 #define vkCmdPipelineBarrier vkd.CmdPipelineBarrier
 #define vkCmdBlitImage vkd.CmdBlitImage
 #define vkCmdDispatch vkd.CmdDispatch
+#define vkCreateRenderPass vkd.CreateRenderPass
+#define vkDestroyRenderPass vkd.DestroyRenderPass
+#define vkCreateGraphicsPipelines vkd.CreateGraphicsPipelines
+#define vkCmdBeginRenderPass vkd.CmdBeginRenderPass
+#define vkCmdEndRenderPass vkd.CmdEndRenderPass
+#define vkCmdSetViewport vkd.CmdSetViewport
+#define vkCmdSetScissor vkd.CmdSetScissor
+#define vkCmdDraw vkd.CmdDraw

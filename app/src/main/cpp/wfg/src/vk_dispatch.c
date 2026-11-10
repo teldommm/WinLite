@@ -52,9 +52,20 @@ bool vkd_bind_proc(PFN_vkGetInstanceProcAddr gipa, VkInstance instance) {
     LOAD(CmdPipelineBarrier);
     LOAD(CmdBlitImage);
     LOAD(CmdDispatch);
+    LOAD(CreateRenderPass);
+    LOAD(DestroyRenderPass);
+    LOAD(CreateGraphicsPipelines);
+    LOAD(CmdBeginRenderPass);
+    LOAD(CmdEndRenderPass);
+    LOAD(CmdSetViewport);
+    LOAD(CmdSetScissor);
+    LOAD(CmdDraw);
     #undef LOAD
 
-    if (!vkd.GetDeviceProcAddr || !vkd.CreateComputePipelines || !vkd.CmdDispatch) {
+    if (!vkd.GetDeviceProcAddr || !vkd.CreateComputePipelines || !vkd.CmdDispatch ||
+        !vkd.CreateRenderPass || !vkd.DestroyRenderPass || !vkd.CreateGraphicsPipelines ||
+        !vkd.CmdBeginRenderPass || !vkd.CmdEndRenderPass || !vkd.CmdSetViewport ||
+        !vkd.CmdSetScissor || !vkd.CmdDraw) {
         LOGE("vkd_bind_proc: required entry points missing");
         return false;
     }

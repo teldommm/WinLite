@@ -199,6 +199,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // GraphicsSidebarPanel lists the same positions. The frame multiplier modes and the target FPS
     // range live in WfgSettings.
     private static final int[] WFG_FLOW_SIDES = {180, 252};
+    // Per quality index as well: Fast also takes the cheaper interpolation (bilinear warp, one
+    // source step), Balanced the Catmull-Rom warp with two.
+    private static final boolean[] WFG_FAST_INTERP = {true, false};
     // Id of the bundled assets/graphics_driver/wrapper_wl.tzst; bump it with every new wrapper build.
     private static final String WRAPPER_BUILD_ID = "becf2a03";
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
@@ -1919,8 +1922,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final int wfgTargetFps = WfgSettings.clampTarget(
                 readWfgInt("wfgTargetFps", WfgSettings.TARGET_DEFAULT, Integer.MAX_VALUE), wfgPanelHz);
         if (vkRenderer != null) {
-            vkRenderer.setWfg(wfgOn, WFG_FLOW_SIDES[wfgQuality], wfgTargetFps,
-                    WfgSettings.multiplierOf(wfgMode));
+            vkRenderer.setWfg(wfgOn, WFG_FLOW_SIDES[wfgQuality], WFG_FAST_INTERP[wfgQuality],
+                    wfgTargetFps, WfgSettings.multiplierOf(wfgMode));
         }
 
         GraphicsPanelState state = new GraphicsPanelState(
@@ -2020,7 +2023,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 int m = WfgSettings.clampMode(modeIndex);
                 int t = WfgSettings.clampTarget(targetFps, wfgPanelHz);
                 if (vkRenderer != null) {
-                    vkRenderer.setWfg(enabled, WFG_FLOW_SIDES[q], t, WfgSettings.multiplierOf(m));
+                    vkRenderer.setWfg(enabled, WFG_FLOW_SIDES[q], WFG_FAST_INTERP[q], t,
+                            WfgSettings.multiplierOf(m));
                 }
                 saveWfgSettings(enabled, q, m, t);
             }

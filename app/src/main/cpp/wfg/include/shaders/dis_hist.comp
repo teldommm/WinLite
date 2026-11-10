@@ -43,7 +43,13 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0) uniform sampler2D prevColor;
 layout(set = 0, binding = 1) uniform sampler2D nextColor;
 layout(set = 0, binding = 2) uniform sampler2D histIn;
+// R16F where the device can write and filter it (the luminance plane's format, chosen once), R32F
+// elsewhere: a confidence in [0, 1] whose decay steps fp16 resolves. The build compiles both.
+#ifdef DIS_HIST_R16
+layout(set = 0, binding = 8, r16f) uniform image2D histOut;
+#else
 layout(set = 0, binding = 8, r32f) uniform image2D histOut;
+#endif
 
 layout(push_constant) uniform PC {
     int reset;

@@ -456,7 +456,8 @@ void VulkanRendererContext::createSwapchain() {
     uint32_t fmtN=0; vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,surface,&fmtN,nullptr);
     std::vector<VkSurfaceFormatKHR> fmts(fmtN); vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,surface,&fmtN,fmts.data());
     swapchainFmt = VK_FORMAT_R8G8B8A8_UNORM;
-    // WFG presents its generated frames from extra images, FIFO-paced, and writes them by transfer.
+    // WFG presents its generated frames from extra images, FIFO-paced. It draws them as colour
+    // attachments; the real frame is copied from its composite, which needs TRANSFER_DST.
     const bool wantWfg = wfgRequested.load();
     swapchainMinImages = caps.minImageCount;
     wfgSwapchain = wantWfg;
@@ -526,6 +527,9 @@ void VulkanRendererContext::createSwapchain() {
     }
 }
 
+// WFG draws its generated frames through the framebuffers made with this pass, with a render pass
+// of its own (dis_create_interp_pass in wfg/src/vkr_dis.c) that has to stay compatible with it:
+// change the attachment, the subpass or the dependency here and there together.
 void VulkanRendererContext::createRenderPass() {
     VkAttachmentDescription att{}; att.format=swapchainFmt; att.samples=VK_SAMPLE_COUNT_1_BIT;
     att.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR; att.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
@@ -1116,7 +1120,8 @@ void VulkanRendererContext::renderFrame() {
     for (uint32_t g=0; g<wf.genCount; g++) {
         wSem[1+g]=wfgGenSems[currentFrame][g];
         sSem[1+g]=renderDoneSems[wf.genIdx[g]];
-        wStage[1+g]=VK_PIPELINE_STAGE_TRANSFER_BIT;
+        // WFG's interpolation pass, or the copy of the real frame should it not write the image.
+        wStage[1+g]=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_TRANSFER_BIT;
     }
     VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.waitSemaphoreCount=1+wf.genCount; si.pWaitSemaphores=wSem; si.pWaitDstStageMask=wStage;

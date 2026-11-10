@@ -163,8 +163,12 @@ void VulkanRendererContext::setWfgFpsLimit(int fps) {
     if (wfgFpsLimit.exchange(v) != v) WLOG_I("WFG pacing: game FPS limit %u", v);
 }
 
-void VulkanRendererContext::setWfgConfig(int flowSide, int targetFps, int multiplier, float refreshHz) {
+void VulkanRendererContext::setWfgConfig(int flowSide, bool fastInterp, int targetFps, int multiplier,
+                                         float refreshHz) {
     wfgFlowSide.store((uint32_t)std::clamp(flowSide, 64, 1080));
+    if (wfgFastInterp.exchange(fastInterp) != fastInterp)
+        WLOG_I("WFG interpolation: %s", fastInterp ? "fast (bilinear warp, one source step)"
+                                                   : "balanced (Catmull-Rom warp, two source steps)");
     wfgTargetFps.store((uint32_t)std::max(0, targetFps));
     wfgMultiplier.store((uint32_t)std::clamp(multiplier, 0, (int)VKR_DIS_MAX_GENERATIONS + 1));
     const uint32_t mhz = refreshHz > 0.f ? (uint32_t)std::lround(refreshHz * 1000.f) : 0u;
@@ -224,6 +228,7 @@ bool VulkanRendererContext::wfgSync() {
             wfgUnavailable = true;
         } else {
             wfgSeenFrames = contentFrames.load();
+            wfgIdle = false;
             wfgRealFrames = wfgLogReal = wfgLogMade = 0;
             wfgPace.restart();
             WLOG_I("WFG engine ready");
@@ -279,10 +284,13 @@ bool VulkanRendererContext::wfgEnsureComposite() {
         sub.colorAttachmentCount = 1;
         sub.pColorAttachments = &ref;
         VkSubpassDependency deps[2]{};
-        // The previous frame's WFG and copy passes read the composite before it is cleared.
+        // The previous frame's WFG passes (copies, compute, and the interpolation's fragment pass,
+        // which samples it outside the content rect) and its copy read the composite before it
+        // is cleared.
         deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
         deps[0].dstSubpass = 0;
-        deps[0].srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        deps[0].srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                               VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         deps[0].srcAccessMask = 0;
         deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -657,22 +665,42 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
 
     const VkrDisContentRect content = wfgContentRect(draws, ox, oy, sx, sy, cw, ch);
     const float refresh = (float)wfgRefreshMhz.load() / 1000.f;
-    vkr_dis_configure(wfg, wfgFlowSide.load(), wfgTargetFps.load(), wfgMultiplier.load(), refresh);
-    if (vkr_dis_needs_rebuild(wfg, swapchainExt.width, swapchainExt.height, swapchainFmt, content))
+    vkr_dis_configure(wfg, wfgFlowSide.load(), wfgFastInterp.load(), wfgTargetFps.load(),
+                      wfgMultiplier.load(), refresh);
+    if (vkr_dis_needs_rebuild(wfg, swapchainExt.width, swapchainExt.height, swapchainFmt, content,
+                              wfgCompositeView))
         vk_.DeviceWaitIdle(device);
-    if (!vkr_dis_prepare(wfg, swapchainExt.width, swapchainExt.height, swapchainFmt, content))
+    if (!vkr_dis_prepare(wfg, swapchainExt.width, swapchainExt.height, swapchainFmt, content,
+                         wfgCompositeView))
         return wf;
 
     wf.active = true;
     const uint64_t frames = contentFrames.load();
     wf.newFrame = frames != wfgSeenFrames;
     wfgSeenFrames = frames;
-    if (!wf.newFrame) return wf;
+    if (!wf.newFrame) {
+        // A render without a new game frame (cursor, UI) follows the last plan's choice.
+        if (wfgIdle) wf.active = false;
+        return wf;
+    }
 
     const uint32_t images = (uint32_t)swapchainImages.size();
     uint32_t capacity = images > swapchainMinImages + 1 ? images - swapchainMinImages - 1 : 0;
     capacity = std::min(capacity, VKR_DIS_MAX_GENERATIONS);
     uint32_t planned = vkr_dis_plan(wfg, capacity, frames);
+
+    // Nothing to generate, and WFG does not need this frame: draw it to the swapchain directly,
+    // without the composite, its copy into the real image and WFG's per-frame copies. The plan
+    // still runs on every game frame and asks for frames again when there is something to make.
+    if (vkr_dis_idle(wfg)) {
+        if (!wfgIdle) WLOG_I("WFG idle: nothing to generate, frames go straight to the display");
+        wfgIdle = true;
+        vkr_dis_skip_frame(wfg);
+        wfgPace.restart();   // the next paced batch starts its schedule over
+        return WfgFrame{};
+    }
+    if (wfgIdle) WLOG_I("WFG resumes generating");
+    wfgIdle = false;
 
     // Images still waiting for the display beyond the next refresh. More than two means the
     // queue has grown (a game slightly faster than the output cadence, a burst after a stall):
@@ -717,7 +745,7 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
                        g + 1, planned, (int)r, images);
             break;
         }
-        if (idx >= images) break;
+        if (idx >= images || idx >= swapchainFBs.size()) break;
         if (idx < imgInFlight.size()) imgInFlight[idx] = inFlightFences[currentFrame];
         wf.genIdx[wf.genCount++] = idx;
     }
@@ -732,11 +760,29 @@ void VulkanRendererContext::wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFr
 
     if (wf.newFrame) {
         vkr_dis_process(wfg, cb, wfgComposite, w, h, wf.genCount);
+        // Each generated frame is one fragment pass straight into its swapchain image, through the
+        // renderer's own framebuffer for it; the pass leaves the image in PRESENT_SRC_KHR. Should
+        // WFG not write one, the image is acquired and will be presented regardless, so it gets
+        // the real frame (a repeat) rather than whatever it held.
         for (uint32_t g = 0; g < wf.genCount; g++) {
             const uint32_t idx = wf.genIdx[g];
-            vkr_dis_generate_into_at(wfg, cb, g, wf.paced ? wf.phase[g] : 0.0f,
-                                     swapchainImages[idx], w, h, wfgComposite);
-            transition(cb, swapchainImages[idx], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            if (vkr_dis_generate_into_at(wfg, cb, g, wf.paced ? wf.phase[g] : 0.0f,
+                                         swapchainFBs[idx], w, h))
+                continue;
+            if (wfgGenFallbacks++ % 120 == 0)
+                RLOG_E("WFG: generated frame %u/%u not written; showing the real frame", g + 1,
+                       wf.genCount);
+            VkImage gdst = swapchainImages[idx];
+            transition(cb, gdst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            VkImageCopy gcopy{};
+            gcopy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            gcopy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            gcopy.extent = {w, h, 1};
+            vk_.CmdCopyImage(cb, wfgComposite, VK_IMAGE_LAYOUT_GENERAL,
+                             gdst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &gcopy);
+            transition(cb, gdst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
         }

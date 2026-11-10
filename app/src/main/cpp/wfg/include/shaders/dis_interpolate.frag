@@ -11,14 +11,15 @@
 precision highp float;
 precision highp int;
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-
 layout(set = 0, binding = 0) uniform sampler2D prevColor;
 layout(set = 0, binding = 1) uniform sampler2D nextColor;
 layout(set = 0, binding = 2) uniform sampler2D flowTex;
 layout(set = 0, binding = 3) uniform sampler2D sideTex;
 layout(set = 0, binding = 4) uniform sampler2D histTex;
-layout(set = 0, binding = 5, rgba8) uniform image2D outImage;
+// The composite: what the display shows outside the content rect (letterbox, other windows).
+layout(set = 0, binding = 7) uniform sampler2D baseTex;
+
+layout(location = 0) out vec4 outColor;
 // The field splatted to t (dis_splat.comp): xy the vector times z, z the share of the bilinear
 // footprint something landed on. One strip of SPLAT_STRIPS per generated frame, stacked down.
 layout(set = 0, binding = 6) uniform sampler2D splatTex;
@@ -27,15 +28,21 @@ layout(push_constant) uniform PC {
     float t;
     int debugMode;
     int layer;     // which generated frame of the pair: the splat strip
+    int pad;
+    vec2 rectOff;  // the content rect in the target, in pixels
+    vec2 rectSize;
+    vec2 invTarget; // 1 / target size: the composite covers the whole target
 } pc;
 
 layout(constant_id = 0) const int manualFlowFilter = 0;
 
+// The two the Fast preset changes, set per pipeline (vkr_dis.c builds one of each preset) so the
+// compiler drops what a preset does not use:
 // Fixed-point steps that move the flow lookup from the output pixel to the point of the
 // previous frame that actually lands on it. 0 samples the field at the output pixel.
-#ifndef DIS_SOURCE_STEPS
-#define DIS_SOURCE_STEPS 2
-#endif
+layout(constant_id = 1) const int sourceSteps = 2;
+// Catmull-Rom (5 bilinear taps) for the warped fetches instead of one bilinear tap.
+layout(constant_id = 2) const int warpCatmull = 1;
 
 // Keep a static overlay in place where the unwarped pair explains the pixel better than
 // the warped one. 0 turns it off.
@@ -47,11 +54,6 @@ layout(constant_id = 0) const int manualFlowFilter = 0;
 // instead of the nearer one in time.
 #ifndef DIS_OCCL_SIDED
 #define DIS_OCCL_SIDED 1
-#endif
-
-// Catmull-Rom (5 bilinear taps) for the warped fetches instead of one bilinear tap.
-#ifndef DIS_WARP_CATMULL
-#define DIS_WARP_CATMULL 1
 #endif
 
 // Take the stabilised overlay confidence from dis_hist on top of the per-pixel test.
@@ -119,9 +121,8 @@ float maxChannel(vec3 v) {
 }
 
 vec3 warpSample(sampler2D tex, vec2 uv, vec2 texSize) {
-#if DIS_WARP_CATMULL == 0
-    return textureLod(tex, clamp(uv, vec2(0.0), vec2(1.0)), 0.0).xyz;
-#else
+    if (warpCatmull == 0) return textureLod(tex, clamp(uv, vec2(0.0), vec2(1.0)), 0.0).xyz;
+
     vec2 samplePos = uv * texSize;
     vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
     vec2 fr = samplePos - texPos1;
@@ -143,7 +144,6 @@ vec3 warpSample(sampler2D tex, vec2 uv, vec2 texSize) {
     r += textureLod(tex, vec2(p12.x, p3.y),  0.0).xyz * (w12.x * w3.y);
     r /= w12.x + w12.y * (1.0 - w12.x);
     return clamp(r, vec3(0.0), vec3(1.0));
-#endif
 }
 
 vec3 hsv2rgb(vec3 c) {
@@ -153,11 +153,18 @@ vec3 hsv2rgb(vec3 c) {
 }
 
 void main() {
-    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(outImage);
-    if (pix.x >= size.x || pix.y >= size.y) return;
+    // One pass over the whole target: outside the content rect the composite as it is (the
+    // letterbox strips the blits used to copy), inside it the interpolated frame.
+    vec2 frag = gl_FragCoord.xy;
+    vec2 local = frag - pc.rectOff;
+    if (any(lessThan(local, vec2(0.0))) || any(greaterThanEqual(local, pc.rectSize))) {
+        outColor = textureLod(baseTex, frag * pc.invTarget, 0.0);
+        return;
+    }
 
-    vec2 uv = (vec2(pix) + 0.5) / vec2(size);
+    // The content's own resolution (the colour pair is kept at it), as the compute pass had it.
+    ivec2 size = textureSize(prevColor, 0);
+    vec2 uv = local / pc.rectSize;
     vec2 texel = 1.0 / vec2(size);
 
     const float GUARD_PX = 20.0;
@@ -185,7 +192,7 @@ void main() {
         float m = length(f) * float(size.x) / 16.0;
         float hue = atan(f.y, f.x) / 6.2831853 + 0.5;
         vec3 fc = hsv2rgb(vec3(hue, clamp(m, 0.0, 1.0), min(1.0, 0.15 + m)));
-        imageStore(outImage, pix, vec4(fc, 1.0));
+        outColor = vec4(fc, 1.0);
         return;
     }
 
@@ -196,13 +203,11 @@ void main() {
     // the previous frame. A couple of fixed-point steps find x wherever the field is
     // smooth enough to have one.
     vec2 fa = f;
-#if DIS_SOURCE_STEPS > 0
-    for (int i = 0; i < DIS_SOURCE_STEPS; i++) {
+    for (int i = 0; i < sourceSteps; i++) {
         vec2 fn = sampleFlow(clamp(uv - pc.t * fa, vec2(0.0), vec2(1.0)));
         if (any(isnan(fn)) || any(isinf(fn))) break;
         fa = fn;
     }
-#endif
     // The real pair where it sits: the splat guard, the early-out below and the static test at
     // the end all need it.
     vec3 s0 = textureLod(prevColor, uv, 0.0).xyz;
@@ -231,9 +236,8 @@ void main() {
         fa = mix(fa, fs, take);
     }
 #endif
-#if DIS_SOURCE_STEPS > 0 || DIS_SPLAT
+    // fa is f itself without steps and splat, and then this changes nothing.
     fa = mix(f, fa, edgeMix);
-#endif
 
 
     // Under a quarter of a pixel no warp can change an output pixel visibly, and where the
@@ -243,7 +247,7 @@ void main() {
     // brings the object in. Static scenery and HUD-heavy screens are mostly this case.
     vec2 fpx = max(abs(f), abs(fa)) * vec2(size);
     if (max(fpx.x, fpx.y) <= 0.25 && rStatic < 0.03) {
-        imageStore(outImage, pix, vec4(mix(s0, s1, pc.t), 1.0));
+        outColor = vec4(mix(s0, s1, pc.t), 1.0);
         return;
     }
 
@@ -331,5 +335,5 @@ void main() {
     }
 #endif
 
-    imageStore(outImage, pix, vec4(result, 1.0));
+    outColor = vec4(result, 1.0);
 }

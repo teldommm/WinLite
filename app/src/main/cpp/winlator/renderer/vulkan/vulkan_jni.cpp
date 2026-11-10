@@ -372,12 +372,13 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeReattachSurface(
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfg(
-    JNIEnv*, jobject, jlong handle, jboolean enabled, jint flowSide, jint targetFps,
-    jint multiplier, jfloat refreshHz)
+    JNIEnv*, jobject, jlong handle, jboolean enabled, jint flowSide, jboolean fastInterp,
+    jint targetFps, jint multiplier, jfloat refreshHz)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (!r) return;
-    r->setWfgConfig((int)flowSide, (int)targetFps, (int)multiplier, (float)refreshHz);
+    r->setWfgConfig((int)flowSide, fastInterp == JNI_TRUE, (int)targetFps, (int)multiplier,
+                    (float)refreshHz);
     r->setWfgEnabled(enabled == JNI_TRUE);
 }
 

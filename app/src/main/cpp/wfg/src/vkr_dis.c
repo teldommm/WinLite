@@ -16,8 +16,10 @@
 #include "shaders/dis_inverse_search_comp.spv.h"
 #include "shaders/dis_propagate_comp.spv.h"
 #include "shaders/dis_densify_comp.spv.h"
-#include "shaders/dis_interpolate_comp.spv.h"
+#include "shaders/dis_interpolate_frag.spv.h"
+#include "shaders/dis_fullscreen_vert.spv.h"
 #include "shaders/dis_hist_comp.spv.h"
+#include "shaders/dis_hist_r16_comp.spv.h"
 #include "shaders/dis_side_comp.spv.h"
 #include "shaders/dis_flow_pack_comp.spv.h"
 #include "shaders/dis_splat_comp.spv.h"
@@ -159,6 +161,7 @@ struct VkrDis {
     VkPhysicalDeviceMemoryProperties mem_props;
 
     uint32_t flow_min_side;
+    bool fast_interp;   // the Fast preset's interpolation (pass_interp_fast)
     uint32_t target_fps;
     uint32_t multiplier;
     float refresh_rate;
@@ -183,7 +186,6 @@ struct VkrDis {
     DisImage flow_sparse[DIS_MAX_LEVELS];
     DisImage flow_sparse_b[DIS_MAX_LEVELS];
     DisImage flow_dense;
-    DisImage interp_out;
 
     DisImage vr_prep;
     DisImage vr_d1;
@@ -218,7 +220,6 @@ struct VkrDis {
     VkImageView view_sparse[DIS_MAX_LEVELS];
     VkImageView view_sparse_b[DIS_MAX_LEVELS];
     VkImageView view_dense[DIS_MAX_LEVELS];
-    VkImageView view_interp_out;
     VkImageView view_vr_prep[DIS_MAX_LEVELS];
     VkImageView view_vr_d1[DIS_MAX_LEVELS];
     VkImageView view_vr_d2[DIS_MAX_LEVELS];
@@ -242,6 +243,16 @@ struct VkrDis {
     VkImageView view_fb_l1;
 
     VkSampler sampler;
+
+    // The interpolation is a fragment pass straight into the presented image (a colour
+    // attachment keeps the swapchain's framebuffer compression, which a storage image or a
+    // copy through one would not): its render pass, compatible with the renderer's swapchain
+    // pass so the renderer's framebuffers serve, the format it was built for, and its layout.
+    // base_view is the composite, sampled outside the content rect.
+    VkRenderPass interp_pass;
+    VkFormat interp_pass_format;
+    VkPipelineLayout interp_layout;
+    VkImageView base_view;
 
     VkDescriptorSetLayout set_layout;
     VkPipelineLayout pipeline_layout;
@@ -284,7 +295,8 @@ struct VkrDis {
     DisPass pass_inverse;
     DisPass pass_propagate;
     DisPass pass_densify;
-    DisPass pass_interp;
+    DisPass pass_interp;        // Balanced: Catmull-Rom warp, two source steps
+    DisPass pass_interp_fast;   // Fast: bilinear warp, one source step
     DisPass pass_hist;
     DisPass pass_fb_poly;
     DisPass pass_fb_hsum;
@@ -319,6 +331,12 @@ struct VkrDis {
     int planned_gen;
     uint32_t gen_high_streak;
     uint32_t gen_low_streak;
+
+    // The last plan generates nothing and needs no frame (vkr_dis_idle), and frames went by
+    // without vkr_dis_process since the slots were last filled (vkr_dis_skip_frame): the colour
+    // pair is stale, so the first plan that would generate again takes one frame in first.
+    bool plan_idle;
+    bool stale;
 
     uint64_t plan_log_ns;
     int plan_log_gen;
@@ -382,6 +400,10 @@ typedef struct {
     float t;
     int debugMode;
     int layer;
+    int pad;
+    float rectOff[2];
+    float rectSize[2];
+    float invTarget[2];
 } DisInterpPC;
 
 typedef struct {
@@ -547,7 +569,6 @@ static uint32_t dis_collect_images(VkrDis* d, DisImage** out, uint32_t cap) {
         DIS_PUSH(&d->flow_sparse_b[l]);
     }
     DIS_PUSH(&d->flow_dense);
-    DIS_PUSH(&d->interp_out);
     DIS_PUSH(&d->vr_prep);
     DIS_PUSH(&d->vr_d1);
     DIS_PUSH(&d->vr_d2);
@@ -739,7 +760,8 @@ static bool dis_create_pipelines(VkrDis* d) {
         bindings[i].descriptorType = i == 5 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                                             : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        // The interpolation sets are bound to the fragment pass (dis_interpolate.frag).
+        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     }
 
     VkDescriptorSetLayoutCreateInfo li;
@@ -765,6 +787,18 @@ static bool dis_create_pipelines(VkrDis* d) {
     pli.pushConstantRangeCount = 1;
     pli.pPushConstantRanges = &pcr;
     if (vkd.CreatePipelineLayout(d->device, &pli, NULL, &d->pipeline_layout) != VK_SUCCESS) {
+        return false;
+    }
+
+    // The interpolation's: the same sets, push constants for the fragment stage.
+    VkPushConstantRange ipcr;
+    memset(&ipcr, 0, sizeof(ipcr));
+    ipcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    ipcr.offset = 0;
+    ipcr.size = (uint32_t)sizeof(DisInterpPC);
+    VkPipelineLayoutCreateInfo ipli = pli;
+    ipli.pPushConstantRanges = &ipcr;
+    if (vkd.CreatePipelineLayout(d->device, &ipli, NULL, &d->interp_layout) != VK_SUCCESS) {
         return false;
     }
 
@@ -850,20 +884,6 @@ static bool dis_create_pipelines(VkrDis* d) {
     d->pass_inverse.pipeline = dis_create_compute_pipeline(d, dis_inverse_search_comp, dis_inverse_search_comp_size);
     d->pass_propagate.pipeline = dis_create_compute_pipeline(d, dis_propagate_comp, dis_propagate_comp_size);
     d->pass_densify.pipeline = dis_create_compute_pipeline(d, dis_densify_comp, dis_densify_comp_size);
-    const VkBool32 manual_filter = d->manual_flow_filter ? 1u : 0u;
-    VkSpecializationMapEntry spec_entry;
-    memset(&spec_entry, 0, sizeof(spec_entry));
-    spec_entry.constantID = 0;
-    spec_entry.offset = 0;
-    spec_entry.size = sizeof(manual_filter);
-    VkSpecializationInfo spec;
-    memset(&spec, 0, sizeof(spec));
-    spec.mapEntryCount = 1;
-    spec.pMapEntries = &spec_entry;
-    spec.dataSize = sizeof(manual_filter);
-    spec.pData = &manual_filter;
-    d->pass_interp.pipeline = dis_create_compute_pipeline_with_layout(
-        d, dis_interpolate_comp, dis_interpolate_comp_size, d->pipeline_layout, &spec);
 
     d->pass_vr_prep.pipeline = dis_create_compute_pipeline_with_layout(d, dis_vr_prep_comp, dis_vr_prep_comp_size, d->vr_pipeline_layout, NULL);
     d->pass_vr_d1.pipeline = dis_create_compute_pipeline_with_layout(d, dis_vr_d1_comp, dis_vr_d1_comp_size, d->vr_pipeline_layout, NULL);
@@ -872,7 +892,11 @@ static bool dis_create_pipelines(VkrDis* d) {
     d->pass_vr_coef.pipeline = dis_create_compute_pipeline_with_layout(d, dis_vr_coef_comp, dis_vr_coef_comp_size, d->vr_pipeline_layout, NULL);
     d->pass_vr_sor.pipeline = dis_create_compute_pipeline_with_layout(d, dis_vr_sor_comp, dis_vr_sor_comp_size, d->vr_pipeline_layout, NULL);
     d->pass_vr_add.pipeline = dis_create_compute_pipeline_with_layout(d, dis_vr_add_comp, dis_vr_add_comp_size, d->vr_pipeline_layout, NULL);
-    d->pass_hist.pipeline = dis_create_compute_pipeline_with_layout(d, dis_hist_comp, dis_hist_comp_size, d->vr_pipeline_layout, NULL);
+    // The overlay history shares the luminance plane's format (R16F where it can be written and
+    // filtered); its shader's image format has to match.
+    d->pass_hist.pipeline = d->luma_format == VK_FORMAT_R16_SFLOAT
+        ? dis_create_compute_pipeline_with_layout(d, dis_hist_r16_comp, dis_hist_r16_comp_size, d->vr_pipeline_layout, NULL)
+        : dis_create_compute_pipeline_with_layout(d, dis_hist_comp, dis_hist_comp_size, d->vr_pipeline_layout, NULL);
     d->pass_fb_poly.pipeline = dis_create_compute_pipeline_with_layout(d, dis_fb_poly_comp, dis_fb_poly_comp_size, d->vr_pipeline_layout, NULL);
     d->pass_fb_hsum.pipeline = dis_create_compute_pipeline_with_layout(d, dis_fb_hsum_comp, dis_fb_hsum_comp_size, d->vr_pipeline_layout, NULL);
     d->pass_fb_vsolve.pipeline = dis_create_compute_pipeline_with_layout(d, dis_fb_vsolve_comp, dis_fb_vsolve_comp_size, d->vr_pipeline_layout, NULL);
@@ -882,7 +906,7 @@ static bool dis_create_pipelines(VkrDis* d) {
     d->pass_fill.pipeline = dis_create_compute_pipeline_with_layout(d, dis_fill_comp, dis_fill_comp_size, d->vr_pipeline_layout, NULL);
 
     if (!d->pass_gradient.pipeline || !d->pass_inverse.pipeline || !d->pass_propagate.pipeline ||
-        !d->pass_densify.pipeline || !d->pass_interp.pipeline ||
+        !d->pass_densify.pipeline ||
         !d->pass_vr_prep.pipeline || !d->pass_vr_d1.pipeline || !d->pass_vr_d2.pipeline ||
         !d->pass_vr_w.pipeline || !d->pass_vr_coef.pipeline || !d->pass_vr_sor.pipeline ||
         !d->pass_vr_add.pipeline || !d->pass_hist.pipeline || !d->pass_side.pipeline ||
@@ -890,6 +914,195 @@ static bool dis_create_pipelines(VkrDis* d) {
         !d->pass_fb_poly.pipeline || !d->pass_fb_hsum.pipeline || !d->pass_fb_vsolve.pipeline) {
         return false;
     }
+    return true;
+}
+
+static VkShaderModule dis_create_module(VkrDis* d, const uint32_t* code, size_t code_size) {
+    VkShaderModuleCreateInfo smi;
+    memset(&smi, 0, sizeof(smi));
+    smi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    smi.codeSize = code_size;
+    smi.pCode = code;
+    VkShaderModule sm = VK_NULL_HANDLE;
+    if (vkd.CreateShaderModule(d->device, &smi, NULL, &sm) != VK_SUCCESS) return VK_NULL_HANDLE;
+    return sm;
+}
+
+static void dis_destroy_interp_pass(VkrDis* d) {
+    if (d->pass_interp.pipeline) vkd.DestroyPipeline(d->device, d->pass_interp.pipeline, NULL);
+    if (d->pass_interp_fast.pipeline)
+        vkd.DestroyPipeline(d->device, d->pass_interp_fast.pipeline, NULL);
+    if (d->interp_pass) vkd.DestroyRenderPass(d->device, d->interp_pass, NULL);
+    d->pass_interp.pipeline = VK_NULL_HANDLE;
+    d->pass_interp_fast.pipeline = VK_NULL_HANDLE;
+    d->interp_pass = VK_NULL_HANDLE;
+    d->interp_pass_format = VK_FORMAT_UNDEFINED;
+}
+
+// The interpolation's render pass and pipeline for the presented image's format. The renderer's
+// own framebuffers of the swapchain images are used, so the render pass must be compatible with
+// the renderer's swapchain pass: identical but for load/store ops and layouts - one attachment of
+// this format and one sample, one subpass, and the very same single dependency (subpass
+// dependencies count for compatibility). It writes every pixel of the target (the content rect
+// interpolated, the rest from the composite), so nothing is loaded, and it leaves the image ready
+// to present. The images are acquired with a wait at the colour-output stage, which the external
+// dependency chains to; the present waits on a semaphore, which needs no dependency out.
+static bool dis_create_interp_pass(VkrDis* d, VkFormat format) {
+    if (d->interp_pass && d->pass_interp.pipeline && d->pass_interp_fast.pipeline &&
+        d->interp_pass_format == format)
+        return true;
+    dis_destroy_interp_pass(d);
+
+    VkAttachmentDescription att;
+    memset(&att, 0, sizeof(att));
+    att.format = format;
+    att.samples = VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    att.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkAttachmentReference ref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sub;
+    memset(&sub, 0, sizeof(sub));
+    sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = 1;
+    sub.pColorAttachments = &ref;
+    // Exactly the renderer's swapchain pass dependency (VulkanRendererContext::createRenderPass).
+    VkSubpassDependency dep;
+    memset(&dep, 0, sizeof(dep));
+    dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dep.dstSubpass = 0;
+    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep.srcAccessMask = 0;
+    dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    VkRenderPassCreateInfo rpi;
+    memset(&rpi, 0, sizeof(rpi));
+    rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpi.attachmentCount = 1;
+    rpi.pAttachments = &att;
+    rpi.subpassCount = 1;
+    rpi.pSubpasses = &sub;
+    rpi.dependencyCount = 1;
+    rpi.pDependencies = &dep;
+    if (vkd.CreateRenderPass(d->device, &rpi, NULL, &d->interp_pass) != VK_SUCCESS) {
+        d->interp_pass = VK_NULL_HANDLE;
+        return false;
+    }
+
+    VkShaderModule vs = dis_create_module(d, dis_fullscreen_vert, dis_fullscreen_vert_size);
+    VkShaderModule fs = dis_create_module(d, dis_interpolate_frag, dis_interpolate_frag_size);
+    if (!vs || !fs) {
+        if (vs) vkd.DestroyShaderModule(d->device, vs, NULL);
+        if (fs) vkd.DestroyShaderModule(d->device, fs, NULL);
+        dis_destroy_interp_pass(d);
+        return false;
+    }
+
+    // dis_interpolate.frag's constants: 0 manualFlowFilter, 1 sourceSteps, 2 warpCatmull. The
+    // presets differ in the last two; Fast drops eight of the warp's ten fetches and one of the
+    // two field lookups that find the source point.
+    const int32_t manual_filter = d->manual_flow_filter ? 1 : 0;
+    const int32_t spec_balanced[3] = {manual_filter, 2, 1};
+    const int32_t spec_fast[3] = {manual_filter, 1, 0};
+    VkSpecializationMapEntry spec_entries[3];
+    memset(spec_entries, 0, sizeof(spec_entries));
+    for (uint32_t i = 0; i < 3; i++) {
+        spec_entries[i].constantID = i;
+        spec_entries[i].offset = i * (uint32_t)sizeof(int32_t);
+        spec_entries[i].size = sizeof(int32_t);
+    }
+    VkSpecializationInfo spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.mapEntryCount = 3;
+    spec.pMapEntries = spec_entries;
+    spec.dataSize = sizeof(spec_balanced);
+    spec.pData = spec_balanced;
+
+    VkPipelineShaderStageCreateInfo stages[2];
+    memset(stages, 0, sizeof(stages));
+    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = vs;
+    stages[0].pName = "main";
+    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = fs;
+    stages[1].pName = "main";
+    stages[1].pSpecializationInfo = &spec;
+
+    VkPipelineVertexInputStateCreateInfo vi;
+    memset(&vi, 0, sizeof(vi));
+    vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VkPipelineInputAssemblyStateCreateInfo ia;
+    memset(&ia, 0, sizeof(ia));
+    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineViewportStateCreateInfo vp;
+    memset(&vp, 0, sizeof(vp));
+    vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    vp.viewportCount = 1;
+    vp.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo rs;
+    memset(&rs, 0, sizeof(rs));
+    rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rs.polygonMode = VK_POLYGON_MODE_FILL;
+    rs.cullMode = VK_CULL_MODE_NONE;
+    rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rs.lineWidth = 1.0f;
+    VkPipelineMultisampleStateCreateInfo ms;
+    memset(&ms, 0, sizeof(ms));
+    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineColorBlendAttachmentState cba;
+    memset(&cba, 0, sizeof(cba));
+    cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    VkPipelineColorBlendStateCreateInfo cb;
+    memset(&cb, 0, sizeof(cb));
+    cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    cb.attachmentCount = 1;
+    cb.pAttachments = &cba;
+    const VkDynamicState dyn_states[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dyn;
+    memset(&dyn, 0, sizeof(dyn));
+    dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dyn.dynamicStateCount = 2;
+    dyn.pDynamicStates = dyn_states;
+
+    VkGraphicsPipelineCreateInfo gpi;
+    memset(&gpi, 0, sizeof(gpi));
+    gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    gpi.stageCount = 2;
+    gpi.pStages = stages;
+    gpi.pVertexInputState = &vi;
+    gpi.pInputAssemblyState = &ia;
+    gpi.pViewportState = &vp;
+    gpi.pRasterizationState = &rs;
+    gpi.pMultisampleState = &ms;
+    gpi.pColorBlendState = &cb;
+    gpi.pDynamicState = &dyn;
+    gpi.layout = d->interp_layout;
+    gpi.renderPass = d->interp_pass;
+    gpi.subpass = 0;
+    VkResult res = vkd.CreateGraphicsPipelines(d->device, VK_NULL_HANDLE, 1, &gpi, NULL,
+                                               &d->pass_interp.pipeline);
+    if (res != VK_SUCCESS) d->pass_interp.pipeline = VK_NULL_HANDLE;
+    if (res == VK_SUCCESS) {
+        spec.pData = spec_fast;
+        res = vkd.CreateGraphicsPipelines(d->device, VK_NULL_HANDLE, 1, &gpi, NULL,
+                                          &d->pass_interp_fast.pipeline);
+        if (res != VK_SUCCESS) d->pass_interp_fast.pipeline = VK_NULL_HANDLE;
+    }
+    vkd.DestroyShaderModule(d->device, vs, NULL);
+    vkd.DestroyShaderModule(d->device, fs, NULL);
+    if (res != VK_SUCCESS) {
+        dis_destroy_interp_pass(d);
+        return false;
+    }
+    d->interp_pass_format = format;
     return true;
 }
 
@@ -1100,7 +1313,7 @@ static void dis_write_all_descriptors(VkrDis* d) {
             dis_batch_sampled(d, &b, d->interp_sets[s][dir], 3, d->view_side, d->sampler);
             dis_batch_sampled(d, &b, d->interp_sets[s][dir], 4, d->view_hist[dir], d->sampler);
             dis_batch_sampled(d, &b, d->interp_sets[s][dir], 6, d->view_splat_field, d->sampler);
-            dis_batch_storage(d, &b, d->interp_sets[s][dir], 5, d->view_interp_out);
+            dis_batch_sampled(d, &b, d->interp_sets[s][dir], 7, d->base_view, d->sampler);
 
             dis_batch_sampled(d, &b, d->hist_sets[s][dir], 0, d->view_color[prev], d->sampler);
             dis_batch_sampled(d, &b, d->hist_sets[s][dir], 1, d->view_color[next], d->sampler);
@@ -1231,7 +1444,6 @@ static void dis_write_all_descriptors(VkrDis* d) {
 
 static void dis_destroy_views(VkrDis* d) {
     for (uint32_t s = 0; s < DIS_SLOTS; s++) dis_destroy_view(d, &d->view_color[s]);
-    dis_destroy_view(d, &d->view_interp_out);
     dis_destroy_view(d, &d->view_hist[0]);
     dis_destroy_view(d, &d->view_hist[1]);
     dis_destroy_view(d, &d->view_side);
@@ -1282,7 +1494,6 @@ static void dis_destroy_images(VkrDis* d) {
         dis_destroy_image(d, &d->flow_sparse_b[l]);
     }
     dis_destroy_image(d, &d->flow_dense);
-    dis_destroy_image(d, &d->interp_out);
     dis_destroy_image(d, &d->vr_prep);
     dis_destroy_image(d, &d->vr_d1);
     dis_destroy_image(d, &d->vr_d2);
@@ -1338,10 +1549,6 @@ static bool dis_create_resources(VkrDis* d, uint32_t w, uint32_t h, uint32_t ful
     }
     if (!dis_create_image(d, &d->flow_dense, w, h, VK_FORMAT_R32G32_SFLOAT, L,
                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) return false;
-    if (!dis_create_image(d, &d->interp_out, full_w, full_h, VK_FORMAT_R8G8B8A8_UNORM, 1,
-                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
-        return false;
-    }
 
     if (!dis_create_image(d, &d->vr_prep, w, h, VK_FORMAT_R32G32_SFLOAT, L,
                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) return false;
@@ -1361,13 +1568,14 @@ static bool dis_create_resources(VkrDis* d, uint32_t w, uint32_t h, uint32_t ful
                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) return false;
     if (!dis_create_image(d, &d->flow_refined, w, h, VK_FORMAT_R32G32_SFLOAT, L,
                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) return false;
-    // R32_SFLOAT at half the content resolution: the storage format is already
-    // required by the flow images, so the history adds no device requirement.
+    // At half the content resolution, in the luminance plane's format (R16F where the device
+    // can write and filter it, else R32F): already required, so the history adds no device
+    // requirement.
     const uint32_t hist_w = full_w > 1u ? full_w / 2u : 1u;
     const uint32_t hist_h = full_h > 1u ? full_h / 2u : 1u;
-    if (!dis_create_image(d, &d->hist[0], hist_w, hist_h, VK_FORMAT_R32_SFLOAT, 1,
+    if (!dis_create_image(d, &d->hist[0], hist_w, hist_h, d->luma_format, 1,
                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) return false;
-    if (!dis_create_image(d, &d->hist[1], hist_w, hist_h, VK_FORMAT_R32_SFLOAT, 1,
+    if (!dis_create_image(d, &d->hist[1], hist_w, hist_h, d->luma_format, 1,
                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) return false;
     if (!dis_create_image(d, &d->side, w, h, VK_FORMAT_R32_SFLOAT, 1,
                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) return false;
@@ -1435,9 +1643,8 @@ static bool dis_create_resources(VkrDis* d, uint32_t w, uint32_t h, uint32_t ful
         if (!dis_create_view(d, d->fb_sg.image, VK_FORMAT_R32G32B32A32_SFLOAT, l, 1, &d->view_fb_sg[l])) return false;
         if (!dis_create_view(d, d->fb_sh.image, VK_FORMAT_R32_SFLOAT, l, 1, &d->view_fb_sh[l])) return false;
     }
-    if (!dis_create_view(d, d->interp_out.image, VK_FORMAT_R8G8B8A8_UNORM, 0, 1, &d->view_interp_out)) return false;
-    if (!dis_create_view(d, d->hist[0].image, VK_FORMAT_R32_SFLOAT, 0, 1, &d->view_hist[0])) return false;
-    if (!dis_create_view(d, d->hist[1].image, VK_FORMAT_R32_SFLOAT, 0, 1, &d->view_hist[1])) return false;
+    if (!dis_create_view(d, d->hist[0].image, d->luma_format, 0, 1, &d->view_hist[0])) return false;
+    if (!dis_create_view(d, d->hist[1].image, d->luma_format, 0, 1, &d->view_hist[1])) return false;
     if (!dis_create_view(d, d->side.image, VK_FORMAT_R32_SFLOAT, 0, 1, &d->view_side)) return false;
     if (!dis_create_view(d, d->flow_out.image, VK_FORMAT_R16G16_SFLOAT, 0, 1, &d->view_flow_out)) return false;
     if (!dis_create_view(d, d->splat_key.image, VK_FORMAT_R32_UINT, 0, 1, &d->view_splat_key)) return false;
@@ -1629,8 +1836,6 @@ static bool dis_audit_formats(VkrDis* d) {
         {VK_FORMAT_R16G16_SFLOAT, STORE | READ, "interpolation flow"},
         {VK_FORMAT_R32G32B32A32_SFLOAT, STORE | READ, "sparse flow and refinement"},
         {VK_FORMAT_R32_SFLOAT, STORE | READ, "refinement weights"},
-        {VK_FORMAT_R8G8B8A8_UNORM, STORE | VK_FORMAT_FEATURE_BLIT_SRC_BIT,
-         "interpolated output"},
         {d->luma_format, STORE | READ | FILTER, "luminance plane"},
     };
 
@@ -1759,7 +1964,8 @@ void vkr_dis_destroy(VkrDis* d) {
     if (d->pass_inverse.pipeline) vkd.DestroyPipeline(d->device, d->pass_inverse.pipeline, NULL);
     if (d->pass_propagate.pipeline) vkd.DestroyPipeline(d->device, d->pass_propagate.pipeline, NULL);
     if (d->pass_densify.pipeline) vkd.DestroyPipeline(d->device, d->pass_densify.pipeline, NULL);
-    if (d->pass_interp.pipeline) vkd.DestroyPipeline(d->device, d->pass_interp.pipeline, NULL);
+    dis_destroy_interp_pass(d);
+    if (d->interp_layout) vkd.DestroyPipelineLayout(d->device, d->interp_layout, NULL);
     if (d->pass_vr_prep.pipeline) vkd.DestroyPipeline(d->device, d->pass_vr_prep.pipeline, NULL);
     if (d->pass_vr_d1.pipeline) vkd.DestroyPipeline(d->device, d->pass_vr_d1.pipeline, NULL);
     if (d->pass_vr_d2.pipeline) vkd.DestroyPipeline(d->device, d->pass_vr_d2.pipeline, NULL);
@@ -1783,9 +1989,11 @@ void vkr_dis_destroy(VkrDis* d) {
     free(d);
 }
 
-void vkr_dis_configure(VkrDis* d, uint32_t flow_min_side, uint32_t target_fps,
+void vkr_dis_configure(VkrDis* d, uint32_t flow_min_side, bool fast_interp, uint32_t target_fps,
                        uint32_t multiplier, float refresh_rate) {
     if (!d) return;
+    // Takes effect with the next generated frame: both pipelines exist, nothing is rebuilt.
+    d->fast_interp = fast_interp;
     uint32_t side = flow_min_side < DIS_FLOW_MIN_SIDE_FLOOR ? DIS_FLOW_MIN_SIDE_FLOOR
                   : (flow_min_side > DIS_FLOW_MIN_SIDE_CEIL ? DIS_FLOW_MIN_SIDE_CEIL
                                                             : flow_min_side);
@@ -1799,18 +2007,19 @@ void vkr_dis_configure(VkrDis* d, uint32_t flow_min_side, uint32_t target_fps,
 }
 
 bool vkr_dis_needs_rebuild(const VkrDis* d, uint32_t width, uint32_t height, VkFormat format,
-                           VkrDisContentRect content) {
+                           VkrDisContentRect content, VkImageView base_view) {
     if (!d || d->unavailable) return false;
-    return !d->built || d->built_full_extent.width != width ||
+    return !d->built || d->base_view != base_view || d->built_full_extent.width != width ||
            d->built_full_extent.height != height || d->built_format != format ||
            d->built_min_side != d->flow_min_side ||
            d->content.width != content.width || d->content.height != content.height;
 }
 
 bool vkr_dis_prepare(VkrDis* d, uint32_t width, uint32_t height, VkFormat format,
-                     VkrDisContentRect content) {
+                     VkrDisContentRect content, VkImageView base_view) {
     if (!d || d->unavailable) return false;
-    if (width == 0 || height == 0 || format == VK_FORMAT_UNDEFINED) return false;
+    if (width == 0 || height == 0 || format == VK_FORMAT_UNDEFINED || base_view == VK_NULL_HANDLE)
+        return false;
 
     if (content.width < DIS_MIN_EXTENT || content.height < DIS_MIN_EXTENT ||
         content.x < 0 || content.y < 0 ||
@@ -1833,7 +2042,8 @@ bool vkr_dis_prepare(VkrDis* d, uint32_t width, uint32_t height, VkFormat format
     if (d->built && d->built_extent.width == w && d->built_extent.height == h &&
         d->built_full_extent.width == width && d->built_full_extent.height == height &&
         d->built_format == format && d->built_min_side == d->flow_min_side && d->levels == levels &&
-        d->content.width == content.width && d->content.height == content.height) {
+        d->content.width == content.width && d->content.height == content.height &&
+        d->base_view == base_view) {
         d->content.x = content.x;
         d->content.y = content.y;
         return true;
@@ -1859,7 +2069,16 @@ bool vkr_dis_prepare(VkrDis* d, uint32_t width, uint32_t height, VkFormat format
         }
     }
 
+    if (!dis_create_interp_pass(d, format)) {
+        DIS_LOGW("WFG interpolation pass could not be built for format %d; frame generation "
+                 "unavailable", (int)format);
+        d->unavailable = true;
+        return false;
+    }
+
     d->levels = levels;
+    // The interpolation sets sample it; dis_create_resources writes them.
+    d->base_view = base_view;
 
     if (!dis_create_resources(d, w, h, content.width, content.height, format)) {
         DIS_LOGW("WFG resource build failed at %ux%u; frame generation unavailable", w, h);
@@ -1963,6 +2182,9 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
         d->planned_gen = 0;
         d->gen_high_streak = 0;
         d->gen_low_streak = 0;
+        // Filling the slots or still measuring the game's rate needs the frames; without spare
+        // swapchain images nothing is ever generated.
+        d->plan_idle = capacity == 0;
         return 0;
     }
 
@@ -1979,7 +2201,10 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
     } else {
         float desired = d->target_fps > 0 ? (float)d->target_fps : d->refresh_rate;
         if (d->refresh_rate > 0.0f && desired > d->refresh_rate) desired = d->refresh_rate;
-        if (desired <= 0.0f) return 0;
+        if (desired <= 0.0f) {
+            d->plan_idle = true;
+            return 0;
+        }
 
         if (d->smoothed_desired <= 0.0f) {
             d->smoothed_desired = desired;
@@ -1994,6 +2219,7 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
         d->planned_gen = 0;
         d->gen_high_streak = 0;
         d->gen_low_streak = 0;
+        d->plan_idle = true;
         dis_log_plan(d, now, source_rate, eff_desired, ratio, capacity);
         return 0;
     }
@@ -2076,7 +2302,24 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
     }
 
     dis_log_plan(d, now, source_rate, eff_desired, ratio, capacity);
+    // The planner's own hysteresis decides; idle is just its answer of nothing. After skipped
+    // frames the first answer of something is a frame taken in, not generated from: the slot
+    // before it holds a frame from before the pause.
+    d->plan_idle = d->planned_gen == 0;
+    if (d->planned_gen > 0 && d->stale) return 0;
     return (uint32_t)d->planned_gen;
+}
+
+bool vkr_dis_idle(const VkrDis* d) {
+    return d && !d->unavailable && d->built && d->plan_idle;
+}
+
+void vkr_dis_skip_frame(VkrDis* d) {
+    if (!d) return;
+    d->stale = true;
+    // Neither the previous pair's field nor the overlay history describes what comes next.
+    d->prior_valid = false;
+    d->hist_valid = false;
 }
 
 // Solver budget for one level. The refinement is a red-black SOR, and the
@@ -2275,6 +2518,11 @@ void vkr_dis_process(VkrDis* d, VkCommandBuffer cmd, VkImage source, uint32_t wi
     d->last_generations = generations;
 
     dis_prime_layouts(d, cmd);
+    // The previous pair's interpolation passes sampled the colour pair, the field, the side map,
+    // the history and the splat, which this pair's copies and compute passes overwrite.
+    vkd.CmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           0, 0, NULL, 0, NULL, 0, NULL);
     DIS_PROF_BEGIN(d, cmd);
 
     const DisRefine refine = dis_refine_for(generations);
@@ -2320,6 +2568,7 @@ void vkr_dis_process(VkrDis* d, VkCommandBuffer cmd, VkImage source, uint32_t wi
     d->prev_idx = (int)((slot + DIS_SLOTS - 1u) % DIS_SLOTS);
     d->active_slot = slot;
     d->frame_count++;
+    d->stale = false;   // this frame is the start of the next pair
 
     for (uint32_t l = 0; l < L; l++) {
         const uint32_t lw = w >> l;
@@ -2510,33 +2759,29 @@ static void dis_splat_pass(VkrDis* d, VkCommandBuffer cmd, uint32_t slot, uint32
                     (fh + DIS_LOCAL_SIZE - 1) / DIS_LOCAL_SIZE, 1);
 }
 
+// One generated frame into a presented image, in a single fragment pass over the whole target:
+// the content rect interpolated, the rest (letterbox, anything outside the windows) taken from
+// the composite. The attachment comes out ready to present (dis_create_interp_pass).
 static void dis_render_into(VkrDis* d, VkCommandBuffer cmd, float t, int layer,
-                            VkImage target_image, uint32_t width, uint32_t height,
-                            VkImage base_image) {
+                            VkFramebuffer target_fb, uint32_t width, uint32_t height) {
     const uint32_t w = d->content.width;
     const uint32_t h = d->content.height;
 
-    DisInterpPC ipc;
-    ipc.t = t;
-    ipc.debugMode = 0;   // dis_interpolate.comp's flow-visualization path is not used
-    ipc.layer = layer;
+    // What the pass samples - the colour pair and the composite (transfer and colour-output
+    // writes), the field, side map, history and splat (compute writes) - before it reads them.
+    VkMemoryBarrier mb;
+    memset(&mb, 0, sizeof(mb));
+    mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT |
+                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkd.CmdPipelineBarrier(cmd,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT |
+                               VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &mb, 0, NULL, 0, NULL);
 
-    vkd.CmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, d->pass_interp.pipeline);
-    vkd.CmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, d->pipeline_layout, 0, 1,
-                              &d->interp_sets[d->active_slot][d->hist_parity], 0, NULL);
-    vkd.CmdPushConstants(cmd, d->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ipc), &ipc);
-    vkd.CmdDispatch(cmd, (w + DIS_LOCAL_SIZE - 1) / DIS_LOCAL_SIZE,
-                    (h + DIS_LOCAL_SIZE - 1) / DIS_LOCAL_SIZE, 1);
-    DIS_PROF(cmd, "interp shader");
-
-    dis_barrier(cmd, d->interp_out.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-
-    dis_barrier(cmd, target_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-                VK_ACCESS_TRANSFER_WRITE_BIT);
-
+    // Where the content lands in the target (the composite and the target are normally the same
+    // size; a scale is kept for when they are not).
     const uint32_t comp_w = d->built_full_extent.width;
     const uint32_t comp_h = d->built_full_extent.height;
     const float tsx = comp_w > 0 ? (float)width / (float)comp_w : 1.0f;
@@ -2550,68 +2795,70 @@ static void dis_render_into(VkrDis* d, VkCommandBuffer cmd, float t, int layer,
     if ((uint32_t)tx + tw > width) tw = width - (uint32_t)tx;
     if ((uint32_t)ty + th > height) th = height - (uint32_t)ty;
 
-    if (base_image != VK_NULL_HANDLE) {
-        const int32_t cx = d->content.x;
-        const int32_t cy = d->content.y;
-        const int32_t cr = cx + (int32_t)w;
-        const int32_t cb = cy + (int32_t)h;
-        const int32_t trx = tx + (int32_t)tw;
-        const int32_t tby = ty + (int32_t)th;
-        const int32_t src[4][4] = {
-            {0,  0,  cx,                    (int32_t)comp_h},
-            {cr, 0,  (int32_t)comp_w - cr,  (int32_t)comp_h},
-            {cx, 0,  (int32_t)w,            cy},
-            {cx, cb, (int32_t)w,            (int32_t)comp_h - cb},
-        };
-        const int32_t dst[4][4] = {
-            {0,   0,   tx,                     (int32_t)height},
-            {trx, 0,   (int32_t)width - trx,   (int32_t)height},
-            {tx,  0,   (int32_t)tw,            ty},
-            {tx,  tby, (int32_t)tw,            (int32_t)height - tby},
-        };
-        bool any_strip = false;
-        for (uint32_t i = 0; i < 4; i++) {
-            if (src[i][2] <= 0 || src[i][3] <= 0 || dst[i][2] <= 0 || dst[i][3] <= 0) continue;
-            dis_blit_rect(cmd, base_image, src[i][0], src[i][1],
-                          (uint32_t)src[i][2], (uint32_t)src[i][3],
-                          target_image, dst[i][0], dst[i][1],
-                          (uint32_t)dst[i][2], (uint32_t)dst[i][3], VK_FILTER_LINEAR);
-            any_strip = true;
-        }
-        if (any_strip) {
-            dis_barrier(cmd, target_image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
-        }
-    }
+    DisInterpPC ipc;
+    memset(&ipc, 0, sizeof(ipc));
+    ipc.t = t;
+    ipc.debugMode = 0;   // dis_interpolate.frag's flow-visualization path is not used
+    ipc.layer = layer;
+    ipc.rectOff[0] = (float)tx;
+    ipc.rectOff[1] = (float)ty;
+    ipc.rectSize[0] = (float)tw;
+    ipc.rectSize[1] = (float)th;
+    ipc.invTarget[0] = 1.0f / (float)width;
+    ipc.invTarget[1] = 1.0f / (float)height;
 
-    dis_blit_rect(cmd, d->interp_out.image, 0, 0, w, h,
-                  target_image, tx, ty, tw, th, VK_FILTER_LINEAR);
+    VkRenderPassBeginInfo rbi;
+    memset(&rbi, 0, sizeof(rbi));
+    rbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rbi.renderPass = d->interp_pass;
+    rbi.framebuffer = target_fb;
+    rbi.renderArea.extent.width = width;
+    rbi.renderArea.extent.height = height;
+    vkd.CmdBeginRenderPass(cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE);
 
-    dis_barrier(cmd, d->interp_out.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
-    DIS_PROF(cmd, "interp blit");
+    VkViewport vp;
+    memset(&vp, 0, sizeof(vp));
+    vp.width = (float)width;
+    vp.height = (float)height;
+    vp.maxDepth = 1.0f;
+    VkRect2D sc;
+    memset(&sc, 0, sizeof(sc));
+    sc.extent.width = width;
+    sc.extent.height = height;
+    vkd.CmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        d->fast_interp ? d->pass_interp_fast.pipeline : d->pass_interp.pipeline);
+    vkd.CmdSetViewport(cmd, 0, 1, &vp);
+    vkd.CmdSetScissor(cmd, 0, 1, &sc);
+    vkd.CmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d->interp_layout, 0, 1,
+                              &d->interp_sets[d->active_slot][d->hist_parity], 0, NULL);
+    vkd.CmdPushConstants(cmd, d->interp_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(ipc), &ipc);
+    vkd.CmdDraw(cmd, 3, 1, 0, 0);
+    vkd.CmdEndRenderPass(cmd);
+    DIS_PROF(cmd, "interp pass");
 }
 
-void vkr_dis_generate_into(VkrDis* d, VkCommandBuffer cmd, uint32_t generation,
-                           VkImage target_image, uint32_t width, uint32_t height,
-                           VkImage base_image) {
-    if (!d || !d->built || d->unavailable) return;
-    if (d->last_generations == 0) return;
+static bool dis_can_generate(const VkrDis* d, uint32_t generation, VkFramebuffer target_fb) {
+    return d && d->built && !d->unavailable && d->pass_interp.pipeline &&
+           d->pass_interp_fast.pipeline && target_fb != VK_NULL_HANDLE &&
+           d->last_generations > 0 && generation < d->last_generations;
+}
+
+bool vkr_dis_generate_into(VkrDis* d, VkCommandBuffer cmd, uint32_t generation,
+                           VkFramebuffer target_fb, uint32_t width, uint32_t height) {
+    if (!dis_can_generate(d, generation, target_fb)) return false;
 
     const float t = (float)(generation + 1) / (float)(d->last_generations + 1);
-    dis_render_into(d, cmd, t, (int)generation, target_image, width, height, base_image);
+    dis_render_into(d, cmd, t, (int)generation, target_fb, width, height);
+    return true;
 }
 
-void vkr_dis_generate_into_at(VkrDis* d, VkCommandBuffer cmd, uint32_t generation, float t,
-                              VkImage target_image, uint32_t width, uint32_t height,
-                              VkImage base_image) {
-    if (!d || !d->built || d->unavailable) return;
-    if (d->last_generations == 0) return;
+bool vkr_dis_generate_into_at(VkrDis* d, VkCommandBuffer cmd, uint32_t generation, float t,
+                              VkFramebuffer target_fb, uint32_t width, uint32_t height) {
+    if (!dis_can_generate(d, generation, target_fb)) return false;
     if (!(t > 0.0f && t < 1.0f))   // also rejects NaN
         t = (float)(generation + 1) / (float)(d->last_generations + 1);
-    dis_render_into(d, cmd, t, (int)generation, target_image, width, height, base_image);
+    dis_render_into(d, cmd, t, (int)generation, target_fb, width, height);
+    return true;
 }
 
 uint64_t vkr_dis_source_interval_ns(const VkrDis* d) {
@@ -2641,4 +2888,6 @@ static void dis_reset(VkrDis* d) {
     d->hist_parity = 0;
     d->hist_valid = false;
     d->prior_valid = false;
+    d->plan_idle = false;
+    d->stale = false;
 }
