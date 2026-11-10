@@ -475,6 +475,7 @@ void VulkanRendererContext::createSwapchain() {
     // gain in smoothness. Modes that can drop images (MAILBOX, IMMEDIATE) and WFG (which presents
     // several images per frame) keep it. debug.winlite.swapchain_extra forces either way.
     const bool fifoLike = presentMode==VK_PRESENT_MODE_FIFO_KHR || presentMode==VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+    swapchainFifo = fifoLike;
     bool spareImage = wantWfg || !fifoLike;
     const int extraOverride = swapchainExtraImageOverride();
     if (!wantWfg && extraOverride >= 0) spareImage = extraOverride != 0;
@@ -1083,6 +1084,8 @@ void VulkanRendererContext::renderFrame() {
     }
 
     WfgFrame wf = wfgBeginFrame(frameDraws,ox,oy,sx,sy,cw,ch);
+    // Without WFG, a new game frame under an FPS limit gets its own target on the refresh grid.
+    const uint64_t plainAt = wf.active ? 0 : limitPlanPresent();
     {
         struct RecordTargetReset {
             VulkanRendererContext* c;
@@ -1133,7 +1136,8 @@ void VulkanRendererContext::renderFrame() {
     ptimes.sType=VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE;
     ptimes.swapchainCount=1; ptimes.pTimes=&ptime;
     auto pacedNext=[&](uint64_t at) -> const void* {
-        if (!wf.paced) return nullptr;
+        if (!wf.paced && !plainAt) return nullptr;
+        if (!wf.paced) at = plainAt;
         ptime.presentID=++wfgPresentId;
         ptime.desiredPresentTime=at;
         return &ptimes;

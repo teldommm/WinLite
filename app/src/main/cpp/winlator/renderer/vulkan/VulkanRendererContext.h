@@ -480,6 +480,24 @@ public:
     uint64_t              wfgPacedFrames = 0;
     uint64_t              wfgPaceResets  = 0;
     void     wfgPlanPresentTimes(WfgFrame& wf);
+    void     paceSchedule(uint64_t& lastNs, int64_t& integ, uint64_t& lastRealDisp,
+                          uint64_t& resets, uint64_t& late, uint32_t n, uint64_t interval,
+                          uint64_t arrival, uint64_t* presentAt, uint64_t* disp);
+    // Pacing of the plain path (no WFG) to the game's FPS limit; see limitPlanPresent.
+    uint64_t limitPlanPresent();
+    bool                  swapchainFifo  = false; // the swapchain presents FIFO (pacing applies)
+    uint64_t              lpSeenFrames   = 0;
+    uint64_t              lpLastArrival  = 0;
+    uint64_t              lpIntervalEma  = 0;     // the game's measured frame interval
+    uint64_t              lpLastNs       = 0;
+    int64_t               lpInteg        = 0;
+    uint64_t              lpLastDisp     = 0;
+    uint64_t              lpResets       = 0;
+    uint64_t              lpLate         = 0;
+    uint64_t              lpPaced        = 0;
+    uint64_t              lpGameFrames   = 0;
+    uint64_t              lpLogTimed     = 0;
+    uint64_t              lpLogLate      = 0;
     std::atomic<bool>     wfgRequested{false};
     std::atomic<uint32_t> wfgFlowSide{180};
     std::atomic<uint32_t> wfgTargetFps{0};
