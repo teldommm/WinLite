@@ -4,23 +4,20 @@ import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.mutableStateMapOf
-import com.winlator.cmod.ui.theme.RevealSection
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +29,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -66,7 +66,6 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.ThemedDialog
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
-import com.winlator.cmod.ui.theme.TablerIcons
 
 enum class EnvValueKind { CHECKBOX, SELECT, MULTI, TEXT, NUMBER }
 
@@ -180,74 +179,57 @@ fun EnvironmentVariablesEditor(
         mutableStateListOf<EditableEnvVariable>().apply { addAll(parseEnvironmentVariables(value)) }
     }
     var addOpen by remember { mutableStateOf(false) }
-    val leaving = remember { mutableStateMapOf<String, Pair<Int, EditableEnvVariable>>() }
+    // Names already on screen: only a variable that was just added animates in.
     val seen = remember { mutableSetOf<String>().apply { addAll(rows.map { it.name }) } }
 
     fun commit() = onChanged(serializeEnvironmentVariables(rows))
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Rows that were just removed stay on screen (as ghosts) until their exit animation ends.
-        val items = ArrayList<Triple<EditableEnvVariable, Boolean, Int>>()
-        rows.forEach { items.add(Triple(it, false, 0)) }
-        leaving.values.sortedBy { it.first }.forEach { (idx, row) ->
-            items.add(idx.coerceIn(0, items.size), Triple(row, true, idx))
-        }
-        AnimatedContent(
-            targetState = items.isEmpty(),
-            modifier = Modifier.fillMaxWidth().animateContentSize(tween(260, easing = FastOutSlowInEasing)),
-            transitionSpec = {
-                (fadeIn(tween(220, delayMillis = 80)) togetherWith fadeOut(tween(140)))
-                    .using(SizeTransform(clip = false) { _, _ -> tween(260, easing = FastOutSlowInEasing) })
-            },
-            label = "envList"
-        ) { empty ->
-            if (empty) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = WinZShapes.Medium,
-                    border = BorderStroke(1.dp, hairlineColor()),
-                    color = MaterialTheme.colorScheme.surface
-                ) {
-                    Text(
-                        uiStr(R.string.ui_no_environment_variables_added),
-                        modifier = Modifier.padding(14.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                SettingsCard {
-                    items.forEachIndexed { index, (row, ghost, _) ->
-                        // Keyed by name so text-field state follows its row when another row is removed.
-                        key(row.name) {
-                            val startVisible = remember { row.name in seen }
-                            SideEffect { seen.add(row.name) }
-                            EnvRowReveal(
-                                visible = !ghost,
-                                startVisible = startVisible,
-                                onGone = { leaving.remove(row.name) }
-                            ) {
-                                Column {
-                                    if (index != 0) SettingsDivider()
-                                    EnvironmentVariableRow(
-                                        row = row,
-                                        onValue = { newValue ->
-                                            val at = rows.indexOfFirst { it.name == row.name }
-                                            if (at >= 0) {
-                                                rows[at] = rows[at].copy(value = newValue)
-                                                commit()
-                                            }
-                                        },
-                                        onRemove = {
-                                            val at = rows.indexOfFirst { it.name == row.name }
-                                            if (at >= 0) {
-                                                leaving[row.name] = at to rows[at]
-                                                rows.removeAt(at)
-                                                commit()
-                                            }
-                                        }
-                                    )
+        if (rows.isEmpty()) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = WinZShapes.Medium,
+                border = BorderStroke(1.dp, hairlineColor()),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Text(
+                    uiStr(R.string.ui_no_environment_variables_added),
+                    modifier = Modifier.padding(14.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            SettingsCard {
+                rows.forEachIndexed { index, row ->
+                    // Keyed by name so text-field state follows its row when another row is removed.
+                    key(row.name) {
+                        val startVisible = remember { row.name in seen }
+                        SideEffect { seen.add(row.name) }
+                        val appear = remember { MutableTransitionState(startVisible).apply { targetState = true } }
+                        AnimatedVisibility(
+                            visibleState = appear,
+                            enter = expandVertically(tween(260, easing = FastOutSlowInEasing)) + fadeIn(tween(220, delayMillis = 40))
+                        ) {
+                        Column {
+                        if (index != 0) SettingsDivider()
+                        EnvironmentVariableRow(
+                            row = row,
+                            onValue = { newValue ->
+                                val at = rows.indexOfFirst { it.name == row.name }
+                                if (at >= 0) {
+                                    rows[at] = rows[at].copy(value = newValue)
+                                    commit()
+                                }
+                            },
+                            onRemove = {
+                                val at = rows.indexOfFirst { it.name == row.name }
+                                if (at >= 0) {
+                                    rows.removeAt(at)
+                                    commit()
                                 }
                             }
+                        )
+                        }
                         }
                     }
                 }
@@ -258,7 +240,7 @@ fun EnvironmentVariablesEditor(
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
         ) {
-            Icon(TablerIcons.Plus, null)
+            Icon(Icons.Outlined.Add, null)
             Spacer(Modifier.width(7.dp))
             Text(uiStr(R.string.ui_add_variable))
         }
@@ -270,7 +252,6 @@ fun EnvironmentVariablesEditor(
             onDismiss = { addOpen = false },
             onAdd = { added ->
                 added.forEach { entry ->
-                    leaving.remove(entry.name)
                     val at = rows.indexOfFirst { it.name == entry.name }
                     if (at >= 0) rows[at] = entry else rows.add(entry)
                 }
@@ -278,27 +259,6 @@ fun EnvironmentVariablesEditor(
                 addOpen = false
             }
         )
-    }
-}
-
-// One list row that unfolds when it is added and folds away when removed; `onGone` fires once the
-// exit has finished so the caller can drop the ghost.
-@Composable
-private fun EnvRowReveal(
-    visible: Boolean,
-    startVisible: Boolean,
-    onGone: () -> Unit,
-    content: @Composable () -> Unit
-) {
-    val state = remember { MutableTransitionState(startVisible) }
-    state.targetState = visible
-    AnimatedVisibility(
-        visibleState = state,
-        enter = expandVertically(tween(260, easing = FastOutSlowInEasing)) + fadeIn(tween(220, delayMillis = 40)),
-        exit = shrinkVertically(tween(210, easing = FastOutSlowInEasing)) + fadeOut(tween(140))
-    ) { content() }
-    LaunchedEffect(state.currentState, state.isIdle, visible) {
-        if (!visible && state.isIdle && !state.currentState) onGone()
     }
 }
 
@@ -332,7 +292,7 @@ private fun EnvironmentVariableRow(
                     CustomTag()
                 }
             }
-            IconButton(onClick = onRemove) { Icon(TablerIcons.Trash, uiStr(R.string.remove)) }
+            IconButton(onClick = onRemove) { Icon(Icons.Outlined.DeleteOutline, uiStr(R.string.remove)) }
         }
         EnvValueEditor(spec, row.value, onValue)
     }
@@ -473,17 +433,7 @@ private fun AddEnvironmentVariableDialog(
         ModeSwitch(mode, presetEnabled = available.isNotEmpty()) { mode = it }
         Spacer(Modifier.height(10.dp))
         ThemedDialogScrollBody(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            AnimatedContent(
-                targetState = mode,
-                modifier = Modifier.fillMaxWidth().animateContentSize(tween(260, easing = FastOutSlowInEasing)),
-                transitionSpec = {
-                    (fadeIn(tween(220, delayMillis = 70)) togetherWith fadeOut(tween(120)))
-                        .using(SizeTransform(clip = false) { _, _ -> tween(260, easing = FastOutSlowInEasing) })
-                },
-                label = "addMode"
-            ) { shownMode ->
-              Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            when (shownMode) {
+            when (mode) {
                 AddMode.PRESET -> {
                     SettingChoice(uiStr(R.string.ui_variable), presetName, available.map { it.name }) { presetName = it }
                     if (presetSpec != null) EnvValueEditor(presetSpec, presetValue) { presetValue = it }
@@ -507,20 +457,8 @@ private fun AddEnvironmentVariableDialog(
                         // Only shown when there is something to say (no idle tip line).
                         supportingText = if (customMessage != null) { { Text(customMessage) } } else null
                     )
-                    // 0 = known variable's own editor, 1 = plain value field, 2 = pasted list.
-                    val customView = when {
-                        custom.bulk -> 2
-                        customSpec != null -> 0
-                        else -> 1
-                    }
-                    AnimatedContent(
-                        targetState = customView,
-                        modifier = Modifier.fillMaxWidth().animateContentSize(tween(240, easing = FastOutSlowInEasing)),
-                        transitionSpec = { fadeIn(tween(200, delayMillis = 60)) togetherWith fadeOut(tween(110)) },
-                        label = "customValue"
-                    ) { view ->
-                    if (view != 2) {
-                        if (view == 0 && customSpec != null) {
+                    if (!custom.bulk) {
+                        if (customSpec != null) {
                             // Known name typed by hand: offer the proper editor right away.
                             val v = customValue.ifEmpty { defaultValueFor(customSpec) }
                             EnvValueEditor(customSpec, v) { customValue = it }
@@ -548,12 +486,9 @@ private fun AddEnvironmentVariableDialog(
                             }
                         }
                     }
-                    }
                 }
             }
-              }
-            }
-            RevealSection(visible = replacing > 0) {
+            if (replacing > 0) {
                 Text(
                     if (toAdd.size == 1) uiStr(R.string.ui_already_added_its_value_will_be_replaced)
                     else uiStr(R.string.ui_already_added_their_values_will_be_replac, replacing),
@@ -602,26 +537,38 @@ private fun ModeSwitch(mode: AddMode, presetEnabled: Boolean, onMode: (AddMode) 
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = BorderStroke(1.dp, hairlineColor())
     ) {
-        Row(Modifier.padding(3.dp)) {
+        // The accent pill slides between the two options instead of jumping.
+        val slide by animateFloatAsState(if (mode == AddMode.PRESET) 0f else 1f, tween(260, easing = FastOutSlowInEasing), label = "modeSlide")
+        val pillRadius = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.toPx() }
+        Row(
+            Modifier.padding(3.dp).drawBehind {
+                val w = size.width / 2f
+                drawRoundRect(accent, topLeft = Offset(slide * w, 0f), size = Size(w, size.height), cornerRadius = CornerRadius(pillRadius))
+            }
+        ) {
             listOf(AddMode.PRESET to uiStr(R.string.preset), AddMode.CUSTOM to uiStr(R.string.ui_custom)).forEach { (m, label) ->
                 val selected = m == mode
                 val enabled = m != AddMode.PRESET || presetEnabled
+                val textColor by animateColorAsState(
+                    when {
+                        selected -> Color.White
+                        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    tween(220), label = "modeText"
+                )
                 Surface(
                     onClick = { onMode(m) },
                     enabled = enabled,
                     modifier = Modifier.weight(1f),
                     shape = WinZShapes.Small,
-                    color = if (selected) accent else Color.Transparent
+                    color = Color.Transparent
                 ) {
                     Box(Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                         Text(
                             if (m == AddMode.PRESET && !presetEnabled) uiStr(R.string.ui_all_added, label) else label,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = when {
-                                selected -> Color.White
-                                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                else -> MaterialTheme.colorScheme.onSurface
-                            }
+                            color = textColor
                         )
                     }
                 }

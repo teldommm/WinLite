@@ -43,6 +43,9 @@ import com.winlator.cmod.ui.library.kenBurns
 import com.winlator.cmod.ui.theme.WinZOverlayTheme
 import com.winlator.cmod.ui.theme.controlAccentColor
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -108,7 +111,7 @@ object PreloaderOverlayHost {
         view.postDelayed({ (view.parent as? ViewGroup)?.removeView(view) }, EXIT_MILLIS)
     }
 
-    private const val EXIT_MILLIS = 260L
+    private const val EXIT_MILLIS = 420L
 }
 
 @Composable
@@ -118,8 +121,10 @@ private fun PreloaderOverlayContent(state: PreloaderOverlayState) {
     AnimatedVisibility(
         state.visible,
         modifier = Modifier.fillMaxSize(),
-        enter = fadeIn(tween(280)),
-        exit = fadeOut(tween(240))
+        // The launch screen is opaque from its first frame (its own content fades in on top):
+        // fading the whole overlay in showed the HUD and touch controls underneath for a moment.
+        enter = if (state.launchMode) EnterTransition.None else fadeIn(tween(280)),
+        exit = fadeOut(tween(if (state.launchMode) 380 else 240))
     ) {
         Box(
             Modifier
@@ -148,9 +153,18 @@ private fun LaunchScreen(state: PreloaderOverlayState) {
     )
     val scrimAlpha by animateFloatAsState(if (overArtwork) 1f else 0f, tween(400), label = "launchScrim")
 
+    // The picture and its scrim fade in over the opaque themed background.
+    val intro = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { intro.animateTo(1f, tween(520)) }
+
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Cross-fades when the picture changes or shows up late.
-        Crossfade(targetState = artwork, animationSpec = tween(420), label = "launchArt") { shown ->
+        Crossfade(
+            targetState = artwork,
+            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = intro.value },
+            animationSpec = tween(420),
+            label = "launchArt"
+        ) { shown ->
             if (shown != null) {
                 val image = remember(shown) { shown.asImageBitmap() }
                 // kenBurns scales the layer past its bounds, so the parent has to clip.
@@ -172,7 +186,7 @@ private fun LaunchScreen(state: PreloaderOverlayState) {
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = scrimAlpha }
+                .graphicsLayer { alpha = scrimAlpha * intro.value }
                 .background(Brush.verticalGradient(OnArtwork.LaunchScrim))
         )
 

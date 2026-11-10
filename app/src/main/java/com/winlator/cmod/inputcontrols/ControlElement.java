@@ -722,33 +722,68 @@ public class ControlElement {
     }
 
     // Inner fade: right inside the crisp outline the shape is a touch lighter, and that fades out
-    // towards the middle (exponentially, over `depth`). Done as stroke layers clipped to the shape,
-    // with the alpha rounding error carried from layer to layer so no bands show.
+    // smoothly (exponentially) towards the middle. Circles use a radial gradient; rounded rects use
+    // a per-pixel mask built from the distance to the edge (cached per size), so the fade follows
+    // the exact shape and has no visible contour lines.
+    private Bitmap fadeMask;
+    private int fadeMaskW, fadeMaskH;
+    private float fadeMaskRadius, fadeMaskDepth;
+
+    private static float fadeProfile(float inside, float depth) {
+        float tau = depth / 3.2f;
+        float tail = (float) Math.exp(-depth / tau);
+        float v = ((float) Math.exp(-inside / tau) - tail) / (1f - tail);
+        return Math.max(0f, v);
+    }
+
     private void drawInnerFade(Canvas canvas, boolean circle, float l, float t, float r, float b, float radius, float depth, float peakAlpha) {
         Paint paint = inputControlsView.getPaint();
-        Path shape = new Path();
-        if (circle) shape.addCircle((l + r) / 2f, (t + b) / 2f, radius, Path.Direction.CW);
-        else shape.addRoundRect(new RectF(l, t, r, b), radius, radius, Path.Direction.CW);
-
-        final int n = 28;
-        final float tau = depth / 3.2f;
-        float opacity = getEffectiveOpacity();
-        float carry = 0f;
-        canvas.save();
-        canvas.clipPath(shape);
-        for (int k = 0; k < n; k++) {
-            float dk = depth * (k + 1) / n;
-            float dNext = depth * (k + 2) / n;
-            float cur = peakAlpha * (float) Math.exp(-dk / tau);
-            float next = k == n - 1 ? 0f : peakAlpha * (float) Math.exp(-dNext / tau);
-            float want = (cur - next) * opacity + carry;
-            int a = Math.max(0, Math.round(want));
-            carry = want - a;
-            if (a == 0) continue;
-            setupPaint(paint, Paint.Style.STROKE, (0xffffffff & 0x00ffffff) | (a << 24), dk * 2f);
-            canvas.drawPath(shape, paint);
+        float peak = peakAlpha * getEffectiveOpacity();
+        if (circle) {
+            final int steps = 18;
+            int[] colors = new int[steps + 1];
+            float[] pos = new float[steps + 1];
+            float cx = (l + r) / 2f, cy = (t + b) / 2f;
+            float inner = Math.max(0f, 1f - depth / radius);
+            for (int i = 0; i <= steps; i++) {
+                float f = (float) i / steps;           // 0 = fade end, 1 = rim
+                pos[i] = inner + (1f - inner) * f;
+                float inside = depth * (1f - f);
+                int a = Math.max(0, Math.min(255, Math.round(peak * fadeProfile(inside, depth))));
+                colors[i] = (a << 24) | 0x00ffffff;
+            }
+            // Everything inside `inner` stays at the first stop (alpha 0).
+            setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
+            paint.setShader(new RadialGradient(cx, cy, radius, colors, pos, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, radius, paint);
+            paint.setShader(null);
+            return;
         }
-        canvas.restore();
+
+        int w = Math.max(1, Math.round(r - l)), h = Math.max(1, Math.round(b - t));
+        if (fadeMask == null || w != fadeMaskW || h != fadeMaskH
+                || Math.abs(radius - fadeMaskRadius) > 0.5f || Math.abs(depth - fadeMaskDepth) > 0.5f) {
+            int[] px = new int[w * h];
+            float hx = w / 2f, hy = h / 2f;
+            float bx = hx - radius, by = hy - radius;
+            for (int y = 0; y < h; y++) {
+                float qy = Math.abs(y + 0.5f - hy) - by;
+                for (int x = 0; x < w; x++) {
+                    float qx = Math.abs(x + 0.5f - hx) - bx;
+                    float ox = Math.max(qx, 0f), oy = Math.max(qy, 0f);
+                    float d = (float) Math.sqrt(ox * ox + oy * oy) + Math.min(Math.max(qx, qy), 0f) - radius;
+                    float coverage = Math.max(0f, Math.min(1f, 0.5f - d));
+                    float v = coverage * fadeProfile(Math.max(0f, -d), depth);
+                    px[y * w + x] = (Math.round(v * 255f) << 24) | 0x00ffffff;
+                }
+            }
+            if (fadeMask != null) fadeMask.recycle();
+            fadeMask = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888);
+            fadeMaskW = w; fadeMaskH = h; fadeMaskRadius = radius; fadeMaskDepth = depth;
+        }
+        setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
+        paint.setAlpha(Math.max(0, Math.min(255, Math.round(peak))));
+        canvas.drawBitmap(fadeMask, l, t, paint);
     }
 
     // Outline brighter at the bottom than at the top: a soft light from below, as on the reference
@@ -775,7 +810,7 @@ public class ControlElement {
         Paint paint = inputControlsView.getPaint();
         float unit = inputControlsView.getSnappingSize() * scale;
 
-        setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 92), 0);
+        setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 97), 0);
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
 
         drawInnerFade(canvas, false, left, top, right, bottom, radius, Math.min(right - left, bottom - top) * 0.30f, active ? 70f : 58f);
@@ -791,7 +826,7 @@ public class ControlElement {
         Paint paint = inputControlsView.getPaint();
         float unit = inputControlsView.getSnappingSize() * scale;
 
-        setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 96), 0);
+        setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 101), 0);
         canvas.drawCircle(cx, cy, radius, paint);
 
         drawInnerFade(canvas, true, cx - radius, cy - radius, cx + radius, cy + radius, radius, radius * 0.58f, active ? 70f : 58f);
@@ -1007,10 +1042,10 @@ public class ControlElement {
                 setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
                 paint.setShader(new RadialGradient(cx, cy, outer,
                         new int[] {
-                                withAlpha(0xff020202, active ? 120 : 100),
-                                withAlpha(0xff050505, active ? 124 : 104),
-                                withAlpha(0xff151516, active ? 135 : 112),
-                                withAlpha(0xff2e2e30, active ? 145 : 120)
+                                withAlpha(0xff020202, active ? 126 : 105),
+                                withAlpha(0xff050505, active ? 130 : 109),
+                                withAlpha(0xff151516, active ? 142 : 118),
+                                withAlpha(0xff2e2e30, active ? 152 : 126)
                         },
                         new float[] {0f, 0.5f, 0.8f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(cx, cy, outer, paint);

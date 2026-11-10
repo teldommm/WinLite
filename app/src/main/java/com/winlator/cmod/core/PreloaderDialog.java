@@ -40,6 +40,9 @@ public class PreloaderDialog {
     private View overlay;
     private Bitmap artworkBitmap;
     private volatile String theGamesDbRequestKey;
+    private long shownAtMillis;
+    // The launch screen stays at least this long, so a game that starts at once still shows it.
+    private static final long MIN_LAUNCH_MILLIS = 1800L;
 
     public PreloaderDialog(Activity activity) {
         this.activity = activity;
@@ -56,6 +59,7 @@ public class PreloaderDialog {
             configureStandardPreloader(textResId);
         }
         overlay = PreloaderOverlayHost.show(activity, state);
+        shownAtMillis = android.os.SystemClock.uptimeMillis();
     }
 
     private void configureLaunchScreen(int textResId) {
@@ -292,7 +296,13 @@ public class PreloaderDialog {
             if (Looper.myLooper() == Looper.getMainLooper()) PreloaderOverlayHost.dismiss(view);
             else activity.runOnUiThread(() -> PreloaderOverlayHost.dismiss(view));
         }
-        releaseArtwork();
+        // Keep the picture on screen while the overlay fades out.
+        artworkBitmap = null;
+        if (view != null) {
+            view.postDelayed(() -> { if (overlay == null) state.setArtwork(null); }, 600L);
+        } else {
+            state.setArtwork(null);
+        }
     }
 
     // Compose may still be drawing the bitmap for a frame after we drop it, so it is not recycled
@@ -303,7 +313,16 @@ public class PreloaderDialog {
     }
 
     public void closeOnUiThread() {
-        activity.runOnUiThread(this::close);
+        activity.runOnUiThread(() -> {
+            long remaining = state.getLaunchMode()
+                    ? MIN_LAUNCH_MILLIS - (android.os.SystemClock.uptimeMillis() - shownAtMillis) : 0L;
+            if (remaining > 0 && overlay != null) {
+                final View view = overlay;
+                view.postDelayed(() -> { if (overlay == view) close(); }, remaining);
+            } else {
+                close();
+            }
+        });
     }
 
     public boolean isShowing() {

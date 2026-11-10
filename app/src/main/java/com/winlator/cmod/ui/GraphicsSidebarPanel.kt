@@ -435,7 +435,7 @@ private fun FpsLimiterCard(
             onValueChangeFinished = { apply() },
             valueRange = 0f..FPS_CUSTOM_POSITION.toFloat()
         )
-        if (position >= FPS_CUSTOM_POSITION) {
+        RevealSection(visible = position >= FPS_CUSTOM_POSITION) {
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = customText,
