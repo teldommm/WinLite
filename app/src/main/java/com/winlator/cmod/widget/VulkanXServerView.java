@@ -889,11 +889,15 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     /**
-     * The panel mode for WFG at its current resolution. Each output frame must last a whole
+     * The panel mode for WFG at its current resolution. Each output frame should last a whole
      * number of refreshes, or the cadence alternates (60 fps on 165 Hz: 3-3-3-2 refreshes,
      * 18.2/12.1 ms). With the output rate known, the fastest mode it divides evenly (within 1%)
-     * is taken: 120 Hz for 60 fps on a 60/90/120/144/165 Hz panel. Otherwise, or when no mode
-     * divides it, the fastest mode: the finer the refresh, the smaller an uneven step.
+     * into two or more refreshes per frame is taken: 120 Hz for 60 fps on a 60/90/120/144/165 Hz
+     * panel. One refresh per frame is not enough: a game frame that comes a little early or a
+     * GPU batch that ends a little late has no spare refresh to land on, and generated frames
+     * are dropped (30 fps x4 on 120 Hz showed ~105 fps). Otherwise, or when no mode qualifies,
+     * the fastest mode: the finer the refresh, the smaller an uneven step, and the interpolation
+     * phase follows where each frame really lands.
      */
     public static android.view.Display.Mode wfgMode(android.view.Display display, int outputFps) {
         android.view.Display.Mode fastest = fastestMode(display);
@@ -905,7 +909,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     || m.getPhysicalHeight() != current.getPhysicalHeight()) continue;
             float ratio = m.getRefreshRate() / outputFps;
             long whole = Math.round(ratio);
-            if (whole < 1 || Math.abs(ratio - whole) > 0.01f * whole) continue;
+            if (whole < 2 || Math.abs(ratio - whole) > 0.01f * whole) continue;
             if (best == null || m.getRefreshRate() > best.getRefreshRate()) best = m;
         }
         return best != null ? best : fastest;

@@ -74,6 +74,9 @@ void VulkanRendererContext::wfgPollDisplayTiming(uint64_t javaPeriod) {
             if (t.actualPresentTime > wfgVsyncAnchorNs) wfgVsyncAnchorNs = t.actualPresentTime;
             if (t.desiredPresentTime) {
                 wfgPresentTimed++;
+                // Planned for the refresh at desired + half a period.
+                wfgShowLagNs = (int64_t)t.actualPresentTime -
+                               (int64_t)(t.desiredPresentTime + period / 2);
                 // The target was the refresh at desired + half a period.
                 if (t.actualPresentTime > t.desiredPresentTime + period) wfgPresentLate++;
             }
@@ -101,6 +104,7 @@ bool VulkanRendererContext::wfgSkipRender() {
 void VulkanRendererContext::wfgNotePresented(const WfgFrame& wf, uint32_t count, uint64_t acquireWaitNs) {
     const uint64_t period = wfgPeriodNs();
     const uint64_t now = nowNs();
+    if (wf.newFrame) wfgAcqWaitSum += acquireWaitNs;
     if (wf.paced) {
         // Paced images leave the queue at their target times, not one per refresh.
         wfgQueueEndNs = std::max(now + period, wf.presentAt[wf.genCount]);
@@ -536,9 +540,25 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
     const uint64_t now = nowNs();
     const uint64_t ahead = wfgQueueEndNs > now + period ? (wfgQueueEndNs - now - period) / period : 0;
     wfgAheadSum += ahead;
-    if (ahead > 2 && planned > 0) {
+    if (displayTiming_ && wfgLastRealDispNs && wfgPaceLastNs) {
+        // Paced: the queue is the display chain itself. Each image owns a refresh, so a game
+        // frame that comes early, or an image the display showed late (feedback), pushes the
+        // chain behind the schedule; the coarse queue model below cannot tell that from the
+        // designed lead and drops frames the schedule has room for. One generated frame is
+        // dropped only once the chain is more than a refresh and a half behind: a refresh of
+        // jitter is left for the next frame to absorb.
+        int64_t lag = (int64_t)wfgLastRealDispNs - (int64_t)wfgPaceLastNs;
+        if (wfgShowLagNs > 0) lag += wfgShowLagNs;
+        wfgLagSum += lag;
+        if (lag > (int64_t)(period + period / 2) && planned > 0) {
+            planned--;
+            wfgTrimmedFrames++;
+            wfgTrimLag++;
+        }
+    } else if (ahead > 2 && planned > 0) {
         planned--;
         wfgTrimmedFrames++;
+        wfgTrimQueue++;
     }
 
     uint64_t timeout = kWfgAcquireTimeoutNs;
@@ -587,7 +607,8 @@ void VulkanRendererContext::wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFr
                 wfgLogMade = made;
                 WLOG_I("WFG delivered real=%llu made=%llu ratio=%.2f misses=%llu skipped=%llu "
                        "trimmed=%llu ahead=%.2f paced=%llu limitPaced=%llu paceResets=%llu paceLate=%llu integ=%lldus "
-                       "refresh=%.3fms grid=%d shownLate=%llu/%llu",
+                       "refresh=%.3fms grid=%d shownLate=%llu/%llu trimLag=%llu trimQueue=%llu "
+                       "lag=%.2fv showLag=%lldus acqWait=%.2fms",
                        (unsigned long long)wfgRealFrames, (unsigned long long)made,
                        dReal ? (double)dMade / (double)dReal : 0.0,
                        (unsigned long long)wfgAcquireMisses, (unsigned long long)wfgSkippedRenders,
@@ -597,7 +618,13 @@ void VulkanRendererContext::wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFr
                        (unsigned long long)wfgPaceResets, (unsigned long long)wfgPaceLate,
                        (long long)(wfgPaceInteg / 1000),
                        (double)wfgPeriodNs() / 1.0e6, wfgVsyncAnchorNs ? 1 : 0,
-                       (unsigned long long)wfgPresentLate, (unsigned long long)wfgPresentTimed);
+                       (unsigned long long)wfgPresentLate, (unsigned long long)wfgPresentTimed,
+                       (unsigned long long)wfgTrimLag, (unsigned long long)wfgTrimQueue,
+                       dReal ? (double)wfgLagSum / (double)dReal / (double)wfgPeriodNs() : 0.0,
+                       (long long)(wfgShowLagNs / 1000),
+                       dReal ? (double)wfgAcqWaitSum / (double)dReal / 1.0e6 : 0.0);
+                wfgLagSum = 0;
+                wfgAcqWaitSum = 0;
                 wfgAheadSum = 0;
             }
         }

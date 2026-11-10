@@ -468,6 +468,13 @@ public:
     uint64_t              wfgLastRealDispNs = 0;  // when the last paced real frame is shown
     uint64_t              wfgPresentLate   = 0;   // paced images shown a refresh or more late
     uint64_t              wfgPresentTimed  = 0;   // paced images with display feedback
+    int64_t               wfgShowLagNs     = 0;   // latest paced image: shown minus planned
+    // Generated frames dropped to drain the queue, by reason: the paced display chain fell
+    // behind its schedule, or the FIFO queue model (unpaced) grew.
+    uint64_t              wfgTrimLag       = 0;
+    uint64_t              wfgTrimQueue     = 0;
+    int64_t               wfgLagSum        = 0;   // chain lag behind schedule, per log window
+    uint64_t              wfgAcqWaitSum    = 0;   // real image acquire wait, per log window
     void     wfgPollDisplayTiming(uint64_t javaPeriod);
     uint32_t              wfgPresentId   = 0;
     uint64_t              wfgPacedFrames = 0;
