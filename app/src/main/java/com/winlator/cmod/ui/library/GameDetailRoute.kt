@@ -90,6 +90,9 @@ private fun GameDetailLoaded(
             value = value.copy(sizeText = withContext(Dispatchers.IO) { GameStatsLoader.sizeText(activity, shortcut) })
         }
     }
+    val setup by produceState<GameSetup?>(null, shortcut, refreshTick) {
+        value = withContext(Dispatchers.IO) { GameSetupLoader.load(shortcut) }
+    }
     val homePinned by produceState(false, shortcut, refreshTick, pinTick) {
         value = withContext(Dispatchers.IO) { HomeShortcuts.isPinned(activity, shortcut) }
     }
@@ -233,6 +236,7 @@ private fun GameDetailLoaded(
             shortcut.icon,
             "1" == shortcut.getExtra("favorite", "0"),
             stats,
+            setup,
             homePinned,
             callbacks
         )

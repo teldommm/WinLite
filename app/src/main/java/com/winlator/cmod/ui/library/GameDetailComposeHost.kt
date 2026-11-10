@@ -79,6 +79,17 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import kotlin.math.roundToInt
 import com.winlator.cmod.ui.theme.TablerIcons
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.border
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.delay
 
 interface GameDetailCallbacks {
     fun onBack()
@@ -97,7 +108,7 @@ interface GameDetailCallbacks {
 // The game detail screen. Opened by MainShell as a detail entry through GameDetailRoute
 // (GameDetailRoute.kt); onBack pops it.
 @Composable
-internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: String?, coverPath: String?, coverIsUser: Boolean, fallback: Bitmap?, initialFavorite: Boolean, stats: GameStats, homePinned: Boolean, callbacks: GameDetailCallbacks) {
+internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: String?, coverPath: String?, coverIsUser: Boolean, fallback: Bitmap?, initialFavorite: Boolean, stats: GameStats, setup: GameSetup?, homePinned: Boolean, callbacks: GameDetailCallbacks) {
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
     val activity = LocalContext.current as? MainActivity
 
@@ -112,8 +123,12 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
     val artworkPath = bannerPath ?: coverPath
     val coverOnly = bannerPath == null && coverPath != null
     val artworkKey = remember(artworkPath) { LibraryImageCache.keyFor(artworkPath) }
+    // artDone tells "still decoding" from "there is none": only the second shows the fallback
+    // backdrop, so a game with art never flashes the placeholder first.
+    var artDone by remember(artworkKey) { mutableStateOf(artworkPath == null || LibraryImageCache.peek(artworkKey) != null) }
     val artwork by produceState<Bitmap?>(LibraryImageCache.peek(artworkKey), artworkKey) {
         value = withContext(Dispatchers.IO) { LibraryImageCache.load(artworkPath) }
+        artDone = true
     }
     var favorite by remember(initialFavorite) { mutableStateOf(initialFavorite) }
     val toggle = {
@@ -134,23 +149,32 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
         ),
         DetailActionItem(TablerIcons.Trash, stringResource(R.string.remove), stringResource(R.string.remove), callbacks::onRemove, destructive = true)
     )
-    if (landscape) LandscapeDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, favorite, stats, items, callbacks, toggle)
+    if (landscape) LandscapeDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, artDone && artwork == null, fallback, favorite, stats, setup, items, callbacks, toggle)
     else PortraitDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, fallback, favorite, stats, items, callbacks, toggle)
 }
 
 // Landscape game page: the picture stays open, the controls sit in the corners.
-//   top-left  : back plate, then the title and the container under it
+//   top-left  : back plate, then the title, the container and "Not played yet" for a new game
 //   top-right : favorite plate (same look as the back plate)
 //   bottom-right : one compact panel - Play and a row of icon buttons with captions
-//   bottom-left  : the user's own portrait cover as a poster (clear of the panel)
+//   bottom-left  : the cover as a poster (clear of the panel), and beside it two rows of chips:
+//                  how the game is set up (emulator, driver, resolution, wrapper) and its stats
+//                  (playtime, plays, last played, size)
+// A game with no picture at all gets a soft wash of its icon with the icon as the poster, so the
+// page is never a flat field with floating buttons. Everything eases in once, staggered.
 // Two soft scrims (top for the title, bottom for the panel) replace the old heavy left-to-right
 // darkening, so most of the picture keeps its own colours.
 @Composable
-private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
+private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, needsFallback: Boolean, fallback: Bitmap?, favorite: Boolean, stats: GameStats, setup: GameSetup?, items: List<DetailActionItem>, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        DetailArtwork(artwork, artworkKey, coverOnly, coverIsUser, landscape = true)
+        // The picture fades in once it is decoded instead of popping in.
+        val artAlpha by animateFloatAsState(if (artwork != null || needsFallback) 1f else 0f, tween(420), label = "detailArt")
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = artAlpha }) {
+            if (artwork != null) DetailArtwork(artwork, artworkKey, coverOnly, coverIsUser, landscape = true)
+            else if (needsFallback) FallbackBackdrop(fallback)
+        }
         Box(
-            Modifier.align(Alignment.TopStart).fillMaxWidth().height(132.dp)
+            Modifier.align(Alignment.TopStart).fillMaxWidth().height(150.dp)
                 .background(Brush.verticalGradient(listOf(Color.Black.copy(.66f), Color.Transparent)))
         )
         Box(
@@ -165,30 +189,51 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
             // Five icon buttons share the panel: a narrow cell falls back to the smaller caption.
             val iconCell = (panelWidth - 28.dp - 8.dp * (items.size - 1)) / items.size
             val compactCaptions = iconCell < 64.dp
-            val posterShown = artwork != null && coverIsUser && !usesAsBackground(artwork, coverOnly, coverIsUser)
-            if (artwork != null && posterShown) {
-                DetailPoster(artwork, Modifier.align(Alignment.BottomStart))
+
+            // The poster: any cover that is not itself the background (the user's own, a downloaded
+            // one, the generated one) - or the game's icon when there is no picture at all.
+            val posterRatio: Float? = when {
+                artwork != null && !usesAsBackground(artwork, coverOnly, coverIsUser) ->
+                    if (coverIsUser) (artwork.width.toFloat() / artwork.height.toFloat()).coerceIn(0.5f, 1.29f) else 2f / 3f
+                artwork == null && needsFallback && fallback != null -> 2f / 3f
+                else -> null
+            }
+            if (posterRatio != null) {
+                val posterModifier = Modifier.align(Alignment.BottomStart).reveal(120, 12.dp)
+                if (artwork != null) DetailPoster(artwork, posterRatio, posterModifier)
+                else if (fallback != null) FallbackPoster(fallback, posterRatio, posterModifier)
             }
 
-            // The stat chips sit bottom-left, beside the poster when there is one. Where the picture
-            // and the panel leave no room (small phone), they move into the panel above Play.
-            val posterWidth = if (artwork != null && posterShown) {
-                (maxHeight - 156.dp).coerceAtLeast(0.dp) * (artwork.width.toFloat() / artwork.height.toFloat()).coerceIn(0.5f, 1.29f)
+            // The chips sit bottom-left, beside the poster when there is one. Where the picture
+            // and the panel leave no room (small phone), the stats move into the panel above Play
+            // and the set-up chips are left out.
+            val posterWidth = if (posterRatio != null) {
+                (maxHeight - (POSTER_TOP + 24.dp)).coerceAtLeast(0.dp) * posterRatio
             } else 0.dp
-            val chipsStart = 34.dp + if (posterShown) posterWidth + 14.dp else 0.dp
+            val chipsStart = 34.dp + if (posterRatio != null) posterWidth + 14.dp else 0.dp
             val chipsEndReserve = panelWidth + 34.dp + 16.dp
-            val chipsInPanel = stats.hasAny && maxWidth - chipsStart - chipsEndReserve < 190.dp
-            if (stats.hasAny && !chipsInPanel) {
-                StatChips(stats, modifier = Modifier.align(Alignment.BottomStart).padding(start = chipsStart, end = chipsEndReserve, bottom = 24.dp))
+            val chipsInPanel = maxWidth - chipsStart - chipsEndReserve < 190.dp
+            if (!chipsInPanel) {
+                Column(
+                    Modifier.align(Alignment.BottomStart).padding(start = chipsStart, end = chipsEndReserve, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AnimatedVisibility(setup != null, enter = fadeIn(tween(320))) {
+                        if (setup != null) StatChipRow(rememberSetupEntries(setup), Modifier.fillMaxWidth())
+                    }
+                    AnimatedVisibility(stats.loaded, enter = fadeIn(tween(320, delayMillis = 60))) {
+                        StatChipRow(rememberStatEntries(stats), Modifier.fillMaxWidth())
+                    }
+                }
             }
 
             ArtPlateButton(
                 onClick = callbacks::onBack,
-                modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 16.dp)
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 16.dp).reveal(0, 0.dp)
             ) { Icon(TablerIcons.ArrowLeft, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp)) }
 
             // 74dp = 18 margin + 44 plate + 12 gap, on both sides, so a long title never runs under a plate.
-            Column(Modifier.align(Alignment.TopStart).padding(start = 74.dp, end = 74.dp, top = 15.dp)) {
+            Column(Modifier.align(Alignment.TopStart).padding(start = 74.dp, end = 74.dp, top = 15.dp).reveal(80, 10.dp)) {
                 Text(
                     title,
                     color = Color.White,
@@ -206,18 +251,35 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                         shadow = Shadow(OnArtwork.TextShadow, Offset(0f, 1f), 4f)
                     )
                 )
+                // Playtime and last launch are chips again; this line only says so for a new game.
+                val meta = if (stats.loaded && stats.lastPlayedMillis == 0L && stats.playCount == 0) stringResource(R.string.ui_game_not_played) else null
+                AnimatedVisibility(meta != null, enter = fadeIn(tween(300)) + expandVertically(tween(300))) {
+                    Text(
+                        meta.orEmpty(),
+                        modifier = Modifier.padding(top = 2.dp),
+                        color = OnArtwork.TextTertiary,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            shadow = Shadow(OnArtwork.TextShadow, Offset(0f, 1f), 4f)
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
-            FavoriteButton(favorite, toggleFavorite, Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 16.dp))
+            FavoriteButton(favorite, toggleFavorite, Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 16.dp).reveal(0, 0.dp))
 
             Surface(
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 34.dp, bottom = 24.dp).width(panelWidth),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 34.dp, bottom = 24.dp).width(panelWidth).reveal(140, 18.dp),
                 shape = WinZShapes.Large,
                 color = OnArtwork.PanelFill,
                 border = BorderStroke(1.dp, OnArtwork.PlateBorder)
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (chipsInPanel) StatChips(stats, modifier = Modifier.fillMaxWidth())
+                    if (chipsInPanel) {
+                        val panelEntries = rememberStatEntries(stats)
+                        if (panelEntries.isNotEmpty()) StatChipRow(panelEntries, Modifier.fillMaxWidth())
+                    }
                     Button(
                         onClick = callbacks::onPlay,
                         modifier = Modifier.fillMaxWidth().height(58.dp),
@@ -235,6 +297,60 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
             }
         }
     }
+}
+
+// Top of the poster in landscape: clears the title block (two title lines + container + note).
+private val POSTER_TOP = 144.dp
+
+// Fade + rise once, when the page enters the composition, after delayMillis. Used to stagger the
+// landscape page's parts instead of having them all present on the first frame.
+@Composable
+private fun Modifier.reveal(delayMillis: Int, rise: Dp): Modifier {
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        delay(delayMillis.toLong())
+        progress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
+    }
+    return this.graphicsLayer {
+        alpha = progress.value
+        translationY = (1f - progress.value) * rise.toPx()
+    }
+}
+
+// Backdrop for a game with no picture: its icon softened into a wash (same SoftArt the Library
+// uses) over a dark base with a faint accent glow from the top.
+@Composable
+private fun FallbackBackdrop(icon: Bitmap?) {
+    val accent = controlAccentColor()
+    Box(Modifier.fillMaxSize().background(Color(0xFF101014)))
+    val soft by produceState<Bitmap?>(null, icon) {
+        if (icon != null) value = withContext(Dispatchers.Default) { SoftArt.of(null, icon) }
+    }
+    soft?.let { wash ->
+        val washImage = remember(wash) { wash.asImageBitmap() }
+        Image(
+            washImage,
+            null,
+            Modifier.fillMaxSize().kenBurns(amplitude = 0.12f, periodMs = 26_000, pan = 0.9f),
+            contentScale = ContentScale.Crop
+        )
+    }
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(accent.copy(alpha = .30f), Color.Transparent))))
+}
+
+// The game's icon as the poster when there is no cover at all.
+@Composable
+private fun FallbackPoster(icon: Bitmap, ratio: Float, modifier: Modifier) {
+    IconTile(
+        null,
+        icon,
+        modifier
+            .padding(start = 34.dp, top = POSTER_TOP, bottom = 24.dp)
+            .fillMaxHeight()
+            .aspectRatio(ratio)
+            .clip(WinZShapes.Small)
+            .border(1.dp, OnArtwork.PlateBorder, WinZShapes.Small)
+    )
 }
 
 // Round plate for a control that sits on the artwork (back, favorite). Same translucent look as the
@@ -303,13 +419,12 @@ private fun DetailIconAction(item: DetailActionItem, modifier: Modifier, compact
 // The user's own portrait cover as a poster, bottom-left, kept sharp above the scrims and clear of
 // the title (top padding) and of the action panel (it is on the right).
 @Composable
-private fun DetailPoster(artwork: Bitmap, modifier: Modifier) {
-    val ratio = (artwork.width.toFloat() / artwork.height.toFloat()).coerceIn(0.5f, 1.29f)
+private fun DetailPoster(artwork: Bitmap, ratio: Float, modifier: Modifier) {
     Image(
         artwork.asImageBitmap(),
         null,
         modifier
-            .padding(start = 34.dp, top = 132.dp, bottom = 24.dp)
+            .padding(start = 34.dp, top = POSTER_TOP, bottom = 24.dp)
             .fillMaxHeight()
             .aspectRatio(ratio)
             .kenBurns(amplitude = 0.04f, periodMs = 18_000, pan = 0f, phase = 0.5f)
@@ -443,12 +558,18 @@ private class StatEntry(val icon: ImageVector, val label: String, val value: Str
 //  3. else (a very narrow spot) two equal columns at full size, so the last chip sits in a tidy grid.
 @Composable
 private fun StatChips(stats: GameStats, modifier: Modifier = Modifier) {
+    val entries = rememberStatEntries(stats)
+    if (entries.isNotEmpty()) StatChipRow(entries, modifier)
+}
+
+@Composable
+private fun rememberStatEntries(stats: GameStats): List<StatEntry> {
     // Labels resolved here: the remember block below is not a composable context.
     val playtimeLabel = stringResource(R.string.ui_stat_playtime)
     val playsLabel = stringResource(R.string.ui_stat_plays)
     val lastPlayedLabel = stringResource(R.string.ui_stat_last_played)
     val sizeLabel = stringResource(R.string.ui_stat_size)
-    val entries = remember(stats, playtimeLabel) {
+    return remember(stats, playtimeLabel) {
         buildList {
             if (stats.playtimeMillis > 0L) add(StatEntry(TablerIcons.Clock, playtimeLabel, formatPlaytime(stats.playtimeMillis)))
             if (stats.playCount > 0) add(StatEntry(TablerIcons.DeviceGamepad2, playsLabel, stats.playCount.toString()))
@@ -456,6 +577,27 @@ private fun StatChips(stats: GameStats, modifier: Modifier = Modifier) {
             stats.sizeText?.let { add(StatEntry(TablerIcons.Database, sizeLabel, it)) }
         }
     }
+}
+
+// How the game is set up. Blank values (a container without a wrapper, say) are skipped.
+@Composable
+private fun rememberSetupEntries(setup: GameSetup): List<StatEntry> {
+    val emulatorLabel = stringResource(R.string.ui_stat_emulator)
+    val driverLabel = stringResource(R.string.ui_stat_driver)
+    val resolutionLabel = stringResource(R.string.ui_stat_resolution)
+    val wrapperLabel = stringResource(R.string.ui_stat_wrapper)
+    return remember(setup, emulatorLabel) {
+        listOf(
+            StatEntry(TablerIcons.Cpu, emulatorLabel, setup.emulator),
+            StatEntry(TablerIcons.Gauge, driverLabel, setup.driver),
+            StatEntry(TablerIcons.DeviceDesktop, resolutionLabel, setup.resolution),
+            StatEntry(TablerIcons.StackFront, wrapperLabel, setup.wrapper)
+        ).filter { it.value.isNotBlank() }
+    }
+}
+
+@Composable
+private fun StatChipRow(entries: List<StatEntry>, modifier: Modifier = Modifier) {
     if (entries.isEmpty()) return
     SubcomposeLayout(modifier) { constraints ->
         val gap = 8.dp.roundToPx()
@@ -533,7 +675,7 @@ private fun StatChip(entry: StatEntry, fill: Boolean) {
             Icon(entry.icon, null, Modifier.size(16.dp), tint = OnArtwork.InfoIcon)
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(entry.label.uppercase(), color = OnArtwork.TextTertiary, style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 12.sp), fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(entry.value, color = OnArtwork.Text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall.tabularNumbers())
+                Text(entry.value, modifier = Modifier.widthIn(max = 150.dp), color = OnArtwork.Text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall.tabularNumbers())
             }
         }
     }
