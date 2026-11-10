@@ -45,13 +45,6 @@
     <string name="ui_stat_plays">Plays</string>
     <string name="ui_stat_last_played">Last played</string>
     <string name="ui_stat_size">Size</string>
-    <string name="ui_stat_emulator">Emulator</string>
-    <string name="ui_stat_driver">Driver</string>
-    <string name="ui_stat_resolution">Resolution</string>
-    <string name="ui_stat_wrapper">DX wrapper</string>
-    <string name="ui_game_not_played">Not played yet</string>
-    <string name="ui_game_last_played_meta">Last played %1$s</string>
-    <string name="ui_game_played_meta">%1$s played</string>
     <string name="ui_remove_shortcut_title">Remove shortcut?</string>
     <string name="ui_remove_shortcut_message">Do you want to remove this shortcut? The game files stay on your device.</string>
     <string name="ui_shortcut_removed">Shortcut removed</string>

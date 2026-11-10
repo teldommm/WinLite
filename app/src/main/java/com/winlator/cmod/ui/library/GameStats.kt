@@ -13,7 +13,6 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-import com.winlator.cmod.core.StringUtils
 
 // What the game page shows as stat chips. Playtime and play count are written by
 // XServerDisplayActivity into the "playtime_stats" preferences (keyed by the shortcut name); the
@@ -33,30 +32,6 @@ data class GameStats(
 
 /** A measured folder size as stored; fresh = no need to measure again. */
 class CachedSize(val text: String?, val fresh: Boolean)
-
-// What the game page shows about how the game is set up: the shortcut's own setting where it has
-// one, else the container's (same lookup as ShortcutEditorV2).
-data class GameSetup(
-    val emulator: String,
-    val driver: String,
-    val resolution: String,
-    val wrapper: String
-)
-
-object GameSetupLoader {
-    // Cheap (reads of the shortcut's in-memory extras), but kept off the main thread by the caller.
-    fun load(shortcut: Shortcut): GameSetup? {
-        val container = shortcut.container ?: return null
-        fun pick(key: String, fallback: String?): String = shortcut.getExtra(key, fallback ?: "").orEmpty()
-        val emulator = pick("emulator", container.emulator).let { if (it.equals("FEXCore", true)) "FEXCore" else "Box64" }
-        return GameSetup(
-            emulator = emulator,
-            driver = StringUtils.parseIdentifier(pick("graphicsDriver", container.graphicsDriver)),
-            resolution = pick("screenSize", container.screenSize),
-            wrapper = StringUtils.parseIdentifier(pick("dxwrapper", container.dxWrapper))
-        )
-    }
-}
 
 object GameStatsLoader {
     // Names of the folders an exe usually sits in below the real game folder
