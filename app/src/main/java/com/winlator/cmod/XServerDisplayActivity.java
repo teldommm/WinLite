@@ -296,6 +296,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    private android.hardware.display.DisplayManager.DisplayListener randrDisplayListener;
+
     private void advertisePanelRefreshRates() {
         RandrExtension randr = xServer.getExtension(RandrExtension.MAJOR_OPCODE);
         if (randr == null) return;
@@ -318,6 +320,28 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         short activeRate = (short)Math.round(display.getRefreshRate());
         randr.setRefreshRates(rates, activeRate);
+
+        // Keep the current rate in step with the panel: its mode changes with the system setting
+        // and with the modes WinLite asks for (WFG, FPS limit).
+        if (randrDisplayListener == null) {
+            android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
+                    getSystemService(DISPLAY_SERVICE);
+            if (dm != null) {
+                final int displayId = display.getDisplayId();
+                randrDisplayListener = new android.hardware.display.DisplayManager.DisplayListener() {
+                    @Override public void onDisplayAdded(int id) {}
+                    @Override public void onDisplayRemoved(int id) {}
+                    @Override public void onDisplayChanged(int id) {
+                        if (id != displayId || xServer == null) return;
+                        RandrExtension r = xServer.getExtension(RandrExtension.MAJOR_OPCODE);
+                        android.view.Display d = dm.getDisplay(id);
+                        if (r != null && d != null) r.setActiveRate((short)Math.round(d.getRefreshRate()));
+                    }
+                };
+                dm.registerDisplayListener(randrDisplayListener,
+                        new android.os.Handler(android.os.Looper.getMainLooper()));
+            }
+        }
         Log.d("XServerDisplayActivity", "RandR advertising refresh rates "
                 + java.util.Arrays.toString(rates) + ", active=" + activeRate);
     }
@@ -991,6 +1015,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (randrDisplayListener != null) {
+            android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
+                    getSystemService(DISPLAY_SERVICE);
+            if (dm != null) dm.unregisterDisplayListener(randrDisplayListener);
+            randrDisplayListener = null;
+        }
         if (winlatorLogcatLogger != null) {
             ProcessHelper.removeDebugCallback(winlatorLogcatLogger);
             winlatorLogcatLogger.stop();

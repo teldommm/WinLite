@@ -40,7 +40,25 @@ public class RandrExtension implements Extension {
         short[] copy = rates.clone();
         refreshRates = copy;
 
-        currentRate = copy[0];
+        currentRate = matchRate(copy, activeRate);
+    }
+
+    /**
+     * The panel's mode changed (the system, or WinLite picking a mode for WFG or an FPS limit):
+     * report its rate as the current one. RandR 1.0/1.1 clients (Wine's xrandr10 path) read the
+     * current rate from GetScreenInfo, and games read it from there as the display frequency.
+     */
+    public void setActiveRate(short activeRate) {
+        currentRate = matchRate(refreshRates, activeRate);
+    }
+
+    // The advertised rate closest to the panel's (Display rates are rounded floats).
+    private static short matchRate(short[] rates, short active) {
+        short best = rates[0];
+        for (short rate : rates) {
+            if (Math.abs(rate - active) < Math.abs(best - active)) best = rate;
+        }
+        return best;
     }
 
     @Override

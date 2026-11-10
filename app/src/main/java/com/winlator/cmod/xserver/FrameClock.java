@@ -11,14 +11,18 @@ import java.util.concurrent.atomic.AtomicLong;
  *  - an interval within 1% of a whole number of refreshes becomes exactly that many refreshes
  *    (the rule the renderer applies to its schedules and to the panel mode), so the limiter and
  *    the panel cannot drift apart;
- *  - each new arrival phase error the renderer measures slews the next release by a quarter of
+ *  - each new arrival phase error the renderer measures slews the next release by an eighth of
  *    it, at most 0.5 ms per frame: the game is released so its frame arrives at the phase that
  *    lands it on a refresh with the least latency, whatever the game's own render time is.
+ *    The gain is low because the loop is delayed: a release is an IdleNotify, and the WSI's
+ *    acquire only returns once an image is idle, so a correction reaches the arrivals a
+ *    swapchain's length minus one frames later. At a quarter the loop rings from about eight
+ *    images up (WRAPPER_MAX_IMAGE_COUNT); an eighth settles at any length in use.
  * Without a display clock (no renderer, no fresh grid) it is the plain 1/fps interval.
  */
 public final class FrameClock {
     private static final long MAX_SLEW_NS = 500_000L;
-    private static final int  GAIN_DIV = 4;
+    private static final int  GAIN_DIV = 8;
 
     // Each measurement is applied once, by whichever limiter releases next: one game, one error.
     private static final AtomicLong appliedSeq = new AtomicLong();
