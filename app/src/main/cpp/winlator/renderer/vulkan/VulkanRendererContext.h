@@ -451,49 +451,75 @@ public:
     // VK_GOOGLE_display_timing is enabled on the device: WFG spaces its presents evenly instead
     // of handing FIFO a back-to-back burst (at 120 Hz a 30 fps x2 burst shows 8 ms + 25 ms).
     bool                  displayTiming_ = false;
-    uint64_t              wfgPaceLastNs  = 0;     // target time of the last paced real frame
-    // Phase lock of the pace schedule to the game's frames (proportional + integral): keeps the
-    // chained schedule from drifting away on an interval estimate a few percent off.
-    int64_t               wfgPaceInteg   = 0;     // ns per frame, absorbs a steady rate error
     std::atomic<uint32_t> wfgFpsLimit{0};         // the game's FPS limit, 0 = none
-    uint64_t              wfgPaceLate    = 0;     // batches whose schedule fell behind 'now'
     uint64_t              wfgLimitPaced  = 0;     // batches paced on the exact limit interval
-    // The display's refresh grid, from VK_GOOGLE_display_timing feedback: the time a paced
-    // image really reached the display, and the refresh cycle. Targets snap onto this grid, so
-    // where each frame lands - and the interpolation phase it gets - is known, not guessed.
+
+    // ---- Display clock ----
+    // The display's refresh grid from VK_GOOGLE_display_timing feedback. Every present carries a
+    // presentID (desiredPresentTime 0 when it is not paced), so the grid stays fresh whatever path
+    // presents. One grid serves everything that times frames: the WFG and plain-path schedules
+    // snap onto it, and the FPS limiters (Java) read it through nativeGetDisplayClock.
     PFN_vkGetRefreshCycleDurationGOOGLE   getRefreshCycleGOOGLE_  = nullptr;
     PFN_vkGetPastPresentationTimingGOOGLE getPastPresentTimingGOOGLE_ = nullptr;
     uint64_t              wfgVsyncAnchorNs = 0;   // a refresh the display really showed a frame at
     uint64_t              wfgRefreshNs     = 0;   // the swapchain's refresh cycle, 0 = unknown
-    uint64_t              wfgLastRealDispNs = 0;  // when the last paced real frame is shown
     uint64_t              wfgPresentLate   = 0;   // paced images shown a refresh or more late
     uint64_t              wfgPresentTimed  = 0;   // paced images with display feedback
     int64_t               wfgShowLagNs     = 0;   // latest paced image: shown minus planned
+    uint32_t              wfgPresentId     = 0;
+    void     wfgPollDisplayTiming(uint64_t javaPeriod);
+    // The grid when it is fresh (feedback within the last second): the one rule every user of
+    // the clock goes by.
+    bool     displayGrid(uint64_t now, uint64_t& anchor, uint64_t& period) const;
+    // An interval within 1% of a whole number of refreshes becomes exactly that many refreshes,
+    // so a schedule and the panel cannot drift apart (the rule wfgMode applies to modes).
+    static uint64_t snapToRefreshes(uint64_t interval, uint64_t period);
+    // Published for the limiters (any thread): the refresh period, and how far the latest paced
+    // game frame arrived from the phase that lands it on a refresh with the least latency.
+    std::atomic<uint64_t> clockPeriodNs{0};
+    std::atomic<int64_t>  clockArrivalErrNs{0};
+    std::atomic<uint64_t> clockErrSeq{0};         // bumps with each new arrival error
+    std::atomic<uint64_t> clockStampNs{0};        // when the grid was last known fresh
+    // {period, arrival error, its sequence number}; false while the grid is not fresh.
+    bool getDisplayClock(int64_t out[3]) const;
+
+    // ---- Pacing ----
+    // One schedule per path (WFG batches, plain FPS-limited frames), same model for both: a
+    // phase-locked loop on the game's frames, a lead after each arrival that covers the GPU
+    // work and the latch, and images snapped onto the display grid.
+    struct PaceState {
+        uint64_t lastNs       = 0;   // unsnapped target of the last real frame
+        int64_t  integ        = 0;   // PLL integral: ns per frame of steady rate error
+        uint64_t lastRealDisp = 0;   // the refresh the last real frame is planned for
+        uint64_t lastArrival  = 0;
+        uint64_t jitterNs     = 0;   // EMA of the arrivals' deviation from the interval
+        uint64_t leadExtraNs  = 0;   // learned from late presents: extra lead the GPU needs
+        uint64_t seenLate     = 0;   // feedback counters already accounted for
+        uint64_t seenTimed    = 0;
+        uint64_t onTime       = 0;
+        uint64_t resets       = 0;   // schedule restarted (hitch, rate change)
+        uint64_t late         = 0;   // schedule fell behind 'now' (frame came late)
+        uint64_t frames       = 0;
+        void restart() { lastNs = 0; integ = 0; lastRealDisp = 0; lastArrival = 0; }
+    };
+    PaceState             wfgPace;
+    PaceState             lpPace;
+    void     paceSchedule(PaceState& st, uint32_t n, uint64_t interval, uint64_t arrival,
+                          uint64_t* presentAt, uint64_t* disp);
+    void     wfgPlanPresentTimes(WfgFrame& wf);
+    uint64_t              wfgPacedFrames = 0;
     // Generated frames dropped to drain the queue, by reason: the paced display chain fell
     // behind its schedule, or the FIFO queue model (unpaced) grew.
     uint64_t              wfgTrimLag       = 0;
     uint64_t              wfgTrimQueue     = 0;
     int64_t               wfgLagSum        = 0;   // chain lag behind schedule, per log window
     uint64_t              wfgAcqWaitSum    = 0;   // real image acquire wait, per log window
-    void     wfgPollDisplayTiming(uint64_t javaPeriod);
-    uint32_t              wfgPresentId   = 0;
-    uint64_t              wfgPacedFrames = 0;
-    uint64_t              wfgPaceResets  = 0;
-    void     wfgPlanPresentTimes(WfgFrame& wf);
-    void     paceSchedule(uint64_t& lastNs, int64_t& integ, uint64_t& lastRealDisp,
-                          uint64_t& resets, uint64_t& late, uint32_t n, uint64_t interval,
-                          uint64_t arrival, uint64_t* presentAt, uint64_t* disp);
-    // Pacing of the plain path (no WFG) to the game's FPS limit; see limitPlanPresent.
+    // Plain path (no WFG) paced to the game's FPS limit; see limitPlanPresent.
     uint64_t limitPlanPresent();
     bool                  swapchainFifo  = false; // the swapchain presents FIFO (pacing applies)
     uint64_t              lpSeenFrames   = 0;
     uint64_t              lpLastArrival  = 0;
     uint64_t              lpIntervalEma  = 0;     // the game's measured frame interval
-    uint64_t              lpLastNs       = 0;
-    int64_t               lpInteg        = 0;
-    uint64_t              lpLastDisp     = 0;
-    uint64_t              lpResets       = 0;
-    uint64_t              lpLate         = 0;
     uint64_t              lpPaced        = 0;
     uint64_t              lpGameFrames   = 0;
     uint64_t              lpLogTimed     = 0;

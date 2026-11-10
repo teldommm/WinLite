@@ -19,6 +19,14 @@ public abstract class XServerRendererView extends SurfaceView {
         this.xServer = xServer;
     }
 
+    /**
+     * The display clock, for the FPS limiters: {refresh period ns, how far the latest paced game
+     * frame arrived from the phase that lands it on a refresh with the least latency (ns, > 0 =
+     * late), that measurement's sequence number}. False when the renderer has no fresh refresh
+     * grid; a renderer without one keeps the default.
+     */
+    public boolean getDisplayClock(long[] out) { return false; }
+
     public abstract void onPause();
     public abstract void onResume();
     public abstract void onDestroy();

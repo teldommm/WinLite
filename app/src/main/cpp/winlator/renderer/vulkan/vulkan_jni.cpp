@@ -390,6 +390,21 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfgFpsLimit(
     r->setWfgFpsLimit((int)fps);
 }
 
+// The display clock for the FPS limiters: {refresh period ns, arrival phase error ns, its
+// sequence number}; false while the renderer has no fresh refresh grid.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetDisplayClock(
+    JNIEnv* env, jobject, jlong handle, jlongArray out)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || !out || env->GetArrayLength(out) < 3) return JNI_FALSE;
+    int64_t v[3];
+    if (!r->getDisplayClock(v)) return JNI_FALSE;
+    const jlong j[3] = {(jlong)v[0], (jlong)v[1], (jlong)v[2]};
+    env->SetLongArrayRegion(out, 0, 3, j);
+    return JNI_TRUE;
+}
+
 // {presented frames (real and generated), WFG-generated frames}
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetFrameCounts(

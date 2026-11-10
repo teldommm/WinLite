@@ -1083,6 +1083,11 @@ void VulkanRendererContext::renderFrame() {
         curHotX=cursorHotX; curHotY=cursorHotY; curW=cursorTexW; curH=cursorTexH;
     }
 
+    // The display clock: feedback from earlier presents, every frame, whatever path presents.
+    if (displayTiming_) {
+        const uint32_t mhz = wfgRefreshMhz.load();
+        wfgPollDisplayTiming(mhz > 1000 ? (uint64_t)(1.0e12 / (double)mhz) : 0);
+    }
     WfgFrame wf = wfgBeginFrame(frameDraws,ox,oy,sx,sy,cw,ch);
     // Without WFG, a new game frame under an FPS limit gets its own target on the refresh grid.
     const uint64_t plainAt = wf.active ? 0 : limitPlanPresent();
@@ -1128,15 +1133,16 @@ void VulkanRendererContext::renderFrame() {
     }
     slotSerial[currentFrame]=++submitSerial;   // this slot's fence now stands for frame #submitSerial
     VkSwapchainKHR scs[]={swapchain};
-    // Paced presents (WFG with VK_GOOGLE_display_timing): each image carries the time it should
-    // reach the display, so the generated and the real frame split the game's frame interval
-    // evenly instead of leaving FIFO's next two refreshes back to back.
+    // With VK_GOOGLE_display_timing every present carries a presentID, so the display reports
+    // when each image was shown (the display clock). A paced image (WFG, or a game frame under an
+    // FPS limit) also carries the time it should reach the display; the rest go as soon as
+    // possible (desiredPresentTime 0).
     VkPresentTimeGOOGLE ptime{};
     VkPresentTimesInfoGOOGLE ptimes{};
     ptimes.sType=VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE;
     ptimes.swapchainCount=1; ptimes.pTimes=&ptime;
     auto pacedNext=[&](uint64_t at) -> const void* {
-        if (!wf.paced && !plainAt) return nullptr;
+        if (!displayTiming_) return nullptr;
         if (!wf.paced) at = plainAt;
         ptime.presentID=++wfgPresentId;
         ptime.desiredPresentTime=at;

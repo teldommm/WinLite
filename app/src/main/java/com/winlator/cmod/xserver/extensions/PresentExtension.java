@@ -175,8 +175,10 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     }
 
     private void scheduleIdleNotify(Window window, Pixmap pixmap, int serial,
-                                    int idleFence, int targetFps) {
-        final long frameDurationNs = 1_000_000_000L / targetFps;
+                                    int idleFence, int targetFps,
+                                    com.winlator.cmod.widget.XServerRendererView view) {
+        // On the display clock: whole refreshes, phase slewed toward the least-latency arrival.
+        final long frameDurationNs = com.winlator.cmod.xserver.FrameClock.nextInterval(view, targetFps);
         final long now = System.nanoTime();
         final long deadline;
         final ScheduledThreadPoolExecutor executor;
@@ -363,7 +365,8 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
 
         pixmap.drawable.updateDirect();
         sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
-        scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps);
+        scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps,
+                client.xServer.getXServerView());
     }
 
     private void selectInput(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {

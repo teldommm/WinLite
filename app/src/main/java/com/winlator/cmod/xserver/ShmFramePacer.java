@@ -32,7 +32,8 @@ public class ShmFramePacer {
      * @param fps target FPS; 0 (or less) means no limit
      * @return how long (ns) the caller should suspend this client's reads, or 0
      */
-    public static long framePresented(int drawableId, int fps) {
+    public static long framePresented(int drawableId, int fps,
+                                      com.winlator.cmod.widget.XServerRendererView view) {
         if (fps <= 0) {
             if (!timings.isEmpty()) timings.clear();
             return 0;
@@ -42,7 +43,8 @@ public class ShmFramePacer {
         long now = System.nanoTime();
         if (t.nextNs < now) t.nextNs = now;
         long delay = t.nextNs - now;
-        t.nextNs += 1_000_000_000L / fps;
+        // On the display clock: whole refreshes, phase slewed toward the least-latency arrival.
+        t.nextNs += FrameClock.nextInterval(view, fps);
         return delay;
     }
 

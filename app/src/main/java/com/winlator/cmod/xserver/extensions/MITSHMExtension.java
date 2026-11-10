@@ -118,7 +118,8 @@ public class MITSHMExtension implements Extension {
             int targetFps = client.xServer.getXServerView() != null
                     ? client.xServer.getXServerView().getFpsLimit() : 0;
             if (targetFps > 1000) targetFps = 1000;
-            long delayNs = ShmFramePacer.framePresented(drawableId, targetFps);
+            long delayNs = ShmFramePacer.framePresented(drawableId, targetFps,
+                    client.xServer.getXServerView());
             if (delayNs > 0) {
                 client.connectorClient.getConnector().pauseClientReads(client.connectorClient, delayNs);
             }

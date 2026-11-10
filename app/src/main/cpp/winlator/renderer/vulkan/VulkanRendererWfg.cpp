@@ -45,8 +45,36 @@ uint64_t VulkanRendererContext::wfgPeriodNs() const {
     return java;
 }
 
-// Reads VK_GOOGLE_display_timing feedback: the exact refresh cycle and when paced images really
-// reached the display. The latest such time anchors the refresh grid the targets snap onto.
+bool VulkanRendererContext::displayGrid(uint64_t now, uint64_t& anchor, uint64_t& period) const {
+    if (!wfgVsyncAnchorNs || now <= wfgVsyncAnchorNs || now - wfgVsyncAnchorNs >= 1000000000ull)
+        return false;
+    anchor = wfgVsyncAnchorNs;
+    period = wfgPeriodNs();
+    return true;
+}
+
+uint64_t VulkanRendererContext::snapToRefreshes(uint64_t interval, uint64_t period) {
+    if (!period) return interval;
+    const uint64_t k = (interval + period / 2) / period;
+    if (k == 0) return interval;
+    const uint64_t whole = k * period;
+    const uint64_t diff = whole > interval ? whole - interval : interval - whole;
+    return diff * 100 <= interval ? whole : interval;
+}
+
+bool VulkanRendererContext::getDisplayClock(int64_t out[3]) const {
+    const uint64_t stamp = clockStampNs.load(std::memory_order_acquire);
+    const uint64_t now = nowNs();
+    if (!stamp || now < stamp || now - stamp > 1000000000ull) return false;
+    out[0] = (int64_t)clockPeriodNs.load(std::memory_order_relaxed);
+    out[1] = clockArrivalErrNs.load(std::memory_order_relaxed);
+    out[2] = (int64_t)clockErrSeq.load(std::memory_order_relaxed);
+    return out[0] > 0;
+}
+
+// Reads VK_GOOGLE_display_timing feedback (every frame, from renderFrame): the exact refresh
+// cycle and when images really reached the display. The latest such time anchors the refresh
+// grid; the grid is published for the limiters while it is fresh.
 void VulkanRendererContext::wfgPollDisplayTiming(uint64_t javaPeriod) {
     if (getRefreshCycleGOOGLE_) {
         VkRefreshCycleDurationGOOGLE rc{};
@@ -62,17 +90,16 @@ void VulkanRendererContext::wfgPollDisplayTiming(uint64_t javaPeriod) {
     const uint64_t period = wfgPeriodNs();
     if (javaPeriod && (period * 100 < javaPeriod * 97 || period * 100 > javaPeriod * 103))
         wfgVsyncAnchorNs = 0;
-    if (!getPastPresentTimingGOOGLE_) return;
     VkPastPresentationTimingGOOGLE past[16];
-    for (int round = 0; round < 4; round++) {
+    for (int round = 0; getPastPresentTimingGOOGLE_ && round < 4; round++) {
         uint32_t count = 16;
         const VkResult r = getPastPresentTimingGOOGLE_(device, swapchain, &count, past);
-        if (r != VK_SUCCESS && r != VK_INCOMPLETE) return;
+        if (r != VK_SUCCESS && r != VK_INCOMPLETE) break;
         for (uint32_t i = 0; i < count; i++) {
             const VkPastPresentationTimingGOOGLE& t = past[i];
             if (!t.actualPresentTime) continue;
             if (t.actualPresentTime > wfgVsyncAnchorNs) wfgVsyncAnchorNs = t.actualPresentTime;
-            if (t.desiredPresentTime) {
+            if (t.desiredPresentTime) {   // a paced image: count it against its plan
                 wfgPresentTimed++;
                 // Planned for the refresh at desired + half a period.
                 wfgShowLagNs = (int64_t)t.actualPresentTime -
@@ -81,7 +108,13 @@ void VulkanRendererContext::wfgPollDisplayTiming(uint64_t javaPeriod) {
                 if (t.actualPresentTime > t.desiredPresentTime + period) wfgPresentLate++;
             }
         }
-        if (r != VK_INCOMPLETE) return;
+        if (r != VK_INCOMPLETE) break;
+    }
+    uint64_t anchor = 0, gridPeriod = 0;
+    const uint64_t now = nowNs();
+    if (displayGrid(now, anchor, gridPeriod)) {
+        clockPeriodNs.store(gridPeriod, std::memory_order_relaxed);
+        clockStampNs.store(now, std::memory_order_release);
     }
 }
 
@@ -192,9 +225,7 @@ bool VulkanRendererContext::wfgSync() {
         } else {
             wfgSeenFrames = contentFrames.load();
             wfgRealFrames = wfgLogReal = wfgLogMade = 0;
-            wfgPaceLastNs = 0;
-            wfgPaceInteg = 0;
-            wfgLastRealDispNs = 0;
+            wfgPace.restart();
             WLOG_I("WFG engine ready");
         }
     } else if (!want) {
@@ -393,7 +424,7 @@ VkrDisContentRect VulkanRendererContext::wfgContentRect(const std::vector<DrawEn
 // moves the interpolated frame (t = 0.5) a quarter interval off its own time.
 void VulkanRendererContext::wfgPlanPresentTimes(WfgFrame& wf) {
     wf.paced = false;
-    auto unpaced = [&] { wfgPaceLastNs = 0; wfgPaceInteg = 0; wfgLastRealDispNs = 0; };
+    auto unpaced = [&] { wfgPace.restart(); };
     if (!displayTiming_ || wf.genCount == 0) { unpaced(); return; }
     const uint64_t measured = vkr_dis_source_interval_ns(wfg);
     if (measured == 0) { unpaced(); return; }
@@ -413,9 +444,9 @@ void VulkanRendererContext::wfgPlanPresentTimes(WfgFrame& wf) {
 
     const uint32_t n = wf.genCount + 1;
     uint64_t disp[VKR_DIS_MAX_GENERATIONS + 1];
-    const uint64_t prevReal = wfgLastRealDispNs;
-    paceSchedule(wfgPaceLastNs, wfgPaceInteg, wfgLastRealDispNs, wfgPaceResets, wfgPaceLate,
-                 n, interval, lastGameFrameNs.load(std::memory_order_relaxed), wf.presentAt, disp);
+    const uint64_t prevReal = wfgPace.lastRealDisp;
+    paceSchedule(wfgPace, n, interval, lastGameFrameNs.load(std::memory_order_relaxed),
+                 wf.presentAt, disp);
 
     // Interpolation phase from the landing times: a frame shown a third of the way from the
     // previous real frame to this one shows the motion a third of the way (40 fps x2 at 120 Hz
@@ -435,76 +466,98 @@ void VulkanRendererContext::wfgPlanPresentTimes(WfgFrame& wf) {
 }
 
 // The pacing core shared by WFG (a batch of generated frames plus the real one) and the plain
-// FPS-limited path (one frame): spaces n images evenly over the game's frame interval, phase-locked
-// to the game's frames, and snaps each onto the display's refresh grid.
-//   lastNs/integ/lastRealDisp/resets/late: the schedule's state and counters (one set per path)
-//   arrival: when the game frame arrived (0 = unknown)
-//   presentAt[k]: desiredPresentTime for image k; disp[k]: the refresh it is planned to land on
-void VulkanRendererContext::paceSchedule(uint64_t& lastNs, int64_t& integ, uint64_t& lastRealDisp,
-                                         uint64_t& resets, uint64_t& late, uint32_t n,
-                                         uint64_t interval, uint64_t arrival,
-                                         uint64_t* presentAt, uint64_t* disp) {
-    const uint32_t mhz = wfgRefreshMhz.load();
-    wfgPollDisplayTiming(mhz > 1000 ? (uint64_t)(1.0e12 / (double)mhz) : 0);
+// FPS-limited path (one frame). One model for both:
+//  - the interval snaps to whole refreshes when it is within 1% of them;
+//  - the n images are spaced evenly over it, the schedule phase-locked to the game's frames
+//    (proportional + integral, so an interval a little off does not drift into resets);
+//  - an image lands no sooner than 'need' after its game frame arrived: a refresh for the GPU
+//    work and the latch plus extra learned from the display's feedback (each late image adds a
+//    quarter refresh, a run of on-time ones gives 0.1 ms back), so a GPU that needs longer gets
+//    it and one that does not is not padded. The schedule itself aims a cushion past 'need'
+//    (three times the arrivals' jitter), so a frame that comes a little late still makes it;
+//  - each image snaps onto the display grid (never two on one refresh);
+//  - how far the arrival was from the phase that puts need + cushion exactly on a refresh (the
+//    least latency that still absorbs the jitter) is published for the FPS limiters, which slew
+//    their release of the game toward it.
+//   presentAt[k]: desiredPresentTime of image k; disp[k]: the refresh it is planned to land on
+void VulkanRendererContext::paceSchedule(PaceState& st, uint32_t n, uint64_t interval,
+                                         uint64_t arrival, uint64_t* presentAt, uint64_t* disp) {
     const uint64_t period = wfgPeriodNs();
-    const uint64_t step = interval / n;
+    const uint64_t half = period / 2;
     const uint64_t now = nowNs();
-    // The first image cannot reach the display before the GPU work of this frame and the next
-    // latch: one refresh from now.
-    const uint64_t earliest = now + period;
+    uint64_t anchor = 0, gridPeriod = 0;
+    const bool grid = displayGrid(now, anchor, gridPeriod);
+    interval = snapToRefreshes(interval, period);
+    const uint64_t step = interval / n;
 
-    // Where the schedule should start, judged by when the game frame arrived: one refresh for
-    // the GPU and the latch plus half a refresh of cushion for the game's arrival jitter.
+    // Lead learned from the display's feedback.
+    const uint64_t lateNow = wfgPresentLate, timedNow = wfgPresentTimed;
+    if (st.frames > 0) {
+        if (lateNow > st.seenLate) {
+            st.leadExtraNs = std::min(st.leadExtraNs + period / 4, period);
+            st.onTime = 0;
+        } else if (timedNow > st.seenTimed) {
+            st.onTime += timedNow - st.seenTimed;
+            if (st.onTime >= 240) {
+                st.leadExtraNs = st.leadExtraNs > 100000 ? st.leadExtraNs - 100000 : 0;
+                st.onTime = 0;
+            }
+        }
+    }
+    st.seenLate = lateNow;
+    st.seenTimed = timedNow;
+    st.frames++;
+
+    // The arrivals' jitter around the interval.
     if (!arrival || arrival > now || now - arrival > interval) arrival = now;
-    const uint64_t ideal = arrival + period + period / 2;
+    if (st.lastArrival && arrival > st.lastArrival) {
+        const int64_t dev = (int64_t)(arrival - st.lastArrival) - (int64_t)interval;
+        const uint64_t a = (uint64_t)(dev < 0 ? -dev : dev);
+        if (a < interval) st.jitterNs = (uint64_t)((int64_t)st.jitterNs + ((int64_t)a - (int64_t)st.jitterNs) / 8);
+    }
+    st.lastArrival = arrival;
+    const uint64_t cushion = std::clamp<uint64_t>(3 * st.jitterNs, 500000ull, half);
+    const uint64_t need = period + st.leadExtraNs;
+
+    // The first image cannot reach the display before the GPU work and the next latch.
+    const uint64_t earliest = now + period;
+    const uint64_t ideal = arrival + need + cushion;
 
     uint64_t start;
-    if (!lastNs) {
+    if (!st.lastNs) {
         start = ideal;
-        integ = 0;
+        st.integ = 0;
     } else {
-        // Continue the cadence from the previous real frame, phase-locked to the game: the
-        // proportional term pulls the schedule toward 'ideal', the integral one learns the
-        // per-frame rate error of the interval, so the schedule does not drift until a reset
-        // jerks it back every few seconds.
-        const uint64_t chained = lastNs + step;
+        const uint64_t chained = st.lastNs + step;
         const int64_t err = (int64_t)chained - (int64_t)ideal;   // > 0: the schedule runs late
         if (err > (int64_t)(interval / 2) || err < -(int64_t)(interval / 2)) {
             // A real break (a hitch, a burst after a stall, a rate change): start over.
             start = ideal;
-            integ = 0;
-            resets++;
+            st.integ = 0;
+            st.resets++;
         } else {
             constexpr int64_t kP = 6;    // 1/6 of the phase error per frame
             constexpr int64_t kI = 64;   // 1/64 of it into the rate correction
             const int64_t integLimit = (int64_t)(interval / 8);
-            integ = std::clamp(integ + err / kI, -integLimit, integLimit);
-            start = (uint64_t)((int64_t)chained - err / kP - integ);
+            st.integ = std::clamp(st.integ + err / kI, -integLimit, integLimit);
+            start = (uint64_t)((int64_t)chained - err / kP - st.integ);
         }
     }
     if (start < earliest) {
-        // The game frame came late: show it as soon as possible rather than behind schedule.
-        start = earliest;
-        late++;
+        start = earliest;   // the game frame came late: as soon as possible
+        st.late++;
     }
 
-    // Where each image lands. With a refresh grid from the display's feedback the target snaps
-    // to the nearest refresh on it, so the landing time is known; each image gets a refresh of
-    // its own (never two on one, never before this one can be ready). Without the grid the
-    // target itself is the best guess. SurfaceFlinger shows a buffer at the first refresh at or
-    // after its time, so the time handed over is half a refresh before the chosen one.
-    const uint64_t half = period / 2;
-    const bool grid = wfgVsyncAnchorNs && now > wfgVsyncAnchorNs &&
-                      now - wfgVsyncAnchorNs < 1000000000ull;
-    uint64_t floorNs = now + half;                          // earliest landing for any image
-    if (lastRealDisp && lastRealDisp + period > floorNs)
-        floorNs = lastRealDisp + period;                    // after the previous real frame
+    // Snap onto the grid: the nearest refresh, never before 'need' after the arrival, never on
+    // or before the previous real frame's refresh. SurfaceFlinger shows a buffer at the first
+    // refresh at or after its time, so the time handed over is half a refresh before.
+    uint64_t floorNs = std::max(now + half, arrival + need);
+    if (st.lastRealDisp && st.lastRealDisp + period > floorNs) floorNs = st.lastRealDisp + period;
     for (uint32_t k = 0; k < n; k++) {
         const uint64_t at = start + (uint64_t)k * step;
         uint64_t d = at;
         if (grid) {
-            const uint64_t idx = (at - wfgVsyncAnchorNs + half) / period;
-            d = wfgVsyncAnchorNs + idx * period;
+            d = anchor + ((at - anchor + half) / period) * period;
             while (d < floorNs) d += period;
         } else if (d < floorNs) {
             d = floorNs;
@@ -513,9 +566,18 @@ void VulkanRendererContext::paceSchedule(uint64_t& lastNs, int64_t& integ, uint6
         presentAt[k] = d > half ? d - half : d;
         floorNs = d + period;
     }
+    st.lastNs = start + (uint64_t)(n - 1) * step;   // unsnapped: no rounding drift
+    st.lastRealDisp = disp[n - 1];
 
-    lastNs = start + (uint64_t)(n - 1) * step;   // the schedule stays unsnapped: no rounding drift
-    lastRealDisp = disp[n - 1];
+    // For the limiters: how far this arrival was from the phase that puts need + cushion exactly
+    // on a refresh (> 0: it came late).
+    if (grid) {
+        const uint64_t x = (arrival + need + cushion - anchor) % period;   // past the last refresh
+        int64_t e = (int64_t)x;
+        if (e >= (int64_t)half) e -= (int64_t)period;
+        clockArrivalErrNs.store(e, std::memory_order_relaxed);
+        clockErrSeq.fetch_add(1, std::memory_order_release);
+    }
 }
 
 // The plain path (no WFG) with an FPS limit: each new game frame gets a target on the refresh
@@ -530,7 +592,7 @@ uint64_t VulkanRendererContext::limitPlanPresent() {
     const bool fresh = frames != lpSeenFrames;
     lpSeenFrames = frames;
     const uint32_t limit = wfgFpsLimit.load(std::memory_order_relaxed);
-    auto unpaced = [&] { lpLastNs = 0; lpInteg = 0; lpLastDisp = 0; };
+    auto unpaced = [&] { lpPace.restart(); };
     if (!displayTiming_ || !swapchainFifo || limit == 0 || wfgRequested.load() || wfg) {
         unpaced();
         lpLastArrival = 0;
@@ -558,7 +620,7 @@ uint64_t VulkanRendererContext::limitPlanPresent() {
     }
 
     uint64_t at = 0, disp = 0;
-    paceSchedule(lpLastNs, lpInteg, lpLastDisp, lpResets, lpLate, 1, limitNs, arrival, &at, &disp);
+    paceSchedule(lpPace, 1, limitNs, arrival, &at, &disp);
     lpPaced++;
 
     if (lpGameFrames % 300 == 0) {
@@ -566,12 +628,14 @@ uint64_t VulkanRendererContext::limitPlanPresent() {
         lpLogTimed = wfgPresentTimed;
         lpLogLate = wfgPresentLate;
         WLOG_I("Pace delivered frames=%llu paced=%llu limit=%u game=%.2ffps resets=%llu late=%llu "
-               "refresh=%.3fms grid=%d shownLate=%llu/%llu showLag=%lldus",
+               "refresh=%.3fms grid=%d shownLate=%llu/%llu showLag=%lldus leadExtra=%lluus jitter=%lluus",
                (unsigned long long)lpGameFrames, (unsigned long long)lpPaced, limit,
-               1.0e9 / (double)lpIntervalEma, (unsigned long long)lpResets,
-               (unsigned long long)lpLate, (double)wfgPeriodNs() / 1.0e6,
+               1.0e9 / (double)lpIntervalEma, (unsigned long long)lpPace.resets,
+               (unsigned long long)lpPace.late, (double)wfgPeriodNs() / 1.0e6,
                wfgVsyncAnchorNs ? 1 : 0, (unsigned long long)lateShown,
-               (unsigned long long)timed, (long long)(wfgShowLagNs / 1000));
+               (unsigned long long)timed, (long long)(wfgShowLagNs / 1000),
+               (unsigned long long)(lpPace.leadExtraNs / 1000),
+               (unsigned long long)(lpPace.jitterNs / 1000));
     }
     return at;
 }
@@ -611,14 +675,14 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
     const uint64_t now = nowNs();
     const uint64_t ahead = wfgQueueEndNs > now + period ? (wfgQueueEndNs - now - period) / period : 0;
     wfgAheadSum += ahead;
-    if (displayTiming_ && wfgLastRealDispNs && wfgPaceLastNs) {
+    if (displayTiming_ && wfgPace.lastRealDisp && wfgPace.lastNs) {
         // Paced: the queue is the display chain itself. Each image owns a refresh, so a game
         // frame that comes early, or an image the display showed late (feedback), pushes the
         // chain behind the schedule; the coarse queue model below cannot tell that from the
         // designed lead and drops frames the schedule has room for. One generated frame is
         // dropped only once the chain is more than a refresh and a half behind: a refresh of
         // jitter is left for the next frame to absorb.
-        int64_t lag = (int64_t)wfgLastRealDispNs - (int64_t)wfgPaceLastNs;
+        int64_t lag = (int64_t)wfgPace.lastRealDisp - (int64_t)wfgPace.lastNs;
         if (wfgShowLagNs > 0) lag += wfgShowLagNs;
         wfgLagSum += lag;
         if (lag > (int64_t)(period + period / 2) && planned > 0) {
@@ -679,21 +743,23 @@ void VulkanRendererContext::wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFr
                 WLOG_I("WFG delivered real=%llu made=%llu ratio=%.2f misses=%llu skipped=%llu "
                        "trimmed=%llu ahead=%.2f paced=%llu limitPaced=%llu paceResets=%llu paceLate=%llu integ=%lldus "
                        "refresh=%.3fms grid=%d shownLate=%llu/%llu trimLag=%llu trimQueue=%llu "
-                       "lag=%.2fv showLag=%lldus acqWait=%.2fms",
+                       "lag=%.2fv showLag=%lldus acqWait=%.2fms leadExtra=%lluus jitter=%lluus",
                        (unsigned long long)wfgRealFrames, (unsigned long long)made,
                        dReal ? (double)dMade / (double)dReal : 0.0,
                        (unsigned long long)wfgAcquireMisses, (unsigned long long)wfgSkippedRenders,
                        (unsigned long long)wfgTrimmedFrames,
                        dReal ? (double)wfgAheadSum / (double)dReal : 0.0,
                        (unsigned long long)wfgPacedFrames, (unsigned long long)wfgLimitPaced,
-                       (unsigned long long)wfgPaceResets, (unsigned long long)wfgPaceLate,
-                       (long long)(wfgPaceInteg / 1000),
+                       (unsigned long long)wfgPace.resets, (unsigned long long)wfgPace.late,
+                       (long long)(wfgPace.integ / 1000),
                        (double)wfgPeriodNs() / 1.0e6, wfgVsyncAnchorNs ? 1 : 0,
                        (unsigned long long)wfgPresentLate, (unsigned long long)wfgPresentTimed,
                        (unsigned long long)wfgTrimLag, (unsigned long long)wfgTrimQueue,
                        dReal ? (double)wfgLagSum / (double)dReal / (double)wfgPeriodNs() : 0.0,
                        (long long)(wfgShowLagNs / 1000),
-                       dReal ? (double)wfgAcqWaitSum / (double)dReal / 1.0e6 : 0.0);
+                       dReal ? (double)wfgAcqWaitSum / (double)dReal / 1.0e6 : 0.0,
+                       (unsigned long long)(wfgPace.leadExtraNs / 1000),
+                       (unsigned long long)(wfgPace.jitterNs / 1000));
                 wfgLagSum = 0;
                 wfgAcqWaitSum = 0;
                 wfgAheadSum = 0;

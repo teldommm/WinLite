@@ -150,6 +150,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                                      int multiplier, float refreshHz);
     // The game's FPS limit (0 = none): WFG paces its presents to it while the game holds it.
     @FastNative private native void nativeSetWfgFpsLimit(long handle, int fps);
+    @FastNative private native boolean nativeGetDisplayClock(long handle, long[] out);
     private native void nativeGetFrameCounts(long handle, long[] out);
 
     private native void nativeDumpRendererInfo(long handle);
@@ -1058,6 +1059,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
     public int getFpsLimit() {
         return fpsLimit;
+    }
+
+    @Override
+    public boolean getDisplayClock(long[] out) {
+        synchronized (lock) {
+            return nativeHandle != 0 && nativeGetDisplayClock(nativeHandle, out);
+        }
     }
     public void setFpsLimit(int limit) {
         int v = Math.max(0, Math.min(1000, limit));
