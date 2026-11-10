@@ -382,7 +382,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
         drawerLayout.setOnApplyWindowInsetsListener(
                 (view, windowInsets) -> windowInsets.replaceSystemWindowInsets(0, 0, 0, 0));
         drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED);
+        // The default scrim is 60% black, heavy for a panel that covers a small part of the game.
+        drawerLayout.setScrimColor(0x52000000);
         drawerLayout.addDrawerListener(new DrawerLayout.SimpleDrawerListener() {
+            // The panel fades with the slide, but faster than the slide itself (fully visible at
+            // ~55% of the way): opening, it is solid before it stops; closing, it is gone well
+            // before the slide ends, so closing reads as quicker than DrawerLayout's fixed
+            // ~500ms settle (not configurable).
+            @Override
+            public void onDrawerSlide(View drawerView, float slideOffset) {
+                drawerView.setAlpha(Math.min(1f, slideOffset * 1.8f));
+            }
+
             @Override
             public void onDrawerOpened(View drawerView) {
                 openSidebarPanel(activeSidebarPanelId);
