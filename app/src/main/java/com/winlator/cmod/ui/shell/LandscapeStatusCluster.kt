@@ -116,7 +116,8 @@ internal fun LandscapeStatusCluster(modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            StatusText(state.time, Modifier.width(38.dp), 14, FontWeight.Medium, textColor)
+            // 43dp: with tabular digits "06:10" is ~40dp at 14sp, so 38dp clipped the 0.
+            StatusText(state.time, Modifier.width(43.dp), 14, FontWeight.Medium, textColor)
 
             val netIcon: ImageVector = when (state.network) {
                 NetKind.Wifi -> TablerIcons.Wifi
@@ -174,6 +175,7 @@ private fun StatusText(text: String, modifier: Modifier, sizeDp: Int, weight: Fo
         color = color,
         maxLines = 1,
         softWrap = false,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Visible,
         textAlign = TextAlign.Center,
         style = MaterialTheme.typography.labelLarge.copy(
             fontSize = size,

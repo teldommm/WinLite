@@ -421,7 +421,8 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, ar
             Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodyMedium)
-                if (stats.hasAny) {
+                // Same as landscape: the chips are always drawn (zeros / dashes for a game never run).
+                if (stats.loaded) {
                     Spacer(Modifier.height(6.dp))
                     StatChips(stats, modifier = Modifier.fillMaxWidth())
                 }
@@ -471,7 +472,7 @@ private class StatEntry(val icon: ImageVector, val label: String, val value: Str
 //  3. else (a very narrow spot) two equal columns at full size, so the last chip sits in a tidy grid.
 @Composable
 private fun StatChips(stats: GameStats, modifier: Modifier = Modifier) {
-    val entries = rememberStatEntries(stats)
+    val entries = rememberStatEntries(stats, always = true)
     if (entries.isNotEmpty()) StatChipRow(entries, modifier)
 }
 
