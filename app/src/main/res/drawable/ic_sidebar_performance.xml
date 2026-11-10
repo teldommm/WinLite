@@ -1,1 +1,36 @@
-<?xml version="1.0" encoding="utf-8"?><vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="28dp" android:height="28dp" android:viewportWidth="24" android:viewportHeight="24"><path android:fillColor="#00000000" android:strokeColor="#40C4FF" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M4,14a8,8 0,0 1,16 0M12,14l4,-4M6,18h12"/></vector>
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tabler Icons "gauge" (https://tabler.io/icons, MIT) - same set as TablerIcons.kt. Tinted by the caller. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp"
+    android:height="28dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12 12 m-9 0 a9 9 0 1 0 18 0 a9 9 0 1 0 -18 0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12 12 m-1 0 a1 1 0 1 0 2 0 a1 1 0 1 0 -2 0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M13.41 10.59 l2.59 -2.59" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7 12 a5 5 0 0 1 5 -5" />
+</vector>

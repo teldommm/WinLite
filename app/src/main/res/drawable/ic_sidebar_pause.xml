@@ -1,13 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Filled disc with two pause bars cut out (even-odd), same geometry as the 64px icon_pause of
-     the reference build: bars 5.25 wide, 13.5 tall, 2.25 apart, square corners. -->
+<!-- Tabler Icons "player-pause" (https://tabler.io/icons, MIT) - same set as TablerIcons.kt. Tinted by the caller. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="28dp"
     android:height="28dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:fillColor="#40C4FF"
-        android:fillType="evenOdd"
-        android:pathData="M12,0A12,12 0,1 1,12,24A12,12 0,1 1,12,0Z M5.625,5.25h5.25v13.5h-5.25Z M13.125,5.25h5.25v13.5h-5.25Z" />
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M6 5 m0 1 a1 1 0 0 1 1 -1 h2 a1 1 0 0 1 1 1 v12 a1 1 0 0 1 -1 1 h-2 a1 1 0 0 1 -1 -1 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40C4FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M14 5 m0 1 a1 1 0 0 1 1 -1 h2 a1 1 0 0 1 1 1 v12 a1 1 0 0 1 -1 1 h-2 a1 1 0 0 1 -1 -1 Z" />
 </vector>
