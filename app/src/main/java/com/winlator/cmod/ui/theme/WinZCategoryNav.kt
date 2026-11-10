@@ -179,15 +179,10 @@ fun AnimatedCategoryContent(
         modifier = modifier.fillMaxWidth(),
         transitionSpec = {
             val sign = if (order.indexOf(targetState) >= order.indexOf(initialState)) 1 else -1
-            // The old page leaves at once and only the new one eases in. Fading the old one out
-            // and then fading the new one in dipped through an empty screen - a visible blink.
-            val fade = fadeIn(tween(170, easing = LinearOutSlowInEasing))
-            val slide = if (vertical) {
-                slideInVertically(tween(WinZMotion.DurationTabSlide, easing = FastOutSlowInEasing)) { sign * shiftPx / 2 }
-            } else {
-                slideInHorizontally(tween(WinZMotion.DurationTabSlide, easing = FastOutSlowInEasing)) { sign * shiftPx / 2 }
-            }
-            (fade + slide).togetherWith(ExitTransition.None)
+            // No movement: the page just changes in place. The old one leaves at once and the new
+            // one eases up from 60% opacity (fading through empty looked like a blink).
+            fadeIn(tween(140, easing = LinearOutSlowInEasing), initialAlpha = 0.6f)
+                .togetherWith(ExitTransition.None)
                 .using(SizeTransform(clip = false) { _, _ -> snap() })
         },
         label = "categoryContent"
