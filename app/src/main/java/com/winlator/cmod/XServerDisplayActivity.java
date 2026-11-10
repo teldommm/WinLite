@@ -59,6 +59,7 @@ import com.winlator.cmod.contents.AdrenotoolsManager;
 import com.winlator.cmod.core.AppUtils;
 import com.winlator.cmod.core.DebugLogFile;
 import com.winlator.cmod.core.DefaultVersion;
+import com.winlator.cmod.core.GpuTurbo;
 import com.winlator.cmod.core.EnvVars;
 import com.winlator.cmod.core.GpuSpoof;
 import com.winlator.cmod.core.FileUtils;
@@ -815,6 +816,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         if (environment != null) xServerView.onResume();
         if (environment != null) startThreadPlacement();
+        if (gpuTurboWanted) GpuTurbo.apply(true);
 
         // Thaw only what onPause() froze, and never a game the player paused by hand.
         if (backgroundSuspended && !isPaused) resumeGame();
@@ -829,6 +831,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public void onPause() {
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
         stopThreadPlacement(false);
+        if (!isInPictureInPictureMode()) GpuTurbo.revert();
         super.onPause();
 
         if (!isInPictureInPictureMode()) {
@@ -932,6 +935,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         handler.removeCallbacks(savePlaytimeRunnable);
 
         stopThreadPlacement(true);
+        gpuTurboWanted = false;
+        GpuTurbo.revert();
 
         if (midiHandler != null)
             midiHandler.stop();
@@ -993,6 +998,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
         stopThreadPlacement(true);
+        gpuTurboWanted = false;
+        GpuTurbo.revert();
         super.onDestroy();
     }
 
@@ -1430,6 +1437,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         AppUtils.observeSoftKeyboardVisibility(drawerLayout, renderer::setScreenOffsetYRelativeToCursor);
 
         setupSidebarHudControls();
+        initGpuTurbo();
         setupSidebarGraphicsControls();
     }
 
@@ -1897,7 +1905,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 wfgQuality,
                 wfgMode,
                 wfgTargetFps,
-                wfgPanelHz
+                wfgPanelHz,
+                gpuTurboMenuVisible,
+                gpuTurboWanted
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
@@ -1983,6 +1993,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     vkRenderer.setWfg(enabled, WFG_FLOW_SIDES[q], t, WfgSettings.multiplierOf(m));
                 }
                 saveWfgSettings(enabled, q, m, t);
+            }
+
+            @Override
+            public void onGpuTurboChanged(boolean enabled) {
+                gpuTurboWanted = enabled;
+                GpuTurbo.apply(enabled);
+                saveGpuTurbo(enabled);
             }
 
         };
@@ -3070,6 +3087,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
             threadPlacementController = null;
         } else {
             threadPlacementController.stop();
+        }
+    }
+
+    // GPU Turbo: the container option (a shortcut can override it) only decides whether the toggle
+    // is offered in the in-game menu. The switch itself is saved where the other graphics settings
+    // are and applied again at every launch; it is cleared whenever the game is left.
+    private boolean gpuTurboMenuVisible;
+    private boolean gpuTurboWanted;
+
+    private void initGpuTurbo() {
+        String fallback = container != null ? container.getExtra("gpuTurboMenu", "0") : "0";
+        String option = shortcut != null ? shortcut.getExtra("gpuTurboMenu", fallback) : fallback;
+        gpuTurboMenuVisible = "1".equals(option) && GpuTurbo.isSupported();
+        gpuTurboWanted = gpuTurboMenuVisible && "1".equals(readGraphicsExtra("gpuTurbo"));
+        GpuTurbo.clearStale();
+        GpuTurbo.apply(gpuTurboWanted);
+    }
+
+    private void saveGpuTurbo(boolean enabled) {
+        if (shortcut != null) {
+            shortcut.putExtra("gpuTurbo", enabled ? "1" : "0");
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra("gpuTurbo", enabled ? "1" : "0");
+            container.saveData();
         }
     }
 

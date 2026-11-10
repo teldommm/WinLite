@@ -77,6 +77,7 @@ import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.core.DefaultVersion
 import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.GPUInformation
+import com.winlator.cmod.core.GpuTurbo
 import com.winlator.cmod.core.ImageUtils
 import com.winlator.cmod.core.StringUtils
 import com.winlator.cmod.core.WineInfo
@@ -247,6 +248,7 @@ private class ContainerEditorStateV2(
     var syncCpu by mutableStateOf(editing?.isSyncCpuTopology ?: false)
     // Off by default; stored in the container's extra data ("1" = on).
     var threadPlacement by mutableStateOf(editing?.getExtra("threadPlacement", "0") == "1")
+    var gpuTurboMenu by mutableStateOf(editing?.getExtra("gpuTurboMenu", "0") == "1")
 
     private val cpuCount = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
     val cpu64 = mutableStateListOf<Boolean>().apply {
@@ -335,7 +337,7 @@ private class ContainerEditorStateV2(
         renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat, surfaceUbwc,
         graphicsDriver, graphicsConfig,
         wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, forceSsbs, boxPreset, exclusive, xinput, dinput,
-        syncCpu, threadPlacement, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
+        syncCpu, threadPlacement, gpuTurboMenu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
         cpu64.joinToString(), cpu32.joinToString(), components.entries.sortedBy { it.key }.joinToString()
     ).joinToString("|")
 }
@@ -480,6 +482,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.setCPUListWoW64(state.cpu32.indices.filter { state.cpu32[it] }.joinToString(","))
         container.setSyncCpuTopology(state.syncCpu)
         container.putExtra("threadPlacement", if (state.threadPlacement) "1" else "0")
+        container.putExtra("gpuTurboMenu", if (state.gpuTurboMenu) "1" else "0")
         container.setGraphicsDriver(state.graphicsDriver)
         container.setGraphicsDriverConfig(state.graphicsConfig)
         container.setRendererPresentMode(state.rendererPresentMode)
@@ -582,6 +585,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     .put(DirectAudioDriver.EXTRA_MIC, if (state.directAudioMic) "1" else "0")
                     .put("openGlDefaultInitialized", if (state.openGlDefaultInitialized) "1" else "0")
                     .put("threadPlacement", if (state.threadPlacement) "1" else "0")
+                    .put("gpuTurboMenu", if (state.gpuTurboMenu) "1" else "0")
                     .put("autoMesaGlVersionOverride", if (state.autoMesaGlVersionOverride) "1" else "0"))
             }
             manager.createContainerAsync(data, contents) { created ->
@@ -1116,6 +1120,10 @@ private fun ContainerCategoryV2(
                 SettingsDivider()
                 SettingToggle(uiStr(R.string.ui_thread_placement), s.threadPlacement) { s.threadPlacement = it }
                 SettingsDivider()
+                if (GpuTurbo.isSupported()) {
+                    SettingToggle(uiStr(R.string.ui_gpu_turbo_menu), s.gpuTurboMenu) { s.gpuTurboMenu = it }
+                    SettingsDivider()
+                }
                 CpuSelectorRow(uiStr(R.string.processor_affinity), s.cpu64) { index, checked -> s.cpu64[index] = checked }
                 SettingsDivider()
                 CpuSelectorRow(uiStr(R.string.ui_processor_affinity_32_bit_apps), s.cpu32) { index, checked -> s.cpu32[index] = checked }

@@ -45,7 +45,10 @@ data class GraphicsPanelState(
     val wfgModeIndex: Int,
     val wfgTargetFps: Int,
     // Fastest refresh rate the panel can run at (0 = unknown): the ceiling for the target FPS.
-    val wfgPanelHz: Int
+    val wfgPanelHz: Int,
+    // GPU Turbo row: shown only when the container/shortcut option is on and the GPU is an Adreno.
+    val gpuTurboVisible: Boolean,
+    val gpuTurboEnabled: Boolean
 )
 
 interface GraphicsPanelCallbacks {
@@ -58,6 +61,7 @@ interface GraphicsPanelCallbacks {
     fun onReshadeEffectChanged(index: Int)
     fun onReshadeStrengthChanged(percent: Int)
     fun onWfgChanged(enabled: Boolean, qualityIndex: Int, modeIndex: Int, targetFps: Int)
+    fun onGpuTurboChanged(enabled: Boolean)
 }
 
 object GraphicsSidebarPanelHost {
@@ -166,6 +170,7 @@ private fun GraphicsSidebarPanel(
     var reshadeIndex by remember { mutableStateOf(state.reshadeEffectIndex) }
     var reshadeStrength by remember { mutableStateOf(state.reshadeStrengthPercent) }
     var wfgEnabled by remember { mutableStateOf(state.wfgEnabled) }
+    var gpuTurbo by remember { mutableStateOf(state.gpuTurboEnabled) }
     var wfgQualityIndex by remember { mutableStateOf(state.wfgQualityIndex) }
     var wfgModeIndex by remember { mutableStateOf(state.wfgModeIndex) }
     // The target FPS in effect (kept while a multiplier is selected, so switching back restores it)
@@ -364,6 +369,20 @@ private fun GraphicsSidebarPanel(
                         }
                     )
                 }
+            }
+        }
+
+        if (state.gpuTurboVisible) {
+            SidebarGap()
+            SidebarCard {
+                SidebarInlineToggle(
+                    label = uiStr(R.string.ui_gpu_turbo),
+                    checked = gpuTurbo,
+                    onCheckedChange = {
+                        gpuTurbo = it
+                        callbacks.onGpuTurboChanged(it)
+                    }
+                )
             }
         }
 

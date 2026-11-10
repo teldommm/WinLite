@@ -89,6 +89,7 @@ import com.winlator.cmod.core.GameSaveManager
 import com.winlator.cmod.core.DefaultVersion
 import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.GPUInformation
+import com.winlator.cmod.core.GpuTurbo
 import com.winlator.cmod.core.OpenGLDriverDefaults
 import com.winlator.cmod.core.StringUtils
 import com.winlator.cmod.fexcore.FEXCorePresetManager
@@ -281,6 +282,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var syncCpu by mutableStateOf(shortcut.getExtra("syncCpuTopology", if (container.isSyncCpuTopology()) "1" else "0") == "1")
     // Follows the container until the shortcut saves its own choice.
     var threadPlacement by mutableStateOf(shortcut.getExtra("threadPlacement", container.getExtra("threadPlacement", "0")) == "1")
+    var gpuTurboMenu by mutableStateOf(shortcut.getExtra("gpuTurboMenu", container.getExtra("gpuTurboMenu", "0")) == "1")
     val cpu = mutableStateListOf<Boolean>().apply {
         val count = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         val selected = shortcut.getExtra("cpuList", container.getCPUList(true)).split(',').map(String::trim).toSet()
@@ -493,6 +495,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
         shortcut.putExtra("cpuList", cpu.indices.filter { cpu[it] }.joinToString(","))
         shortcut.putExtra("syncCpuTopology", if (syncCpu) "1" else "0")
         shortcut.putExtra("threadPlacement", if (threadPlacement) "1" else "0")
+        shortcut.putExtra("gpuTurboMenu", if (gpuTurboMenu) "1" else "0")
         save()
     }
 
@@ -1158,6 +1161,10 @@ private fun ShortcutCategoryV2(
                 SettingsDivider()
                 SettingToggle(uiStr(R.string.ui_thread_placement), s.threadPlacement) { s.threadPlacement = it; s.saveCpu() }
                 SettingsDivider()
+                if (GpuTurbo.isSupported()) {
+                    SettingToggle(uiStr(R.string.ui_gpu_turbo_menu), s.gpuTurboMenu) { s.gpuTurboMenu = it; s.saveCpu() }
+                    SettingsDivider()
+                }
                 CpuSelectorRow(uiStr(R.string.processor_affinity), s.cpu) { index, checked -> s.cpu[index] = checked; s.saveCpu() }
             }
             SettingsCard {

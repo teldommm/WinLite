@@ -26,6 +26,7 @@ add_library(winlator SHARED
         winlator/alsa_client.c
         winlator/vulkan.c
         winlator/thread_affinity.c
+        winlator/gpu_turbo.c
 )
 
 # JNI entry points have a fixed (env, obj) signature, so unused parameters are expected.
