@@ -80,16 +80,14 @@ import com.winlator.cmod.ui.theme.hairlineColor
 import kotlin.math.roundToInt
 import com.winlator.cmod.ui.theme.TablerIcons
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.border
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.graphicsLayer
-import kotlinx.coroutines.delay
 
 interface GameDetailCallbacks {
     fun onBack()
@@ -187,7 +185,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                 (artwork.width.toFloat() / artwork.height.toFloat()).coerceIn(0.5f, 1.29f)
             } else null
             if (posterRatio != null && artwork != null) {
-                DetailPoster(artwork, posterRatio, Modifier.align(Alignment.BottomStart).reveal(120, 12.dp))
+                DetailPoster(artwork, posterRatio, Modifier.align(Alignment.BottomStart))
             }
 
             // The stat chips sit bottom-left, beside the poster when there is one. Where the picture
@@ -202,7 +200,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                 AnimatedVisibility(
                     stats.loaded,
                     modifier = Modifier.align(Alignment.BottomStart).padding(start = chipsStart, end = chipsEndReserve, bottom = 24.dp),
-                    enter = fadeIn(tween(320, delayMillis = 60))
+                    enter = EnterTransition.None
                 ) {
                     StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
                 }
@@ -210,11 +208,11 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
 
             ArtPlateButton(
                 onClick = callbacks::onBack,
-                modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 16.dp).reveal(0, 0.dp)
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 16.dp)
             ) { Icon(TablerIcons.ArrowLeft, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp)) }
 
             // 74dp = 18 margin + 44 plate + 12 gap, on both sides, so a long title never runs under a plate.
-            Column(Modifier.align(Alignment.TopStart).padding(start = 74.dp, end = 74.dp, top = 15.dp).reveal(80, 10.dp)) {
+            Column(Modifier.align(Alignment.TopStart).padding(start = 74.dp, end = 74.dp, top = 15.dp)) {
                 Text(
                     title,
                     color = Color.White,
@@ -234,10 +232,10 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                 )
             }
 
-            FavoriteButton(favorite, toggleFavorite, Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 16.dp).reveal(0, 0.dp))
+            FavoriteButton(favorite, toggleFavorite, Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 16.dp))
 
             Surface(
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 34.dp, bottom = 24.dp).width(panelWidth).reveal(140, 18.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 34.dp, bottom = 24.dp).width(panelWidth),
                 shape = WinZShapes.Large,
                 color = OnArtwork.PanelFill,
                 border = BorderStroke(1.dp, OnArtwork.PlateBorder)
@@ -267,21 +265,6 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
 
 // Top of the poster in landscape: clears the title block (two title lines + container).
 private val POSTER_TOP = 132.dp
-
-// Fade + rise once, when the page enters the composition, after delayMillis. Used to stagger the
-// landscape page's parts instead of having them all present on the first frame.
-@Composable
-private fun Modifier.reveal(delayMillis: Int, rise: Dp): Modifier {
-    val progress = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        delay(delayMillis.toLong())
-        progress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
-    }
-    return this.graphicsLayer {
-        alpha = progress.value
-        translationY = (1f - progress.value) * rise.toPx()
-    }
-}
 
 // Round plate for a control that sits on the artwork (back, favorite). Same translucent look as the
 // selected All / Favorites / Recent chip, but always light-on-dark: the artwork under it is darkened
