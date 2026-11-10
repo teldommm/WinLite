@@ -50,6 +50,10 @@ bool vkr_dis_prepare(VkrDis* dis, uint32_t width, uint32_t height, VkFormat form
 
 uint32_t vkr_dis_plan(VkrDis* dis, uint32_t capacity, uint64_t source_frames);
 
+// The game's smoothed frame interval as vkr_dis_plan measures it, in nanoseconds; 0 while the
+// estimate is not settled yet. The renderer spaces the generated and real presents by it.
+uint64_t vkr_dis_source_interval_ns(const VkrDis* dis);
+
 void vkr_dis_process(VkrDis* dis, VkCommandBuffer cmd, VkImage source,
                      uint32_t width, uint32_t height, uint32_t generations);
 

@@ -439,7 +439,19 @@ public:
         bool     newFrame = false;   // the composite is a new game frame for WFG
         uint32_t genCount = 0;
         uint32_t genIdx[VKR_DIS_MAX_GENERATIONS] = {};
+        // VK_GOOGLE_display_timing: when each image should reach the display (CLOCK_MONOTONIC
+        // ns, 0 = as soon as possible). [g] for generated frame g, [genCount] for the real one.
+        bool     paced = false;
+        uint64_t presentAt[VKR_DIS_MAX_GENERATIONS + 1] = {};
     };
+    // VK_GOOGLE_display_timing is enabled on the device: WFG spaces its presents evenly instead
+    // of handing FIFO a back-to-back burst (at 120 Hz a 30 fps x2 burst shows 8 ms + 25 ms).
+    bool                  displayTiming_ = false;
+    uint64_t              wfgPaceLastNs  = 0;     // target time of the last paced real frame
+    uint32_t              wfgPresentId   = 0;
+    uint64_t              wfgPacedFrames = 0;
+    uint64_t              wfgPaceResets  = 0;
+    void     wfgPlanPresentTimes(WfgFrame& wf);
     std::atomic<bool>     wfgRequested{false};
     std::atomic<uint32_t> wfgFlowSide{180};
     std::atomic<uint32_t> wfgTargetFps{0};
@@ -465,7 +477,7 @@ public:
     uint64_t              wfgAheadSum = 0;
     bool     wfgSkipRender();
     uint64_t wfgPeriodNs() const;
-    void     wfgNotePresented(uint32_t count, uint64_t acquireWaitNs);
+    void     wfgNotePresented(const WfgFrame& wf, uint32_t count, uint64_t acquireWaitNs);
     VkrDis*          wfg              = nullptr;
     bool             wfgUnavailable   = false;
     bool             wfgSwapchain     = false;    // the swapchain was built for generation

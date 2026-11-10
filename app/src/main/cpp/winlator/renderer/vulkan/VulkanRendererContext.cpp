@@ -382,14 +382,18 @@ void VulkanRendererContext::createLogicalDevice() {
     PFN_vkEnumerateDeviceExtensionProperties enumDevExts =
         (PFN_vkEnumerateDeviceExtensionProperties)gipa(instance, "vkEnumerateDeviceExtensionProperties");
     bool hasForeignQueue = false;
+    bool hasDisplayTiming = false;
     if (enumDevExts) {
         uint32_t n=0;
         if (enumDevExts(physicalDevice,nullptr,&n,nullptr)==VK_SUCCESS && n>0) {
             std::vector<VkExtensionProperties> av(n);
             if (enumDevExts(physicalDevice,nullptr,&n,av.data())==VK_SUCCESS) {
-                for (auto& e:av)
+                for (auto& e:av) {
                     if (strcmp(e.extensionName, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME)==0)
                         hasForeignQueue = true;
+                    if (strcmp(e.extensionName, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME)==0)
+                        hasDisplayTiming = true;
+                }
             }
         }
     }
@@ -405,6 +409,11 @@ void VulkanRendererContext::createLogicalDevice() {
     } else {
         RLOG_E("AHB imports want VK_EXT_queue_family_foreign, but the Vulkan device does not advertise it; continuing without it");
     }
+    // WFG paces its generated and real presents with desiredPresentTime (the Android swapchain
+    // turns it into the buffer's presentation timestamp, honoured by SurfaceFlinger).
+    displayTiming_ = hasDisplayTiming;
+    if (hasDisplayTiming) extList.push_back(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
+    RLOG("VK_GOOGLE_display_timing %s", hasDisplayTiming ? "enabled (WFG present pacing)" : "unavailable");
     VkDeviceCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pQueueCreateInfos=&qi; ci.queueCreateInfoCount=1;
     ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
@@ -1110,9 +1119,23 @@ void VulkanRendererContext::renderFrame() {
     }
     slotSerial[currentFrame]=++submitSerial;   // this slot's fence now stands for frame #submitSerial
     VkSwapchainKHR scs[]={swapchain};
+    // Paced presents (WFG with VK_GOOGLE_display_timing): each image carries the time it should
+    // reach the display, so the generated and the real frame split the game's frame interval
+    // evenly instead of leaving FIFO's next two refreshes back to back.
+    VkPresentTimeGOOGLE ptime{};
+    VkPresentTimesInfoGOOGLE ptimes{};
+    ptimes.sType=VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE;
+    ptimes.swapchainCount=1; ptimes.pTimes=&ptime;
+    auto pacedNext=[&](uint64_t at) -> const void* {
+        if (!wf.paced) return nullptr;
+        ptime.presentID=++wfgPresentId;
+        ptime.desiredPresentTime=at;
+        return &ptimes;
+    };
     // Generated frames sit between the previous real frame and this one.
     for (uint32_t g=0; g<wf.genCount; g++) {
         VkPresentInfoKHR gpi{}; gpi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        gpi.pNext=pacedNext(wf.presentAt[g]);
         gpi.waitSemaphoreCount=1; gpi.pWaitSemaphores=&sSem[1+g];
         gpi.swapchainCount=1; gpi.pSwapchains=scs; gpi.pImageIndices=&wf.genIdx[g];
         VkResult gr=vk_.QueuePresentKHR(graphicsQueue,&gpi);
@@ -1120,11 +1143,12 @@ void VulkanRendererContext::renderFrame() {
         if (gr==VK_ERROR_OUT_OF_DATE_KHR||gr==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
     }
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.pNext=pacedNext(wf.presentAt[wf.genCount]);
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
     res = vk_.QueuePresentKHR(graphicsQueue, &pi);
     if (res==VK_SUCCESS||res==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
-    if (wf.active) wfgNotePresented(1+wf.genCount,acquireWaitNs);
+    if (wf.active) wfgNotePresented(wf,1+wf.genCount,acquireWaitNs);
 
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
     // SUBOPTIMAL only says the surface could be matched better. Some drivers return it on every

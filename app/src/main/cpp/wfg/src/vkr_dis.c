@@ -2604,6 +2604,12 @@ void vkr_dis_generate_into(VkrDis* d, VkCommandBuffer cmd, uint32_t generation,
     dis_render_into(d, cmd, t, (int)generation, target_image, width, height, base_image);
 }
 
+uint64_t vkr_dis_source_interval_ns(const VkrDis* d) {
+    if (!d || d->unavailable || d->src_samples < DIS_MIN_RATE_SAMPLES || d->src_interval <= 0.0f)
+        return 0;
+    return (uint64_t)((double)d->src_interval * 1.0e9);
+}
+
 static void dis_reset(VkrDis* d) {
     d->frame_count = 0;
     d->last_generations = 0;
