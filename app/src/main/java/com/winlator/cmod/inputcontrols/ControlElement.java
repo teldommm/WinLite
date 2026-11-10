@@ -3,6 +3,9 @@ package com.winlator.cmod.inputcontrols;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
+import android.graphics.LinearGradient;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PointF;
@@ -678,8 +681,10 @@ public class ControlElement {
     }
 
     private static final int WINLATOR_BLUE = 0xff2184ff;
-    private static final int DARK_SURFACE = 0xff06111d;
-    private static final int EDGE_SOFT = 0xff7fa8d8;
+    // Neutral greys (the old surface/edge were blue-tinted): the controls read as part of the
+    // app's dark theme, and the profile's theme colour is the only colour left on them.
+    private static final int DARK_SURFACE = 0xff0a0a0b;
+    private static final int EDGE_SOFT = 0xffc4c4c8;
 
     
     
@@ -712,7 +717,16 @@ public class ControlElement {
         paint.setStrokeWidth(strokeWidth);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setColorFilter(null);
+        paint.setShader(null);
         paint.setAntiAlias(true);
+    }
+
+    // Outline brighter at the bottom than at the top: a soft light from below, as on the reference
+    // controls. The paint's shader is cleared by the next setupPaint().
+    private void useEdgeGradient(Paint paint, float top, float bottom, int topAlpha, int bottomAlpha) {
+        paint.setColor(0xff000000);
+        paint.setShader(new LinearGradient(0, top, 0, bottom,
+                withAlpha(EDGE_SOFT, topAlpha), withAlpha(EDGE_SOFT, bottomAlpha), Shader.TileMode.CLAMP));
     }
 
     private void drawCenteredText(Canvas canvas, String text, float cx, float cy, float maxWidth, float maxSize, int color) {
@@ -729,37 +743,52 @@ public class ControlElement {
 
     private void drawSoftRoundRect(Canvas canvas, float left, float top, float right, float bottom, float radius, boolean active) {
         Paint paint = inputControlsView.getPaint();
+        float unit = inputControlsView.getSnappingSize() * scale;
 
-        
-        setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 64 : 16), Math.max(1f, inputControlsView.getSnappingSize() * 0.55f * scale));
-        canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
-
-        setupPaint(paint, Paint.Style.STROKE, withAlpha(EDGE_SOFT, active ? 70 : 28), Math.max(1f, inputControlsView.getSnappingSize() * 0.22f * scale));
+        setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 64 : 16), Math.max(1f, unit * 0.55f));
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
 
         setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 135), 0);
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
 
-        
-        float inset = Math.max(1f, inputControlsView.getSnappingSize() * 0.35f * scale);
-        setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, active ? 58 : 24), Math.max(1f, inputControlsView.getSnappingSize() * 0.08f * scale));
-        canvas.drawRoundRect(left + inset, top + inset, right - inset, bottom - inset, Math.max(0, radius - inset), Math.max(0, radius - inset), paint);
+        // Soft glow just inside the edge: three hairlines stepping inwards and fading out.
+        float glow = Math.max(1f, unit * 0.30f);
+        int[] glowAlpha = active ? new int[] {46, 26, 12} : new int[] {30, 16, 7};
+        for (int i = 0; i < 3; i++) {
+            float inset = glow * (i + 0.5f) + Math.max(1f, unit * 0.12f);
+            setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, glowAlpha[i]), glow);
+            canvas.drawRoundRect(left + inset, top + inset, right - inset, bottom - inset, Math.max(0, radius - inset), Math.max(0, radius - inset), paint);
+        }
+
+        // The outline on top, brighter along the bottom.
+        setupPaint(paint, Paint.Style.STROKE, 0xff000000, Math.max(1f, unit * 0.24f));
+        useEdgeGradient(paint, top, bottom, active ? 70 : 34, active ? 140 : 92);
+        canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
+        paint.setShader(null);
     }
 
     private void drawSoftCircle(Canvas canvas, float cx, float cy, float radius, boolean active, int accentColor, boolean fillActive) {
         Paint paint = inputControlsView.getPaint();
+        float unit = inputControlsView.getSnappingSize() * scale;
 
-        setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 72 : 18), Math.max(1f, inputControlsView.getSnappingSize() * 0.55f * scale));
-        canvas.drawCircle(cx, cy, radius, paint);
-
-        setupPaint(paint, Paint.Style.STROKE, withAlpha(EDGE_SOFT, active ? 74 : 30), Math.max(1f, inputControlsView.getSnappingSize() * 0.20f * scale));
+        setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 72 : 18), Math.max(1f, unit * 0.55f));
         canvas.drawCircle(cx, cy, radius, paint);
 
         setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 140), 0);
         canvas.drawCircle(cx, cy, radius, paint);
 
-        setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, active ? 44 : 18), Math.max(1f, inputControlsView.getSnappingSize() * 0.08f * scale));
-        canvas.drawCircle(cx, cy, radius * 0.88f, paint);
+        float glow = Math.max(1f, unit * 0.30f);
+        int[] glowAlpha = active ? new int[] {46, 26, 12} : new int[] {30, 16, 7};
+        for (int i = 0; i < 3; i++) {
+            float inset = glow * (i + 0.5f) + Math.max(1f, unit * 0.12f);
+            setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, glowAlpha[i]), glow);
+            canvas.drawCircle(cx, cy, Math.max(0, radius - inset), paint);
+        }
+
+        setupPaint(paint, Paint.Style.STROKE, 0xff000000, Math.max(1f, unit * 0.22f));
+        useEdgeGradient(paint, cy - radius, cy + radius, active ? 74 : 36, active ? 140 : 96);
+        canvas.drawCircle(cx, cy, radius, paint);
+        paint.setShader(null);
     }
 
     private void drawTriangle(Canvas canvas, float cx, float cy, float size, int direction, int color) {
@@ -960,21 +989,29 @@ public class ControlElement {
                 float cx = stickCenterX(boundingBox);
                 float cy = stickCenterY(boundingBox);
                 float outer = boundingBox.height() * 0.5f;
-                float innerRing = outer * 0.52f;
+                float innerRing = outer * 0.56f;
                 float thumbRadius = outer * 0.42f;
 
-                
-                setupPaint(paint, Paint.Style.FILL, withAlpha(DARK_SURFACE, active ? 155 : 118), 0);
+                // Base: a radial gradient, nearly black in the middle and lighter towards the rim.
+                setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
+                paint.setShader(new RadialGradient(cx, cy, outer,
+                        new int[] {
+                                withAlpha(0xff020202, active ? 150 : 120),
+                                withAlpha(0xff060606, active ? 155 : 125),
+                                withAlpha(0xff2a2a2d, active ? 190 : 150)
+                        },
+                        new float[] {0f, 0.6f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(cx, cy, outer, paint);
 
-                
-                setupPaint(paint, Paint.Style.STROKE, withAlpha(EDGE_SOFT, active ? 62 : 26), Math.max(1f, snappingSize * 0.20f * scale));
-                canvas.drawCircle(cx, cy, outer * 0.96f, paint);
-                setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 72 : 20), Math.max(1f, snappingSize * 0.50f * scale));
-                canvas.drawCircle(cx, cy, outer * 0.98f, paint);
+                // Rim: a hairline, brighter along the bottom (same light as the buttons).
+                setupPaint(paint, Paint.Style.STROKE, 0xff000000, Math.max(1f, snappingSize * 0.18f * scale));
+                useEdgeGradient(paint, cy - outer, cy + outer, active ? 70 : 34, active ? 130 : 88);
+                canvas.drawCircle(cx, cy, outer * 0.985f, paint);
+                paint.setShader(null);
 
-                
-                setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 235 : 205), Math.max(1f, snappingSize * 0.22f * scale));
+                // One thin ring in the profile colour marks the travel limit - fine and quiet, no
+                // longer the heavy coloured ring it used to be.
+                setupPaint(paint, Paint.Style.STROKE, withAlpha(getThemeColor(), active ? 150 : 95), Math.max(1f, snappingSize * 0.09f * scale));
                 canvas.drawCircle(cx, cy, innerRing, paint);
 
                 // Thumb follows the finger only while held; otherwise it sits in the centre. (The
@@ -983,11 +1020,17 @@ public class ControlElement {
                 float thumbstickX = held ? currentPosition.x : cx;
                 float thumbstickY = held ? currentPosition.y : cy;
 
-                setupPaint(paint, Paint.Style.FILL, withAlpha(DARK_SURFACE, 190), 0);
+                // Thumb: a flat grey disc, a touch lighter at the edge; it brightens while held.
+                int core = active ? 0xff626266 : 0xff4d4d50;
+                int edge = active ? 0xff787880 : 0xff5f5f64;
+                setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
+                paint.setShader(new RadialGradient(thumbstickX, thumbstickY, thumbRadius,
+                        new int[] {withAlpha(core, 225), withAlpha(core, 225), withAlpha(edge, 235)},
+                        new float[] {0f, 0.62f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(thumbstickX, thumbstickY, thumbRadius, paint);
 
-                setupPaint(paint, Paint.Style.STROKE, withAlpha(EDGE_SOFT, 45), Math.max(1f, snappingSize * 0.12f * scale));
-                canvas.drawCircle(thumbstickX, thumbstickY, thumbRadius * 0.96f, paint);
+                setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, active ? 70 : 38), Math.max(1f, snappingSize * 0.10f * scale));
+                canvas.drawCircle(thumbstickX, thumbstickY, thumbRadius * 0.97f, paint);
                 break;
             }
 
