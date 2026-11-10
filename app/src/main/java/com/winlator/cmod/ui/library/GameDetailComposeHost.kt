@@ -490,7 +490,10 @@ private fun rememberStatEntries(stats: GameStats, always: Boolean = false): List
             if (always || stats.playCount > 0) add(StatEntry(TablerIcons.DeviceGamepad2, playsLabel, stats.playCount.toString()))
             if (stats.lastPlayedMillis > 0L) add(StatEntry(TablerIcons.History, lastPlayedLabel, formatLastPlayed(stats.lastPlayedMillis)))
             else if (always) add(StatEntry(TablerIcons.History, lastPlayedLabel, "\u2014"))
-            stats.sizeText?.let { add(StatEntry(TablerIcons.Database, sizeLabel, it)) }
+            // Size is measured later (or unknown for a broad folder): with always the chip is there
+            // from the start, with a dash until the value arrives, so it doesn't pop in.
+            if (stats.sizeText != null) add(StatEntry(TablerIcons.Database, sizeLabel, stats.sizeText))
+            else if (always) add(StatEntry(TablerIcons.Database, sizeLabel, "\u2014"))
         }
     }
 }
