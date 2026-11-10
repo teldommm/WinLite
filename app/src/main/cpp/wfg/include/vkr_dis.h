@@ -61,6 +61,13 @@ void vkr_dis_generate_into(VkrDis* dis, VkCommandBuffer cmd, uint32_t generation
                            VkImage target_image, uint32_t width, uint32_t height,
                            VkImage base_image);
 
+// As vkr_dis_generate_into, with the frame's time between the previous game frame (0) and the
+// current one (1) given by the caller: the renderer passes where the frame lands on the display,
+// which differs from the even split when the output does not divide the refresh rate.
+void vkr_dis_generate_into_at(VkrDis* dis, VkCommandBuffer cmd, uint32_t generation, float t,
+                              VkImage target_image, uint32_t width, uint32_t height,
+                              VkImage base_image);
+
 #ifdef __cplusplus
 }
 #endif

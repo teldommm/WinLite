@@ -2604,6 +2604,16 @@ void vkr_dis_generate_into(VkrDis* d, VkCommandBuffer cmd, uint32_t generation,
     dis_render_into(d, cmd, t, (int)generation, target_image, width, height, base_image);
 }
 
+void vkr_dis_generate_into_at(VkrDis* d, VkCommandBuffer cmd, uint32_t generation, float t,
+                              VkImage target_image, uint32_t width, uint32_t height,
+                              VkImage base_image) {
+    if (!d || !d->built || d->unavailable) return;
+    if (d->last_generations == 0) return;
+    if (!(t > 0.0f && t < 1.0f))   // also rejects NaN
+        t = (float)(generation + 1) / (float)(d->last_generations + 1);
+    dis_render_into(d, cmd, t, (int)generation, target_image, width, height, base_image);
+}
+
 uint64_t vkr_dis_source_interval_ns(const VkrDis* d) {
     if (!d || d->unavailable || d->src_samples < DIS_MIN_RATE_SAMPLES || d->src_interval <= 0.0f)
         return 0;

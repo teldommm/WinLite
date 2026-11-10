@@ -207,6 +207,7 @@ public:
     // per game frame, 0 chases targetFps instead (0 = the display refresh rate).
     void setWfgEnabled(bool enabled);
     void setWfgConfig(int flowSide, int targetFps, int multiplier, float refreshHz);
+    void setWfgFpsLimit(int fps);
     uint64_t getWfgGeneratedFrames() const { return wfgMadeFrames.load(std::memory_order_relaxed); }
     uint64_t getPresentedFrames() const { return presentedFrames.load(std::memory_order_relaxed); }
 
@@ -443,11 +444,31 @@ public:
         // ns, 0 = as soon as possible). [g] for generated frame g, [genCount] for the real one.
         bool     paced = false;
         uint64_t presentAt[VKR_DIS_MAX_GENERATIONS + 1] = {};
+        // Each generated frame's time between the previous game frame (0) and this one (1),
+        // from where it lands on the display; 0 = the even split.
+        float    phase[VKR_DIS_MAX_GENERATIONS] = {};
     };
     // VK_GOOGLE_display_timing is enabled on the device: WFG spaces its presents evenly instead
     // of handing FIFO a back-to-back burst (at 120 Hz a 30 fps x2 burst shows 8 ms + 25 ms).
     bool                  displayTiming_ = false;
     uint64_t              wfgPaceLastNs  = 0;     // target time of the last paced real frame
+    // Phase lock of the pace schedule to the game's frames (proportional + integral): keeps the
+    // chained schedule from drifting away on an interval estimate a few percent off.
+    int64_t               wfgPaceInteg   = 0;     // ns per frame, absorbs a steady rate error
+    std::atomic<uint32_t> wfgFpsLimit{0};         // the game's FPS limit, 0 = none
+    uint64_t              wfgPaceLate    = 0;     // batches whose schedule fell behind 'now'
+    uint64_t              wfgLimitPaced  = 0;     // batches paced on the exact limit interval
+    // The display's refresh grid, from VK_GOOGLE_display_timing feedback: the time a paced
+    // image really reached the display, and the refresh cycle. Targets snap onto this grid, so
+    // where each frame lands - and the interpolation phase it gets - is known, not guessed.
+    PFN_vkGetRefreshCycleDurationGOOGLE   getRefreshCycleGOOGLE_  = nullptr;
+    PFN_vkGetPastPresentationTimingGOOGLE getPastPresentTimingGOOGLE_ = nullptr;
+    uint64_t              wfgVsyncAnchorNs = 0;   // a refresh the display really showed a frame at
+    uint64_t              wfgRefreshNs     = 0;   // the swapchain's refresh cycle, 0 = unknown
+    uint64_t              wfgLastRealDispNs = 0;  // when the last paced real frame is shown
+    uint64_t              wfgPresentLate   = 0;   // paced images shown a refresh or more late
+    uint64_t              wfgPresentTimed  = 0;   // paced images with display feedback
+    void     wfgPollDisplayTiming(uint64_t javaPeriod);
     uint32_t              wfgPresentId   = 0;
     uint64_t              wfgPacedFrames = 0;
     uint64_t              wfgPaceResets  = 0;

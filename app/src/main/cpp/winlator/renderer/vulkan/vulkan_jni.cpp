@@ -381,6 +381,15 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfg(
     r->setWfgEnabled(enabled == JNI_TRUE);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfgFpsLimit(
+    JNIEnv*, jobject, jlong handle, jint fps)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r) return;
+    r->setWfgFpsLimit((int)fps);
+}
+
 // {presented frames (real and generated), WFG-generated frames}
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetFrameCounts(

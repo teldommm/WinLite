@@ -148,6 +148,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
     private native void nativeSetWfg(long handle, boolean enabled, int flowSide, int targetFps,
                                      int multiplier, float refreshHz);
+    // The game's FPS limit (0 = none): WFG paces its presents to it while the game holds it.
+    @FastNative private native void nativeSetWfgFpsLimit(long handle, int fps);
     private native void nativeGetFrameCounts(long handle, long[] out);
 
     private native void nativeDumpRendererInfo(long handle);
@@ -875,8 +877,44 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     /**
+     * The WFG output rate when it is known up front: the game's FPS limit times a fixed
+     * multiplier, or the target of the target mode. 0 when it is not known (no limit with a
+     * fixed multiplier, or a target of "the refresh rate").
+     */
+    private int wfgOutputFps() {
+        if (pendingWfgMultiplier >= 2) {
+            return fpsLimit > 0 ? fpsLimit * pendingWfgMultiplier : 0;
+        }
+        return Math.max(0, pendingWfgTargetFps);
+    }
+
+    /**
+     * The panel mode for WFG at its current resolution. Each output frame must last a whole
+     * number of refreshes, or the cadence alternates (60 fps on 165 Hz: 3-3-3-2 refreshes,
+     * 18.2/12.1 ms). With the output rate known, the fastest mode it divides evenly (within 1%)
+     * is taken: 120 Hz for 60 fps on a 60/90/120/144/165 Hz panel. Otherwise, or when no mode
+     * divides it, the fastest mode: the finer the refresh, the smaller an uneven step.
+     */
+    public static android.view.Display.Mode wfgMode(android.view.Display display, int outputFps) {
+        android.view.Display.Mode fastest = fastestMode(display);
+        if (fastest == null || outputFps <= 0) return fastest;
+        android.view.Display.Mode current = display.getMode();
+        android.view.Display.Mode best = null;
+        for (android.view.Display.Mode m : display.getSupportedModes()) {
+            if (m.getPhysicalWidth() != current.getPhysicalWidth()
+                    || m.getPhysicalHeight() != current.getPhysicalHeight()) continue;
+            float ratio = m.getRefreshRate() / outputFps;
+            long whole = Math.round(ratio);
+            if (whole < 1 || Math.abs(ratio - whole) > 0.01f * whole) continue;
+            if (best == null || m.getRefreshRate() > best.getRefreshRate()) best = m;
+        }
+        return best != null ? best : fastest;
+    }
+
+    /**
      * Generated frames need display refresh slots above the game's rate: with WFG on, ask for the
-     * panel's fastest mode (the window otherwise stays at the system's default, often 60 Hz).
+     * mode wfgMode picks (the window otherwise stays at the system's default, often 60 Hz).
+     * Called again whenever the output rate changes (FPS limit, multiplier, target).
      */
     private void requestWfgRefreshRate(boolean on) {
         post(() -> {
@@ -887,10 +925,15 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             android.view.WindowManager.LayoutParams lp = window.getAttributes();
             Surface surface = getHolder().getSurface();
             if (on) {
-                android.view.Display.Mode best = fastestMode(display);
+                android.view.Display.Mode best = wfgMode(display, wfgOutputFps());
+                if (best == null) return;
                 if (savedDisplayModeId < 0) savedDisplayModeId = lp.preferredDisplayModeId;
-                lp.preferredDisplayModeId = best.getModeId();
-                window.setAttributes(lp);
+                if (lp.preferredDisplayModeId != best.getModeId()) {
+                    lp.preferredDisplayModeId = best.getModeId();
+                    window.setAttributes(lp);
+                    android.util.Log.i("WinLite", "WFG display mode " + best.getRefreshRate()
+                            + " Hz for output " + wfgOutputFps() + " fps");
+                }
                 setSurfaceFrameRate(surface, best.getRefreshRate());
             } else if (savedDisplayModeId >= 0) {
                 lp.preferredDisplayModeId = savedDisplayModeId;
@@ -939,6 +982,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         if (display != null && display.getRefreshRate() > 1f) refreshHz = display.getRefreshRate();
         nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgTargetFps,
                 pendingWfgMultiplier, refreshHz);
+        nativeSetWfgFpsLimit(nativeHandle, fpsLimit);
     }
 
     public void setFilterMode(int mode) {
@@ -993,7 +1037,14 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public int getFpsLimit() {
         return fpsLimit;
     }
-    public void setFpsLimit(int limit) { this.fpsLimit = Math.max(0, Math.min(1000, limit)); }
+    public void setFpsLimit(int limit) {
+        int v = Math.max(0, Math.min(1000, limit));
+        boolean changed = v != fpsLimit;
+        this.fpsLimit = v;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetWfgFpsLimit(nativeHandle, fpsLimit); }
+        // The WFG output rate depends on the limit: the panel mode may have to follow it.
+        if (changed && pendingWfgEnabled) requestWfgRefreshRate(true);
+    }
     public void setPipMode(boolean pip) { inPipMode = pip; }
     public void requestRender() {}
 }

@@ -420,6 +420,12 @@ void VulkanRendererContext::createLogicalDevice() {
     if (vk_.CreateDevice(physicalDevice,&ci,nullptr,&device)!=VK_SUCCESS) throw std::runtime_error("device");
     vk_.GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)gipa(instance, "vkGetDeviceProcAddr");
     loadDeviceDispatch();
+    if (displayTiming_) {
+        getRefreshCycleGOOGLE_ = (PFN_vkGetRefreshCycleDurationGOOGLE)
+            vk_.GetDeviceProcAddr(device, "vkGetRefreshCycleDurationGOOGLE");
+        getPastPresentTimingGOOGLE_ = (PFN_vkGetPastPresentationTimingGOOGLE)
+            vk_.GetDeviceProcAddr(device, "vkGetPastPresentationTimingGOOGLE");
+    }
     vk_.GetDeviceQueue(device,graphicsQueueFamilyIndex,0,&graphicsQueue);
 
     vk_.GetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
