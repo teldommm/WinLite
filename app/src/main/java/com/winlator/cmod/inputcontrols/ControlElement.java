@@ -695,6 +695,28 @@ public class ControlElement {
         return schemeColor != 0 ? schemeColor : 0xffffffff;
     }
 
+    // The element's colour reaches the neutral parts too (outline, inner fade, stick rim), mixed in
+    // softly so the controls stay grey-ish. An uncoloured (white) element keeps the plain greys.
+    private boolean isNeutralTint() {
+        return (getThemeColor() & 0x00ffffff) == 0x00ffffff;
+    }
+
+    private int tintedEdge() {
+        return isNeutralTint() ? EDGE_SOFT : mixColor(EDGE_SOFT, getThemeColor(), 0.40f);
+    }
+
+    private int tintedFade() {
+        return isNeutralTint() ? 0xffffffff : mixColor(0xffffffff, getThemeColor(), 0.45f);
+    }
+
+    // Linear mix of two opaque colours: t = 0 gives a, t = 1 gives b.
+    private static int mixColor(int a, int b, float t) {
+        int r = Math.round(((a >> 16) & 0xff) * (1f - t) + ((b >> 16) & 0xff) * t);
+        int g = Math.round(((a >> 8) & 0xff) * (1f - t) + ((b >> 8) & 0xff) * t);
+        int bl = Math.round((a & 0xff) * (1f - t) + (b & 0xff) * t);
+        return 0xff000000 | (r << 16) | (g << 8) | bl;
+    }
+
     private boolean isVisuallyPressed() {
         return selected || currentPointerId != -1;
     }
@@ -718,6 +740,7 @@ public class ControlElement {
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setColorFilter(null);
         paint.setShader(null);
+        paint.clearShadowLayer();
         paint.setAntiAlias(true);
     }
 
@@ -725,6 +748,8 @@ public class ControlElement {
     // smoothly (exponentially) towards the middle. Circles use a radial gradient; rounded rects use
     // a per-pixel mask built from the distance to the edge (cached per size), so the fade follows
     // the exact shape and has no visible contour lines.
+    private ColorFilter fadeFilter;
+    private int fadeFilterColor;
     private Bitmap fadeMask;
     private int fadeMaskW, fadeMaskH;
     private float fadeMaskRadius, fadeMaskDepth;
@@ -740,6 +765,7 @@ public class ControlElement {
         Paint paint = inputControlsView.getPaint();
         float peak = peakAlpha * getEffectiveOpacity();
         if (circle) {
+            final int fadeRgb = tintedFade();
             final int steps = 18;
             int[] colors = new int[steps + 1];
             float[] pos = new float[steps + 1];
@@ -750,7 +776,7 @@ public class ControlElement {
                 pos[i] = inner + (1f - inner) * f;
                 float inside = depth * (1f - f);
                 int a = Math.max(0, Math.min(255, Math.round(peak * fadeProfile(inside, depth))));
-                colors[i] = (a << 24) | 0x00ffffff;
+                colors[i] = (a << 24) | (fadeRgb & 0x00ffffff);
             }
             // Everything inside `inner` stays at the first stop (alpha 0).
             setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
@@ -783,7 +809,14 @@ public class ControlElement {
         }
         setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
         paint.setAlpha(Math.max(0, Math.min(255, Math.round(peak))));
+        int fadeRgbRect = tintedFade();
+        if (fadeFilter == null || fadeFilterColor != fadeRgbRect) {
+            fadeFilter = new PorterDuffColorFilter(fadeRgbRect, PorterDuff.Mode.SRC_IN);
+            fadeFilterColor = fadeRgbRect;
+        }
+        paint.setColorFilter(fadeFilter);
         canvas.drawBitmap(fadeMask, l, t, paint);
+        paint.setColorFilter(null);
     }
 
     // Outline brighter at the bottom than at the top: a soft light from below, as on the reference
@@ -791,7 +824,7 @@ public class ControlElement {
     private void useEdgeGradient(Paint paint, float top, float bottom, int topAlpha, int bottomAlpha) {
         paint.setColor(0xff000000);
         paint.setShader(new LinearGradient(0, top, 0, bottom,
-                withAlpha(EDGE_SOFT, topAlpha), withAlpha(EDGE_SOFT, bottomAlpha), Shader.TileMode.CLAMP));
+                withAlpha(tintedEdge(), topAlpha), withAlpha(tintedEdge(), bottomAlpha), Shader.TileMode.CLAMP));
     }
 
     private void drawCenteredText(Canvas canvas, String text, float cx, float cy, float maxWidth, float maxSize, int color) {
@@ -799,7 +832,11 @@ public class ControlElement {
         int alpha = (color >>> 24) & 0xff;
         setupPaint(paint, Paint.Style.FILL, withAlpha(color, alpha), 0);
         paint.setTextSize(Math.min(getTextSizeForWidth(paint, text, maxWidth), maxSize));
+        // A faint glow in the text's own colour: small radius, low alpha.
+        float glowRadius = Math.max(2f, paint.getTextSize() * 0.11f);
+        paint.setShadowLayer(glowRadius, 0f, 0f, withAlpha(color, 85));
         canvas.drawText(text, cx, cy - ((paint.descent() + paint.ascent()) * 0.5f), paint);
+        paint.clearShadowLayer();
     }
 
     private int colorForText(String text) {
@@ -810,14 +847,14 @@ public class ControlElement {
         Paint paint = inputControlsView.getPaint();
         float unit = inputControlsView.getSnappingSize() * scale;
 
-        setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 97), 0);
+        setupPaint(paint, Paint.Style.FILL, active ? withAlpha(getThemeColor(), 190) : withAlpha(DARK_SURFACE, 94), 0);
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
 
         drawInnerFade(canvas, false, left, top, right, bottom, radius, Math.min(right - left, bottom - top) * 0.30f, active ? 70f : 58f);
 
         // The outline on top, brighter along the bottom.
         setupPaint(paint, Paint.Style.STROKE, 0xff000000, Math.max(1f, unit * 0.24f));
-        useEdgeGradient(paint, top, bottom, active ? 80 : 50, active ? 150 : 105);
+        useEdgeGradient(paint, top, bottom, active ? 70 : 34, active ? 130 : 88);
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint);
         paint.setShader(null);
     }
@@ -826,13 +863,13 @@ public class ControlElement {
         Paint paint = inputControlsView.getPaint();
         float unit = inputControlsView.getSnappingSize() * scale;
 
-        setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 101), 0);
+        setupPaint(paint, Paint.Style.FILL, active && fillActive ? withAlpha(accentColor, 190) : withAlpha(DARK_SURFACE, 98), 0);
         canvas.drawCircle(cx, cy, radius, paint);
 
         drawInnerFade(canvas, true, cx - radius, cy - radius, cx + radius, cy + radius, radius, radius * 0.58f, active ? 70f : 58f);
 
         setupPaint(paint, Paint.Style.STROKE, 0xff000000, Math.max(1f, unit * 0.22f));
-        useEdgeGradient(paint, cy - radius, cy + radius, active ? 84 : 52, active ? 150 : 110);
+        useEdgeGradient(paint, cy - radius, cy + radius, active ? 70 : 34, active ? 130 : 88);
         canvas.drawCircle(cx, cy, radius, paint);
         paint.setShader(null);
     }
@@ -1045,7 +1082,7 @@ public class ControlElement {
                                 withAlpha(0xff020202, active ? 126 : 105),
                                 withAlpha(0xff050505, active ? 130 : 109),
                                 withAlpha(0xff151516, active ? 142 : 118),
-                                withAlpha(0xff2e2e30, active ? 152 : 126)
+                                withAlpha(mixColor(0xff2e2e30, isNeutralTint() ? 0xff2e2e30 : getThemeColor(), 0.22f), active ? 152 : 126)
                         },
                         new float[] {0f, 0.5f, 0.8f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(cx, cy, outer, paint);
@@ -1067,16 +1104,23 @@ public class ControlElement {
                 float thumbstickX = held ? currentPosition.x : cx;
                 float thumbstickY = held ? currentPosition.y : cy;
 
-                // Thumb: a flat grey disc, a touch lighter at the edge; it brightens while held.
-                int core = active ? 0xff626266 : 0xff4d4d50;
-                int edge = active ? 0xff787880 : 0xff5f5f64;
+                // Thumb: grey, tinted with the element's colour (an uncoloured white element stays
+                // neutral grey). Darker in the middle, lighter towards the rim; lighter again while held.
+                int tint = getThemeColor();
+                boolean neutral = (tint & 0x00ffffff) == 0x00ffffff;
+                int core = mixColor(active ? 0xff676770 : 0xff515154, tint, neutral ? 0f : 0.45f);
+                int edge = mixColor(active ? 0xff7e7e86 : 0xff646469, tint, neutral ? 0f : 0.35f);
                 setupPaint(paint, Paint.Style.FILL, 0xff000000, 0);
                 paint.setShader(new RadialGradient(thumbstickX, thumbstickY, thumbRadius,
-                        new int[] {withAlpha(core, 225), withAlpha(core, 225), withAlpha(edge, 235)},
-                        new float[] {0f, 0.62f, 1f}, Shader.TileMode.CLAMP));
+                        new int[] {
+                                withAlpha(mixColor(core, 0xff000000, 0.28f), 225),
+                                withAlpha(core, 228),
+                                withAlpha(mixColor(edge, 0xffffffff, 0.12f), 238)
+                        },
+                        new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
                 canvas.drawCircle(thumbstickX, thumbstickY, thumbRadius, paint);
 
-                setupPaint(paint, Paint.Style.STROKE, withAlpha(0xffffffff, active ? 70 : 38), Math.max(1f, snappingSize * 0.10f * scale));
+                setupPaint(paint, Paint.Style.STROKE, withAlpha(tintedFade(), active ? 70 : 38), Math.max(1f, snappingSize * 0.10f * scale));
                 canvas.drawCircle(thumbstickX, thumbstickY, thumbRadius * 0.97f, paint);
                 break;
             }

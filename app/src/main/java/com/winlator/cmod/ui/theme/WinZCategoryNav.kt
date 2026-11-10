@@ -1,6 +1,8 @@
 package com.winlator.cmod.ui.theme
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -177,14 +179,16 @@ fun AnimatedCategoryContent(
         modifier = modifier.fillMaxWidth(),
         transitionSpec = {
             val sign = if (order.indexOf(targetState) >= order.indexOf(initialState)) 1 else -1
-            val fade = fadeIn(tween(WinZMotion.DurationM, delayMillis = 70, easing = LinearOutSlowInEasing))
+            // The old page leaves at once and only the new one eases in. Fading the old one out
+            // and then fading the new one in dipped through an empty screen - a visible blink.
+            val fade = fadeIn(tween(170, easing = LinearOutSlowInEasing))
             val slide = if (vertical) {
-                slideInVertically(tween(WinZMotion.DurationTabSlide, easing = FastOutSlowInEasing)) { sign * shiftPx }
+                slideInVertically(tween(WinZMotion.DurationTabSlide, easing = FastOutSlowInEasing)) { sign * shiftPx / 2 }
             } else {
-                slideInHorizontally(tween(WinZMotion.DurationTabSlide, easing = FastOutSlowInEasing)) { sign * shiftPx }
+                slideInHorizontally(tween(WinZMotion.DurationTabSlide, easing = FastOutSlowInEasing)) { sign * shiftPx / 2 }
             }
-            (fade + slide).togetherWith(fadeOut(tween(90, easing = FastOutLinearInEasing)))
-                .using(SizeTransform(clip = false) { _, _ -> tween(WinZMotion.DurationM, easing = FastOutSlowInEasing) })
+            (fade + slide).togetherWith(ExitTransition.None)
+                .using(SizeTransform(clip = false) { _, _ -> snap() })
         },
         label = "categoryContent"
     ) { category -> content(category) }
