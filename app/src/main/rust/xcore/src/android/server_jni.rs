@@ -9,12 +9,12 @@ use super::platform::{self, AndroidPlatform};
 use super::ahb_pixels::AhbPixels;
 use super::{guard, guard_or};
 use crate::bridge;
-use crate::frames::Output;
+use crate::frames::{CursorImage, Item, Output};
 use crate::log;
 use crate::proto::gfx::PixelStore;
 use crate::proto::{Config, Server};
 use crate::runtime::Runtime;
-use jni::objects::{JByteArray, JClass, JIntArray, JLongArray, JObject, JString};
+use jni::objects::{JByteArray, JClass, JIntArray, JLongArray, JObject, JObjectArray, JString};
 use jni::signature::{Primitive, ReturnType};
 use jni::sys::{jboolean, jdouble, jint, jlong, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
@@ -97,6 +97,8 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeCreate(
                 let out = output::output();
                 out.forget_drawables();
                 rt.set_output(Some(out as Arc<dyn Output>));
+                // A renderer that is already up has the previous server's tree (or none).
+                rt.replay();
                 let handle = NEXT.fetch_add(1, Ordering::Relaxed);
                 registry().lock().unwrap_or_else(|e| e.into_inner()).insert(handle, Arc::new(rt));
                 log::warn(&format!("X server started on {path} ({w}x{h})"));
@@ -276,7 +278,79 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetFpsLimit(_e
 #[no_mangle]
 pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetRenderer(_env: Env, _cls: JClass, api: jlong, ctx: jlong) {
     guard("nativeSetRenderer", || {
-        output::output().set_renderer(api as usize as *const RendererApi, ctx as usize as *mut std::os::raw::c_void)
+        output::output().set_renderer(api as usize as *const RendererApi, ctx as usize as *mut std::os::raw::c_void);
+        // A new renderer has nothing: the whole state goes to it, behind what is already queued.
+        if api != 0 && ctx != 0 {
+            for rt in runtimes() {
+                rt.replay();
+            }
+        }
+    })
+}
+
+fn runtimes() -> Vec<Arc<Runtime>> {
+    registry().lock().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
+}
+
+/// The app shows a cursor at all (touch modes hide it); applied in order by the frame thread.
+#[no_mangle]
+pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetCursorShown(_env: Env, _cls: JClass, shown: jboolean) {
+    guard("nativeSetCursorShown", || {
+        output::output().set_cursor_shown(shown == JNI_TRUE);
+        for rt in runtimes() {
+            rt.push_item(Item::CursorRefresh);
+        }
+    })
+}
+
+/// The arrow shown where no window has an X cursor of its own: R,G,B,A, `width * height * 4`.
+#[no_mangle]
+pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetDefaultCursor(env: Env, _cls: JClass, rgba: JByteArray, width: jint, height: jint) {
+    guard("nativeSetDefaultCursor", || {
+        let image = if rgba.as_raw().is_null() || width <= 0 || height <= 0 {
+            None
+        } else {
+            match env.convert_byte_array(&rgba) {
+                Ok(bytes) if bytes.len() >= width as usize * height as usize * 4 => Some(Arc::new(CursorImage {
+                    serial: 0,
+                    visible: true,
+                    hot_x: 0,
+                    hot_y: 0,
+                    width: width.min(i16::MAX as i32) as i16,
+                    height: height.min(i16::MAX as i32) as i16,
+                    rgba: bytes,
+                })),
+                _ => None,
+            }
+        };
+        output::output().set_default_cursor(image);
+        for rt in runtimes() {
+            rt.push_item(Item::CursorRefresh);
+        }
+    })
+}
+
+/// Windows whose WM_CLASS contains one of `classes` are not drawn and get no input.
+#[no_mangle]
+pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetHiddenWindowClasses(mut env: Env, _cls: JClass, classes: JObjectArray) {
+    guard("nativeSetHiddenWindowClasses", || {
+        let mut out = Vec::new();
+        if !classes.as_raw().is_null() {
+            let n = env.get_array_length(&classes).unwrap_or(0);
+            for i in 0..n {
+                let Ok(obj) = env.get_object_array_element(&classes, i) else { continue };
+                if obj.as_raw().is_null() {
+                    continue;
+                }
+                let js = JString::from(obj);
+                let v: Option<String> = env.get_string(&js).ok().map(|v| v.into());
+                if let Some(v) = v.filter(|v| !v.is_empty()) {
+                    out.push(v);
+                }
+                let _ = env.delete_local_ref(js);
+            }
+        }
+        crate::frames::set_hidden_classes(out);
     })
 }
 

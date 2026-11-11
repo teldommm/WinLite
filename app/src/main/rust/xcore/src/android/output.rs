@@ -1,20 +1,23 @@
 //! The renderer end of [`crate::frames`] on Android: `libvulkan_renderer.so` hands over a table of
-//! C functions and its context (`XCore.setRenderer`, from `VulkanXServerView`), and frames go
-//! straight into it from the server's frame thread (`xcore-frames`). That thread, not the I/O
+//! C functions and its context (`XCore.setRenderer`, from `VulkanXServerView`), and frames, the
+//! window tree, the pointer and the cursor go straight into it from the server's frame thread
+//! (`xcore-frames`). That thread, not the I/O
 //! thread, is the one that waits when the renderer holds its lock for long (the GPU wait when the
 //! cursor changes size, `DeviceWaitIdle` on a filter switch, the import of a new buffer).
 //!
-//! What `VulkanXServerView` did per frame in Java now happens here: point the window at the
-//! buffer (`updateWindowContentAHB`), remember which buffer each drawable last handed over so it
-//! can be given back when the server drops the drawable (`importedAhb` + `onDrawableRemoved`),
-//! and pass the renderer's display clock on to Present (`pushDisplayClockLocked`).
+//! What `VulkanXServerView` did in Java now happens here: point the window at the buffer
+//! (`updateWindowContentAHB`), remember which buffer each drawable last handed over so it can be
+//! given back when the server drops the drawable (`importedAhb` + `onDrawableRemoved`), pass the
+//! renderer's display clock on to Present (`pushDisplayClockLocked`), mirror the window tree into
+//! the renderer's, and give it the cursor (`applyCursorLocked`: shown by the app and by the
+//! client, its image only when it is another one).
 //!
 //! One renderer per process (there is one X server view), so the output is a process-wide object
 //! that every server instance shares.
 
 use super::ahb::{self, AHardwareBuffer};
 use super::platform;
-use crate::frames::{Item, Output};
+use crate::frames::{CursorImage, Item, Output};
 use crate::log;
 use crate::proto::Server;
 use std::collections::HashMap;
@@ -23,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 /// Layout shared with `vulkan_jni.cpp` (`XcoreRendererApi`); `version` first, so a mismatch is
-/// noticed before any other field is read.
+/// noticed before any other field is read. Window ids are the server's, as `int64_t`.
 #[repr(C)]
 pub struct RendererApi {
     pub version: u32,
@@ -33,14 +36,32 @@ pub struct RendererApi {
     pub release_buffer: unsafe extern "C" fn(ctx: *mut c_void, ahb: *mut AHardwareBuffer),
     /// The display clock (`[period_ns, phase_error_ns, sequence]`); 0 when there is none yet.
     pub display_clock: unsafe extern "C" fn(ctx: *mut c_void, out: *mut i64) -> i32,
+    // ---- version 2: the window tree and the cursor
+    /// Starts the tree over with just the root.
+    pub init_root: unsafe extern "C" fn(ctx: *mut c_void, root: i64, content: i64, width: i32, height: i32),
+    pub create_window: unsafe extern "C" fn(ctx: *mut c_void, id: i64, parent: i64, content: i64, x: i32, y: i32, width: i32, height: i32),
+    pub destroy_window: unsafe extern "C" fn(ctx: *mut c_void, id: i64),
+    pub map_window: unsafe extern "C" fn(ctx: *mut c_void, id: i64),
+    pub unmap_window: unsafe extern "C" fn(ctx: *mut c_void, id: i64),
+    pub reparent_window: unsafe extern "C" fn(ctx: *mut c_void, id: i64, parent: i64),
+    pub update_geometry: unsafe extern "C" fn(ctx: *mut c_void, id: i64, content: i64, x: i32, y: i32, width: i32, height: i32),
+    /// The children of `parent`, bottom-most first.
+    pub sync_children: unsafe extern "C" fn(ctx: *mut c_void, parent: i64, ids: *const i64, count: i32),
+    pub set_viewable: unsafe extern "C" fn(ctx: *mut c_void, id: i64, viewable: i32),
+    pub set_pointer: unsafe extern "C" fn(ctx: *mut c_void, x: i32, y: i32),
+    pub set_cursor_visible: unsafe extern "C" fn(ctx: *mut c_void, visible: i32),
+    /// R,G,B,A pixels, `stride` pixels per row.
+    pub update_cursor: unsafe extern "C" fn(ctx: *mut c_void, rgba: *const u8, width: i32, height: i32, stride: i32, hot_x: i32, hot_y: i32),
 }
 
-pub const RENDERER_API_VERSION: u32 = 1;
+pub const RENDERER_API_VERSION: u32 = 2;
 
 // The C side checks the same layout (vulkan_jni.cpp builds the table): version, then pointers.
-const _: () = assert!(std::mem::size_of::<RendererApi>() == 32);
+const _: () = assert!(std::mem::size_of::<RendererApi>() == 128);
 const _: () = assert!(std::mem::offset_of!(RendererApi, update_content) == 8);
 const _: () = assert!(std::mem::offset_of!(RendererApi, display_clock) == 24);
+const _: () = assert!(std::mem::offset_of!(RendererApi, init_root) == 32);
+const _: () = assert!(std::mem::offset_of!(RendererApi, update_cursor) == 120);
 
 struct Renderer {
     api: &'static RendererApi,
@@ -58,11 +79,19 @@ struct Inner {
     shown: HashMap<u32, usize>,
     /// Sequence of the last display clock passed on; -1: none (Present paces without it).
     clock_seq: i64,
+    /// The X cursor under the pointer, as last queued (`None`: none, the default arrow).
+    x_cursor: Option<Arc<CursorImage>>,
+    /// The image the renderer has: the X cursor's serial, 0 for the default arrow, -1 none.
+    sent_serial: i64,
 }
 
 pub struct AndroidOutput {
     active: AtomicBool,
     inner: Mutex<Inner>,
+    /// The app shows a cursor at all (touch modes hide it).
+    cursor_shown: AtomicBool,
+    /// The arrow where no window has an X cursor of its own (from the app's resources).
+    default_cursor: Mutex<Option<Arc<CursorImage>>>,
 }
 
 fn lock(m: &Mutex<Inner>) -> MutexGuard<'_, Inner> {
@@ -75,7 +104,9 @@ pub fn output() -> Arc<AndroidOutput> {
     OUT.get_or_init(|| {
         Arc::new(AndroidOutput {
             active: AtomicBool::new(false),
-            inner: Mutex::new(Inner { renderer: None, shown: HashMap::new(), clock_seq: -1 }),
+            inner: Mutex::new(Inner { renderer: None, shown: HashMap::new(), clock_seq: -1, x_cursor: None, sent_serial: -1 }),
+            cursor_shown: AtomicBool::new(false),
+            default_cursor: Mutex::new(None),
         })
     })
     .clone()
@@ -98,8 +129,10 @@ impl AndroidOutput {
             }
         };
         let mut g = lock(&self.inner);
-        // A different renderer has imported nothing of what the last one was handed.
+        // A different renderer has imported nothing of what the last one was handed, and has no
+        // cursor image.
         g.shown.clear();
+        g.sent_serial = -1;
         if g.clock_seq != -1 {
             g.clock_seq = -1;
             platform::set_display_clock(0, 0, 0);
@@ -111,6 +144,46 @@ impl AndroidOutput {
     /// A new server, or none: its drawables are not the ones `shown` knows about.
     pub fn forget_drawables(&self) {
         lock(&self.inner).shown.clear();
+    }
+
+    /// The app shows the cursor or not. Applied by the frame thread ([`Item::CursorRefresh`]),
+    /// so the caller (the UI thread) never waits for a busy renderer.
+    pub fn set_cursor_shown(&self, shown: bool) {
+        self.cursor_shown.store(shown, Ordering::Release);
+    }
+
+    /// The default arrow, R,G,B,A (see [`AndroidOutput::set_cursor_shown`] for when it applies).
+    pub fn set_default_cursor(&self, image: Option<Arc<CursorImage>>) {
+        *self.default_cursor.lock().unwrap_or_else(|e| e.into_inner()) = image;
+    }
+
+    /// Visibility for the renderer: shown by the app, and by the client (an empty mask hides
+    /// it). The image only when it is another one than the renderer has.
+    fn apply_cursor(&self, g: &mut Inner) {
+        let Some(r) = g.renderer.as_ref() else { return };
+        let visible = self.cursor_shown.load(Ordering::Acquire) && g.x_cursor.as_ref().map(|c| c.visible).unwrap_or(true);
+        unsafe { (r.api.set_cursor_visible)(r.ctx, visible as i32) };
+        if !visible {
+            return;
+        }
+        let serial = g.x_cursor.as_ref().map(|c| c.serial as i64).unwrap_or(0);
+        if serial == g.sent_serial {
+            return;
+        }
+        let default = self.default_cursor.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let image = match g.x_cursor.as_ref() {
+            Some(c) => c.clone(),
+            None => match default {
+                Some(d) => d,
+                None => return,
+            },
+        };
+        let (w, h) = (image.width as i32, image.height as i32);
+        if w <= 0 || h <= 0 || image.rgba.len() < (w * h * 4) as usize {
+            return;
+        }
+        unsafe { (r.api.update_cursor)(r.ctx, image.rgba.as_ptr(), w, h, w, image.hot_x as i32, image.hot_y as i32) };
+        g.sent_serial = serial;
     }
 }
 
@@ -131,12 +204,15 @@ impl Output for AndroidOutput {
 
     fn deliver(&self, items: Vec<Item>) {
         let mut g = lock(&self.inner);
-        let Inner { renderer, shown, clock_seq } = &mut *g;
         let mut showed = false;
+        let mut cursor_changed = false;
+        let mut cursor_refresh = false;
         for item in items {
+            let Inner { renderer, shown, x_cursor, .. } = &mut *g;
+            let r = renderer.as_ref();
             match item {
                 Item::Show { window, drawable, buf } => {
-                    if let Some(r) = renderer.as_ref() {
+                    if let Some(r) = r {
                         unsafe { (r.api.update_content)(r.ctx, window as i64, buf as *mut AHardwareBuffer) };
                         shown.insert(drawable, buf);
                         showed = true;
@@ -145,12 +221,29 @@ impl Output for AndroidOutput {
                     unsafe { ahb::AHardwareBuffer_release(buf as *mut AHardwareBuffer) };
                 }
                 Item::Removed(drawable) => {
-                    if let (Some(buf), Some(r)) = (shown.remove(&drawable), renderer.as_ref()) {
+                    if let (Some(buf), Some(r)) = (shown.remove(&drawable), r) {
                         unsafe { (r.api.release_buffer)(r.ctx, buf as *mut AHardwareBuffer) };
+                    }
+                }
+                Item::Cursor(c) => {
+                    *x_cursor = c;
+                    cursor_changed = true;
+                }
+                Item::CursorRefresh => cursor_refresh = true,
+                scene => {
+                    if let Some(r) = r {
+                        // SAFETY: the renderer's entry points lock what they touch; `r.ctx` stays
+                        // valid while `inner` is held (see `set_renderer`).
+                        unsafe { apply_scene(r, scene) };
                     }
                 }
             }
         }
+        // Once per batch: the latest cursor of a run is the one that matters.
+        if cursor_changed || cursor_refresh {
+            self.apply_cursor(&mut g);
+        }
+        let Inner { renderer, clock_seq, .. } = &mut *g;
         // Present paces the game by the renderer's clock: pass on each new measurement.
         if let (true, Some(r)) = (showed, renderer.as_ref()) {
             let mut clock = [0i64; 3];
@@ -164,5 +257,33 @@ impl Output for AndroidOutput {
                 platform::set_display_clock(0, 0, 0);
             }
         }
+    }
+}
+
+/// A window-tree or pointer step on the renderer.
+///
+/// # Safety
+/// `r.ctx` is a live renderer context.
+unsafe fn apply_scene(r: &Renderer, item: Item) {
+    let (api, ctx) = (r.api, r.ctx);
+    match item {
+        Item::InitRoot { root, width, height } => (api.init_root)(ctx, root as i64, root as i64, width, height),
+        Item::Create { id, parent, content, x, y, width, height } => {
+            (api.create_window)(ctx, id as i64, parent as i64, content as i64, x, y, width, height)
+        }
+        Item::Destroy(id) => (api.destroy_window)(ctx, id as i64),
+        Item::Map(id) => (api.map_window)(ctx, id as i64),
+        Item::Unmap(id) => (api.unmap_window)(ctx, id as i64),
+        Item::Reparent { id, parent } => (api.reparent_window)(ctx, id as i64, parent as i64),
+        Item::Geometry { id, content, x, y, width, height } => {
+            (api.update_geometry)(ctx, id as i64, content as i64, x, y, width, height)
+        }
+        Item::Children { parent, ordered } => {
+            let ids: Vec<i64> = ordered.iter().map(|&c| c as i64).collect();
+            (api.sync_children)(ctx, parent as i64, ids.as_ptr(), ids.len() as i32)
+        }
+        Item::Viewable { id, viewable } => (api.set_viewable)(ctx, id as i64, viewable as i32),
+        Item::Pointer { x, y } => (api.set_pointer)(ctx, x as i32, y as i32),
+        Item::Show { .. } | Item::Removed(_) | Item::Cursor(_) | Item::CursorRefresh => {}
     }
 }

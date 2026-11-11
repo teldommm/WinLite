@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <cstdlib>
 #include <cstring>
+#include <cstddef>
 #include <algorithm>
 #include <vector>
 #include <string>
@@ -140,7 +141,29 @@ struct XcoreRendererApi {
     void    (*updateContent)(void* ctx, int64_t id, AHardwareBuffer* ahb);
     void    (*releaseBuffer)(void* ctx, AHardwareBuffer* ahb);
     int32_t (*displayClock)(void* ctx, int64_t* out);
+    // Version 2: the window tree and the cursor come from the X server too (they went through
+    // Java's event thread, which read the state back from the server after the fact).
+    void    (*initRoot)(void* ctx, int64_t root, int64_t content, int32_t width, int32_t height);
+    void    (*createWindow)(void* ctx, int64_t id, int64_t parent, int64_t content,
+                            int32_t x, int32_t y, int32_t width, int32_t height);
+    void    (*destroyWindow)(void* ctx, int64_t id);
+    void    (*mapWindow)(void* ctx, int64_t id);
+    void    (*unmapWindow)(void* ctx, int64_t id);
+    void    (*reparentWindow)(void* ctx, int64_t id, int64_t parent);
+    void    (*updateGeometry)(void* ctx, int64_t id, int64_t content,
+                              int32_t x, int32_t y, int32_t width, int32_t height);
+    void    (*syncChildren)(void* ctx, int64_t parent, const int64_t* ids, int32_t count);
+    void    (*setViewable)(void* ctx, int64_t id, int32_t viewable);
+    void    (*setPointer)(void* ctx, int32_t x, int32_t y);
+    void    (*setCursorVisible)(void* ctx, int32_t visible);
+    void    (*updateCursor)(void* ctx, const uint8_t* rgba, int32_t width, int32_t height,
+                            int32_t stride, int32_t hotX, int32_t hotY);
 };
+
+// Mirrors the Rust side (xcore src/android/output.rs), which checks the same numbers.
+static_assert(sizeof(XcoreRendererApi) == 128, "XcoreRendererApi layout");
+static_assert(offsetof(XcoreRendererApi, initRoot) == 32, "XcoreRendererApi layout");
+static_assert(offsetof(XcoreRendererApi, updateCursor) == 120, "XcoreRendererApi layout");
 
 static void xcoreUpdateContent(void* ctx, int64_t id, AHardwareBuffer* ahb) noexcept {
     try {
@@ -164,8 +187,69 @@ static int32_t xcoreDisplayClock(void* ctx, int64_t* out) noexcept {
     return static_cast<const VulkanRendererContext*>(ctx)->getDisplayClock(out) ? 1 : 0;
 }
 
+// The tree and cursor calls only lock renderMutex (the content's import may wait for the GPU):
+// called on the server's frame thread, never on a Java thread.
+#define XCORE_CTX(ctx) static_cast<VulkanRendererContext*>(ctx)
+#define XCORE_GUARD(name, body)                                                              \
+    do {                                                                                     \
+        if (!ctx) return;                                                                    \
+        try { body; } catch (...) {                                                          \
+            __android_log_print(ANDROID_LOG_ERROR, "Winlator_Renderer", name ": exception"); \
+        }                                                                                    \
+    } while (0)
+
+static void xcoreInitRoot(void* ctx, int64_t root, int64_t content, int32_t w, int32_t h) noexcept {
+    XCORE_GUARD("initRoot", XCORE_CTX(ctx)->initRootWindow(root, content, w, h));
+}
+static void xcoreCreateWindow(void* ctx, int64_t id, int64_t parent, int64_t content,
+                              int32_t x, int32_t y, int32_t w, int32_t h) noexcept {
+    XCORE_GUARD("createWindow", XCORE_CTX(ctx)->createWindowNode(id, parent, content, x, y, w, h));
+}
+static void xcoreDestroyWindow(void* ctx, int64_t id) noexcept {
+    XCORE_GUARD("destroyWindow", XCORE_CTX(ctx)->destroyWindowNode(id));
+}
+static void xcoreMapWindow(void* ctx, int64_t id) noexcept {
+    XCORE_GUARD("mapWindow", XCORE_CTX(ctx)->mapWindowNode(id));
+}
+static void xcoreUnmapWindow(void* ctx, int64_t id) noexcept {
+    XCORE_GUARD("unmapWindow", XCORE_CTX(ctx)->unmapWindowNode(id));
+}
+static void xcoreReparentWindow(void* ctx, int64_t id, int64_t parent) noexcept {
+    XCORE_GUARD("reparentWindow", XCORE_CTX(ctx)->reparentWindowNode(id, parent));
+}
+static void xcoreUpdateGeometry(void* ctx, int64_t id, int64_t content,
+                                int32_t x, int32_t y, int32_t w, int32_t h) noexcept {
+    XCORE_GUARD("updateGeometry", XCORE_CTX(ctx)->updateWindowGeometryNode(id, content, x, y, w, h));
+}
+static void xcoreSyncChildren(void* ctx, int64_t parent, const int64_t* ids, int32_t count) noexcept {
+    if (!ids || count < 0) return;
+    XCORE_GUARD("syncChildren", XCORE_CTX(ctx)->syncChildOrder(parent, ids, count));
+}
+static void xcoreSetViewable(void* ctx, int64_t id, int32_t viewable) noexcept {
+    XCORE_GUARD("setViewable", XCORE_CTX(ctx)->setWindowViewable(id, viewable != 0));
+}
+static void xcoreSetPointer(void* ctx, int32_t x, int32_t y) noexcept {
+    XCORE_GUARD("setPointer", XCORE_CTX(ctx)->updatePointerPosition((short)x, (short)y));
+}
+static void xcoreSetCursorVisible(void* ctx, int32_t visible) noexcept {
+    XCORE_GUARD("setCursorVisible", XCORE_CTX(ctx)->setCursorVisible(visible != 0));
+}
+static void xcoreUpdateCursor(void* ctx, const uint8_t* rgba, int32_t w, int32_t h,
+                              int32_t stride, int32_t hotX, int32_t hotY) noexcept {
+    if (!rgba || w <= 0 || h <= 0 || w > 0x7fff || h > 0x7fff) return;
+    XCORE_GUARD("updateCursor", XCORE_CTX(ctx)->updateCursorImage(
+        const_cast<uint8_t*>(rgba), (short)w, (short)h, (short)std::max(stride, w),
+        (short)hotX, (short)hotY, true));
+}
+
+#undef XCORE_GUARD
+#undef XCORE_CTX
+
 static const XcoreRendererApi kXcoreRendererApi = {
-    1, xcoreUpdateContent, xcoreReleaseBuffer, xcoreDisplayClock,
+    2, xcoreUpdateContent, xcoreReleaseBuffer, xcoreDisplayClock,
+    xcoreInitRoot, xcoreCreateWindow, xcoreDestroyWindow, xcoreMapWindow, xcoreUnmapWindow,
+    xcoreReparentWindow, xcoreUpdateGeometry, xcoreSyncChildren, xcoreSetViewable,
+    xcoreSetPointer, xcoreSetCursorVisible, xcoreUpdateCursor,
 };
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -182,126 +266,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetTransformAndScissor(
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r) r->setTransformAndScissor(ox, oy, sx, sy, (bool)hasScissor, scX, scY, scW, scH);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPointerPos(
-    JNIEnv*, jobject, jlong handle, jshort x, jshort y)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->updatePointerPosition(x, y);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetCursorVisible(
-    JNIEnv*, jobject, jlong handle, jboolean v)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->setCursorVisible(v);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateCursorImage(
-    JNIEnv* env, jobject, jlong handle, jobject buf,
-    jshort w, jshort h, jshort stride, jshort hotX, jshort hotY, jboolean rgba)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || !buf) return;
-    void* px = env->GetDirectBufferAddress(buf);
-    jlong required = (jlong)std::max((int)stride, (int)w) * h * 4;
-    if (px && env->GetDirectBufferCapacity(buf) >= required)
-        r->updateCursorImage(px, w, h, stride, hotX, hotY, rgba == JNI_TRUE);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeRemoveWindow(
-    JNIEnv*, jobject, jlong handle, jlong id)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->removeWindow(id);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeInitRootWindow(
-    JNIEnv*, jobject, jlong handle, jlong rootId, jlong contentId, jint width, jint height)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->initRootWindow(rootId, contentId, width, height);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeCreateWindow(
-    JNIEnv*, jobject, jlong handle, jlong id, jlong parentId, jlong contentId,
-    jint x, jint y, jint width, jint height)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->createWindowNode(id, parentId, contentId, x, y, width, height);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeDestroyWindow(
-    JNIEnv*, jobject, jlong handle, jlong id)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->destroyWindowNode(id);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeMapWindow(
-    JNIEnv*, jobject, jlong handle, jlong id)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->mapWindowNode(id);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeUnmapWindow(
-    JNIEnv*, jobject, jlong handle, jlong id)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->unmapWindowNode(id);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeReparentWindow(
-    JNIEnv*, jobject, jlong handle, jlong id, jlong newParentId)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->reparentWindowNode(id, newParentId);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowGeometry(
-    JNIEnv*, jobject, jlong handle, jlong id, jlong contentId,
-    jint x, jint y, jint width, jint height)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->updateWindowGeometryNode(id, contentId, x, y, width, height);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSyncChildOrder(
-    JNIEnv* env, jobject, jlong handle, jlong parentId, jlongArray jorderedIds, jint count)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || count <= 0 || !jorderedIds || env->GetArrayLength(jorderedIds) < count) return;
-    // Copied out first: syncChildOrder() waits for renderMutex, which the render thread and the
-    // configuration calls hold across fence waits and vkDeviceWaitIdle. A JNI critical section
-    // open across that wait blocks the garbage collector (ART waits for every critical section
-    // to close before a thread flip, and stops new ones from opening) - and with it every
-    // allocating thread, the UI thread included.
-    std::vector<int64_t> ids((size_t)count);
-    env->GetLongArrayRegion(jorderedIds, 0, count, reinterpret_cast<jlong*>(ids.data()));
-    if (env->ExceptionCheck()) return;
-    r->syncChildOrder(parentId, ids.data(), count);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWindowViewable(
-    JNIEnv*, jobject, jlong handle, jlong id, jboolean viewable)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->setWindowViewable(id, viewable);
 }
 
 extern "C" JNIEXPORT void JNICALL

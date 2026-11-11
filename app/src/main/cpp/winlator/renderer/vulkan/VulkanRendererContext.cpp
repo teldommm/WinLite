@@ -1424,9 +1424,10 @@ void VulkanRendererContext::reapDeadAhbsLocked() {
 
 void VulkanRendererContext::initRootWindow(int64_t rootId, int64_t contentId, int width, int height) {
     std::lock_guard<std::mutex> lk(renderMutex);
-    // Only called on a fresh renderer and by the Java window-tree replay, which re-sends every
-    // window right after: start from an empty tree, so nodes created by window events queued
-    // ahead of the replay are rebuilt from the X server's current state, not merged with it.
+    // Only called by the X server's replay of its window tree (a fresh renderer, a new server),
+    // which re-sends every window right after: start from an empty tree, so nodes created by
+    // window events queued ahead of the replay are rebuilt from the server's current state, not
+    // merged with it.
     windowTree.clear();
     rootWindowId = rootId;
     treeScreenW = width; treeScreenH = height;

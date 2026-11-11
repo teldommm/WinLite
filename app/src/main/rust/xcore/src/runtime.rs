@@ -181,6 +181,34 @@ impl Runtime {
         drop(old);
     }
 
+    /// Gives the output the whole state again: window tree, contents, pointer, cursor (a new
+    /// renderer has none of it).
+    pub fn replay(&self) {
+        self.with_router(|r, s| r.replay(s));
+    }
+
+    /// Queues `item` for the output, in order with what the server queued before it.
+    pub fn push_item(&self, item: crate::frames::Item) {
+        self.with_router(|r, _| r.push(item));
+    }
+
+    fn with_router(&self, f: impl FnOnce(&mut Router, &Server)) {
+        let queued = {
+            let mut st = lock(&self.shared.state);
+            let State { server, router, .. } = &mut *st;
+            match router.as_mut() {
+                Some(r) => {
+                    f(r, server);
+                    r.has_pending()
+                }
+                None => false,
+            }
+        };
+        if queued {
+            kick(&self.shared);
+        }
+    }
+
     /// Sends the window's own content to the output again (a new renderer has none of it).
     pub fn refresh_content(&self, window: u32) {
         let queued = {
@@ -377,6 +405,13 @@ fn pump(shared: &Shared, st: &mut State) -> Pumped {
         if !rest.is_empty() {
             lock(&shared.events).extend(rest);
             queued = true;
+        }
+    }
+    // The cursor, once the run is through; windows the router hid lose their input.
+    let State { server, router, .. } = &mut *st;
+    if let Some(r) = router.as_mut() {
+        for w in r.finish(server) {
+            crate::bridge::disable_subtree(server, w);
         }
     }
     Pumped {
@@ -626,6 +661,56 @@ mod tests {
             }
             lock(&self.items).extend(items);
         }
+    }
+
+    #[test]
+    fn the_window_tree_reaches_the_output_in_order_and_replays_on_demand() {
+        use crate::frames::Item;
+        let path = socket_path("scene");
+        let rt = Runtime::start(&path, new_server(640, 480)).unwrap();
+        let rec = Arc::new(Recorder::default());
+        rt.set_output(Some(rec.clone() as Arc<dyn Output>));
+
+        let mut c = UnixStream::connect(&path).unwrap();
+        c.write_all(&[b'l', 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
+        let mut head = [0u8; 8];
+        c.read_exact(&mut head).unwrap();
+        let mut rest = vec![0u8; u16::from_le_bytes([head[6], head[7]]) as usize * 4];
+        c.read_exact(&mut rest).unwrap();
+        let w = u32::from_le_bytes([rest[4], rest[5], rest[6], rest[7]]) + 1;
+        let root = rt.with(|s| s.root);
+        let mut req = vec![1, 0, 8, 0];
+        for v in [w, root] {
+            req.extend(v.to_le_bytes());
+        }
+        for v in [3u16, 4, 64, 32, 0, 1] {
+            req.extend(v.to_le_bytes());
+        }
+        req.extend([0u8; 8]);
+        req.extend([8, 0, 2, 0]);
+        req.extend(w.to_le_bytes());
+        c.write_all(&req).unwrap();
+
+        wait_for("the window shown", || lock(&rec.items).iter().any(|i| matches!(i, Item::Show { window, .. } if *window == w)));
+        let items = lock(&rec.items).clone();
+        let at = |want: &Item| items.iter().position(|i| i == want).unwrap_or_else(|| panic!("{want:?} missing: {items:?}"));
+        let create = at(&Item::Create { id: w, parent: root, content: w, x: 3, y: 4, width: 64, height: 32 });
+        let map = at(&Item::Map(w));
+        let show = items.iter().position(|i| matches!(i, Item::Show { window, .. } if *window == w)).unwrap();
+        assert!(create < map && map < show, "server order on the frame thread: {items:?}");
+        assert!(lock(&rec.threads).iter().all(|t| t == "xcore-frames"));
+
+        // A new renderer: the whole tree again, from the root.
+        lock(&rec.items).clear();
+        rt.replay();
+        wait_for("the replay", || lock(&rec.items).iter().any(|i| matches!(i, Item::Cursor(_))));
+        let items = lock(&rec.items).clone();
+        assert_eq!(items[0], Item::InitRoot { root, width: 640, height: 480 });
+        assert!(items.contains(&Item::Create { id: w, parent: root, content: w, x: 3, y: 4, width: 64, height: 32 }));
+        assert!(items.contains(&Item::Map(w)));
+        drop(c);
+        drop(rt);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

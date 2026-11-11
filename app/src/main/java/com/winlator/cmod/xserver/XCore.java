@@ -162,10 +162,33 @@ public final class XCore {
      * ({@code VulkanXServerView.nativeRendererApi()}) and its native handle; {@code 0, 0} for none.
      * Frames then go from the server's own threads straight into it, and the renderer's display
      * clock straight to Present. Returns once no frame is being handed to the previous renderer,
-     * so that one may be destroyed right after. Blocks briefly: not from a {@code @FastNative} path.
+     * so that one may be destroyed right after. A new renderer gets the whole state (window tree,
+     * contents, pointer, cursor) from the server. Blocks briefly: not from a {@code @FastNative} path.
      */
     public static void setRenderer(long api, long rendererHandle) {
         nativeSetRenderer(api, rendererHandle);
+    }
+
+    /**
+     * Whether the app shows a cursor at all (touch modes hide it). The renderer shows it when the
+     * X cursor under the pointer is visible too. Never waits for the renderer.
+     */
+    public static void setCursorShown(boolean shown) {
+        nativeSetCursorShown(shown);
+    }
+
+    /** The arrow shown where no window has an X cursor of its own: R,G,B,A, {@code width * height * 4} bytes. */
+    public static void setDefaultCursor(byte[] rgba, int width, int height) {
+        nativeSetDefaultCursor(rgba, width, height);
+    }
+
+    /**
+     * Windows whose WM_CLASS contains one of {@code classes} are not drawn and get no input
+     * (Wine's explorer.exe desktop when a shortcut runs a game). Applied as windows are mapped
+     * or get their WM_CLASS.
+     */
+    public static void setHiddenWindowClasses(String... classes) {
+        nativeSetHiddenWindowClasses(classes != null ? classes : new String[0]);
     }
 
     // ------------------------------------------------------------------ screen and buffers
@@ -287,4 +310,7 @@ public final class XCore {
     private static native void nativeSetActiveRate(long handle, int active);
     private static native void nativeSetFpsLimit(int fps);
     private static native void nativeSetRenderer(long api, long rendererHandle);
+    private static native void nativeSetCursorShown(boolean shown);
+    private static native void nativeSetDefaultCursor(byte[] rgba, int width, int height);
+    private static native void nativeSetHiddenWindowClasses(String[] classes);
 }

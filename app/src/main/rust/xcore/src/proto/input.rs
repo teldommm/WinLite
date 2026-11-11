@@ -290,9 +290,19 @@ impl Server {
     /// Moves the pointer without producing events (Java `setX`/`setY`).
     pub fn set_pointer_silent(&mut self, x: i32, y: i32) {
         if !self.input.mouse_disabled {
-            self.input.x = x as i16;
-            self.input.y = y as i16;
+            self.move_silently(x as i16, y as i16);
             self.arm_settle();
+        }
+    }
+
+    /// No events for the clients, but the embedder (the renderer's cursor, the magnifier) is told
+    /// where the pointer is now: a warp by the game or the edge pull-back used to leave the drawn
+    /// cursor where it was until the next real movement.
+    fn move_silently(&mut self, x: i16, y: i16) {
+        if (x, y) != (self.input.x, self.input.y) {
+            self.input.x = x;
+            self.input.y = y;
+            self.notifications.push(Notify::PointerMove { x, y });
         }
     }
 
@@ -319,7 +329,8 @@ impl Server {
 
     /// Edge pull-back (was the Java `CursorLocker`, a 60 Hz timer that ran for the whole session
     /// while the mouse was not captured): a pointer pushed past the edge (touchpad deltas, a warp)
-    /// is drawn back to it a quarter per step, silently, so the next movement starts at the edge.
+    /// is drawn back to it a quarter per step, without events for the clients, so the next
+    /// movement starts at the edge.
     /// Runs only while the pointer is outside.
     pub fn settle_pointer(&mut self, now_ns: i64) {
         self.input.settle_at_ns = 0;
@@ -329,8 +340,7 @@ impl Server {
         let max_over = (self.screen_w as f32 * 0.05) as i16;
         let nx = settle_step(self.input.x, self.screen_w, max_over);
         let ny = settle_step(self.input.y, self.screen_h, max_over);
-        self.input.x = nx;
-        self.input.y = ny;
+        self.move_silently(nx, ny);
         if self.pointer_outside() {
             self.input.settle_at_ns = now_ns + SETTLE_PERIOD_NS;
         }

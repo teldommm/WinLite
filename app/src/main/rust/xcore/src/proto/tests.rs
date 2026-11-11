@@ -2213,8 +2213,15 @@ mod settle_tests {
         assert_eq!(t.s.input.settle_at_ns, armed);
 
         t.s.notifications.clear();
+        let _ = t.out();
         assert_eq!(steps(&mut t), [(-12, 779), (-3, 770), (0, 767)]);
-        assert!(t.s.notifications.is_empty(), "no events: the pull-back is silent");
+        assert!(t.out().is_empty(), "no events for the clients: the pull-back is silent");
+        // ...but the renderer is told, or the drawn cursor stays past the edge.
+        assert_eq!(
+            t.s.notifications.iter().filter(|n| matches!(n, Notify::PointerMove { .. })).count(),
+            3
+        );
+        assert!(t.s.notifications.contains(&Notify::PointerMove { x: 0, y: 767 }));
         assert_eq!(t.s.next_deadline(), None, "no timer once it is back on the screen");
     }
 
@@ -2234,6 +2241,24 @@ mod settle_tests {
         let mut t = T::new();
         t.s.set_pointer_silent(1024, 300);
         assert_eq!(steps(&mut t), [(1023, 300)]);
+    }
+
+    #[test]
+    fn a_client_warp_reaches_the_renderer_but_not_the_clients() {
+        let mut t = T::new();
+        t.s.set_pointer_position(100, 100);
+        let _ = t.out();
+        t.s.notifications.clear();
+        // WarpPointer(src None, dst root, 0,0,0,0, 300, 200): what Wine's SetCursorPos sends.
+        let root = t.s.root;
+        let body = [&u32le(0)[..], &u32le(root), &[0u8; 8], &300i16.to_le_bytes(), &200i16.to_le_bytes()].concat();
+        t.req(41, 0, &body);
+        assert_eq!((t.s.input.x, t.s.input.y), (300, 200));
+        assert!(t.s.notifications.contains(&Notify::PointerMove { x: 300, y: 200 }));
+        // The same position again changes nothing and says nothing.
+        t.s.notifications.clear();
+        t.s.set_pointer_silent(300, 200);
+        assert!(t.s.notifications.is_empty());
     }
 
     #[test]

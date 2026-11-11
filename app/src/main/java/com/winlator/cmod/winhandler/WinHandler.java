@@ -498,8 +498,8 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
                 short x = receiveData.getShort();
                 short y = receiveData.getShort();
                 XServer xServer = activity.getXServer();
+                // Silent for the X clients; the server tells the renderer (and the magnifier) itself.
                 xServer.pointer.setPositionSilently(x, y);
-                activity.getXServerView().onPointerMove(x, y);
                 break;
             }
             default: {

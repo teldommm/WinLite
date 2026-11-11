@@ -17,10 +17,6 @@ import com.winlator.cmod.xserver.XCore;
 import com.winlator.cmod.xserver.XServer;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -28,11 +24,14 @@ import java.util.concurrent.TimeUnit;
 import dalvik.annotation.optimization.FastNative;
 
 /**
- * Draws the X server's screen with the native Vulkan renderer. It follows the server through
- * {@link XServer.Listener} (windows, their stacking, the cursor) and mirrors what it learns into
- * the renderer's own window tree. The pixels do not come through here: the renderer is registered
- * with the server ({@link XCore#setRenderer}), which hands it every frame (the server's
- * AHardwareBuffers, imported without a copy) and passes its display clock on to Present itself.
+ * Draws the X server's screen with the native Vulkan renderer. The renderer is registered with
+ * the server ({@link XCore#setRenderer}), which hands it everything straight from native code:
+ * every frame (the server's AHardwareBuffers, imported without a copy), the window tree, the
+ * pointer position and the cursor, and passes its display clock on to Present itself. What is
+ * left here is the surface, the renderer's settings and the view transform: the part of the
+ * screen shown (a Wine desktop smaller than the screen), fullscreen, the magnifier and the
+ * screen offset that follow the cursor, for which it still listens to the server
+ * ({@link XServer.Listener}).
  *
  * <p>The listener methods run on the server's event thread, one after the other. Everything that
  * touches the native renderer holds {@link #lock}.
@@ -55,8 +54,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private boolean screenOffsetYRelativeToCursor = false;
     public int surfaceWidth;
     public int surfaceHeight;
-    private String[] unviewableWMClasses = null;
-    private boolean cursorVisible = false;
     private String driverPath = null;
     private ExecutorService initExecutor = null;
     private volatile boolean initComplete = false;
@@ -64,16 +61,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private String driverLibraryName = null;
     private String nativeLibDir = null;
     private boolean validationEnabled = false;
-
-    // The server's window ids (also the renderer's keys, and those of the windows' contents).
-    private volatile int rootWindowId = 0;
-    // Windows that are mapped, as far as the events told (event thread only).
-    private final HashSet<Integer> mappedWindows = new HashSet<>();
-
-    // The cursor image the renderer has (the server's serial of it; 0 = our default arrow).
-    private long sentCursorSerial = -1;
-    private ByteBuffer rootCursor;
-    private int rootCursorWidth, rootCursorHeight;
 
     private int     pendingPresentMode    = 2;
     private int     pendingStretchMode    = 0;
@@ -115,7 +102,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         xServer.addListener(this);
     }
 
-    /** The arrow shown where no window has an X cursor of its own. */
+    /** The arrow shown where no window has an X cursor of its own; the server keeps it. */
     private void loadRootCursor() {
         try {
             BitmapFactory.Options options = new BitmapFactory.Options();
@@ -123,14 +110,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             Bitmap bitmap = BitmapFactory.decodeResource(getContext().getResources(), R.drawable.cursor, options);
             if (bitmap == null) return;
             // An ARGB_8888 bitmap is R,G,B,A in memory: what the renderer's cursor texture wants.
-            ByteBuffer buf = ByteBuffer.allocateDirect(bitmap.getWidth() * bitmap.getHeight() * 4).order(ByteOrder.nativeOrder());
+            ByteBuffer buf = ByteBuffer.allocate(bitmap.getWidth() * bitmap.getHeight() * 4);
             bitmap.copyPixelsToBuffer(buf);
-            buf.rewind();
-            rootCursor = buf;
-            rootCursorWidth = bitmap.getWidth();
-            rootCursorHeight = bitmap.getHeight();
-        } catch (Exception e) {
-            rootCursor = null;
+            XCore.setDefaultCursor(buf.array(), bitmap.getWidth(), bitmap.getHeight());
+        } catch (Exception ignored) {
+            // No arrow: where no window has a cursor of its own, none is drawn.
         }
     }
 
@@ -151,12 +135,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetTransformAndScissor(long handle,
         float ox, float oy, float sx, float sy,
         boolean hasScissor, int scX, int scY, int scW, int scH);
-    @FastNative private native void nativeSetPointerPos(long handle, short x, short y);
-    @FastNative private native void nativeSetCursorVisible(long handle, boolean visible);
-    private native void nativeUpdateCursorImage(long handle,
-        ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY,
-        boolean rgba);
-    private native void nativeRemoveWindow(long handle, long id);
     /** The table of the renderer's entry points for the X server (see XCore.setRenderer). */
     private static native long nativeRendererApi();
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
@@ -174,18 +152,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetPostFXMode(long handle, int mode);
     private native void nativeSetPresentMode(long handle, int mode);
     private native int[] nativeGetSupportedPresentModes(long handle);
-
-    private native void nativeInitRootWindow(long handle, long rootId, long contentId, int width, int height);
-    private native void nativeCreateWindow(long handle, long id, long parentId, long contentId,
-                                           int x, int y, int width, int height);
-    private native void nativeDestroyWindow(long handle, long id);
-    private native void nativeMapWindow(long handle, long id);
-    private native void nativeUnmapWindow(long handle, long id);
-    private native void nativeReparentWindow(long handle, long id, long newParentId);
-    private native void nativeUpdateWindowGeometry(long handle, long id, long contentId,
-                                                   int x, int y, int width, int height);
-    private native void nativeSyncChildOrder(long handle, long parentId, long[] orderedChildIds, int count);
-    private native void nativeSetWindowViewable(long handle, long id, boolean viewable);
 
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
@@ -248,7 +214,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         }
         initExecutor = Executors.newSingleThreadExecutor();
 
-        final boolean isColdInit = (nativeHandle == 0);
         final String cacheDir = pipelineCacheDir();
 
         initExecutor.execute(() -> {
@@ -269,10 +234,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetSharpness(nativeHandle, pendingSharpness);
                         applyWfg();
                         updateTransform();
-                        // Not nativeSetCursorVisible(cursorVisible): that ignores an X cursor the
-                        // game made invisible (empty mask), and the cursor is unchanged after the
-                        // surface comes back, so nothing would hide it again.
-                        applyCursorLocked(false);
+                        // The renderer kept its window tree and cursor with the surface away.
                         initComplete = true;
                         return;
                     }
@@ -291,25 +253,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetSharpness(nativeHandle, pendingSharpness);
                     applyWfg();
                     updateTransform();
-                    nativeSetCursorVisible(nativeHandle, false);
 
-                    // The server hands the frames to this renderer from now on (and forgets what
-                    // it gave a previous one).
+                    // The server hands everything to this renderer from now on (and forgets what
+                    // it gave a previous one): it starts by sending its whole state, the window
+                    // tree, the contents, the pointer and the cursor, so a renderer re-created
+                    // after a failed re-attach, or one that came up after the first windows,
+                    // shows the screen as it is.
                     XCore.setRenderer(nativeRendererApi(), nativeHandle);
-                    if (isColdInit && rootWindowId != 0) {
-                        int root = rootWindowId;
-                        nativeInitRootWindow(nativeHandle, root, root,
-                            xServer.screenInfo.width, xServer.screenInfo.height);
-                    }
-                    // A fresh native renderer has no cursor image either: re-send the current
-                    // X cursor (image + its own visibility), not just the global flag.
-                    applyCursorLocked(true);
-                    // ...and no window tree. Window events only ever reached the renderer that
-                    // existed when they happened: after a failed re-attach (renderer re-created)
-                    // the screen stayed black for good, and windows created before the first
-                    // renderer was up were never shown. Queued behind every window event already
-                    // sent, so it rebuilds the tree from the X server's current state.
-                    queueEvent(this::replayWindowTree);
                 }
             }
             synchronized (lock) {
@@ -438,186 +388,31 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         xServer.notifyEffectiveScreenChanged();
     }
 
-    /**
-     * Sends the server's whole window tree (geometry, stacking, map state, viewability and the
-     * X-drawn content) to the native renderer. Runs on the event thread, in order with the window
-     * events: a change made after the snapshot below is queued behind this and applied on top.
-     */
-    private void replayWindowTree() {
-        final XCore core = xServer.core();
-        if (core == null) return;
-        final long[] tree = core.snapshotTree();
-        final int stride = XCore.WINDOW_STRIDE;
-        if (tree.length < stride) return;
-        rootWindowId = (int) tree[XCore.W_ID];
-        mappedWindows.clear();
-        // Children of each window, bottom-most first (the snapshot lists them in that order).
-        final HashMap<Integer, ArrayList<Long>> children = new HashMap<>();
-        synchronized (lock) {
-            if (nativeHandle == 0) return;
-            nativeInitRootWindow(nativeHandle, rootWindowId, rootWindowId,
-                xServer.screenInfo.width, xServer.screenInfo.height);
-            for (int i = stride; i + stride <= tree.length; i += stride) {
-                final int id = (int) tree[i + XCore.W_ID];
-                final int parent = (int) tree[i + XCore.W_PARENT];
-                final long flags = tree[i + XCore.W_FLAGS];
-                final boolean hasContent = (flags & XCore.WF_HAS_CONTENT) != 0;
-                nativeCreateWindow(nativeHandle, id, parent, hasContent ? id : 0,
-                    (int) tree[i + XCore.W_X], (int) tree[i + XCore.W_Y],
-                    (int) tree[i + XCore.W_WIDTH], (int) tree[i + XCore.W_HEIGHT]);
-                nativeSetWindowViewable(nativeHandle, id, !isUnviewable(id));
-                children.computeIfAbsent(parent, k -> new ArrayList<>()).add((long) id);
-                if ((flags & XCore.WF_MAPPED) != 0) {
-                    mappedWindows.add(id);
-                    nativeMapWindow(nativeHandle, id);
-                    // Straight from the server to the renderer, like every frame.
-                    if (hasContent) core.refreshContent(id);
-                }
-            }
-            // Exact stacking order (also drops any duplicate child entries the creates may leave).
-            for (java.util.Map.Entry<Integer, ArrayList<Long>> e : children.entrySet()) {
-                ArrayList<Long> list = e.getValue();
-                long[] ordered = new long[list.size()];
-                for (int k = 0; k < ordered.length; k++) ordered[k] = list.get(k);
-                nativeSyncChildOrder(nativeHandle, e.getKey(), ordered, ordered.length);
-            }
-        }
-        refreshDesktopTransform();
-    }
-
-    /** The window's WM_CLASS names one of the classes that must not be drawn. */
-    private boolean isUnviewable(int window) {
-        if (unviewableWMClasses == null || window == rootWindowId) return false;
-        String wc = xServer.getWindowClassName(window);
-        for (String cls : unviewableWMClasses) if (wc.contains(cls)) return true;
-        return false;
-    }
-
-    /** Hides what {@link #setUnviewableWMClasses} names, and stops sending it input. */
-    private void checkViewable(int window) {
-        if (unviewableWMClasses == null || window == rootWindowId) return;
-        final boolean unviewable = isUnviewable(window);
-        if (unviewable) {
-            XCore core = xServer.core();
-            if (core != null) core.disableSubtree(window);
-        }
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeSetWindowViewable(nativeHandle, window, !unviewable);
-        }
-    }
-
     @Override
     public void onServerStarted() {
-        // Everything the renderer knows came from an earlier server (or nothing): start over.
-        replayWindowTree();
-        synchronized (lock) { applyCursorLocked(true); }
-    }
-
-    @Override
-    public void onServerStopped() {
-        mappedWindows.clear();
-    }
-
-    @Override
-    public void onCreateWindow(int window, int parent) {
-        final XCore core = xServer.core();
-        if (core == null) return;
-        final long[] info = core.windowInfo(window);
-        if (info.length < XCore.WINDOW_STRIDE) return; // already gone: its destroy event follows
-        final boolean hasContent = (info[XCore.W_FLAGS] & XCore.WF_HAS_CONTENT) != 0;
-        synchronized (lock) {
-            if (nativeHandle != 0) {
-                nativeCreateWindow(nativeHandle, window, parent, hasContent ? window : 0,
-                    (int) info[XCore.W_X], (int) info[XCore.W_Y],
-                    (int) info[XCore.W_WIDTH], (int) info[XCore.W_HEIGHT]);
-            }
-        }
-        checkViewable(window);
-    }
-
-    @Override
-    public void onDestroyWindow(int window) {
-        mappedWindows.remove(window);
-        synchronized (lock) {
-            // The renderer drops the window's buffers with it.
-            if (nativeHandle != 0) nativeDestroyWindow(nativeHandle, window);
-        }
+        // The server sends its window tree to the renderer itself; only the shown part is ours.
+        refreshDesktopTransform();
     }
 
     @Override
     public void onMapWindow(int window) {
-        mappedWindows.add(window);
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeMapWindow(nativeHandle, window);
-        }
         refreshDesktopTransform();
-        checkViewable(window);
     }
 
     @Override
     public void onUnmapWindow(int window) {
-        mappedWindows.remove(window);
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeUnmapWindow(nativeHandle, window);
-        }
         refreshDesktopTransform();
     }
 
     @Override
-    public void onReparentWindow(int window, int parent, int x, int y) {
-        final XCore core = xServer.core();
-        if (core == null) return;
-        final long[] info = core.windowInfo(window);
-        if (info.length < XCore.WINDOW_STRIDE) return;
-        final boolean hasContent = (info[XCore.W_FLAGS] & XCore.WF_HAS_CONTENT) != 0;
-        synchronized (lock) {
-            if (nativeHandle != 0) {
-                nativeReparentWindow(nativeHandle, window, parent);
-                nativeUpdateWindowGeometry(nativeHandle, window, hasContent ? window : 0,
-                    x, y, (int) info[XCore.W_WIDTH], (int) info[XCore.W_HEIGHT]);
-            }
-        }
-    }
-
-    @Override
-    public void onChangeWindowZOrder(int stackMode, int window, int sibling) {
-        final XCore core = xServer.core();
-        if (core == null) return;
-        final long[] info = core.windowInfo(window);
-        if (info.length < XCore.WINDOW_STRIDE) return;
-        final int parent = (int) info[XCore.W_PARENT];
-        final long[] ordered = core.windowChildren(parent);
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeSyncChildOrder(nativeHandle, parent, ordered, ordered.length);
-        }
-    }
-
-    @Override
     public void onUpdateWindowGeometry(int window, boolean resized) {
-        final XCore core = xServer.core();
-        if (core == null) return;
-        final long[] info = core.windowInfo(window);
-        if (info.length < XCore.WINDOW_STRIDE) return;
-        final boolean hasContent = (info[XCore.W_FLAGS] & XCore.WF_HAS_CONTENT) != 0;
-        synchronized (lock) {
-            if (nativeHandle != 0) {
-                // A resized window's new buffer (same id) reaches the renderer from the server.
-                nativeUpdateWindowGeometry(nativeHandle, window, hasContent ? window : 0,
-                    (int) info[XCore.W_X], (int) info[XCore.W_Y],
-                    (int) info[XCore.W_WIDTH], (int) info[XCore.W_HEIGHT]);
-            }
-        }
         if (resized) refreshDesktopTransform();
     }
 
     @Override
     public void onModifyWindowProperty(int window, int atom) {
-        // WM_CLASS is what marks Wine's desktop window and the windows that stay hidden; it may be
-        // set after the window is mapped.
-        if (atom == ATOM_WM_CLASS) {
-            if (mappedWindows.contains(window)) refreshDesktopTransform();
-            checkViewable(window);
-        }
+        // WM_CLASS is what marks Wine's desktop window; it may be set after the window is mapped.
+        if (atom == ATOM_WM_CLASS) refreshDesktopTransform();
     }
 
     // ------------------------------------------------------------------ frames
@@ -642,65 +437,17 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         onPointerMove((short) x, (short) y);
     }
 
+    /** The renderer draws the cursor where the server tells it; the transform may follow it. */
     @Override
     public void onPointerMove(short x, short y) {
-        synchronized (lock) {
-            if (nativeHandle == 0) return;
-            nativeSetPointerPos(nativeHandle, x, y);
-            if (screenOffsetYRelativeToCursor || magnifierZoom != 1.0f) updateTransform();
-        }
-    }
-
-    @Override
-    public void onCursorChanged() {
-        synchronized (lock) { applyCursorLocked(false); }
-    }
-
-    /**
-     * Gives the renderer the X cursor under the pointer: its visibility (a game hides the cursor
-     * with an empty mask) and, when it is a different one, its image. Caller holds {@link #lock}.
-     *
-     * @param force send the image even if the renderer is believed to have it (a new renderer)
-     */
-    private void applyCursorLocked(boolean force) {
-        if (nativeHandle == 0) return;
-        final long[] st = xServer.getCursorState();
-        final boolean hasXCursor = st.length >= 6;
-        final boolean visible = cursorVisible && (!hasXCursor || st[3] != 0);
-        nativeSetCursorVisible(nativeHandle, visible);
-        if (!visible) {
-            if (force) sentCursorSerial = -1;
-            return;
-        }
-        final long serial = hasXCursor ? st[0] : 0;
-        if (!force && serial == sentCursorSerial) return;
-        if (hasXCursor) {
-            final int w = (int) st[4], h = (int) st[5];
-            final byte[] rgba = xServer.getCursorImage();
-            if (rgba == null || w <= 0 || h <= 0 || rgba.length < w * h * 4) return;
-            // The renderer's cursor texture is R,G,B,A.
-            ByteBuffer pixels = ByteBuffer.allocateDirect(w * h * 4);
-            pixels.put(rgba, 0, w * h * 4).rewind();
-            nativeUpdateCursorImage(nativeHandle, pixels, (short) w, (short) h, (short) w,
-                (short) st[1], (short) st[2], true);
-        } else if (rootCursor != null) {
-            nativeUpdateCursorImage(nativeHandle, rootCursor, (short) rootCursorWidth,
-                (short) rootCursorHeight, (short) rootCursorWidth, (short) 0, (short) 0, true);
-        } else {
-            return;
-        }
-        sentCursorSerial = serial;
+        if (!screenOffsetYRelativeToCursor && magnifierZoom == 1.0f) return;
+        synchronized (lock) { updateTransform(); }
     }
 
     @Override
     public void setCursorVisible(boolean visible) {
-        cursorVisible = visible;
-        synchronized (lock) {
-            if (nativeHandle != 0) {
-                nativeSetCursorVisible(nativeHandle, visible);
-                if (visible) applyCursorLocked(false);
-            }
-        }
+        // The server combines it with the X cursor's own visibility (an empty mask hides it).
+        XCore.setCursorShown(visible);
     }
 
     public void setDriverInfo(String driverPath, String libraryName, String nativeLibDir) {
@@ -943,7 +690,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @Override
     public float getMagnifierZoom() { return magnifierZoom; }
     @Override
-    public void setUnviewableWMClasses(String... classes) { this.unviewableWMClasses = classes; }
+    public void setUnviewableWMClasses(String... classes) { XCore.setHiddenWindowClasses(classes); }
 
     public void setFpsWindowId(int id) { fpsWindowId = id; }
     public void setFrameRating(Object fr) {

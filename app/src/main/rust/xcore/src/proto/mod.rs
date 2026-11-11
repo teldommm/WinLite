@@ -50,6 +50,8 @@ pub enum Notify {
     Reparent { window: u32, parent: u32, x: i16, y: i16 },
     /// A drawable (pixmap or window content) was removed; its buffer can be released.
     DrawableRemoved(u32),
+    /// The pointer is somewhere else now: a movement (the clients got MotionNotify), or a silent
+    /// move (a warp by a client, the edge pull-back), which the renderer must follow too.
     PointerMove { x: i16, y: i16 },
     PointerButton { button: u8, pressed: bool },
     Key { keycode: u8, keysym: u32, pressed: bool },

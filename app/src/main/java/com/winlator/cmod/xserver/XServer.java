@@ -8,7 +8,6 @@ import com.winlator.cmod.winhandler.MouseEventFlags;
 import com.winlator.cmod.winhandler.WinHandler;
 
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -54,9 +53,8 @@ public class XServer {
         default void onDirectContentAdded(int window, int pixmap) {}
         default void onDirectContentRemoved(int window, int pixmap) {}
         default void onCompositeRedirect(int window, boolean redirected) {}
+        /** The pointer moved, or was moved silently (a warp, the edge pull-back). The renderer follows it by itself. */
         default void onPointerMove(int x, int y) {}
-        /** The cursor under the pointer changed; see {@link #getCursorState}. */
-        default void onCursorChanged() {}
     }
 
     public final ScreenInfo screenInfo;
@@ -79,7 +77,6 @@ public class XServer {
     private volatile boolean disableMouse = false;
     private volatile short[] refreshRates;
     private volatile short activeRate;
-    private long[] lastCursor = new long[0];
     private final Object inputLock = new Object();
 
     /** Android KeyEvent -> X keys (the key state itself is in the Rust server). */
@@ -180,7 +177,6 @@ public class XServer {
         XCore c = core;
         if (c == null) return;
         long[] ev = c.drainEvents();
-        boolean cursorMayChange = false;
         for (int i = 0; i + XCore.EVENT_STRIDE <= ev.length; i += XCore.EVENT_STRIDE) {
             final long kind = ev[i];
             final int a = (int) ev[i + 1], b = (int) ev[i + 2], cc = (int) ev[i + 3], d = (int) ev[i + 4];
@@ -188,45 +184,36 @@ public class XServer {
                 switch ((int) kind) {
                     case (int) XCore.EV_CREATE_WINDOW:
                         for (Listener l : listeners) l.onCreateWindow(a, b);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_MAP_WINDOW:
                         for (Listener l : listeners) l.onMapWindow(a);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_UNMAP_WINDOW:
                         for (Listener l : listeners) l.onUnmapWindow(a);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_DESTROY_WINDOW:
                         for (Listener l : listeners) l.onDestroyWindow(a);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_CHANGE_Z_ORDER:
                         for (Listener l : listeners) l.onChangeWindowZOrder(a, b, cc);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_CONTENT_UPDATE:
                         for (Listener l : listeners) l.onUpdateWindowContent(a, Math.max(1, cc));
                         break;
                     case (int) XCore.EV_GEOMETRY:
                         for (Listener l : listeners) l.onUpdateWindowGeometry(a, b != 0);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_ATTRIBUTES:
                         for (Listener l : listeners) l.onUpdateWindowAttributes(a, ev[i + 2]);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_PROPERTY:
                         for (Listener l : listeners) l.onModifyWindowProperty(a, b);
                         break;
                     case (int) XCore.EV_REPARENT:
                         for (Listener l : listeners) l.onReparentWindow(a, b, cc, d);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_POINTER_MOVE:
                         for (Listener l : listeners) l.onPointerMove(a, b);
-                        cursorMayChange = true;
                         break;
                     case (int) XCore.EV_RELATIVE_MOUSE_BUTTON: {
                         // Relative mode: the button goes to the Windows side instead of the X clients.
@@ -258,36 +245,6 @@ public class XServer {
                 Log.e(TAG, "listener failed on event " + kind, e);
             }
         }
-        if (cursorMayChange) checkCursor(c);
-    }
-
-    private void checkCursor(XCore c) {
-        long[] state = c.cursorState();
-        if (!Arrays.equals(state, lastCursor)) {
-            lastCursor = state;
-            for (Listener l : listeners) {
-                try {
-                    l.onCursorChanged();
-                } catch (RuntimeException e) {
-                    Log.e(TAG, "listener failed on a cursor change", e);
-                }
-            }
-        }
-    }
-
-    /**
-     * The X cursor under the pointer: {@code [serial, hotX, hotY, visible (0/1), width, height]},
-     * empty when none is set (show the default arrow).
-     */
-    public long[] getCursorState() {
-        XCore c = core;
-        return c != null ? c.cursorState() : new long[0];
-    }
-
-    /** The image of that cursor as R,G,B,A bytes (width * height * 4), or null. */
-    public byte[] getCursorImage() {
-        XCore c = core;
-        return c != null ? c.cursorImage() : null;
     }
 
     // ------------------------------------------------------------------ view, WinHandler
