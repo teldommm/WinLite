@@ -74,6 +74,8 @@ public class WinHandler {
     private final Map<Integer, Integer> deviceToSlot = new java.util.concurrent.ConcurrentHashMap<>();
     private Set<Integer> usedSlots = new HashSet<>();
     private String fakeInputBasePath;
+    // Output is held back until prepareGamepadsForWine() has created the slots.
+    private volatile boolean gamepadsReady = false;
     private LocalServerSocket vibrationServer;
     private volatile boolean vibrationRunning = false;
     private boolean[] vibrationEnabledSlots = new boolean[MAX_CONTROLLERS];
@@ -542,6 +544,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
     }
 
     public void sendGamepadState() {
+        if (!gamepadsReady) return;
         final ControlsProfile profile = activity.getInputControlsView().getProfile();
         if (profile == null) {
             releaseSlot(OSC_DEVICE_ID);
@@ -569,13 +572,39 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
      * output are merged here: unbound inputs pass through, bound ones are replaced.
      */
     public void sendGamepadState(ExternalController controller) {
-        if (controller == null)
+        if (controller == null || !gamepadsReady)
             return;
 
         int slot = assignSlot(controller.getDeviceId());
         if (slot >= 0 && writers[slot] != null) {
             writers[slot].writeGamepadState(controller.buildOutputState());
         }
+    }
+
+    /**
+     * UI thread, before the guest starts: creates the fake devices for every connected pad (and
+     * the on-screen pad) so Wine sees them when it enumerates /dev/input, then opens the gate.
+     */
+    public void prepareGamepadsForWine() {
+        try {
+            if (gamepadEnabled) {
+                for (int id : android.view.InputDevice.getDeviceIds()) {
+                    android.view.InputDevice device = android.view.InputDevice.getDevice(id);
+                    if (device != null && ExternalController.isGameController(device)
+                            && getController(id) != null) {
+                        assignSlot(id);
+                    }
+                }
+                InputControlsView icv = activity.getInputControlsView();
+                ControlsProfile profile = icv != null ? icv.getProfile() : null;
+                if (profile != null) profile.prepareGamepad();
+            }
+        } finally {
+            gamepadsReady = true;
+        }
+        if (!gamepadEnabled) return;
+        sendGamepadState();
+        for (ExternalController controller : new ArrayList<>(controllers.values())) sendGamepadState(controller);
     }
 
     private int assignSlot(int deviceId) {

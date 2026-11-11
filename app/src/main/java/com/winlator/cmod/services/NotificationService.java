@@ -1,5 +1,6 @@
 package com.winlator.cmod.services;
 
+import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -16,6 +17,9 @@ import androidx.core.app.NotificationCompat;
 import com.winlator.cmod.MainActivity;
 import com.winlator.cmod.R;
 import com.winlator.cmod.XServerDisplayActivity;
+import com.winlator.cmod.core.ProcessHelper;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 // Keep-alive foreground service: while it runs, Android treats the app as foreground, so a
 // minimized WinLite (library or a paused game session) isn't reclaimed like an ordinary
@@ -33,9 +37,11 @@ import com.winlator.cmod.XServerDisplayActivity;
 // foreground service doesn't need it (on Android 13+ it just runs with its notification hidden).
 public class NotificationService extends Service {
     private static final String EXTRA_SESSION = "session";
+    private static final String ACTION_EXIT = "com.winlator.cmod.action.EXIT";
 
     private static volatile boolean isRunning = false;
     private static volatile boolean sessionMode = false;
+    private final AtomicBoolean exiting = new AtomicBoolean(false);
 
     public static boolean isRunning() {
         return isRunning;
@@ -61,6 +67,14 @@ public class NotificationService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // The Exit action is handled before anything else: it must work whatever the state of the
+        // notification (hidden, permission revoked) and must not re-post it while quitting.
+        if (intent != null && ACTION_EXIT.equals(intent.getAction())) {
+            exitApplication();
+            return START_NOT_STICKY;
+        }
+        if (exiting.get()) return START_NOT_STICKY;
+
         if (intent != null && intent.getBooleanExtra(EXTRA_SESSION, false)) sessionMode = true;
 
         ensureChannel();
@@ -83,15 +97,58 @@ public class NotificationService extends Service {
         PendingIntent pendingIntent = PendingIntent.getActivity(this, session ? 1 : 0, open,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
+        Intent exitIntent = new Intent(this, NotificationService.class).setAction(ACTION_EXIT);
+        PendingIntent exitPendingIntent = PendingIntent.getService(this, 2, exitIntent,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
         return new NotificationCompat.Builder(this, MainActivity.NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(session ? R.drawable.ic_stat_ab_gear_0011 : R.drawable.winlator_mark)
                 .setContentTitle("WinLite")
                 .setContentText("WinLite is running, do not kill or swipe this notification")
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setContentIntent(pendingIntent)
+                .addAction(R.drawable.ic_sidebar_power, "Exit", exitPendingIntent)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .setOngoing(true)
                 .build();
+    }
+
+    // Exit from the notification. In a game session the activity's own exit() runs, so the
+    // shutdown is the usual one (Wine stopped, save registry and the automatic backup done) and
+    // then the app quits instead of coming back to the library. Without a session (library mode,
+    // or the activity is already gone) the Wine processes, if any, are stopped here.
+    private void exitApplication() {
+        if (!exiting.compareAndSet(false, true)) return;
+        if (sessionMode && XServerDisplayActivity.requestQuit()) return;
+
+        // Not on the service's main thread: stopping Wine waits for its processes.
+        new Thread(() -> {
+            try {
+                ProcessHelper.resumeAllWineProcesses();
+                ProcessHelper.terminateAllWineProcesses();
+                long deadline = android.os.SystemClock.uptimeMillis() + 1500;
+                while (android.os.SystemClock.uptimeMillis() < deadline
+                        && !ProcessHelper.listRunningWineProcesses().isEmpty()) {
+                    Thread.sleep(50);
+                }
+                for (String pid : ProcessHelper.listRunningWineProcesses()) {
+                    ProcessHelper.killProcess(Integer.parseInt(pid));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (Exception ignored) {
+                // Quitting anyway.
+            } finally {
+                stopForeground(STOP_FOREGROUND_REMOVE);
+                stopSelf();
+                isRunning = false;
+                ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+                if (manager != null) {
+                    for (ActivityManager.AppTask task : manager.getAppTasks()) task.finishAndRemoveTask();
+                }
+                android.os.Process.killProcess(android.os.Process.myPid());
+            }
+        }, "WinLiteNotificationExit").start();
     }
 
     // The service can be the first thing to post (e.g. a game launched straight from a home

@@ -239,6 +239,33 @@ public class ControlsProfile implements Comparable<ControlsProfile> {
         return controllers;
     }
 
+    /**
+     * Sets virtualGamepad from the saved JSON without needing the view, so the on-screen pad's
+     * slot can be created before Wine enumerates /dev/input (loadElements only runs on first draw).
+     */
+    public void prepareGamepad() {
+        if (elementsLoaded) return;
+        boolean found = false;
+        File file = getProfileFile(context, id);
+        if (file.isFile()) {
+            try {
+                JSONArray elementsJSONArray = new JSONObject(FileUtils.readString(file)).getJSONArray("elements");
+                for (int i = 0; i < elementsJSONArray.length() && !found; i++) {
+                    JSONArray bindings = elementsJSONArray.getJSONObject(i).getJSONArray("bindings");
+                    boolean allGamepad = true;
+                    for (int j = 0; j < bindings.length(); j++) {
+                        if (!Binding.fromString(bindings.getString(j)).isGamepad()) allGamepad = false;
+                    }
+                    if (allGamepad) found = true;
+                }
+            }
+            catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
+        virtualGamepad = found;
+    }
+
     public void loadElements(InputControlsView inputControlsView) {
         elements.clear();
         elementsLoaded = false;

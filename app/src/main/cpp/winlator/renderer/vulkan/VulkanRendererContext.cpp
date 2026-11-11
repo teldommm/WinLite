@@ -1068,7 +1068,9 @@ void VulkanRendererContext::renderFrame() {
             WinTex& wt=it->second;
             if (wt.ds==VK_NULL_HANDLE) continue;
             DrawEntry de{wt.img,wt.ds,re.x,re.y,wt.w,wt.h};
-            if (wt.needsTransition) { de.needsTransition=true; wt.needsTransition=false; }
+            // Only a submitted frame consumes the flag (see below): a frame that is dropped
+            // before the submit must not lose the UNDEFINED -> SHADER_READ_ONLY transition.
+            if (wt.needsTransition) de.needsTransition=true;
             frameDraws.push_back(de);
         }
 
@@ -1143,6 +1145,22 @@ void VulkanRendererContext::renderFrame() {
         return;
     }
     slotSerial[currentFrame]=++submitSerial;   // this slot's fence now stands for frame #submitSerial
+    // The submit went through, so the transitions recorded in this frame will run on the queue
+    // before any later frame: only now are they done. Matched by image (the window entries alias
+    // the import cache's), so every alias of a transitioned buffer is cleared together.
+    {
+        bool any=false;
+        for (const auto& de : frameDraws) if (de.needsTransition) { any=true; break; }
+        if (any) {
+            std::lock_guard<std::mutex> lk(renderMutex);
+            auto transitioned=[&](VkImage img) {
+                for (const auto& de : frameDraws) if (de.needsTransition && de.img==img) return true;
+                return false;
+            };
+            for (auto& [id, wt] : texMap) if (wt.needsTransition && transitioned(wt.img)) wt.needsTransition=false;
+            for (auto& [ahb, wt] : ahbImportCache) if (wt.needsTransition && transitioned(wt.img)) wt.needsTransition=false;
+        }
+    }
     VkSwapchainKHR scs[]={swapchain};
     // With VK_GOOGLE_display_timing every present carries a presentID, so the display reports
     // when each image was shown (the display clock). A paced image (WFG, or a game frame under an
@@ -1276,8 +1294,9 @@ bool VulkanRendererContext::reattachSurface(ANativeWindow* newWindow) {
 
         surfaceWidth  = ANativeWindow_getWidth(window);
         surfaceHeight = ANativeWindow_getHeight(window);
-        for (auto& [id, wt] : texMap) wt.needsTransition = true;
-        for (auto& [ahb, wt] : ahbImportCache) wt.needsTransition = true;
+        // The guest buffers are untouched by a new surface/swapchain: their layout and contents
+        // stay as they are, so no transition from UNDEFINED (which may discard them) is forced.
+        // Flags still pending (a transition that has not been submitted yet) are kept.
         surfaceDetached.store(false, std::memory_order_release);
     }
     needsRender.store(true, std::memory_order_release);

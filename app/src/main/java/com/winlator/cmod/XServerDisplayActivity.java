@@ -165,6 +165,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private static final HashMap<String, Boolean> WINE_XRANDR_SUPPORT_CACHE = new HashMap<>();
     private final AtomicBoolean exiting = new AtomicBoolean(false);
+    // The running session, for the notification's Exit action. Set in onCreate, cleared in onDestroy.
+    private static volatile XServerDisplayActivity current;
+    // Exit() ends the process instead of coming back to the library (the Exit action).
+    private volatile boolean quitAfterExit;
 
     public static String NOTIFICATION_CHANNEL_ID = "Winlator";
     public static int NOTIFICATION_ID = -1;
@@ -361,6 +365,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        current = this;
         AppUtils.hideSystemUI(this);
         AppUtils.keepScreenOn(this);
 
@@ -941,6 +946,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         editor.apply();
     }
 
+    /**
+     * The notification's Exit action: the usual shutdown (Wine stopped, save registry and the
+     * automatic backup done), then the app quits. False when there is no session to shut down.
+     */
+    public static boolean requestQuit() {
+        final XServerDisplayActivity activity = current;
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) return false;
+        activity.runOnUiThread(() -> {
+            activity.quitAfterExit = true;
+            activity.exit();
+        });
+        return true;
+    }
+
     private void exit() {
         if (!exiting.compareAndSet(false, true)) return;
         boolean removeLoadingBar = PreferenceManager.getDefaultSharedPreferences(this)
@@ -1005,12 +1024,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             runOnUiThread(() -> ThemedLoadingOverlayHost.dismiss(shutdownOverlay));
-            runOnUiThread(() -> AppUtils.restartApplication(getApplicationContext()));
+            if (quitAfterExit) {
+                runOnUiThread(() -> {
+                    stopService(new Intent(getApplicationContext(),
+                            com.winlator.cmod.services.NotificationService.class));
+                    finishAndRemoveTask();
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                });
+            } else {
+                runOnUiThread(() -> AppUtils.restartApplication(getApplicationContext()));
+            }
         });
     }
 
     @Override
     protected void onDestroy() {
+        if (current == this) current = null;
         if (randrDisplayListener != null) {
             android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
                     getSystemService(DISPLAY_SERVICE);
@@ -1260,6 +1289,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
         File devInputDir = new File(imageFs.getRootDir(), "dev/input");
         if (devInputDir.exists() || devInputDir.mkdirs()) {
 
+        }
+
+        // Create the pad slots on the UI thread before Wine starts enumerating /dev/input.
+        java.util.concurrent.CountDownLatch gamepadsLatch = new java.util.concurrent.CountDownLatch(1);
+        runOnUiThread(() -> {
+            try {
+                winHandler.prepareGamepadsForWine();
+            } finally {
+                gamepadsLatch.countDown();
+            }
+        });
+        try {
+            if (!gamepadsLatch.await(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                Log.w("XServerDisplayActivity", "prepareGamepadsForWine timed out");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
 
         environment.startEnvironmentComponents();
