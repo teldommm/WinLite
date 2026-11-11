@@ -207,7 +207,7 @@ impl Render {
     fn add_cursor(&mut self, s: &mut Server, c: ClientId, id: u32, hot_x: i16, hot_y: i16, image: crate::proto::gfx::Drawable, visible: bool) {
         s.cursor_serial += 1;
         let serial = s.cursor_serial;
-        s.cursors.insert(id, Cursor { id, serial, freed: false, hot_x, hot_y, image, visible });
+        s.cursors.insert(id, Cursor { id, serial, freed: false, hot_x, hot_y, image, visible, shape: None });
         s.register_owner(c, Owned::Cursor(id));
     }
 }

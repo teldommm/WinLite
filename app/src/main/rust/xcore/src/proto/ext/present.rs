@@ -31,6 +31,7 @@ const WAIT_FENCE_TIMEOUT_NS: i64 = 1_000_000_000;
 const QUERY_VERSION: u8 = 0;
 const PRESENT_PIXMAP: u8 = 1;
 const SELECT_INPUT: u8 = 3;
+const QUERY_CAPABILITIES: u8 = 4;
 
 const EVT_CONFIGURE_NOTIFY: u16 = 0;
 const EVT_COMPLETE_NOTIFY: u16 = 1;
@@ -277,6 +278,13 @@ impl Extension for Present {
             QUERY_VERSION => {
                 s.reply(c, 0, 0, |w| {
                     w.u32(1).u32(2).pad(16);
+                });
+            }
+            // Vulkan's X11 WSI asks for the capabilities of the window on every swapchain it
+            // creates. None are offered: no async tearing, no explicit-sync fences.
+            QUERY_CAPABILITIES => {
+                s.reply(c, 0, 0, |w| {
+                    w.u32(0).pad(20);
                 });
             }
             PRESENT_PIXMAP => {

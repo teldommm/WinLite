@@ -1,5 +1,5 @@
-//! MIT-SHM (Java `MITSHMExtension` + `SHMSegmentManager`): attach the guest's SysV segments and
-//! blit from them.
+//! MIT-SHM (Java `MITSHMExtension` + `SHMSegmentManager`): attach the guest's SysV segments,
+//! blit from them (PutImage) and read pixels into them (GetImage).
 
 use super::frame::ShmFramePacer;
 use super::reader;
@@ -21,6 +21,7 @@ const QUERY_VERSION: u8 = 0;
 const ATTACH: u8 = 1;
 const DETACH: u8 = 2;
 const PUT_IMAGE: u8 = 3;
+const GET_IMAGE: u8 = 4;
 
 struct Segment {
     shmid: i32,
@@ -129,6 +130,39 @@ impl Extension for MitShm {
                         s.pause_reads(c, now + delay);
                     }
                 }
+            }
+            GET_IMAGE => {
+                let drawable = r.u32()?;
+                let (x, y, w, h) = (r.i16()?, r.i16()?, r.u16()?, r.u16()?);
+                r.skip(4)?; // plane mask: ZPixmap data is always complete
+                let format = r.u8()?;
+                r.skip(3)?;
+                let shmseg = r.u32()?;
+                let offset = r.u32()? as usize;
+
+                let Some(d) = s.drawables.get(&drawable) else { return Err(bad(err::BAD_DRAWABLE, drawable)) };
+                let Some(seg) = self.segments.get(&shmseg) else { return Err(bad(FIRST_ERROR, shmseg)) };
+                // Only ZPixmap, and only inside the drawable.
+                if format != 2 || x < 0 || y < 0 || w == 0 || h == 0 || x as i32 + w as i32 > d.width as i32 || y as i32 + h as i32 > d.height as i32 {
+                    return Err(bad(err::BAD_MATCH, 0));
+                }
+                let size = w as usize * h as usize * 4;
+                if offset.checked_add(size).map_or(true, |end| end > seg.map.len) {
+                    return Err(bad(err::BAD_MATCH, 0));
+                }
+                let visual = d.visual.ok_or(bad(err::BAD_MATCH, drawable))?;
+                let depth = d.depth;
+                let visual_id = if s.pixmaps.contains(&drawable) { 0 } else { visual };
+                let data = d.get_image(x, y, w as i16, h as i16).ok_or(bad(err::BAD_MATCH, drawable))?;
+                if data.len() != size {
+                    return Err(bad(err::BAD_MATCH, drawable));
+                }
+                // SAFETY: the platform keeps the mapping alive until shm_detach, `offset + size`
+                // was checked against its length, and `data` is our own buffer.
+                unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), seg.map.ptr.add(offset), size) };
+                s.reply(c, depth, 0, |wr| {
+                    wr.u32(visual_id).u32(size as u32).pad(16);
+                });
             }
             _ => return Err(Fail::X { code: BAD_IMPLEMENTATION, data: 0 }),
         }

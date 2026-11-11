@@ -10,6 +10,7 @@
 
 pub mod conn;
 pub mod consts;
+pub mod cursor_font;
 pub mod events;
 pub mod ext;
 pub mod fallback;
@@ -111,6 +112,8 @@ pub struct WindowAttrs {
     pub win_gravity: u8,
     pub backing_planes: u32,
     pub backing_pixel: u32,
+    /// The background pixel last set (ClearArea paints with it); `None` after a background pixmap.
+    pub background_pixel: Option<u32>,
     pub save_under: bool,
     pub enabled: bool,
     /// 0 CopyFromParent, 1 InputOutput, 2 InputOnly.
@@ -131,6 +134,7 @@ impl Default for WindowAttrs {
             win_gravity: 5,
             backing_planes: 1,
             backing_pixel: 0,
+            background_pixel: None,
             save_under: false,
             enabled: true,
             class: 1,
@@ -169,6 +173,16 @@ pub struct Cursor {
     pub hot_y: i16,
     pub image: Drawable,
     pub visible: bool,
+    /// What RecolorCursor needs; `None` for ARGB (RENDER) cursors, which it does not recolor.
+    pub shape: Option<CursorShape>,
+}
+
+/// A two-colour cursor: per pixel 0 transparent, 1 foreground, 2 background, and the 0xRRGGBB
+/// colours it is painted with.
+pub struct CursorShape {
+    pub bits: Vec<u8>,
+    pub fore: u32,
+    pub back: u32,
 }
 
 #[derive(Default)]

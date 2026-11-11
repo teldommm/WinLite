@@ -4,6 +4,7 @@
 //! `Err(Fail::Drop)` drops the request silently (Wine would die on an unexpected X error).
 
 use super::consts::{err, ev, op};
+use super::cursor_font;
 use super::events::Event;
 use super::gfx::{self, Gc};
 use super::input::Keyboard;
@@ -49,6 +50,7 @@ impl Extension for BigRequests {
     }
 }
 
+const A_BG_PIXMAP: u32 = 1 << 0;
 const A_BG_PIXEL: u32 = 1 << 1;
 const A_BIT_GRAVITY: u32 = 1 << 4;
 const A_WIN_GRAVITY: u32 = 1 << 5;
@@ -265,6 +267,9 @@ impl Server {
             op::PUT_IMAGE => self.r_put_image(data, r),
             op::GET_IMAGE => self.r_get_image(c, data, r),
             op::CREATE_CURSOR => self.r_create_cursor(c, r),
+            op::CREATE_GLYPH_CURSOR => self.r_create_glyph_cursor(c, r),
+            op::RECOLOR_CURSOR => self.r_recolor_cursor(r),
+            op::CLEAR_AREA => self.r_clear_area(data, r),
             op::FREE_CURSOR => {
                 let id = r.u32()?;
                 self.free_cursor(id);
@@ -298,7 +303,7 @@ impl Server {
                 Ok(())
             }
             // No reply, nothing to do (SetDashes also lands here: opcode 58 is not CopyGC).
-            op::SET_CLIP_RECTANGLES | op::CREATE_COLORMAP | op::FREE_COLORMAP | op::CREATE_GLYPH_CURSOR | op::BELL | op::SET_SCREEN_SAVER | op::FORCE_SCREEN_SAVER | op::NO_OPERATION | 58 => Ok(()),
+            op::SET_CLIP_RECTANGLES | op::CREATE_COLORMAP | op::FREE_COLORMAP | op::BELL | op::SET_SCREEN_SAVER | op::FORCE_SCREEN_SAVER | op::NO_OPERATION | 58 => Ok(()),
             o if o >= 128 => self.dispatch_extension(c, o, data, body),
             o => {
                 if self.fallback_request(c, o, r)? {
@@ -400,7 +405,14 @@ impl Server {
                     if let Some(d) = self.drawables.get(&id) {
                         d.fill_color(color);
                     }
+                    // ClearArea paints with it again.
+                    self.windows.get_mut(&id).unwrap().attrs.background_pixel = Some(color as u32);
                     self.content_changed(id);
+                }
+                // A background pixmap replaces the pixel (ClearArea does not tile it).
+                A_BG_PIXMAP => {
+                    r.skip(4)?;
+                    self.windows.get_mut(&id).unwrap().attrs.background_pixel = None;
                 }
                 A_BACKING_PIXEL => self.windows.get_mut(&id).unwrap().attrs.backing_pixel = r.u32()?,
                 A_BACKING_PLANES => self.windows.get_mut(&id).unwrap().attrs.backing_planes = r.u32()?,
@@ -1186,6 +1198,7 @@ impl Server {
         let col = |r: &mut Reader| -> Res<u32> { Ok(r.u16()? as u32 & 0xff) };
         let (fr, fg, fb) = (col(r)?, col(r)?, col(r)?);
         let (br, bg, bb) = (col(r)?, col(r)?, col(r)?);
+        let (fore, back) = ((fr << 16) | (fg << 8) | fb, (br << 16) | (bg << 8) | bb);
         let (hx, hy) = (r.i16()?, r.i16()?);
         if self.cursors.contains_key(&id) {
             return Err(bad(err::BAD_ID_CHOICE, id));
@@ -1198,13 +1211,107 @@ impl Server {
             visible = md.get_image(0, 0, md.width, md.height).map(|v| v.iter().any(|b| *b != 0)).unwrap_or(false);
             if visible {
                 let (sd, md) = (&self.drawables[&src], &self.drawables[&m]);
-                gfx::draw_alpha_masked(&image, sd, md, (fr << 16) | (fg << 8) | fb, (br << 16) | (bg << 8) | bb);
+                gfx::draw_alpha_masked(&image, sd, md, fore, back);
             }
         }
+        // RecolorCursor needs to know which pixel is foreground: read it back from the image.
+        let shape = if visible {
+            image.get_image(0, 0, sw, sh).map(|px| super::CursorShape { bits: cursor_font::classify(&px, fore, back), fore, back })
+        } else {
+            None
+        };
         self.cursor_serial += 1;
         let serial = self.cursor_serial;
-        self.cursors.insert(id, super::Cursor { id, serial, freed: false, hot_x: hx, hot_y: hy, image, visible });
+        self.cursors.insert(id, super::Cursor { id, serial, freed: false, hot_x: hx, hot_y: hy, image, visible, shape });
         self.register_owner(c, Owned::Cursor(id));
+        Ok(())
+    }
+
+    /// CreateGlyphCursor: a cursor from the built-in X cursor font (the only font OpenFont accepts).
+    fn r_create_glyph_cursor(&mut self, c: ClientId, r: &mut Reader) -> Res {
+        let (id, _source_font, mask_font) = (r.u32()?, r.u32()?, r.u32()?);
+        let (source_char, mask_char) = (r.u16()? as u32, r.u16()? as u32);
+        let col = |r: &mut Reader| -> Res<u32> { Ok(r.u16()? as u32 >> 8) };
+        let (fr, fg, fb) = (col(r)?, col(r)?, col(r)?);
+        let (br, bg, bb) = (col(r)?, col(r)?, col(r)?);
+        let (fore, back) = ((fr << 16) | (fg << 8) | fb, (br << 16) | (bg << 8) | bb);
+        if !self.is_valid_resource_id(c, id) || self.cursors.contains_key(&id) {
+            return Err(bad(err::BAD_ID_CHOICE, id));
+        }
+        let source = cursor_font::glyph(source_char).ok_or_else(|| bad(err::BAD_VALUE, source_char))?;
+        // No mask font: everything the glyph draws is visible.
+        let mask = if mask_font == 0 { None } else { Some(cursor_font::glyph(mask_char).ok_or_else(|| bad(err::BAD_VALUE, mask_char))?) };
+        let bits = cursor_font::shape(&source, mask.as_deref());
+        let (w, h) = (cursor_font::WIDTH, cursor_font::HEIGHT);
+        let image = self.shape_image(&bits, w, h, fore, back).ok_or(Fail::Drop("cursor allocation failed"))?;
+        let visible = bits.iter().any(|b| *b != 0);
+        self.cursor_serial += 1;
+        let serial = self.cursor_serial;
+        let shape = Some(super::CursorShape { bits, fore, back });
+        self.cursors.insert(id, super::Cursor { id, serial, freed: false, hot_x: cursor_font::HOT, hot_y: cursor_font::HOT, image, visible, shape });
+        self.register_owner(c, Owned::Cursor(id));
+        Ok(())
+    }
+
+    /// RecolorCursor: repaints a two-colour cursor. ARGB cursors are left as they are.
+    fn r_recolor_cursor(&mut self, r: &mut Reader) -> Res {
+        let id = r.u32()?;
+        let col = |r: &mut Reader| -> Res<u32> { Ok(r.u16()? as u32 >> 8) };
+        let (fr, fg, fb) = (col(r)?, col(r)?, col(r)?);
+        let (br, bg, bb) = (col(r)?, col(r)?, col(r)?);
+        let (fore, back) = ((fr << 16) | (fg << 8) | fb, (br << 16) | (bg << 8) | bb);
+        let (bits, w, h) = match self.cursors.get(&id) {
+            None => return Err(bad(err::BAD_CURSOR, id)),
+            Some(cu) => match &cu.shape {
+                None => return Ok(()),
+                Some(s) => (s.bits.clone(), cu.image.width, cu.image.height),
+            },
+        };
+        let image = self.shape_image(&bits, w, h, fore, back).ok_or(Fail::Drop("cursor allocation failed"))?;
+        // A new serial makes the renderer fetch the new image.
+        self.cursor_serial += 1;
+        let serial = self.cursor_serial;
+        if let Some(cu) = self.cursors.get_mut(&id) {
+            cu.image = image;
+            cu.serial = serial;
+            cu.shape = Some(super::CursorShape { bits, fore, back });
+        }
+        Ok(())
+    }
+
+    /// A 32-bit drawable holding a two-colour cursor shape.
+    fn shape_image(&mut self, bits: &[u8], w: i16, h: i16, fore: u32, back: u32) -> Option<gfx::Drawable> {
+        let px = cursor_font::paint(bits, fore, back);
+        let visual = self.visual_for_depth(32);
+        let image = self.new_drawable_with(0, w, h, 32, visual)?;
+        image.draw_image(0, 0, 0, 0, w, h, 32, &px, w);
+        Some(image)
+    }
+
+    /// ClearArea: paints the area with the window's background pixel; `exposures` also sends Expose.
+    fn r_clear_area(&mut self, exposures: u8, r: &mut Reader) -> Res {
+        let id = r.u32()?;
+        let (x, y, w, h) = (r.i16()? as i32, r.i16()? as i32, r.u16()? as i32, r.u16()? as i32);
+        let Some(win) = self.windows.get(&id) else { return Err(bad(err::BAD_WINDOW, id)) };
+        if !win.has_content {
+            return Err(bad(err::BAD_MATCH, 0));
+        }
+        let (ww, wh, mapped, pixel) = (win.width as i32, win.height as i32, win.attrs.mapped, win.attrs.background_pixel);
+        // A zero size means "up to the window's edge".
+        let w = if w == 0 { ww - x } else { w };
+        let h = if h == 0 { wh - y } else { h };
+        if let Some(pixel) = pixel {
+            if w > 0 && h > 0 {
+                if let Some(d) = self.drawables.get(&id) {
+                    d.fill_rect(x, y, w, h, pixel as i32);
+                }
+                self.content_changed(id);
+            }
+        }
+        if exposures != 0 && mapped {
+            // The Expose event has no rectangle: the whole window is reported, as on MapWindow.
+            self.send_to_window(id, ev::EXPOSURE, &Event::Expose { window: id, w: ww as i16, h: wh as i16 });
+        }
         Ok(())
     }
 

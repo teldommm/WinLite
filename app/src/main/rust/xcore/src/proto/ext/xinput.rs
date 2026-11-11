@@ -309,8 +309,46 @@ impl Extension for XInput {
                     }
                 });
             }
+            // XIWarpPointer: like core WarpPointer, but with 16.16 fixed-point coordinates, and
+            // for the master (2) or slave (4) pointer only. The pointer moves without events.
+            XI_WARP_POINTER => {
+                let (src, dst) = (r.u32()?, r.u32()?);
+                let fixed = |v: u32| (v as i32) >> 16;
+                let (sx, sy) = (fixed(r.u32()?), fixed(r.u32()?));
+                let (src_w, src_h) = (r.u16()? as i32, r.u16()? as i32);
+                let (dx, dy) = (fixed(r.u32()?), fixed(r.u32()?));
+                let device = r.u16()?;
+                if device != 2 && device != 4 {
+                    return Err(bad(ERROR_BAD_DEVICE, device as u32));
+                }
+                let (src_size, dst_ok) = (s.windows.get(&src).map(|w| (w.width as i32, w.height as i32)), s.windows.contains_key(&dst));
+                if (src != 0 && src_size.is_none()) || (dst != 0 && !dst_ok) {
+                    let missing = if src != 0 && src_size.is_none() { src } else { dst };
+                    return Err(bad(crate::proto::consts::err::BAD_WINDOW, missing));
+                }
+                // Relative mouse mode (a game owns the pointer): the client's warp is ignored.
+                if s.input.relative_mouse {
+                    return Ok(());
+                }
+                if let Some((ww, wh)) = src_size {
+                    let (sw, sh) = (if src_w == 0 { ww - sx } else { src_w }, if src_h == 0 { wh - sy } else { src_h });
+                    let (lx, ly) = s.root_to_local(src, s.input.x, s.input.y);
+                    let (lx, ly) = (lx as i32, ly as i32);
+                    if lx < sx || ly < sy || lx >= sx + sw || ly >= sy + sh {
+                        return Ok(());
+                    }
+                }
+                let clamp = |v: i32| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+                if dst != 0 {
+                    let (rx, ry) = s.local_to_root(dst, clamp(dx), clamp(dy));
+                    s.set_pointer_silent(rx as i32, ry as i32);
+                } else {
+                    let (x, y) = (s.input.x as i32 + dx, s.input.y as i32 + dy);
+                    s.set_pointer_silent(x, y);
+                }
+            }
             // Requests without a reply: accepted and ignored.
-            CLOSE_DEVICE | SELECT_EXTENSION_EVENT | XI_WARP_POINTER | XI_CHANGE_CURSOR | XI_CHANGE_HIERARCHY | XI_SET_CLIENT_POINTER | XI_SET_FOCUS | XI_UNGRAB_DEVICE
+            CLOSE_DEVICE | SELECT_EXTENSION_EVENT | XI_CHANGE_CURSOR | XI_CHANGE_HIERARCHY | XI_SET_CLIENT_POINTER | XI_SET_FOCUS | XI_UNGRAB_DEVICE
             | XI_ALLOW_EVENTS | XI_CHANGE_PROPERTY | XI_DELETE_PROPERTY | XI_BARRIER_RELEASE_POINTER => {}
             // Anything else may expect a reply: an error, so the client never hangs.
             _ => return Err(Fail::X { code: ERROR_BAD_REQUEST, data: 0 }),

@@ -49,6 +49,7 @@ pub mod op {
     pub const COPY_GC: u8 = 57;
     pub const SET_CLIP_RECTANGLES: u8 = 59;
     pub const FREE_GC: u8 = 60;
+    pub const CLEAR_AREA: u8 = 61;
     pub const COPY_AREA: u8 = 62;
     pub const POLY_LINE: u8 = 65;
     pub const POLY_SEGMENT: u8 = 66;
@@ -68,6 +69,7 @@ pub mod op {
     pub const CREATE_CURSOR: u8 = 93;
     pub const CREATE_GLYPH_CURSOR: u8 = 94;
     pub const FREE_CURSOR: u8 = 95;
+    pub const RECOLOR_CURSOR: u8 = 96;
     pub const QUERY_BEST_SIZE: u8 = 97;
     pub const QUERY_EXTENSION: u8 = 98;
     pub const LIST_EXTENSIONS: u8 = 99;
