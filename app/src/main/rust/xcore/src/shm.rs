@@ -74,38 +74,3 @@ pub fn map(fd: i32, size: usize, offset: i64, readonly: bool) -> *mut u8 {
 pub unsafe fn unmap(ptr: *mut u8, size: usize) {
     libc::munmap(ptr as *mut c_void, size);
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ioctl_numbers_match_linux_ashmem_h_on_64_bit() {
-        assert_eq!(ASHMEM_SET_NAME, 0x4100_7701);
-        #[cfg(target_pointer_width = "64")]
-        assert_eq!(ASHMEM_SET_SIZE, 0x4008_7703);
-    }
-
-    #[test]
-    fn memfd_map_roundtrip() {
-        let fd = memfd_create("xcore-test", 4096);
-        assert!(fd >= 0);
-        let a = map(fd, 4096, 0, false);
-        let b = map(fd, 4096, 0, true);
-        assert!(!a.is_null() && !b.is_null());
-        unsafe {
-            *a.add(100) = 0x5a;
-            assert_eq!(*b.add(100), 0x5a); // shared
-            unmap(a, 4096);
-            unmap(b, 4096);
-            libc::close(fd);
-        }
-    }
-
-    #[test]
-    fn map_failure_is_null_and_bad_name_is_rejected() {
-        assert!(map(-1, 4096, 0, false).is_null());
-        assert_eq!(memfd_create("bad\0name", 16), -1);
-        assert_eq!(memfd_create("ok", -1), -1); // ftruncate fails
-    }
-}

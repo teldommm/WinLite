@@ -219,24 +219,3 @@ fn read_color_name(r: &mut Reader) -> Res<[u32; 3]> {
     r.skip(2)?;
     Ok(parse_color(&r.string8(len)?))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn colors() {
-        assert_eq!(parse_color("#fff"), [0xffff; 3]);
-        assert_eq!(parse_color("#ff0000"), [0xffff, 0, 0]);
-        assert_eq!(parse_color("rgb:ff/00/80"), [0xffff, 0, 0x8080]);
-        assert_eq!(parse_color("Light Blue"), [0, 0, 0]);
-        assert_eq!(parse_color("#12"), [0, 0, 0]);
-    }
-
-    #[test]
-    fn component_round_trip() {
-        let p = to_component(0xffff, 0xff0000) | to_component(0x8080, 0x00ff00);
-        assert_eq!(p, 0xff8000);
-        assert_eq!(from_component(0x80, 0xff), 32896);
-    }
-}

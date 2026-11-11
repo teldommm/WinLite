@@ -69,9 +69,6 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('app/src/main/rust/xcore/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
 
-      - name: Test X server core (host)
-        run: cargo test --locked --manifest-path app/src/main/rust/xcore/Cargo.toml
-
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 

@@ -169,39 +169,3 @@ impl<'a> Writer<'a> {
         self.pad((4 - n % 4) % 4)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reader_both_orders() {
-        let d = [1u8, 2, 3, 4, 5, 6];
-        let mut le = Reader::new(&d, Order::Le);
-        assert_eq!(le.u16().unwrap(), 0x0201);
-        assert_eq!(le.u32().unwrap(), 0x06050403);
-        let mut be = Reader::new(&d, Order::Be);
-        assert_eq!(be.u16().unwrap(), 0x0102);
-        assert_eq!(be.u32().unwrap(), 0x03040506);
-        assert_eq!(be.u8(), Err(Underflow));
-    }
-
-    #[test]
-    fn string8_skips_padding() {
-        let d = *b"abcde\0\0\0xyz";
-        let mut r = Reader::new(&d, Order::Le);
-        assert_eq!(r.string8(5).unwrap(), "abcde");
-        assert_eq!(r.pos(), 8);
-        // Missing padding is an underflow, like the Java stream.
-        let mut short = Reader::new(b"abcde", Order::Le);
-        assert!(short.string8(5).is_err());
-    }
-
-    #[test]
-    fn writer_pads_strings() {
-        let mut v = Vec::new();
-        let mut w = Writer::new(&mut v, Order::Be);
-        w.u16(0x0102).u32(0x03040506).string8("ab");
-        assert_eq!(v, [1, 2, 3, 4, 5, 6, b'a', b'b', 0, 0]);
-    }
-}

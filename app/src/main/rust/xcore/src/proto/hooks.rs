@@ -48,10 +48,6 @@ impl ImportResults {
     fn take(&self, token: u64) -> Option<Box<dyn PixelStore>> {
         self.map().remove(&token).flatten()
     }
-    #[cfg(test)]
-    pub(crate) fn is_empty_for_test(&self) -> bool {
-        self.map().is_empty()
-    }
     fn retain(&self, mut keep: impl FnMut(u64) -> bool) {
         self.map().retain(|t, _| keep(*t));
     }

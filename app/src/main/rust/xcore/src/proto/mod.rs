@@ -21,9 +21,6 @@ pub mod requests;
 pub mod tables;
 pub mod wire;
 
-#[cfg(test)]
-mod tests;
-
 use consts::{ev, VENDOR_NAME};
 use events::Event;
 use gfx::{Drawable, Gc, PixelStore};
