@@ -8,6 +8,11 @@ import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
@@ -57,20 +62,33 @@ internal class DetailEntry(val detail: ShellDetail, val id: Long) {
 
 private const val DETAIL_ENTER_MS = 220
 private const val DETAIL_EXIT_MS = 160
+private const val GAME_FADE_MS = 180
 
 @Composable
 internal fun DetailLayer(controller: MainShellController) {
     val entries = controller.detailEntries
     val topActiveIndex = entries.indexOfLast { it.active }
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     entries.forEachIndexed { index, entry ->
         key(entry.id) {
             val isTop = index == topActiveIndex
+            // A game opened from the landscape cover carousel only fades in/out; every other
+            // detail keeps the sideways slide.
+            val zoom = landscape && entry.detail is ShellDetail.GameDetail
+            val enter: EnterTransition = if (zoom)
+                fadeIn(tween(GAME_FADE_MS, easing = FastOutSlowInEasing))
+            else
+                fadeIn(tween(DETAIL_ENTER_MS, easing = LinearOutSlowInEasing)) +
+                    slideInHorizontally(tween(DETAIL_ENTER_MS, easing = LinearOutSlowInEasing)) { it / 10 }
+            val exit: ExitTransition = if (zoom)
+                fadeOut(tween(GAME_FADE_MS, easing = FastOutSlowInEasing))
+            else
+                fadeOut(tween(DETAIL_EXIT_MS, easing = FastOutLinearInEasing)) +
+                    slideOutHorizontally(tween(DETAIL_EXIT_MS, easing = FastOutLinearInEasing)) { it / 10 }
             AnimatedVisibility(
                 visibleState = entry.transition,
-                enter = fadeIn(tween(DETAIL_ENTER_MS, easing = LinearOutSlowInEasing)) +
-                    slideInHorizontally(tween(DETAIL_ENTER_MS, easing = LinearOutSlowInEasing)) { it / 10 },
-                exit = fadeOut(tween(DETAIL_EXIT_MS, easing = FastOutLinearInEasing)) +
-                    slideOutHorizontally(tween(DETAIL_EXIT_MS, easing = FastOutLinearInEasing)) { it / 10 }
+                enter = enter,
+                exit = exit
             ) {
                 // Theme comes from MainShell's single WinZTheme root.
                 Box(

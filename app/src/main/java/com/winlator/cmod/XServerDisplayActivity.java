@@ -197,7 +197,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // WFG frame generation: the quality index is what gets saved (never reorder);
     // GraphicsSidebarPanel lists the same positions. The frame multiplier modes and the target FPS
     // range live in WfgSettings.
-    private static final int[] WFG_FLOW_SIDES = {180, 252};
+    private static final int[] WFG_FLOW_SIDES = {180, 220};
     // Per quality index as well: Fast also takes the cheaper interpolation (bilinear warp, one
     // source step), Balanced the Catmull-Rom warp with two.
     private static final boolean[] WFG_FAST_INTERP = {true, false};

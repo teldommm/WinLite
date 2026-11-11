@@ -21,9 +21,13 @@ import kotlinx.coroutines.delay
 // Entrance animations for content that arrives after the screen is already on display (a list
 // loaded from disk, a catalog fetched from the network). Without them the content "teleports" in.
 
-// A list card: fades in and rises ~14dp, staggered by position (first 8 rows).
+// A list card: fades in and rises ~14dp, staggered by position. Only the first REVEAL_ROWS rows
+// (what the first screen shows) play it; rows further down appear at once, so scrolling never
+// waits for an entrance.
 // `revealed` remembers which ids already played it, so a card scrolled out of a LazyColumn and
 // back, or the same card after a filter / category switch, appears at once instead of replaying.
+private const val REVEAL_ROWS = 8
+
 @Composable
 fun RevealOnEnter(
     id: String,
@@ -32,12 +36,12 @@ fun RevealOnEnter(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val already = remember(id) { id in revealed }
+    val already = remember(id) { index >= REVEAL_ROWS || id in revealed }
     val progress = remember(id) { Animatable(if (already) 1f else 0f) }
     LaunchedEffect(id) {
         if (!already) {
             revealed.add(id)
-            delay(index.coerceAtMost(8) * 35L)
+            delay(index * 35L)
             progress.animateTo(1f, tween(340, easing = FastOutSlowInEasing))
         }
     }

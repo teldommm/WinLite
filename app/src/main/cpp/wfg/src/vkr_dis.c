@@ -103,9 +103,12 @@
 
 #define DIS_RATIO_HYST 0.10f
 
-// Source rate below which frame generation stops, and above which it starts again.
-#define DIS_MIN_SOURCE_FPS_OFF 20.0f
-#define DIS_MIN_SOURCE_FPS_ON 24.0f
+// Source rate below which adaptive frame generation stops, and above which it starts again.
+// A safety net for loading screens, menus and heavy drops (and the GPU-bound spiral where
+// generation takes GPU from the game and the lower rate asks for more frames); a fixed xN
+// is the user's own choice and is not held back by it.
+#define DIS_MIN_SOURCE_FPS_OFF 12.0f
+#define DIS_MIN_SOURCE_FPS_ON 15.0f
 
 #define DIS_VR_ALPHA 20.0f
 #define DIS_VR_DELTA 5.0f
@@ -2225,15 +2228,15 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
     }
 
     const int cur = d->planned_gen > (int)capacity ? (int)capacity : d->planned_gen;
-    // Not from a game below ~20 fps. Measured from 15, 20, 24 and 30 fps to 120 Hz: a fast camera
-    // turn from 24 fps still interpolates (19.96 dB against 12.4 for repeating the frame), from
-    // 20 fps it collapses to the repeat (13.1 against 12.1) - the motion between two real frames
-    // outruns the search - and every generated frame also waits for the next real one, 50-66 ms
-    // there. Off below 20, back on above 24, so a game around the limit does not flicker on and off.
-    const bool fast_enough = cur > 0 ? source_rate >= DIS_MIN_SOURCE_FPS_OFF
-                                     : source_rate >= DIS_MIN_SOURCE_FPS_ON;
+    // Adaptive mode only, a safety net: off below 12 fps, back on above 15, so a game around
+    // the limit does not flicker on and off. Upstream used 20/24 (from 20 fps a fast camera turn
+    // collapses towards a repeat and each generated frame waits 50-66 ms for the next real one),
+    // which kept FG off for the 20-25 fps range where mobile games need it most.
+    const bool fast_enough = fixed_mult ||
+                             (cur > 0 ? source_rate >= DIS_MIN_SOURCE_FPS_OFF
+                                      : source_rate >= DIS_MIN_SOURCE_FPS_ON);
     // A fixed xN always generates (the ratio is the multiplier itself, never below 2); only the
-    // source-rate floor and the display cap below can hold it back.
+    // display cap below can hold it back.
     const bool generate = fast_enough && (fixed_mult ||
                                           (cur > 0 ? (ratio >= DIS_MIN_GEN_RATIO - DIS_RATIO_HYST)
                                                    : (ratio >= DIS_MIN_GEN_RATIO)));
