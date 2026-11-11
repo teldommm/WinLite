@@ -18,8 +18,10 @@
 //!   ([`Router::replay`]);
 //! * what Java still wants to know (map / unmap / geometry for the shown part of the screen, the
 //!   pointer for the magnifier, and of frames: the first frame of a window, which window the HUD
-//!   rates, how many frames it shows) goes on to it; frames as [`Notify::ContentFrames`], at most
-//!   every [`NOTIFY_INTERVAL`] per window, with the number of frames since the previous one.
+//!   rates, how many frames it shows) goes on to it; frames as [`Notify::ContentFrames`], with
+//!   the number of frames since the previous report of that window. A frame is reported at once,
+//!   unless the window's previous report is closer than [`NOTIFY_INTERVAL`] (see there for why
+//!   that must stay short: the HUDs derive the fps from these counts).
 //!
 //! Windows whose WM_CLASS names one of [`set_hidden_classes`] (Wine's explorer.exe desktop, for
 //! a shortcut) are not drawn and get no input.
@@ -84,8 +86,17 @@ pub struct CursorImage {
     pub rgba: Vec<u8>,
 }
 
-/// Java hears about a window's frames at most this often (the HUD shows 2-4 updates a second).
-pub const NOTIFY_INTERVAL: Duration = Duration::from_millis(250);
+/// A window's frames reach Java at once, unless the previous report of that window is closer than
+/// this: then they are only counted, and go with the next report.
+///
+/// Keep it short. The HUDs turn the reports into fps by adding up what arrived in their own
+/// sampling window (the modern one redraws, and samples, every 400 ms), so a report that holds
+/// frames back for a quarter of a second makes the reading jump with the number of reports that
+/// happen to fall into the window: one or two. A steady 60 fps then reads 37..81, and a limiter
+/// set to 10 reads 7..15, although the game presents at an even pace. With 8 ms nothing is held
+/// back up to 125 fps, and above that about `rate x 8 ms` frames at most (one at 125 fps, two at
+/// 250), which the sampling window does not show.
+pub const NOTIFY_INTERVAL: Duration = Duration::from_millis(8);
 
 /// One step for the renderer, in server order. Window ids are the server's (also the renderer's
 /// keys, and those of the windows' own contents).
@@ -415,7 +426,9 @@ impl Router {
         }
     }
 
-    /// Counts a frame of `window`; the summary for Java when it is due.
+    /// Counts a frame of `window`; the summary for Java when it is due (the first frame, and
+    /// every frame that comes [`NOTIFY_INTERVAL`] or more after the previous report). Frames held
+    /// back are not lost: they go with the next report.
     fn rate(&mut self, window: u32, pixmap: u32, now: Instant) -> Option<Notify> {
         let r = self.rates.entry((window, pixmap != 0)).or_default();
         r.frames = r.frames.saturating_add(1);
@@ -627,17 +640,69 @@ mod tests {
     }
 
     #[test]
-    fn java_hears_about_frames_at_most_every_interval_with_the_count() {
+    fn frames_closer_than_the_interval_are_held_and_counted_into_the_next_report() {
         let (s, w) = server();
         let f = Arc::new(Fake::default());
         let mut r = router(&f);
         let t0 = Instant::now();
         assert_eq!(r.route(&s, Notify::ContentUpdate(w), t0), Some(Notify::ContentFrames { window: w, pixmap: 0, frames: 1 }));
-        for i in 1..10 {
-            assert_eq!(r.route(&s, Notify::ContentUpdate(w), t0 + Duration::from_millis(i * 20)), None);
+        // A burst inside the interval (several presents in one turn of the I/O thread).
+        let step = NOTIFY_INTERVAL.as_micros() as u64 / 8;
+        for i in 1..8 {
+            assert_eq!(r.route(&s, Notify::ContentUpdate(w), t0 + Duration::from_micros(i * step)), None);
         }
         let t1 = t0 + NOTIFY_INTERVAL;
-        assert_eq!(r.route(&s, Notify::ContentUpdate(w), t1), Some(Notify::ContentFrames { window: w, pixmap: 0, frames: 10 }));
+        assert_eq!(r.route(&s, Notify::ContentUpdate(w), t1), Some(Notify::ContentFrames { window: w, pixmap: 0, frames: 8 }));
+    }
+
+    /// The regression this guards: with reports every 250 ms the HUD's 400 ms window held one or
+    /// two of them, and a steady 60 fps read anywhere from 37 to 81. Evenly paced frames (a game
+    /// at 60 fps, a limiter at 10) must each reach Java the moment they are routed.
+    #[test]
+    fn evenly_paced_frames_are_each_reported_at_once() {
+        for (fps, direct) in [(240u64, false), (120, false), (60, true), (30, false), (10, true)] {
+            let (s, w) = server();
+            let f = Arc::new(Fake::default());
+            let mut r = router(&f);
+            let t0 = Instant::now();
+            let period = Duration::from_micros(1_000_000 / fps);
+            // The 8 ms interval holds nothing back at 120 fps and below; 240 fps (4.2 ms apart)
+            // is the one that batches, pairs at most.
+            let mut reported = 0u32;
+            for i in 0..(fps * 3) {
+                let now = t0 + period * i as u32;
+                let n = if direct {
+                    r.route(&s, Notify::ContentUpdateDirect { window: w, pixmap: w }, now)
+                } else {
+                    r.route(&s, Notify::ContentUpdate(w), now)
+                };
+                match n {
+                    Some(Notify::ContentFrames { frames, .. }) => reported += frames,
+                    other => assert!(fps > 125, "{fps} fps: frame {i} was held back: {other:?}"),
+                }
+            }
+            let held = (fps * 3) as u32 - reported;
+            assert!(held <= (fps / 125).max(1) as u32, "{fps} fps: {held} frames still held back");
+        }
+    }
+
+    #[test]
+    fn no_frame_is_lost_whatever_the_pacing() {
+        let (s, w) = server();
+        let f = Arc::new(Fake::default());
+        let mut r = router(&f);
+        let mut now = Instant::now();
+        let (mut sent, mut reported) = (0u32, 0u32);
+        // Irregular gaps from 0 to 29 ms, bursts included.
+        for i in 0..2000u64 {
+            now += Duration::from_micros((i * 7919) % 30_000);
+            sent += 1;
+            if let Some(Notify::ContentFrames { frames, .. }) = r.route(&s, Notify::ContentUpdate(w), now) {
+                reported += frames;
+            }
+        }
+        let held = r.rates.get(&(w, false)).map(|x| x.frames).unwrap_or(0);
+        assert_eq!(sent, reported + held, "reported {reported} + held {held}");
     }
 
     #[test]
