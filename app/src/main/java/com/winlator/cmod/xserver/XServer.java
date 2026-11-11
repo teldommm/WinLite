@@ -75,6 +75,7 @@ public class XServer {
     private volatile WinHandler winHandler;
     private volatile XServerRendererView xServerView;
     private volatile boolean relativeMouseMovement = false;
+    private volatile boolean simulateTouchScreen = false;
     private volatile boolean disableMouse = false;
     private volatile short[] refreshRates;
     private volatile short activeRate;
@@ -323,6 +324,18 @@ public class XServer {
         this.relativeMouseMovement = relativeMouseMovement;
         XCore c = core;
         if (c != null) c.setRelativeMouse(relativeMouseMovement);
+    }
+
+    /**
+     * Touch Mode "Touchscreen": the pointer is driven as a touchscreen. The Java server only kept
+     * the flag (the activity decides what it means), and so does this one.
+     */
+    public void setSimulateTouchScreen(boolean simulateTouchScreen) {
+        this.simulateTouchScreen = simulateTouchScreen;
+    }
+
+    public boolean isSimulateTouchScreen() {
+        return simulateTouchScreen;
     }
 
     /**
