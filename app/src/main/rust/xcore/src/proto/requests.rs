@@ -260,6 +260,8 @@ impl Server {
             op::COPY_AREA => self.r_copy_area(r),
             op::POLY_LINE => self.r_poly_line(data, r),
             op::POLY_FILL_RECTANGLE => self.r_poly_fill_rectangle(r),
+            op::POLY_SEGMENT => self.r_poly_segment(r),
+            op::POLY_RECTANGLE => self.r_poly_rectangle(r),
             op::PUT_IMAGE => self.r_put_image(data, r),
             op::GET_IMAGE => self.r_get_image(c, data, r),
             op::CREATE_CURSOR => self.r_create_cursor(c, r),
@@ -296,7 +298,7 @@ impl Server {
                 Ok(())
             }
             // No reply, nothing to do (SetDashes also lands here: opcode 58 is not CopyGC).
-            op::SET_CLIP_RECTANGLES | op::POLY_SEGMENT | op::POLY_RECTANGLE | op::CREATE_COLORMAP | op::FREE_COLORMAP | op::CREATE_GLYPH_CURSOR | op::BELL | op::SET_SCREEN_SAVER | op::FORCE_SCREEN_SAVER | op::NO_OPERATION | 58 => Ok(()),
+            op::SET_CLIP_RECTANGLES | op::CREATE_COLORMAP | op::FREE_COLORMAP | op::CREATE_GLYPH_CURSOR | op::BELL | op::SET_SCREEN_SAVER | op::FORCE_SCREEN_SAVER | op::NO_OPERATION | 58 => Ok(()),
             o if o >= 128 => self.dispatch_extension(c, o, data, body),
             o => {
                 if self.fallback_request(c, o, r)? {
@@ -1049,6 +1051,41 @@ impl Server {
         }
         let color = self.gcs[&gc].foreground as i32;
         if self.drawables[&dr].fill_rects(&rects, color) {
+            self.content_changed(dr);
+        }
+        Ok(())
+    }
+
+    fn r_poly_segment(&mut self, r: &mut Reader) -> Res {
+        let (dr, gc) = (r.u32()?, r.u32()?);
+        self.need_drawable(dr)?;
+        self.need_gc(gc)?;
+        let n = r.remaining() / 8;
+        let mut segs = Vec::with_capacity(n * 4);
+        for _ in 0..n * 4 {
+            segs.push(r.i16()?);
+        }
+        let g = &self.gcs[&gc];
+        let (fg, lw) = (g.foreground as i32, g.line_width);
+        if self.drawables[&dr].draw_segments(fg, lw, &segs) {
+            self.content_changed(dr);
+        }
+        Ok(())
+    }
+
+    fn r_poly_rectangle(&mut self, r: &mut Reader) -> Res {
+        let (dr, gc) = (r.u32()?, r.u32()?);
+        self.need_drawable(dr)?;
+        self.need_gc(gc)?;
+        let n = r.remaining() / 8;
+        let mut rects = Vec::with_capacity(n);
+        for _ in 0..n {
+            // x, y signed; width, height unsigned
+            rects.push((r.i16()? as i32, r.i16()? as i32, r.u16()? as i32, r.u16()? as i32));
+        }
+        let g = &self.gcs[&gc];
+        let (fg, lw) = (g.foreground as i32, g.line_width);
+        if self.drawables[&dr].stroke_rects(&rects, fg, lw) {
             self.content_changed(dr);
         }
         Ok(())

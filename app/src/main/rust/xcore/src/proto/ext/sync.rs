@@ -7,7 +7,7 @@
 
 use super::reader;
 use crate::proto::consts::err;
-use crate::proto::hooks::Blocked;
+use crate::proto::hooks::{Blocked, Hook};
 use crate::proto::requests::Extension;
 use crate::proto::{bad, ClientId, Fail, Res, Server};
 use std::collections::BTreeMap;
@@ -123,6 +123,7 @@ impl Extension for Sync {
                     return Err(bad_fence(id));
                 }
                 s.sync.trigger(id);
+                s.run_hook(Hook::FenceTriggered(id));
             }
             RESET_FENCE => {
                 let id = r.u32()?;

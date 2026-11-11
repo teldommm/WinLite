@@ -6,6 +6,7 @@
 
 use crate::pixels::{self, Surface};
 use std::cell::UnsafeCell;
+use std::sync::{Arc, Mutex};
 
 /// Pixel memory of one drawable. `with_surface` hands out the (locked) memory for the duration
 /// of the closure; `false` means the buffer is gone or could not be locked.
@@ -16,6 +17,31 @@ pub trait PixelStore: Send {
     /// none. Not a reference: the caller acquires its own while the server lock is held.
     fn native_handle(&self) -> i64 {
         0
+    }
+}
+
+/// Pixel memory that stays mapped for the CPU between two operations (an AHardwareBuffer stays
+/// locked, so a burst of small requests locks it once). The owner hands itself to [`hold`] when it
+/// maps; whoever holds the server lock calls [`release_held`] before it lets go of it, which is
+/// the point where the memory must be coherent for the renderer and the clients.
+pub trait Held: Send + Sync {
+    /// Unmaps the memory (and with it flushes the CPU's writes).
+    fn release(&self);
+}
+
+static HELD: Mutex<Vec<Arc<dyn Held>>> = Mutex::new(Vec::new());
+
+/// Registers `h` as mapped until the next [`release_held`].
+pub fn hold(h: Arc<dyn Held>) {
+    HELD.lock().unwrap_or_else(|e| e.into_inner()).push(h);
+}
+
+/// Releases everything [`hold`] registered. Called with the server lock held, just before it is
+/// released.
+pub fn release_held() {
+    let held = std::mem::take(&mut *HELD.lock().unwrap_or_else(|e| e.into_inner()));
+    for h in held {
+        h.release();
     }
 }
 
@@ -237,6 +263,83 @@ impl Drawable {
         }
         self.store.with_surface(&mut |s| {
             s.draw_polyline(&clamped, count, color, line_width);
+        })
+    }
+}
+
+impl Drawable {
+    /// PolySegment: `segs` holds (x1, y1, x2, y2) quadruples, drawn with a square pen of
+    /// `line_width` (0 is the thin line, one pixel). Endpoints are clamped like PolyLine's.
+    pub fn draw_segments(&self, color: i32, line_width: i32, segs: &[i16]) -> bool {
+        let lw = line_width.max(1);
+        if segs.len() < 4 || lw > self.width as i32 || lw > self.height as i32 {
+            return false;
+        }
+        let (max_x, max_y) = (self.width as i32 - lw, self.height as i32 - lw);
+        let mut clamped: Vec<i16> = Vec::with_capacity(segs.len());
+        for q in segs.chunks_exact(4) {
+            clamped.push(clamp(q[0] as i32, 0, max_x) as i16);
+            clamped.push(clamp(q[1] as i32, 0, max_y) as i16);
+            clamped.push(clamp(q[2] as i32, 0, max_x) as i16);
+            clamped.push(clamp(q[3] as i32, 0, max_y) as i16);
+        }
+        self.store.with_surface(&mut |s| {
+            for q in clamped.chunks_exact(4) {
+                s.draw_polyline(q, 2, color, lw);
+            }
+        })
+    }
+
+    /// PolyRectangle: `rects` holds (x, y, width, height) quadruples (the width and height are
+    /// unsigned on the wire, so they come as `i32`); each outline is a pen of `line_width`
+    /// (0 = one pixel) centred on the rectangle's edges. Drawn as up to four strips each.
+    pub fn stroke_rects(&self, rects: &[(i32, i32, i32, i32)], color: i32, line_width: i32) -> bool {
+        let lw = line_width.max(1);
+        let left = lw / 2;
+        let mut strips: Vec<(i32, i32, i32, i32)> = Vec::with_capacity(rects.len() * 4);
+        for &(x, y, w, h) in rects {
+            let (ox, oy, ow, oh) = (x - left, y - left, w + lw, h + lw);
+            if ow <= 2 * lw || oh <= 2 * lw {
+                strips.push((ox, oy, ow, oh)); // no hollow inside: the whole box
+                continue;
+            }
+            strips.push((ox, oy, ow, lw));
+            strips.push((ox, oy + oh - lw, ow, lw));
+            strips.push((ox, oy + lw, lw, oh - 2 * lw));
+            strips.push((ox + ow - lw, oy + lw, lw, oh - 2 * lw));
+        }
+        self.fill_boxes(&strips, color)
+    }
+
+    /// Clips every box to the drawable and fills them under one buffer lock.
+    fn fill_boxes(&self, boxes: &[(i32, i32, i32, i32)], color: i32) -> bool {
+        let mut clipped: Vec<i16> = Vec::with_capacity(boxes.len() * 4);
+        for &(mut x, mut y, mut w, mut h) in boxes {
+            if x < 0 {
+                w += x;
+                x = 0;
+            }
+            if y < 0 {
+                h += y;
+                y = 0;
+            }
+            if x + w > self.width as i32 {
+                w = self.width as i32 - x;
+            }
+            if y + h > self.height as i32 {
+                h = self.height as i32 - y;
+            }
+            if w <= 0 || h <= 0 {
+                continue;
+            }
+            clipped.extend_from_slice(&[x as i16, y as i16, w as i16, h as i16]);
+        }
+        let count = clipped.len() / 4;
+        if count == 0 {
+            return false;
+        }
+        self.store.with_surface(&mut |s| {
+            s.fill_rects(&clipped, count, color);
         })
     }
 }

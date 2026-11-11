@@ -18,6 +18,17 @@ pub struct FrameClock {
 }
 
 impl Server {
+    /// One display refresh in ns: the renderer's measured period, else the RANDR rate in force.
+    /// Present's MSC counts these.
+    pub fn refresh_interval_ns(&mut self) -> i64 {
+        if let Some(clock) = self.platform.display_clock() {
+            if clock[0] > 0 {
+                return clock[0];
+            }
+        }
+        1_000_000_000 / self.randr.current.max(1) as i64
+    }
+
     pub fn next_frame_interval(&mut self, fps: i32) -> i64 {
         let mut interval = 1_000_000_000i64 / fps.max(1) as i64;
         let Some(clock) = self.platform.display_clock() else { return interval };

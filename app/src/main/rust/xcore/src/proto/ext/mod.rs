@@ -10,6 +10,7 @@
 //! | Present    | 153   | handler                                           |
 //! | DRI3       | 154   | handler                                           |
 //! | MIT-SHM    | 155   | handler                                           |
+//! | RENDER     | 157   | handler (formats, pictures, ARGB cursors)         |
 //!
 //! (BIG-REQUESTS, 156, is in `requests.rs`.)
 
@@ -20,6 +21,7 @@ pub mod glx;
 pub mod mitshm;
 pub mod present;
 pub mod randr;
+pub mod render;
 pub mod sync;
 pub mod xinput;
 
@@ -42,4 +44,5 @@ pub fn register_all(server: &mut Server) {
     server.register_extension(Box::new(dri3::Dri3));
     server.register_extension(Box::new(present::Present::default()));
     server.register_extension(Box::new(glx::Glx::default()));
+    server.register_extension(Box::new(render::Render::default()));
 }

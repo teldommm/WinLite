@@ -61,6 +61,8 @@ pub enum Hook {
     WindowFreed(u32),
     PixmapFreed(u32),
     WindowUnmapped(u32),
+    /// SYNC TriggerFence set the fence (Present holds frames for wait fences).
+    FenceTriggered(u32),
     WindowGeometry { window: u32, resized: bool },
     PointerButton { button: u8, pressed: bool },
     /// Relative motion of the input device, before it moves the cursor.

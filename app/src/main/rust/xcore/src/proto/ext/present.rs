@@ -7,6 +7,11 @@
 //! * No limit: the pixmap is idle when the window presents the next one (the renderer no longer
 //!   shows it), with a one second safety timeout; a client that presents the same pixmap over
 //!   and over is single-buffered and gets the idle at once.
+//! * `wait_fence`: a present whose wait fence is not triggered yet is held (in order, per window)
+//!   until it triggers (TriggerFence, or another present's idle), with a one second safety timeout.
+//!
+//! MSC/UST of CompleteNotify count in real refreshes: the renderer's display clock period, else
+//! the RANDR rate in force.
 
 use super::reader;
 use crate::proto::consts::err;
@@ -17,10 +22,11 @@ use std::collections::HashMap;
 
 pub const MAJOR: u8 = 153; // Java: (byte)-103
 const BAD_IMPLEMENTATION: u8 = 17;
-const FAKE_INTERVAL_US: i64 = 1_000_000 / 60;
 /// A client must not wait for a buffer's idle forever; long on purpose (an earlier release would
 /// hand the buffer on screen back to a client that presents slowly).
 const PENDING_IDLE_TIMEOUT_NS: i64 = 1_000_000_000;
+/// A wait fence nobody triggers must not hold a frame for ever.
+const WAIT_FENCE_TIMEOUT_NS: i64 = 1_000_000_000;
 
 const QUERY_VERSION: u8 = 0;
 const PRESENT_PIXMAP: u8 = 1;
@@ -52,6 +58,14 @@ struct Pending {
     token: u64,
 }
 
+/// A PresentPixmap that waits for its `wait_fence`.
+struct Waiting {
+    client: ClientId,
+    idle: Idle,
+    wait_fence: u32,
+    token: u64,
+}
+
 #[derive(Default)]
 pub struct Present {
     /// event id -> selection
@@ -64,6 +78,8 @@ pub struct Present {
     pending: HashMap<u32, Pending>,
     /// windows whose client presents one and the same pixmap over and over
     single: HashMap<u32, u32>,
+    /// Presents held for their wait fence, oldest first.
+    waiting: Vec<Waiting>,
     next_token: u64,
 }
 
@@ -180,6 +196,73 @@ impl Present {
     }
 }
 
+impl Present {
+    /// Shows the pixmap: tells the renderer and answers with CompleteNotify (IdleNotify follows
+    /// as the mode says). The window or the pixmap may be gone if the present was held.
+    fn do_present(&mut self, s: &mut Server, idle: Idle) {
+        let (window, pixmap, serial) = (idle.window, idle.pixmap, idle.serial);
+        if !s.windows.contains_key(&window) || !s.pixmaps.contains(&pixmap) {
+            if idle.fence != 0 {
+                s.sync.trigger(idle.fence);
+            }
+            return;
+        }
+        let fps = s.platform.fps_limit().min(1000);
+        let ust = s.platform.now_ns() / 1000;
+        let msc = ust / (s.refresh_interval_ns() / 1000).max(1);
+        s.content_changed(pixmap);
+        if fps <= 0 {
+            self.present_unlimited(s, idle);
+            self.send_complete(s, window, serial, ust, msc);
+        } else {
+            self.send_complete(s, window, serial, ust, msc);
+            self.schedule_idle(s, idle, fps);
+        }
+    }
+
+    /// Runs the held presents whose wait fence is triggered (or gone), in order; a window's
+    /// later presents stay behind its earlier one.
+    fn release_waiting(&mut self, s: &mut Server) {
+        loop {
+            let mut blocked: Vec<u32> = Vec::new();
+            let mut due = None;
+            for (i, w) in self.waiting.iter().enumerate() {
+                if blocked.contains(&w.idle.window) {
+                    continue;
+                }
+                if w.wait_fence != 0 && s.sync.fence_state(w.wait_fence) == Some(false) {
+                    blocked.push(w.idle.window);
+                    continue;
+                }
+                due = Some(i);
+                break;
+            }
+            let Some(i) = due else { return };
+            let w = self.waiting.remove(i);
+            self.do_present(s, w.idle);
+        }
+    }
+
+    /// The safety timeout of a held present: it goes ahead without its fence.
+    fn expire_waiting(&mut self, s: &mut Server, token: u64) -> bool {
+        let Some(i) = self.waiting.iter().position(|w| w.token == token) else { return false };
+        self.waiting[i].wait_fence = 0;
+        self.release_waiting(s);
+        true
+    }
+
+    /// Drops the held presents `gone` matches, triggering their idle fences.
+    fn drop_waiting(&mut self, s: &mut Server, gone: impl Fn(&Waiting) -> bool) {
+        let (drop, keep): (Vec<Waiting>, Vec<Waiting>) = std::mem::take(&mut self.waiting).into_iter().partition(|w| gone(w));
+        self.waiting = keep;
+        for w in drop {
+            if w.idle.fence != 0 {
+                s.sync.trigger(w.idle.fence);
+            }
+        }
+    }
+}
+
 impl Extension for Present {
     fn name(&self) -> &str {
         "Present"
@@ -198,9 +281,10 @@ impl Extension for Present {
             }
             PRESENT_PIXMAP => {
                 let (window, pixmap, serial) = (r.u32()?, r.u32()?, r.u32()?);
-                r.skip(8)?;
+                r.skip(8)?; // valid, update
                 let (_x_off, _y_off) = (r.i16()?, r.i16()?);
-                r.skip(8)?;
+                r.skip(4)?; // target_crtc
+                let wait_fence = r.u32()?;
                 let fence = r.u32()?;
                 if !s.windows.contains_key(&window) {
                     return Err(bad(err::BAD_WINDOW, window));
@@ -208,17 +292,18 @@ impl Extension for Present {
                 if !s.pixmaps.contains(&pixmap) {
                     return Err(bad(err::BAD_PIXMAP, pixmap));
                 }
-                let fps = s.platform.fps_limit().min(1000);
                 let idle = Idle { window, pixmap, serial, fence };
-                let ust = s.platform.now_ns() / 1000;
-                s.content_changed(pixmap);
-                if fps <= 0 {
-                    self.present_unlimited(s, idle);
-                    self.send_complete(s, window, serial, ust, ust / FAKE_INTERVAL_US);
+                // Behind an earlier held present of the window: frames keep their order.
+                let must_wait = wait_fence != 0 && s.sync.fence_state(wait_fence) == Some(false);
+                if must_wait || self.waiting.iter().any(|w| w.idle.window == window) {
+                    let token = self.token();
+                    let deadline = s.platform.now_ns() + WAIT_FENCE_TIMEOUT_NS;
+                    s.schedule(MAJOR, deadline, token);
+                    self.waiting.push(Waiting { client: c, idle, wait_fence, token });
                 } else {
-                    self.send_complete(s, window, serial, ust, ust / (1_000_000 / fps as i64));
-                    self.schedule_idle(s, idle, fps);
+                    self.do_present(s, idle);
                 }
+                self.release_waiting(s);
             }
             SELECT_INPUT => {
                 let (id, window, mask) = (r.u32()?, r.u32()?, r.u32()?);
@@ -247,6 +332,9 @@ impl Extension for Present {
     }
 
     fn on_timer(&mut self, s: &mut Server, token: u64) {
+        if self.expire_waiting(s, token) {
+            return;
+        }
         if let Some(idle) = self.limited.remove(&token) {
             self.send_idle(s, idle);
             return;
@@ -264,7 +352,9 @@ impl Extension for Present {
         match *hook {
             Hook::WindowGeometry { window, .. } => self.send_configure(s, window, 0),
             Hook::WindowUnmapped(w) => self.flush_pending(s, w),
+            Hook::FenceTriggered(_) => self.release_waiting(s),
             Hook::PixmapFreed(p) => {
+                self.drop_waiting(s, |w| w.idle.pixmap == p);
                 // Nobody to tell, but a waiting idle fence must not stay untriggered.
                 let gone: Vec<u32> = self.pending.iter().filter(|(_, v)| v.idle.pixmap == p).map(|(w, _)| *w).collect();
                 for w in gone {
@@ -277,6 +367,7 @@ impl Extension for Present {
                 self.single.retain(|_, v| *v != p);
             }
             Hook::WindowFreed(w) => {
+                self.drop_waiting(s, |q| q.idle.window == w);
                 self.flush_pending(s, w); // before the window's selections go away
                 self.deadlines.remove(&w);
                 self.send_configure(s, w, PIXMAP_FLAG_WINDOW_DESTROYED);
@@ -286,7 +377,8 @@ impl Extension for Present {
         }
     }
 
-    fn on_client_disconnected(&mut self, _s: &mut Server, client: ClientId) {
+    fn on_client_disconnected(&mut self, s: &mut Server, client: ClientId) {
+        self.drop_waiting(s, |w| w.client == client);
         self.events.retain(|_, e| e.client != client);
     }
 }

@@ -78,6 +78,34 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The server lock. Pixel memory stays mapped across the operations of one holding (see
+/// [`crate::proto::gfx::Held`]); it is unmapped here, before the lock goes, so that nobody
+/// sees a drawable the CPU still has mapped.
+struct StateGuard<'a>(MutexGuard<'a, State>);
+
+impl std::ops::Deref for StateGuard<'_> {
+    type Target = State;
+    fn deref(&self) -> &State {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for StateGuard<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        &mut self.0
+    }
+}
+
+impl Drop for StateGuard<'_> {
+    fn drop(&mut self) {
+        crate::proto::gfx::release_held();
+    }
+}
+
+fn lock_state(m: &Mutex<State>) -> StateGuard<'_> {
+    StateGuard(lock(m))
+}
+
 impl Shared {
     fn wake(&self) {
         let b = 1u8;
@@ -121,7 +149,7 @@ impl Runtime {
         // Worker threads (DRI3 buffer imports) wake the I/O thread when they are done. They hold
         // only a weak reference: a late wake-up after `stop` must not touch a closed pipe.
         let weak = Arc::downgrade(&shared);
-        lock(&shared.state).server.set_waker(Some(Arc::new(move || {
+        lock_state(&shared.state).server.set_waker(Some(Arc::new(move || {
             if let Some(s) = weak.upgrade() {
                 s.wake();
             }
@@ -149,7 +177,7 @@ impl Runtime {
     /// Runs `f` on the server, then delivers whatever it produced (replies, events).
     pub fn with<R>(&self, f: impl FnOnce(&mut Server) -> R) -> R {
         let (r, p, deadline_changed) = {
-            let mut st = lock(&self.shared.state);
+            let mut st = lock_state(&self.shared.state);
             let before = st.server.next_deadline();
             let r = f(&mut st.server);
             st.server.service_wakes();
@@ -173,7 +201,7 @@ impl Runtime {
     /// Frames still queued for a previous output are given back to it.
     pub fn set_output(&self, output: Option<Arc<dyn Output>>) {
         let old = {
-            let mut st = lock(&self.shared.state);
+            let mut st = lock_state(&self.shared.state);
             std::mem::replace(&mut st.router, output.map(Router::new))
         };
         // Outside the server lock: dropping a router delivers what it still holds.
@@ -194,7 +222,7 @@ impl Runtime {
 
     fn with_router(&self, f: impl FnOnce(&mut Router, &Server)) {
         let queued = {
-            let mut st = lock(&self.shared.state);
+            let mut st = lock_state(&self.shared.state);
             let State { server, router, .. } = &mut *st;
             match router.as_mut() {
                 Some(r) => {
@@ -212,7 +240,7 @@ impl Runtime {
     /// Sends the window's own content to the output again (a new renderer has none of it).
     pub fn refresh_content(&self, window: u32) {
         let queued = {
-            let mut st = lock(&self.shared.state);
+            let mut st = lock_state(&self.shared.state);
             let State { server, router, .. } = &mut *st;
             match router.as_mut() {
                 Some(r) => {
@@ -238,7 +266,7 @@ impl Runtime {
     }
 
     pub fn connection_count(&self) -> usize {
-        lock(&self.shared.state).conns.len()
+        lock_state(&self.shared.state).conns.len()
     }
 
     /// Stops the I/O thread, closes every client and removes the socket file. Idempotent.
@@ -253,7 +281,7 @@ impl Runtime {
             let _ = t.join();
         }
         let router = {
-            let mut st = lock(&self.shared.state);
+            let mut st = lock_state(&self.shared.state);
             let ids: Vec<ClientId> = st.conns.iter().map(|c| c.id).collect();
             for id in ids {
                 close_conn(&mut st, id);
@@ -306,7 +334,7 @@ fn deliver(shared: &Shared) {
     let _serial = lock(&shared.delivery);
     loop {
         let (output, items) = {
-            let mut st = lock(&shared.state);
+            let mut st = lock_state(&shared.state);
             match st.router.as_mut() {
                 Some(r) if r.has_pending() => (r.output().clone(), r.take_pending()),
                 _ => return,
@@ -476,7 +504,7 @@ fn io_loop(shared: Arc<Shared>, listener: UnixListener) {
             libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 },
         ];
         let (ids, timeout) = {
-            let mut st = lock(&shared.state);
+            let mut st = lock_state(&shared.state);
             let State { server, conns, .. } = &mut *st;
             for c in conns.iter() {
                 // A paused client (MIT-SHM pacing) is not read: its own writes block instead.
@@ -504,7 +532,7 @@ fn io_loop(shared: Arc<Shared>, listener: UnixListener) {
         }
 
         let p = {
-            let mut st = lock(&shared.state);
+            let mut st = lock_state(&shared.state);
             if fds[1].revents & libc::POLLIN != 0 {
                 while let Ok((stream, _)) = listener.accept() {
                     if stream.set_nonblocking(true).is_err() {
