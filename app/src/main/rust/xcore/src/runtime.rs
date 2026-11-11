@@ -1,5 +1,5 @@
 //! Threaded runtime of the protocol core: the [`Server`] behind one lock, a listening Unix
-//! socket and an I/O thread. Shared by the Android bridge and the host test server.
+//! socket and an I/O thread. Used by the Android bridge.
 //!
 //! * Clients are served on the I/O thread (`poll`): bytes in -> [`Server::feed`], output out.
 //! * Any other thread (UI, input, renderer) calls [`Runtime::with`]: it runs a closure under the

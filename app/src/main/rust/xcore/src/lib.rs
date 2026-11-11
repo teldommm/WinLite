@@ -8,8 +8,8 @@
 //!   (`android::aaudio`); both started by `android::services_jni`;
 //! * [`shm`] / [`sock`]: memfd/ashmem and AF_UNIX/epoll primitives under all of them.
 //!
-//! Everything that does not need Android APIs lives in platform-independent modules and is unit
-//! tested on the host; the `android` module is only the thin JNI / AHardwareBuffer / AAudio layer.
+//! Everything that does not need Android APIs lives in platform-independent modules; the
+//! `android` module is only the thin JNI / AHardwareBuffer / AAudio layer.
 
 pub mod alsa;
 pub mod bridge;
@@ -26,6 +26,3 @@ pub mod sysv;
 
 #[cfg(target_os = "android")]
 mod android;
-
-#[cfg(all(unix, not(target_os = "android")))]
-pub mod host;

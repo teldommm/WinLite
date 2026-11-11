@@ -7,17 +7,8 @@ publish = false
 description = "WinLite native core: the X11 server, the SysV SHM and ALSA (AAudio) guest services, pixel ops, shared memory, epoll I/O"
 
 [lib]
-# staticlib: linked into libwinlator.so by CMake. rlib: lets the host test server (`xcore_host`) link the core.
+# staticlib: linked into libwinlator.so by CMake.
 crate-type = ["staticlib", "rlib"]
-
-[features]
-# `cargo build --features host` also builds the xcore_host test server.
-host = []
-
-[[bin]]
-name = "xcore_host"
-path = "src/bin/xcore_host.rs"
-required-features = ["host"]
 
 [dependencies]
 libc = "0.2"
