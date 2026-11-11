@@ -128,6 +128,9 @@ impl Server {
 
     /// Runs the timers that are due at `now_ns`.
     pub fn run_timers(&mut self, now_ns: i64) {
+        if self.input.settle_at_ns > 0 && self.input.settle_at_ns <= now_ns {
+            self.settle_pointer(now_ns);
+        }
         while let Some(&std::cmp::Reverse((deadline, _, ext, token))) = self.timers.peek() {
             if deadline > now_ns {
                 break;
@@ -223,10 +226,8 @@ impl Server {
     /// (platform clock, ns).
     pub fn next_deadline(&self) -> Option<i64> {
         let pause = self.clients.iter().flatten().map(|c| c.pause_until_ns).filter(|t| *t > 0).min();
-        match (self.next_timer(), pause) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        let settle = Some(self.input.settle_at_ns).filter(|t| *t > 0);
+        [self.next_timer(), pause, settle].into_iter().flatten().min()
     }
 
     /// Wakes the clients whose condition is met and processes what they had queued. Called at the

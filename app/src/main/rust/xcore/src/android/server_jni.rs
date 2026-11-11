@@ -209,7 +209,7 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeKey(_env: Env,
 
 #[no_mangle]
 pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetRelativeMouse(_env: Env, _cls: JClass, handle: jlong, on: jboolean) {
-    on_server("nativeSetRelativeMouse", handle, (), |s| s.input.relative_mouse = on == JNI_TRUE)
+    on_server("nativeSetRelativeMouse", handle, (), |s| s.set_relative_mouse(on == JNI_TRUE))
 }
 
 #[no_mangle]
@@ -286,19 +286,6 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeRefreshContent
     guard("nativeRefreshContent", || {
         if let Some(rt) = get(handle) {
             rt.refresh_content(window as u32)
-        }
-    })
-}
-
-/// The `SysVSharedMemory` MIT-SHM attaches the guest's segments from (null: none).
-#[no_mangle]
-pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetShmProvider(env: Env, _cls: JClass, provider: JObject) {
-    guard("nativeSetShmProvider", || {
-        let Ok(vm) = env.get_java_vm() else { return };
-        if provider.as_raw().is_null() {
-            platform::set_shm_provider(vm, None);
-        } else if let Ok(obj) = env.new_global_ref(&provider) {
-            platform::set_shm_provider(vm, Some(obj));
         }
     })
 }

@@ -2161,3 +2161,100 @@ mod panics {
         rt.stop();
     }
 }
+
+// ------------------------------------------------------------------ edge pull-back (CursorLocker)
+
+mod settle_tests {
+    use super::*;
+    use crate::proto::input::{settle_step, SETTLE_PERIOD_NS};
+
+    /// Runs the pull-back steps due one after another; the x/y after each.
+    fn steps(t: &mut T) -> Vec<(i16, i16)> {
+        let mut out = Vec::new();
+        while t.s.input.settle_at_ns > 0 {
+            let due = t.s.input.settle_at_ns;
+            assert_eq!(t.s.next_deadline(), Some(due), "the I/O loop must wake for it");
+            t.s.run_timers(due);
+            out.push((t.s.input.x, t.s.input.y));
+            assert!(out.len() < 20, "never settles: {out:?}");
+        }
+        out
+    }
+
+    #[test]
+    fn step_math() {
+        // 1024 px wide, overshoot capped at 51 px (5 %).
+        assert_eq!(settle_step(-200, 1024, 51), -12);
+        assert_eq!(settle_step(-12, 1024, 51), -3);
+        assert_eq!(settle_step(-3, 1024, 51), 0);
+        assert_eq!(settle_step(500, 1024, 51), 500);
+        // Exactly one past the last pixel: back on the screen (the Java code left it there).
+        assert_eq!(settle_step(1024, 1024, 51), 1023);
+        assert_eq!(settle_step(1200, 1024, 51), 1035);
+    }
+
+    #[test]
+    fn nothing_runs_while_the_pointer_is_on_the_screen() {
+        let mut t = T::new();
+        t.s.set_pointer_position(10, 10);
+        t.s.set_pointer_position(1023, 767);
+        assert_eq!(t.s.input.settle_at_ns, 0);
+        assert_eq!(t.s.next_deadline(), None);
+    }
+
+    #[test]
+    fn overshoot_is_pulled_back_silently_and_then_the_timer_stops() {
+        let mut t = T::new();
+        t.s.set_pointer_position(-200, 868); // past the left and the bottom edge
+        let armed = t.s.input.settle_at_ns;
+        assert!(armed > 0);
+        // More movement while outside does not push the deadline back.
+        t.s.set_pointer_position(-150, 868);
+        assert_eq!(t.s.input.settle_at_ns, armed);
+
+        t.s.notifications.clear();
+        assert_eq!(steps(&mut t), [(-12, 779), (-3, 770), (0, 767)]);
+        assert!(t.s.notifications.is_empty(), "no events: the pull-back is silent");
+        assert_eq!(t.s.next_deadline(), None, "no timer once it is back on the screen");
+    }
+
+    #[test]
+    fn steps_follow_the_old_period() {
+        let mut t = T::new();
+        t.s.set_pointer_position(1100, 100);
+        let first = t.s.input.settle_at_ns;
+        t.s.run_timers(first - 1);
+        assert_eq!(t.s.input.x, 1100, "not before it is due");
+        t.s.run_timers(first);
+        assert_eq!(t.s.input.settle_at_ns, first + SETTLE_PERIOD_NS);
+    }
+
+    #[test]
+    fn a_silent_warp_past_the_edge_is_pulled_back_too() {
+        let mut t = T::new();
+        t.s.set_pointer_silent(1024, 300);
+        assert_eq!(steps(&mut t), [(1023, 300)]);
+    }
+
+    #[test]
+    fn captured_or_disabled_mouse_is_left_alone() {
+        let mut t = T::new();
+        t.s.set_relative_mouse(true);
+        t.s.set_pointer_position(-100, -100);
+        assert_eq!(t.s.input.settle_at_ns, 0);
+        // Released while outside: pulled back from there.
+        t.s.set_relative_mouse(false);
+        assert!(t.s.input.settle_at_ns > 0);
+        // Captured again before the step: cancelled.
+        t.s.set_relative_mouse(true);
+        assert_eq!(t.s.input.settle_at_ns, 0);
+        assert_eq!(t.s.next_deadline(), None);
+
+        let mut t = T::new();
+        t.s.set_pointer_position(-100, 5);
+        t.s.input.mouse_disabled = true;
+        let due = t.s.input.settle_at_ns;
+        t.s.run_timers(due);
+        assert_eq!((t.s.input.x, t.s.input.settle_at_ns), (-100, 0), "a disabled mouse does not move, nor tick");
+    }
+}

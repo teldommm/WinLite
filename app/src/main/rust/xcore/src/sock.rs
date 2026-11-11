@@ -1,6 +1,5 @@
-//! AF_UNIX sockets and the epoll dispatch loop (the port of `xconnector_epoll.c`).
-//!
-//! Pure libc: the JNI layer only supplies the callbacks into Java.
+//! AF_UNIX sockets, descriptor passing and the epoll dispatch loop (once `xconnector_epoll.c`),
+//! used by the X server and the SysV SHM / ALSA servers. Pure libc.
 
 use std::mem;
 use std::os::raw::c_void;
@@ -211,7 +210,8 @@ pub unsafe fn recv_with_fds(fd: i32, buf: *mut u8, len: usize, fds: &mut [i32; M
     (size, count)
 }
 
-/// `sendmsg` of `len` bytes with one descriptor attached (SCM_RIGHTS). Bytes sent or -1.
+/// `sendmsg` of `len` bytes with one descriptor attached (SCM_RIGHTS), without SIGPIPE.
+/// Bytes sent or -1.
 ///
 /// # Safety
 /// `buf` readable for `len` bytes.
@@ -230,7 +230,15 @@ pub unsafe fn send_with_fd(fd: i32, buf: *const u8, len: usize, anc_fd: i32) -> 
     (*cmsg).cmsg_len = libc::CMSG_LEN(mem::size_of::<i32>() as u32) as _;
     ptr::write_unaligned(libc::CMSG_DATA(cmsg) as *mut i32, anc_fd);
 
-    libc::sendmsg(fd, &msg, 0)
+    libc::sendmsg(fd, &msg, libc::MSG_NOSIGNAL)
+}
+
+/// `send(2)` without SIGPIPE (a guest that went away is an error, not a signal); -1 on error.
+///
+/// # Safety
+/// `buf` readable for `len` bytes.
+pub unsafe fn send_nosignal(fd: i32, buf: *const u8, len: usize) -> isize {
+    libc::send(fd, buf as *const c_void, len, libc::MSG_NOSIGNAL)
 }
 
 #[cfg(test)]

@@ -782,6 +782,24 @@ mod tests {
     }
 
     #[test]
+    fn the_io_thread_pulls_the_pointer_back_from_the_edge_on_its_own() {
+        let path = socket_path("settle");
+        let rt = Runtime::start(&path, new_server(640, 480)).unwrap();
+        // As the JNI layer moves it: through `with`, from another thread.
+        rt.with(|s| s.set_pointer_position(-100, 500));
+        let t = std::time::Instant::now();
+        while rt.with(|s| (s.input.x, s.input.y)) != (0, 479) {
+            assert!(t.elapsed() < Duration::from_secs(2), "never pulled back: {:?}", rt.with(|s| (s.input.x, s.input.y)));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // ~3 steps of 16 ms: well under the 2 s above, and no timer is left behind.
+        assert!(t.elapsed() < Duration::from_millis(500), "{:?}", t.elapsed());
+        assert_eq!(rt.with(|s| s.next_deadline()), None);
+        drop(rt);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn serves_a_client_and_delivers_events() {
         let path = socket_path("basic");
         let rt = Runtime::start(&path, new_server(640, 480)).unwrap();

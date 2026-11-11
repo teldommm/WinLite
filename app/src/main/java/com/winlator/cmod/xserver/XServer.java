@@ -3,7 +3,6 @@ package com.winlator.cmod.xserver;
 import android.graphics.Bitmap;
 import android.util.Log;
 
-import com.winlator.cmod.core.CursorLocker;
 import com.winlator.cmod.widget.XServerRendererView;
 import com.winlator.cmod.winhandler.MouseEventFlags;
 import com.winlator.cmod.winhandler.WinHandler;
@@ -62,7 +61,6 @@ public class XServer {
 
     public final ScreenInfo screenInfo;
     public final Pointer pointer = new Pointer(this);
-    public final CursorLocker cursorLocker;
     private final SurfaceFormat surfaceFormat;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Runnable> effectiveScreenListeners = new CopyOnWriteArrayList<>();
@@ -90,7 +88,7 @@ public class XServer {
 
     /* Last absolute position reported by an absolute input source (touchscreen, stylus, uncaptured
      * mouse). Raw (XI2) motion for these sources is the device's own movement, measured from here,
-     * so cursor warps by the application and CursorLocker never leak into raw input. */
+     * so cursor warps by the application and the edge pull-back never leak into raw input. */
     private boolean absolutePointerAnchored = false;
     private int absolutePointerX;
     private int absolutePointerY;
@@ -98,7 +96,6 @@ public class XServer {
     public XServer(ScreenInfo screenInfo, SurfaceFormat surfaceFormat) {
         this.screenInfo = screenInfo;
         this.surfaceFormat = surfaceFormat != null ? surfaceFormat : SurfaceFormat.DEFAULT;
-        cursorLocker = new CursorLocker(this);
     }
 
     // ------------------------------------------------------------------ life
@@ -319,7 +316,6 @@ public class XServer {
     }
 
     public void setRelativeMouseMovement(boolean relativeMouseMovement) {
-        cursorLocker.setEnabled(!relativeMouseMovement);
         this.relativeMouseMovement = relativeMouseMovement;
         XCore c = core;
         if (c != null) c.setRelativeMouse(relativeMouseMovement);

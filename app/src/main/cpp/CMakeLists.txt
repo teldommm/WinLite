@@ -45,13 +45,12 @@ add_dependencies(xcore xcore_cargo)
 # The OpenXR/VR module (xr/*.c, OpenXR-SDK/) was also removed: it was already fully
 # disconnected in this fork (no Java call site ever invoked its native entry points, and
 # the JNI symbol names didn't even match the actual Java package).
-# drawable.c, sysvshared_memory.c and xconnector_epoll.c are now the Rust crate `xcore`
-# (app/src/main/rust/xcore, linked in below): pixel ops, SysV/ashmem shared memory, and the
-# epoll/socket I/O of the X server connectors. Their JNI symbols are unchanged. The X server
-# itself (protocol, windows, drawing, DRI3/Present, ...) is the same crate; gpu_image.c (the
-# AHardwareBuffer helper of the old Java server's drawables) went with the Java server.
+# drawable.c, sysvshared_memory.c, xconnector_epoll.c and alsa_client.c are now the Rust crate
+# `xcore` (app/src/main/rust/xcore, linked in below), together with the X server itself
+# (protocol, windows, drawing, DRI3/Present, ...), the SysV SHM server and the ALSA server
+# (AAudio output; hence `aaudio` below). gpu_image.c (the AHardwareBuffer helper of the old
+# Java server's drawables) went with the Java server.
 add_library(winlator SHARED
-        winlator/alsa_client.c
         winlator/vulkan.c
         winlator/thread_affinity.c
         winlator/gpu_turbo.c

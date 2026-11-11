@@ -168,11 +168,6 @@ public final class XCore {
         nativeSetRenderer(api, rendererHandle);
     }
 
-    /** Where MIT-SHM finds the guest's SysV segments ({@code attach(int)}/{@code detach(int)}); null to remove. */
-    public static void setShmProvider(com.winlator.cmod.sysvshm.SysVSharedMemory provider) {
-        nativeSetShmProvider(provider);
-    }
-
     // ------------------------------------------------------------------ screen and buffers
 
     /** The effective screen width (that of a fullscreen window if there is one). */
@@ -292,5 +287,4 @@ public final class XCore {
     private static native void nativeSetActiveRate(long handle, int active);
     private static native void nativeSetFpsLimit(int fps);
     private static native void nativeSetRenderer(long api, long rendererHandle);
-    private static native void nativeSetShmProvider(Object provider);
 }

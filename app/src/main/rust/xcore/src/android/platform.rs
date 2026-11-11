@@ -1,8 +1,8 @@
 //! The Android side of [`Platform`]: the renderer's FPS limit and display clock (pushed in by
-//! Java), the guest's SysV segments (a callback into `SysVSharedMemory`) and DRI3 buffers.
+//! Java), the guest's SysV segments ([`crate::sysv`], in-process) and DRI3 buffers.
 //!
-//! These run on the I/O thread under the server lock, so they only read atomics or make short
-//! Java calls that never touch the server. Waiting for a DRI3 buffer happens on a worker thread.
+//! These run on the I/O thread under the server lock, so they only read atomics or take the
+//! short SysV table lock, never anything that touches the server. Waiting for a DRI3 buffer happens on a worker thread.
 
 use super::ahb::{self, AHardwareBuffer};
 use super::ahb_pixels::AhbPixels;
@@ -10,8 +10,6 @@ use crate::log;
 use crate::proto::gfx::PixelStore;
 use crate::proto::hooks::ImportDone;
 use crate::proto::platform::{Platform, ShmMap};
-use jni::objects::{GlobalRef, JByteBuffer, JValue};
-use jni::JavaVM;
 use std::ptr;
 use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use std::sync::Mutex;
@@ -23,13 +21,6 @@ static CLOCK_PERIOD: AtomicI64 = AtomicI64::new(0);
 static CLOCK_PHASE: AtomicI64 = AtomicI64::new(0);
 static CLOCK_SEQ: AtomicI64 = AtomicI64::new(0);
 
-struct ShmProvider {
-    vm: JavaVM,
-    obj: GlobalRef,
-}
-
-static SHM: Mutex<Option<ShmProvider>> = Mutex::new(None);
-
 pub fn set_fps_limit(fps: i32) {
     FPS_LIMIT.store(fps, Ordering::Relaxed);
 }
@@ -39,12 +30,6 @@ pub fn set_display_clock(period_ns: i64, phase_ns: i64, seq: i64) {
     CLOCK_PHASE.store(phase_ns, Ordering::Relaxed);
     CLOCK_PERIOD.store(period_ns, Ordering::Relaxed);
     CLOCK_SEQ.store(seq, Ordering::Release);
-}
-
-/// The `SysVSharedMemory` the guest's segments live in (`ByteBuffer attach(int)`, `void
-/// detach(int)`); `None` removes it.
-pub fn set_shm_provider(vm: JavaVM, obj: Option<GlobalRef>) {
-    *SHM.lock().unwrap_or_else(|e| e.into_inner()) = obj.map(|obj| ShmProvider { vm, obj });
 }
 
 /// How long a DRI3 client may take to hand over its buffer (only that client waits meanwhile).
@@ -67,40 +52,11 @@ impl Platform for AndroidPlatform {
     }
 
     fn shm_attach(&mut self, shmid: i32) -> Option<ShmMap> {
-        let guard = SHM.lock().unwrap_or_else(|e| e.into_inner());
-        let p = guard.as_ref()?;
-        let mut env = p.vm.attach_current_thread().ok()?;
-        // The I/O thread stays attached to the JVM (see nativeSetListener), and a native thread
-        // has no Java frame that would free its local references: the returned ByteBuffer goes
-        // with this frame instead of piling up, one per ShmAttach.
-        let map: jni::errors::Result<Option<ShmMap>> = env.with_local_frame(4, |env| {
-            let result = env.call_method(&p.obj, "attach", "(I)Ljava/nio/ByteBuffer;", &[JValue::Int(shmid)]);
-            let map = match result.and_then(|v| v.l()) {
-                Ok(obj) if !obj.as_raw().is_null() => {
-                    let buf = JByteBuffer::from(obj);
-                    match (env.get_direct_buffer_address(&buf), env.get_direct_buffer_capacity(&buf)) {
-                        (Ok(ptr), Ok(len)) if !ptr.is_null() => Some(ShmMap { ptr, len }),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
-            if env.exception_check().unwrap_or(false) {
-                let _ = env.exception_clear();
-            }
-            Ok(map)
-        });
-        map.ok().flatten()
+        crate::sysv::attach(shmid)
     }
 
     fn shm_detach(&mut self, shmid: i32) {
-        let guard = SHM.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(p) = guard.as_ref() else { return };
-        let Ok(mut env) = p.vm.attach_current_thread() else { return };
-        let _ = env.call_method(&p.obj, "detach", "(I)V", &[JValue::Int(shmid)]);
-        if env.exception_check().unwrap_or(false) {
-            let _ = env.exception_clear();
-        }
+        crate::sysv::detach(shmid)
     }
 
     /// The Mesa/Turnip driver sends its AHardwareBuffer over the socket pair after being poked

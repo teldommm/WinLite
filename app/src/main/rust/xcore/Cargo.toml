@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.78"
 publish = false
-description = "WinLite X server core: pixel ops, shared memory, epoll I/O, X11 protocol core"
+description = "WinLite native core: the X11 server, the SysV SHM and ALSA (AAudio) guest services, pixel ops, shared memory, epoll I/O"
 
 [lib]
 # staticlib: linked into libwinlator.so by CMake. rlib: lets `cargo test` run on the host.

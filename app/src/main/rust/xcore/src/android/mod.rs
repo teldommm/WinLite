@@ -1,13 +1,12 @@
-//! The JNI / AHardwareBuffer layer. The connector and shared-memory symbols keep the name and signature of the C
-//! function they replace, so those Java `native` declarations are unchanged.
+//! The JNI / AHardwareBuffer / AAudio layer.
 
+mod aaudio;
 mod ahb;
 mod ahb_pixels;
-mod connector;
 mod output;
 mod platform;
 mod server_jni;
-mod shm_jni;
+mod services_jni;
 
 use crate::log;
 use std::panic::{catch_unwind, AssertUnwindSafe};

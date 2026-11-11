@@ -94,11 +94,43 @@ pub struct InputState {
     pub point_window: u32,
     pub relative_mouse: bool,
     pub mouse_disabled: bool,
+    /// When the next edge pull-back step is due (see [`Server::settle_pointer`]); 0 = none.
+    pub settle_at_ns: i64,
 }
 
 impl InputState {
     pub fn new(root: u32) -> InputState {
-        InputState { x: 0, y: 0, buttons: 0, keyboard: Keyboard::default_layout(), grab: None, point_window: root, relative_mouse: false, mouse_disabled: false }
+        InputState {
+            x: 0,
+            y: 0,
+            buttons: 0,
+            keyboard: Keyboard::default_layout(),
+            grab: None,
+            point_window: root,
+            relative_mouse: false,
+            mouse_disabled: false,
+            settle_at_ns: 0,
+        }
+    }
+}
+
+/// Edge pull-back step period (the Java CursorLocker's 1000 / 60 ms tick).
+pub const SETTLE_PERIOD_NS: i64 = 16_000_000;
+/// Share of the overshoot kept per step.
+const SETTLE_DAMPING: f32 = 0.25;
+
+/// One pull-back step of a coordinate on an axis of `size` pixels: an overshoot beyond the edge is
+/// first limited to `max_over`, then shrunk to a quarter. The far edge is `size - 1` (the Java
+/// code used `size`, which left a pointer sitting exactly one pixel past the screen for good).
+pub fn settle_step(p: i16, size: i16, max_over: i16) -> i16 {
+    let last = size as i32 - 1;
+    let c = (p as i32).clamp(-(max_over as i32), last + max_over as i32);
+    if c < 0 {
+        (c as f32 * SETTLE_DAMPING).ceil() as i16
+    } else if c > last {
+        (last as f32 + (c - last) as f32 * SETTLE_DAMPING).floor() as i16
+    } else {
+        p
     }
 }
 
@@ -252,6 +284,7 @@ impl Server {
         self.input.x = x as i16;
         self.input.y = y as i16;
         self.on_pointer_move();
+        self.arm_settle();
     }
 
     /// Moves the pointer without producing events (Java `setX`/`setY`).
@@ -259,6 +292,47 @@ impl Server {
         if !self.input.mouse_disabled {
             self.input.x = x as i16;
             self.input.y = y as i16;
+            self.arm_settle();
+        }
+    }
+
+    /// Relative (captured) mouse: the pointer is the game's business, it is not pulled back.
+    pub fn set_relative_mouse(&mut self, on: bool) {
+        self.input.relative_mouse = on;
+        self.arm_settle();
+    }
+
+    fn pointer_outside(&self) -> bool {
+        let (x, y) = (self.input.x, self.input.y);
+        x < 0 || y < 0 || x >= self.screen_w || y >= self.screen_h
+    }
+
+    /// Schedules the edge pull-back when the pointer is past the screen edge (and cancels it when
+    /// it is not, or cannot be moved). Nothing runs while the pointer is on the screen.
+    fn arm_settle(&mut self) {
+        if self.input.relative_mouse || self.input.mouse_disabled || !self.pointer_outside() {
+            self.input.settle_at_ns = 0;
+        } else if self.input.settle_at_ns == 0 {
+            self.input.settle_at_ns = self.platform.now_ns() + SETTLE_PERIOD_NS;
+        }
+    }
+
+    /// Edge pull-back (was the Java `CursorLocker`, a 60 Hz timer that ran for the whole session
+    /// while the mouse was not captured): a pointer pushed past the edge (touchpad deltas, a warp)
+    /// is drawn back to it a quarter per step, silently, so the next movement starts at the edge.
+    /// Runs only while the pointer is outside.
+    pub fn settle_pointer(&mut self, now_ns: i64) {
+        self.input.settle_at_ns = 0;
+        if self.input.relative_mouse || self.input.mouse_disabled {
+            return;
+        }
+        let max_over = (self.screen_w as f32 * 0.05) as i16;
+        let nx = settle_step(self.input.x, self.screen_w, max_over);
+        let ny = settle_step(self.input.y, self.screen_h, max_over);
+        self.input.x = nx;
+        self.input.y = ny;
+        if self.pointer_outside() {
+            self.input.settle_at_ns = now_ns + SETTLE_PERIOD_NS;
         }
     }
 

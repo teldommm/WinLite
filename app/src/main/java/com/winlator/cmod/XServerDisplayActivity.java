@@ -127,7 +127,6 @@ import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.xenvironment.XEnvironment;
 import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
-import com.winlator.cmod.alsaserver.ALSAClient;
 import com.winlator.cmod.directaudio.DirectAudioDriver;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
@@ -1226,7 +1225,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             environment.addComponent(
                     new ALSAServerComponent(
                             UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.ALSA_SERVER_PATH),
-                            ALSAClient.Options.fromEnvVars(envVars)));
+                            ALSAServerComponent.Options.fromEnvVars(envVars)));
         } else if (audioDriver.equals("pulse-audio-gn")) {
             envVars.put("PULSE_SERVER", rootPath + UnixSocketConfig.PULSE_SERVER_PATH);
             environment.addComponent(

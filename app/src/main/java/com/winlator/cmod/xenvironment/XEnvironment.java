@@ -2,8 +2,8 @@ package com.winlator.cmod.xenvironment;
 
 import android.content.Context;
 
-import com.winlator.cmod.alsaserver.ALSAClient;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
 
@@ -72,7 +72,7 @@ public class XEnvironment implements Iterable<EnvironmentComponent> {
 
     public void stopEnvironmentComponents() {
         audioExecutor.shutdownNow();
-        ALSAClient.setOutputSuspended(false);
+        ALSAServerComponent.setOutputSuspended(false);
         for (EnvironmentComponent environmentComponent : this) environmentComponent.stop();
     }
 
@@ -92,7 +92,7 @@ public class XEnvironment implements Iterable<EnvironmentComponent> {
         PulseAudioComponent pulseAudio = getComponent(PulseAudioComponent.class);
         try {
             audioExecutor.execute(() -> {
-                ALSAClient.setOutputSuspended(suspend);
+                ALSAServerComponent.setOutputSuspended(suspend);
                 if (pulseAudio != null) {
                     if (suspend) pulseAudio.suspend();
                     else pulseAudio.resume();

@@ -261,9 +261,10 @@ public abstract class ProcessHelper {
 
         for (int index = 0; index < allPids.length; index++){
             String data = "";
-            try {
-                FileInputStream fr = new FileInputStream(proc + "/" + allPids[index] + "/stat");
-                BufferedReader br = new BufferedReader(new InputStreamReader(fr));
+            // Closed here: left to the GC, every call held one descriptor per process until a
+            // collection (and this runs every few seconds, every 50 ms while exiting).
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(
+                    new FileInputStream(proc + "/" + allPids[index] + "/stat")))) {
                 data = br.readLine();
             }
             catch (IOException e) {}

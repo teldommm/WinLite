@@ -1,40 +1,46 @@
 package com.winlator.cmod.xenvironment.components;
 
-import com.winlator.cmod.sysvshm.SysVSHMConnectionHandler;
-import com.winlator.cmod.sysvshm.SysVSHMRequestHandler;
-import com.winlator.cmod.sysvshm.SysVSharedMemory;
-import com.winlator.cmod.xconnector.UnixSocketConfig;
-import com.winlator.cmod.xconnector.XConnectorEpoll;
-import com.winlator.cmod.xenvironment.EnvironmentComponent;
-import com.winlator.cmod.xserver.XCore;
+import android.util.Log;
 
+import com.winlator.cmod.xconnector.UnixSocketConfig;
+import com.winlator.cmod.xenvironment.EnvironmentComponent;
+
+/**
+ * The SysV shared memory server the guest's {@code libandroid-sysvshm.so} talks to. It runs in
+ * native code (xcore crate, {@code sysv.rs}); the X server's MIT-SHM reaches the same segment
+ * table directly, without going through Java.
+ */
 public class SysVSharedMemoryComponent extends EnvironmentComponent {
-    private XConnectorEpoll connector;
+    private static final String TAG = "SysVSharedMemory";
+
+    static {
+        System.loadLibrary("winlator");
+    }
+
     public final UnixSocketConfig socketConfig;
-    private SysVSharedMemory sysVSharedMemory;
+    private long handle;
+
     public SysVSharedMemoryComponent(UnixSocketConfig socketConfig) {
         this.socketConfig = socketConfig;
     }
 
     @Override
-    public void start() {
-        if (connector != null) return;
-        sysVSharedMemory = new SysVSharedMemory();
-        connector = new XConnectorEpoll(socketConfig, new SysVSHMConnectionHandler(sysVSharedMemory), new SysVSHMRequestHandler());
-        connector.start();
-
-        // MIT-SHM of the X server attaches the guest's segments from here.
-        XCore.setShmProvider(sysVSharedMemory);
+    public synchronized void start() {
+        if (handle != 0) return;
+        handle = nativeStart(socketConfig.path);
+        if (handle == 0) Log.e(TAG, "Cannot start the SysV SHM server on " + socketConfig.path);
     }
 
+    /** Also deletes the guest's segments; those the X server still has attached go with their last detach. */
     @Override
-    public void stop() {
-        if (connector != null) {
-            connector.stop();
-            connector = null;
+    public synchronized void stop() {
+        if (handle != 0) {
+            nativeStop(handle);
+            handle = 0;
         }
-
-        XCore.setShmProvider(null);
-        if (sysVSharedMemory != null) sysVSharedMemory.deleteAll();
     }
+
+    private static native long nativeStart(String socketPath);
+
+    private static native void nativeStop(long handle);
 }
