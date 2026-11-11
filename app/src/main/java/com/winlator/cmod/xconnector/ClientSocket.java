@@ -2,15 +2,11 @@ package com.winlator.cmod.xconnector;
 
 import android.util.Log;
 
-import androidx.annotation.Keep;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
 
 public class ClientSocket {
     public final int fd;
-    private final ArrayDeque<Integer> ancillaryFds = new ArrayDeque<>();
 
     static {
         System.loadLibrary("winlator");
@@ -18,19 +14,6 @@ public class ClientSocket {
 
     public ClientSocket(int fd) {
         this.fd = fd;
-    }
-
-    public boolean hasAncillaryFds() {
-        return !ancillaryFds.isEmpty();
-    }
-
-    public int getAncillaryFd() {
-        return hasAncillaryFds() ? ancillaryFds.poll() : -1;
-    }
-
-    @Keep
-    public void addAncillaryFd(int ancillaryFd) {
-        ancillaryFds.add(ancillaryFd);
     }
 
     public int read(ByteBuffer data) throws IOException {
@@ -68,19 +51,6 @@ public class ClientSocket {
         return n == -EAGAIN ? 0 : n;
     }
 
-    public int recvAncillaryMsg(ByteBuffer data) throws IOException {
-        int position = data.position();
-        int bytesRead = recvAncillaryMsg(fd, data, position, data.remaining());
-        if (bytesRead > 0) {
-            data.position(position + bytesRead);
-            return bytesRead;
-        }
-        else if (bytesRead == 0) {
-            return -1;
-        }
-        else throw new IOException("Failed to receive ancillary messages.");
-    }
-
     public void sendAncillaryMsg(ByteBuffer data, int ancillaryFd) throws IOException {
         int bytesSent = sendAncillaryMsg(fd, data, data.limit(), ancillaryFd);
         if (bytesSent >= 0) {
@@ -94,8 +64,6 @@ public class ClientSocket {
     private native int write(int fd, ByteBuffer data, int length);
 
     private native int writeNonBlocking(int fd, ByteBuffer data, int offset, int length);
-
-    private native int recvAncillaryMsg(int clientFd, ByteBuffer data, int offset, int length);
 
     private native int sendAncillaryMsg(int clientFd, ByteBuffer data, int length, int ancillaryFd);
 }

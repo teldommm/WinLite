@@ -44,14 +44,16 @@ public class XServer {
         /** {@code mask}: the changed attributes (X protocol CW* bits). */
         default void onUpdateWindowAttributes(int window, long mask) {}
         default void onModifyWindowProperty(int window, int atom) {}
-        /** The window's own pixels changed (at most once per batch of events). */
-        default void onUpdateWindowContent(int window) {}
-        /** A game presented the DRI3 buffer {@code pixmap} to {@code window}. */
-        default void onUpdateWindowContentDirect(int window, int pixmap) {}
+        /**
+         * The window's own pixels changed, {@code frames} times since the last call. The renderer
+         * already has them (the server hands frames to it directly); this comes at most every
+         * 250 ms per window, for what only needs to know that and how often (first frame, HUD).
+         */
+        default void onUpdateWindowContent(int window, int frames) {}
+        /** A game presented DRI3 buffers to {@code window}, {@code frames} times, the latest {@code pixmap}; as above. */
+        default void onUpdateWindowContentDirect(int window, int pixmap, int frames) {}
         default void onDirectContentAdded(int window, int pixmap) {}
         default void onDirectContentRemoved(int window, int pixmap) {}
-        /** A drawable's buffer was given back: forget anything imported from it. */
-        default void onDrawableRemoved(int drawable) {}
         default void onCompositeRedirect(int window, boolean redirected) {}
         default void onPointerMove(int x, int y) {}
         /** The cursor under the pointer changed; see {@link #getCursorState}. */
@@ -208,7 +210,7 @@ public class XServer {
                         cursorMayChange = true;
                         break;
                     case (int) XCore.EV_CONTENT_UPDATE:
-                        for (Listener l : listeners) l.onUpdateWindowContent(a);
+                        for (Listener l : listeners) l.onUpdateWindowContent(a, Math.max(1, cc));
                         break;
                     case (int) XCore.EV_GEOMETRY:
                         for (Listener l : listeners) l.onUpdateWindowGeometry(a, b != 0);
@@ -225,9 +227,6 @@ public class XServer {
                         for (Listener l : listeners) l.onReparentWindow(a, b, cc, d);
                         cursorMayChange = true;
                         break;
-                    case (int) XCore.EV_DRAWABLE_REMOVED:
-                        for (Listener l : listeners) l.onDrawableRemoved(a);
-                        break;
                     case (int) XCore.EV_POINTER_MOVE:
                         for (Listener l : listeners) l.onPointerMove(a, b);
                         cursorMayChange = true;
@@ -242,7 +241,7 @@ public class XServer {
                         break;
                     }
                     case (int) XCore.EV_CONTENT_UPDATE_DIRECT:
-                        for (Listener l : listeners) l.onUpdateWindowContentDirect(a, b);
+                        for (Listener l : listeners) l.onUpdateWindowContentDirect(a, b, Math.max(1, cc));
                         break;
                     case (int) XCore.EV_DIRECT_CONTENT_ADDED:
                         for (Listener l : listeners) l.onDirectContentAdded(a, b);

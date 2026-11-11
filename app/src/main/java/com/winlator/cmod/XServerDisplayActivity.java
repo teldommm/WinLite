@@ -614,7 +614,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         xServer.addListener(new XServer.Listener() {
             @Override
-            public void onUpdateWindowContent(int window) {
+            public void onUpdateWindowContent(int window, int frames) {
                 if (!winStarted[0] && xServer.isApplicationWindow(window)) {
                     if (isDrawnCursorVisible()) {
                         xServerView.setCursorVisible(true);
@@ -624,8 +624,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
 
                 if (frameRatingWindowId == window) {
-                    if (classicHud != null) classicHud.update();
-                    if (modernHud != null) modernHud.onFrame();
+                    if (classicHud != null) classicHud.update(frames);
+                    if (modernHud != null) modernHud.onFrames(frames);
                 } else if (frameRatingWindowId == -1 && lastRendererName != null
                         && xServer.isApplicationWindow(window)
                         && ((modernHud != null && modernHud.isUserEnabled())
@@ -634,8 +634,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     frameRatingWindowId = window;
                     activeRendererWindowId = window;
                     if (xServerView != null) xServerView.setFpsWindowId(window);
-                    if (classicHud != null) classicHud.update();
-                    if (modernHud != null) modernHud.onFrame();
+                    if (classicHud != null) classicHud.update(frames);
+                    if (modernHud != null) modernHud.onFrames(frames);
                     syncClassicHudRenderer();
                     syncModernHudRenderer();
                 }

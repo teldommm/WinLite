@@ -17,7 +17,7 @@ pub const EV_MAP_WINDOW: i64 = 2; // window
 pub const EV_UNMAP_WINDOW: i64 = 3; // window
 pub const EV_DESTROY_WINDOW: i64 = 4; // window
 pub const EV_CHANGE_Z_ORDER: i64 = 5; // stack_mode (0 above, 1 below), window, sibling
-pub const EV_CONTENT_UPDATE: i64 = 6; // window
+pub const EV_CONTENT_UPDATE: i64 = 6; // window, 0, frames (0 = one)
 pub const EV_GEOMETRY: i64 = 7; // window, resized (0/1)
 pub const EV_ATTRIBUTES: i64 = 8; // window, mask
 pub const EV_PROPERTY: i64 = 9; // window, atom
@@ -27,7 +27,7 @@ pub const EV_POINTER_MOVE: i64 = 12; // x, y
 pub const EV_POINTER_BUTTON: i64 = 13; // button, pressed (0/1)
 pub const EV_KEY: i64 = 14; // keycode, keysym, pressed (0/1)
 pub const EV_RELATIVE_MOUSE_BUTTON: i64 = 15; // button, pressed (0/1), wheel_delta
-pub const EV_CONTENT_UPDATE_DIRECT: i64 = 16; // window, pixmap (DRI3 / Present frame)
+pub const EV_CONTENT_UPDATE_DIRECT: i64 = 16; // window, pixmap, frames (0 = one) (DRI3 / Present frame)
 pub const EV_DIRECT_CONTENT_ADDED: i64 = 17; // window, pixmap
 pub const EV_DIRECT_CONTENT_REMOVED: i64 = 18; // window, pixmap
 pub const EV_COMPOSITE_REDIRECT: i64 = 19; // window, redirected (0/1)
@@ -66,6 +66,9 @@ pub fn encode_event(n: &Notify) -> Option<[i64; EVENT_STRIDE]> {
         Notify::DirectContentAdded { window, pixmap } => [EV_DIRECT_CONTENT_ADDED, window as i64, pixmap as i64, 0, 0],
         Notify::DirectContentRemoved { window, pixmap } => [EV_DIRECT_CONTENT_REMOVED, window as i64, pixmap as i64, 0, 0],
         Notify::CompositeRedirect { window, redirected } => [EV_COMPOSITE_REDIRECT, window as i64, b(redirected), 0, 0],
+        // The renderer got the frames already; this only tells how many there were.
+        Notify::ContentFrames { window, pixmap: 0, frames } => [EV_CONTENT_UPDATE, window as i64, 0, frames as i64, 0],
+        Notify::ContentFrames { window, pixmap, frames } => [EV_CONTENT_UPDATE_DIRECT, window as i64, pixmap as i64, frames as i64, 0],
         Notify::Output(_) | Notify::Kill(_) => return None,
     })
 }

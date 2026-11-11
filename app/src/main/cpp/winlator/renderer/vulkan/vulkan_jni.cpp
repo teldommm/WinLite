@@ -126,14 +126,52 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeDestroy(
     delete reinterpret_cast<VulkanRendererContext*>(h);
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
-    JNIEnv*, jobject, jlong handle, jlong id, jlong ahbPtr,
-    jshort w, jshort h, jint x, jint y)
+// ---------------------------------------------------------------- frames from the X server
+//
+// The X server (xcore, in libwinlator.so) hands frames to the renderer itself, from its own
+// threads, instead of going through Java for each one: VulkanXServerView passes this table and
+// its native handle to XCore.setRenderer(). The layout is xcore's `RendererApi`
+// (rust/xcore/src/android/output.rs); bump the version on both sides together.
+//
+// These are called from Rust: nothing may unwind out of them.
+
+struct XcoreRendererApi {
+    uint32_t version;
+    void    (*updateContent)(void* ctx, int64_t id, AHardwareBuffer* ahb);
+    void    (*releaseBuffer)(void* ctx, AHardwareBuffer* ahb);
+    int32_t (*displayClock)(void* ctx, int64_t* out);
+};
+
+static void xcoreUpdateContent(void* ctx, int64_t id, AHardwareBuffer* ahb) noexcept {
+    try {
+        if (ctx && ahb) static_cast<VulkanRendererContext*>(ctx)->updateWindowContentAHB(id, ahb, 0, 0, 0, 0);
+    } catch (...) {
+        __android_log_print(ANDROID_LOG_ERROR, "Winlator_Renderer", "updateContent: exception, frame dropped");
+    }
+}
+
+// The server dropped the buffer: forget the renderer's import of it (once nothing shows it).
+static void xcoreReleaseBuffer(void* ctx, AHardwareBuffer* ahb) noexcept {
+    try {
+        if (ctx && ahb) static_cast<VulkanRendererContext*>(ctx)->releaseAhb(ahb);
+    } catch (...) {
+        __android_log_print(ANDROID_LOG_ERROR, "Winlator_Renderer", "releaseBuffer: exception");
+    }
+}
+
+static int32_t xcoreDisplayClock(void* ctx, int64_t* out) noexcept {
+    if (!ctx || !out) return 0;
+    return static_cast<const VulkanRendererContext*>(ctx)->getDisplayClock(out) ? 1 : 0;
+}
+
+static const XcoreRendererApi kXcoreRendererApi = {
+    1, xcoreUpdateContent, xcoreReleaseBuffer, xcoreDisplayClock,
+};
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeRendererApi(JNIEnv*, jclass)
 {
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r && ahbPtr)
-        r->updateWindowContentAHB(id, reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
+    return reinterpret_cast<jlong>(&kXcoreRendererApi);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -181,15 +219,6 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeRemoveWindow(
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r) r->removeWindow(id);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeReleaseBuffer(
-    JNIEnv*, jobject, jlong handle, jlong ahbPtr)
-{
-    // The Java side is dropping its reference to this buffer: forget the renderer's import of it.
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r && ahbPtr) r->releaseAhb(reinterpret_cast<AHardwareBuffer*>(ahbPtr));
 }
 
 extern "C" JNIEXPORT void JNICALL

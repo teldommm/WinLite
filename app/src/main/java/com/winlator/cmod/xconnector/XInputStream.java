@@ -10,16 +10,12 @@ public class XInputStream {
     private ByteBuffer buffer;
     public final ClientSocket clientSocket;
 
-    public XInputStream(int initialCapacity) {
-        this(null, initialCapacity);
-    }
-
     public XInputStream(ClientSocket clientSocket, int initialCapacity) {
         this.clientSocket = clientSocket;
         this.buffer = ByteBuffer.allocateDirect(initialCapacity);
     }
 
-    public int readMoreData(boolean canReceiveAncillaryMessages) throws IOException {
+    public int readMoreData() throws IOException {
         if (activeBuffer != null) {
             if (!activeBuffer.hasRemaining()) {
                 buffer.clear();
@@ -33,7 +29,7 @@ public class XInputStream {
         }
 
         growInputBufferIfNecessary();
-        int bytesRead = canReceiveAncillaryMessages ? clientSocket.recvAncillaryMsg(buffer) : clientSocket.read(buffer);
+        int bytesRead = clientSocket.read(buffer);
 
         if (bytesRead > 0) {
             int position = buffer.position();
@@ -42,10 +38,6 @@ public class XInputStream {
             buffer.limit(buffer.capacity()).position(position);
         }
         return bytesRead;
-    }
-
-    public int getAncillaryFd() {
-        return clientSocket.getAncillaryFd();
     }
 
     private void growInputBufferIfNecessary() {
@@ -78,18 +70,6 @@ public class XInputStream {
         return activeBuffer.get();
     }
 
-    public int readUnsignedByte() {
-        return Byte.toUnsignedInt(activeBuffer.get());
-    }
-
-    public short readShort() {
-        return activeBuffer.getShort();
-    }
-
-    public int readUnsignedShort() {
-        return Short.toUnsignedInt(activeBuffer.getShort());
-    }
-
     public int readInt() {
         return activeBuffer.getInt();
     }
@@ -98,30 +78,10 @@ public class XInputStream {
         return Integer.toUnsignedLong(activeBuffer.getInt());
     }
 
-    public long readLong() {
-        return activeBuffer.getLong();
-    }
-
-    public void read(byte[] result) {
-        activeBuffer.get(result);
-    }
-
     public ByteBuffer readByteBuffer(int length) {
         ByteBuffer newBuffer = activeBuffer.slice().order(activeBuffer.order());
         newBuffer.limit(length);
         activeBuffer.position(activeBuffer.position() + length);
         return newBuffer;
-    }
-
-    public String readString8(int length) {
-        byte[] bytes = new byte[length];
-        read(bytes);
-        String str = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
-        if ((-length & 3) > 0) skip(-length & 3);
-        return str;
-    }
-
-    public void skip(int length) {
-        activeBuffer.position(activeBuffer.position() + length);
     }
 }

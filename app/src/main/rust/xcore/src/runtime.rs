@@ -6,11 +6,20 @@
 //!   server lock; afterwards the notifications it produced are processed, so replies and events
 //!   reach the sockets without the caller knowing about connections.
 //! * Notifications that are not about sockets (window created, content updated, ...) are queued
-//!   for the owner ([`Runtime::drain_events`]); `on_events` fires when the queue becomes non-empty
-//!   so a consumer can sleep instead of polling. No callback runs under the server lock.
+//!   for the owner ([`Runtime::drain_events`]); `on_events` fires after every turn (I/O turn or
+//!   [`Runtime::with`] call) that queued some, so a consumer can sleep instead of polling. No
+//!   callback runs under the server lock.
+//! * With a frame output ([`Runtime::set_output`]), frames bypass the owner: the
+//!   [`frames::Router`] queues them under the server lock, and the frame thread (`xcore-frames`)
+//!   hands them to the output, in server order. Whoever queued frames only wakes that thread: a
+//!   renderer that is busy (it waits for the GPU under its own lock when the cursor changes size
+//!   or a filter is switched, and imports new buffers under it) holds up the frames, never the
+//!   I/O thread, the clients or input. The owner only gets a periodic count
+//!   ([`Notify::ContentFrames`]).
 //! * A socket that is full does not block anyone: the rest stays queued and the I/O thread waits
 //!   for POLLOUT. A client that stops reading is cut off when its queue passes [`MAX_PENDING`].
 
+use crate::frames::{Output, Router};
 use crate::log;
 use crate::proto::{ClientId, Notify, Server};
 use std::io::{self, Write};
@@ -18,8 +27,9 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
+use std::time::Instant;
 
 /// `recvmsg` calls per client and poll turn (64 KiB each).
 const MAX_READS_PER_TURN: usize = 16;
@@ -36,6 +46,8 @@ struct Conn {
 struct State {
     server: Server,
     conns: Vec<Conn>,
+    /// Frames for the renderer (see [`frames`]); `None`: frames go to the owner as events.
+    router: Option<Router>,
 }
 
 type Wakeup = Box<dyn Fn() + Send + Sync>;
@@ -44,6 +56,11 @@ struct Shared {
     state: Mutex<State>,
     events: Mutex<Vec<Notify>>,
     on_events: Mutex<Option<Wakeup>>,
+    /// Held while frames are handed to the output: one batch at a time, in queue order.
+    delivery: Mutex<()>,
+    /// Frames are waiting for the frame thread (set by whoever queued them).
+    frames_kick: Mutex<bool>,
+    frames_cv: Condvar,
     stop: AtomicBool,
     /// Self-pipe: written to wake the I/O thread (`[read, write]`).
     wake: [RawFd; 2],
@@ -52,6 +69,7 @@ struct Shared {
 pub struct Runtime {
     shared: Arc<Shared>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    frames_thread: Mutex<Option<JoinHandle<()>>>,
     path: String,
 }
 
@@ -91,9 +109,12 @@ impl Runtime {
             return Err(io::Error::last_os_error());
         }
         let shared = Arc::new(Shared {
-            state: Mutex::new(State { server, conns: Vec::new() }),
+            state: Mutex::new(State { server, conns: Vec::new(), router: None }),
             events: Mutex::new(Vec::new()),
             on_events: Mutex::new(None),
+            delivery: Mutex::new(()),
+            frames_kick: Mutex::new(false),
+            frames_cv: Condvar::new(),
             stop: AtomicBool::new(false),
             wake: pipe,
         });
@@ -105,29 +126,77 @@ impl Runtime {
                 s.wake();
             }
         })));
+        let f = shared.clone();
+        let frames_thread = std::thread::Builder::new().name("xcore-frames".into()).spawn(move || frames_loop(f))?;
         let t = shared.clone();
-        let thread = std::thread::Builder::new().name("xcore-io".into()).spawn(move || io_loop(t, listener))?;
-        Ok(Runtime { shared, thread: Mutex::new(Some(thread)), path: path.to_string() })
+        let thread = match std::thread::Builder::new().name("xcore-io".into()).spawn(move || io_loop(t, listener)) {
+            Ok(t) => t,
+            Err(e) => {
+                shared.stop.store(true, Ordering::SeqCst);
+                kick(&shared);
+                let _ = frames_thread.join();
+                return Err(e);
+            }
+        };
+        Ok(Runtime {
+            shared,
+            thread: Mutex::new(Some(thread)),
+            frames_thread: Mutex::new(Some(frames_thread)),
+            path: path.to_string(),
+        })
     }
 
     /// Runs `f` on the server, then delivers whatever it produced (replies, events).
     pub fn with<R>(&self, f: impl FnOnce(&mut Server) -> R) -> R {
-        let (r, new_events, pending, deadline_changed) = {
+        let (r, p, deadline_changed) = {
             let mut st = lock(&self.shared.state);
             let before = st.server.next_deadline();
             let r = f(&mut st.server);
             st.server.service_wakes();
-            let (new_events, pending) = pump(&self.shared, &mut st);
-            (r, new_events, pending, st.server.next_deadline() != before)
+            let p = pump(&self.shared, &mut st);
+            (r, p, st.server.next_deadline() != before)
         };
         // Also wakes the I/O thread: `f` may have moved the earliest timer.
-        if pending || deadline_changed {
+        if p.output_pending || deadline_changed {
             self.shared.wake();
         }
-        if new_events {
+        if p.frames {
+            kick(&self.shared);
+        }
+        if p.events {
             fire(&self.shared);
         }
         r
+    }
+
+    /// Frames go to `output` from now on (see [`frames`]); `None`: back to the owner's events.
+    /// Frames still queued for a previous output are given back to it.
+    pub fn set_output(&self, output: Option<Arc<dyn Output>>) {
+        let old = {
+            let mut st = lock(&self.shared.state);
+            std::mem::replace(&mut st.router, output.map(Router::new))
+        };
+        // Outside the server lock: dropping a router delivers what it still holds.
+        let _serial = lock(&self.shared.delivery);
+        drop(old);
+    }
+
+    /// Sends the window's own content to the output again (a new renderer has none of it).
+    pub fn refresh_content(&self, window: u32) {
+        let queued = {
+            let mut st = lock(&self.shared.state);
+            let State { server, router, .. } = &mut *st;
+            match router.as_mut() {
+                Some(r) => {
+                    r.show_content(server, window);
+                    r.has_pending()
+                }
+                None => false,
+            }
+        };
+        if queued {
+            kick(&self.shared);
+        }
     }
 
     /// Takes the queued notifications that are not about sockets.
@@ -151,10 +220,22 @@ impl Runtime {
         if let Some(t) = lock(&self.thread).take() {
             let _ = t.join();
         }
-        let mut st = lock(&self.shared.state);
-        let ids: Vec<ClientId> = st.conns.iter().map(|c| c.id).collect();
-        for id in ids {
-            close_conn(&mut st, id);
+        kick(&self.shared);
+        if let Some(t) = lock(&self.frames_thread).take() {
+            let _ = t.join();
+        }
+        let router = {
+            let mut st = lock(&self.shared.state);
+            let ids: Vec<ClientId> = st.conns.iter().map(|c| c.id).collect();
+            for id in ids {
+                close_conn(&mut st, id);
+            }
+            st.router.take()
+        };
+        // Frames still queued give their buffer references back (outside the server lock).
+        {
+            let _serial = lock(&self.shared.delivery);
+            drop(router);
         }
         let _ = std::fs::remove_file(&self.path);
     }
@@ -163,6 +244,51 @@ impl Runtime {
 impl Drop for Runtime {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// Wakes the frame thread: frames are queued. Never waits for the output.
+fn kick(shared: &Shared) {
+    *lock(&shared.frames_kick) = true;
+    shared.frames_cv.notify_one();
+}
+
+/// The frame thread: delivers whenever frames were queued, until the runtime stops (frames left
+/// then go back with the router, see `stop`).
+fn frames_loop(shared: Arc<Shared>) {
+    loop {
+        {
+            let mut kicked = lock(&shared.frames_kick);
+            while !*kicked && !shared.stop.load(Ordering::SeqCst) {
+                kicked = shared.frames_cv.wait(kicked).unwrap_or_else(|e| e.into_inner());
+            }
+            if shared.stop.load(Ordering::SeqCst) {
+                return;
+            }
+            *kicked = false;
+        }
+        deliver(&shared);
+    }
+}
+
+/// Hands the queued frames to the output (frame thread). Frames are queued under the server lock,
+/// so taking the whole queue each time keeps them in server order; the server lock is only held
+/// to take the queue, never while the output works.
+fn deliver(shared: &Shared) {
+    let _serial = lock(&shared.delivery);
+    loop {
+        let (output, items) = {
+            let mut st = lock(&shared.state);
+            match st.router.as_mut() {
+                Some(r) if r.has_pending() => (r.output().clone(), r.take_pending()),
+                _ => return,
+            }
+        };
+        // A panic in the output may leak the references of this batch; it must not take the I/O
+        // thread (or the caller) with it.
+        if catch_unwind(AssertUnwindSafe(|| output.deliver(items))).is_err() {
+            log::error("frame output panicked");
+        }
     }
 }
 
@@ -195,10 +321,23 @@ fn try_write(conn: &mut Conn) -> bool {
     true
 }
 
-/// Processes the server's notifications until there are none: output to sockets, kills, and
-/// the rest to the event queue. Returns (events were queued, some socket has data waiting).
-fn pump(shared: &Shared, st: &mut State) -> (bool, bool) {
+/// What a [`pump`] left to do once the server lock is released.
+#[derive(Clone, Copy, Default)]
+struct Pumped {
+    /// Events were queued for the owner.
+    events: bool,
+    /// This pump queued frames for the output: wake the frame thread.
+    frames: bool,
+    /// Some socket has data waiting.
+    output_pending: bool,
+}
+
+/// Processes the server's notifications until there are none: output to sockets, kills, frames
+/// to the router, and the rest to the event queue.
+fn pump(shared: &Shared, st: &mut State) -> Pumped {
     let mut queued = false;
+    let now = Instant::now();
+    let frames_before = st.router.as_ref().map(|r| r.pending_len()).unwrap_or(0);
     loop {
         let notes = std::mem::take(&mut st.server.notifications);
         if notes.is_empty() {
@@ -215,7 +354,10 @@ fn pump(shared: &Shared, st: &mut State) -> (bool, bool) {
                     }
                 }
                 Notify::Kill(c) => kill.push(c),
-                other => rest.push(other),
+                other => match st.router.as_mut() {
+                    Some(r) => rest.extend(r.route(&st.server, other, now)),
+                    None => rest.push(other),
+                },
             }
         }
         for c in output {
@@ -237,7 +379,11 @@ fn pump(shared: &Shared, st: &mut State) -> (bool, bool) {
             queued = true;
         }
     }
-    (queued, st.conns.iter().any(|c| !c.out.is_empty()))
+    Pumped {
+        events: queued,
+        frames: st.router.as_ref().map(|r| r.pending_len() > frames_before).unwrap_or(false),
+        output_pending: st.conns.iter().any(|c| !c.out.is_empty()),
+    }
 }
 
 /// One `recvmsg`: the bytes and the descriptors that came with them (SCM_RIGHTS, close-on-exec).
@@ -296,7 +442,7 @@ fn io_loop(shared: Arc<Shared>, listener: UnixListener) {
         ];
         let (ids, timeout) = {
             let mut st = lock(&shared.state);
-            let State { server, conns } = &mut *st;
+            let State { server, conns, .. } = &mut *st;
             for c in conns.iter() {
                 // A paused client (MIT-SHM pacing) is not read: its own writes block instead.
                 let read = if server.reads_paused(c.id) { 0 } else { libc::POLLIN };
@@ -322,7 +468,7 @@ fn io_loop(shared: Arc<Shared>, listener: UnixListener) {
             return;
         }
 
-        let (queued, pending) = {
+        let p = {
             let mut st = lock(&shared.state);
             if fds[1].revents & libc::POLLIN != 0 {
                 while let Ok((stream, _)) = listener.accept() {
@@ -346,7 +492,7 @@ fn io_loop(shared: Arc<Shared>, listener: UnixListener) {
                 if rev == 0 {
                     continue;
                 }
-                let State { server, conns } = &mut *st;
+                let State { server, conns, .. } = &mut *st;
                 let Some(conn) = conns.iter_mut().find(|c| c.id == id) else { continue };
                 if rev & libc::POLLOUT != 0 && !try_write(conn) {
                     dead.push(id);
@@ -393,10 +539,14 @@ fn io_loop(shared: Arc<Shared>, listener: UnixListener) {
                 close_conn(&mut st, id);
             }
             let r2 = pump(&shared, &mut st);
-            (r.0 || r2.0, r2.1)
+            // The next loop iteration asks for POLLOUT by itself.
+            Pumped { events: r.events || r2.events, frames: r.frames || r2.frames, output_pending: r2.output_pending }
         };
-        let _ = pending; // the next loop iteration asks for POLLOUT by itself
-        if queued {
+        // Frames first: the renderer is the one waiting; the owner's events can come after.
+        if p.frames {
+            kick(&shared);
+        }
+        if p.events {
             fire(&shared);
         }
     }
@@ -439,6 +589,196 @@ mod tests {
         let mut r = vec![16, 0, 4, 0, 7, 0, 0, 0];
         r.extend_from_slice(b"WM_NAME\0");
         r
+    }
+
+    /// Records what reaches the renderer; buffers are `drawable + 1000`, references counted.
+    #[derive(Default)]
+    struct Recorder {
+        refs: AtomicUsize,
+        items: Mutex<Vec<crate::frames::Item>>,
+        /// Milliseconds each delivery takes (a renderer waiting for the GPU).
+        slow_ms: AtomicUsize,
+        /// Thread names that delivered.
+        threads: Mutex<Vec<String>>,
+    }
+
+    impl Output for Recorder {
+        fn active(&self) -> bool {
+            true
+        }
+        fn acquire(&self, server: &Server, drawable: u32) -> usize {
+            if !server.drawables.contains_key(&drawable) {
+                return 0;
+            }
+            self.refs.fetch_add(1, Ordering::SeqCst);
+            drawable as usize + 1000
+        }
+        fn deliver(&self, items: Vec<crate::frames::Item>) {
+            lock(&self.threads).push(std::thread::current().name().unwrap_or("?").to_string());
+            let ms = self.slow_ms.load(Ordering::SeqCst);
+            if ms > 0 {
+                std::thread::sleep(Duration::from_millis(ms as u64));
+            }
+            for it in &items {
+                if let crate::frames::Item::Show { .. } = it {
+                    self.refs.fetch_sub(1, Ordering::SeqCst);
+                }
+            }
+            lock(&self.items).extend(items);
+        }
+    }
+
+    #[test]
+    fn frames_go_to_the_output_and_the_owner_only_gets_counts() {
+        use crate::frames::Item;
+        let path = socket_path("frames");
+        let rt = Runtime::start(&path, new_server(640, 480)).unwrap();
+        let rec = Arc::new(Recorder::default());
+        rt.set_output(Some(rec.clone() as Arc<dyn Output>));
+
+        // The setup reply carries the client's resource-id base.
+        let mut c = UnixStream::connect(&path).unwrap();
+        c.write_all(&[b'l', 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
+        let mut head = [0u8; 8];
+        c.read_exact(&mut head).unwrap();
+        let mut rest = vec![0u8; u16::from_le_bytes([head[6], head[7]]) as usize * 4];
+        c.read_exact(&mut rest).unwrap();
+        let w = u32::from_le_bytes([rest[4], rest[5], rest[6], rest[7]]) + 1;
+        let root = rt.with(|s| s.root);
+
+        // CreateWindow 64x64 + MapWindow, from the client: handled on the I/O thread.
+        let mut req = vec![1, 0, 8, 0];
+        for v in [w, root] {
+            req.extend(v.to_le_bytes());
+        }
+        for v in [0u16, 0, 64, 64, 0, 1] {
+            req.extend(v.to_le_bytes());
+        }
+        req.extend([0u8; 8]);
+        req.extend([8, 0, 2, 0]);
+        req.extend(w.to_le_bytes());
+        c.write_all(&req).unwrap();
+
+        // Mapping a window with content of its own shows it.
+        wait_for("the window's content on map", || lock(&rec.items).iter().any(|i| matches!(i, Item::Show { window, .. } if *window == w)));
+        // Frames from another thread (as the renderer's own calls are).
+        for _ in 0..3 {
+            rt.with(|s| s.content_changed(w));
+        }
+        wait_for("the frames of with()", || lock(&rec.items).iter().filter(|i| matches!(i, Item::Show { .. })).count() >= 2);
+        wait_for("every reference back", || rec.refs.load(Ordering::SeqCst) == 0);
+
+        let ev = rt.drain_events();
+        assert!(ev.iter().any(|e| matches!(e, Notify::MapWindow(x) if *x == w)), "{ev:?}");
+        assert!(!ev.iter().any(|e| matches!(e, Notify::ContentUpdate(_))), "frames are not the owner's any more: {ev:?}");
+        let counted: u32 = ev.iter().map(|e| if let Notify::ContentFrames { frames, .. } = e { *frames } else { 0 }).sum();
+        assert!(counted >= 1, "the first frame is reported at once: {ev:?}");
+
+        // Without an output the owner gets the frames again.
+        rt.set_output(None);
+        rt.with(|s| s.content_changed(w));
+        assert!(rt.drain_events().iter().any(|e| matches!(e, Notify::ContentUpdate(x) if *x == w)));
+        rt.stop();
+    }
+
+    #[test]
+    fn concurrent_frame_producers_neither_deadlock_nor_leak_references() {
+        let path = socket_path("frames-mt");
+        let rt = Arc::new(Runtime::start(&path, new_server(640, 480)).unwrap());
+        let rec = Arc::new(Recorder::default());
+        rt.set_output(Some(rec.clone() as Arc<dyn Output>));
+        // A mapped window with content of its own, made on the server directly.
+        let w = rt.with(|s| {
+            let c = s.add_client().unwrap();
+            s.feed(c, &[0x6c, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            let w = s.client(c).unwrap().resource_base + 1;
+            let mut req = vec![1, 0, 8, 0];
+            for v in [w, s.root] {
+                req.extend(v.to_le_bytes());
+            }
+            for v in [0u16, 0, 32, 32, 0, 1] {
+                req.extend(v.to_le_bytes());
+            }
+            req.extend([0u8; 8]);
+            req.extend([8, 0, 2, 0]);
+            req.extend(w.to_le_bytes());
+            s.feed(c, &req);
+            s.take_output(c);
+            w
+        });
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let rt = rt.clone();
+                std::thread::spawn(move || {
+                    for i in 0..300 {
+                        rt.with(|s| s.content_changed(w));
+                        if i % 50 == 0 {
+                            rt.refresh_content(w);
+                        }
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        // Frames of the same buffer queued while the frame thread was busy collapse into one;
+        // none may be lost: a frame after all that still arrives.
+        wait_for("every reference back", || rec.refs.load(Ordering::SeqCst) == 0);
+        let before = lock(&rec.items).len();
+        assert!(before >= 1);
+        rt.with(|s| s.content_changed(w));
+        wait_for("the last frame", || lock(&rec.items).len() > before);
+        assert!(matches!(lock(&rec.items).last(), Some(crate::frames::Item::Show { window, .. }) if *window == w));
+        wait_for("every reference back", || rec.refs.load(Ordering::SeqCst) == 0);
+        rt.stop();
+    }
+
+    #[test]
+    fn a_busy_renderer_holds_up_neither_the_clients_nor_the_caller() {
+        let path = socket_path("frames-slow");
+        let rt = Runtime::start(&path, new_server(640, 480)).unwrap();
+        let rec = Arc::new(Recorder::default());
+        rec.slow_ms.store(300, Ordering::SeqCst);
+        rt.set_output(Some(rec.clone() as Arc<dyn Output>));
+        let mut c = connect(&path);
+        let w = rt.with(|s| {
+            let id = s.add_client().unwrap();
+            s.feed(id, &[0x6c, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            let w = s.client(id).unwrap().resource_base + 1;
+            let mut req = vec![1, 0, 8, 0];
+            for v in [w, s.root] {
+                req.extend(v.to_le_bytes());
+            }
+            for v in [0u16, 0, 32, 32, 0, 1] {
+                req.extend(v.to_le_bytes());
+            }
+            req.extend([0u8; 8]);
+            req.extend([8, 0, 2, 0]);
+            req.extend(w.to_le_bytes());
+            s.feed(id, &req);
+            s.take_output(id);
+            w
+        });
+        // The renderer is now stuck for 300 ms on the map's frame; more frames come meanwhile.
+        wait_for("delivery started", || !lock(&rec.threads).is_empty());
+        let t = Instant::now();
+        for _ in 0..5 {
+            rt.with(|s| s.content_changed(w));
+        }
+        assert!(t.elapsed() < Duration::from_millis(100), "a frame producer waited for the renderer: {:?}", t.elapsed());
+        // A client round trip while the renderer is busy.
+        let t = Instant::now();
+        c.write_all(&intern_wm_name()).unwrap();
+        let mut reply = [0u8; 32];
+        c.read_exact(&mut reply).unwrap();
+        assert_eq!(reply[0], 1);
+        assert!(t.elapsed() < Duration::from_millis(100), "the I/O thread waited for the renderer: {:?}", t.elapsed());
+        // Everything still arrives, on the frame thread, and every reference goes back.
+        wait_for("the later frames", || lock(&rec.items).iter().filter(|i| matches!(i, crate::frames::Item::Show { .. })).count() >= 2);
+        wait_for("every reference back", || rec.refs.load(Ordering::SeqCst) == 0);
+        assert!(lock(&rec.threads).iter().all(|n| n == "xcore-frames"), "{:?}", lock(&rec.threads));
+        rt.stop();
     }
 
     #[test]

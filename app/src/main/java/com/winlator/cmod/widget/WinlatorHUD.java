@@ -416,8 +416,13 @@ public class WinlatorHUD extends View {
     }
 
     public void onFrame() {
+        onFrames(1);
+    }
+
+    /** {@code frames} frames of the rated window (the X server reports them in batches). */
+    public void onFrames(int frames) {
         if (!rendererActive && !userEnabled) return;
-        frameAccum.incrementAndGet();
+        frameAccum.addAndGet(frames);
     }
 
     public void update() {

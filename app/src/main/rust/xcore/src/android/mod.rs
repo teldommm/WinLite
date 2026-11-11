@@ -4,6 +4,7 @@
 mod ahb;
 mod ahb_pixels;
 mod connector;
+mod output;
 mod platform;
 mod server_jni;
 mod shm_jni;

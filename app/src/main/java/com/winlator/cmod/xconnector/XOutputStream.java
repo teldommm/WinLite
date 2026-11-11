@@ -12,19 +12,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class XOutputStream {
-    private static final byte[] ZERO = new byte[64];
     public ByteBuffer buffer;
     public final ClientSocket clientSocket;
     private final ReentrantLock lock = new ReentrantLock();
     private int ancillaryFd = -1;
 
-    // Output the client hasn't taken yet. A client that stops reading (a game busy compiling
-    // shaders) fills its socket, and a blocking write then stalls whichever thread produced the
-    // output - the UI thread, for touch input - until Android reports "not responding". So writes
+    // Output the client hasn't taken yet. A client that stops reading fills its socket, and a
+    // blocking write would then stall the connector thread that produced the output. So writes
     // never block: what doesn't fit queues here in order, and a background task delivers it once
-    // the client reads again. While output is queued, consecutive pointer-motion events collapse to
-    // the newest (each one supersedes the last); everything else is kept. Guarded by lock.
-    private static final byte MOTION_NOTIFY = 6;
+    // the client reads again. Guarded by lock.
     private static final long BACKLOG_WARN_BYTES = 8L << 20;
     private static final ExecutorService DRAINER = Executors.newCachedThreadPool(r -> {
         Thread thread = new Thread(r, "XOutputDrain");
@@ -35,13 +31,11 @@ public class XOutputStream {
     private static class Pending {
         final ByteBuffer data;
         final int fd;
-        final boolean motion;
         final int size;
 
-        Pending(ByteBuffer data, int fd, boolean motion) {
+        Pending(ByteBuffer data, int fd) {
             this.data = data;
             this.fd = fd;
-            this.motion = motion;
             this.size = data.remaining();
         }
     }
@@ -51,12 +45,7 @@ public class XOutputStream {
     private boolean drainScheduled = false;
     private boolean backlogWarned = false;
     private boolean dead = false;
-    private boolean coalesceMotionEvents = false;
     private Pending inFlight = null;
-
-    public XOutputStream(int initialCapacity) {
-        this(null, initialCapacity);
-    }
 
     public XOutputStream(ClientSocket clientSocket, int initialCapacity) {
         this.clientSocket = clientSocket;
@@ -65,12 +54,6 @@ public class XOutputStream {
 
     public void setByteOrder(ByteOrder byteOrder) {
         buffer.order(byteOrder);
-    }
-
-    /** X11 clients only: lets queued MotionNotify events collapse to the newest. Other protocols
-     *  sharing this stream class (ALSA, SysV shm) keep every message. */
-    public void setCoalesceMotionEvents(boolean coalesce) {
-        this.coalesceMotionEvents = coalesce;
     }
 
     public void setAncillaryFd(int ancillaryFd) {
@@ -82,57 +65,9 @@ public class XOutputStream {
         buffer.put(value);
     }
 
-    public void writeShort(short value) {
-        ensureSpaceIsAvailable(2);
-        buffer.putShort(value);
-    }
-
     public void writeInt(int value) {
         ensureSpaceIsAvailable(4);
         buffer.putInt(value);
-    }
-
-    public void writeIntPair(int first, int second) {
-        writeInt(first);
-        writeInt(second);
-    }
-
-    public void writeLong(long value) {
-        ensureSpaceIsAvailable(8);
-        buffer.putLong(value);
-    }
-
-    public void writeFP3232(double value) {
-        int integral = (int) value;
-        int frac = (int) ((value - integral) * 0x100000000L);
-        writeInt(integral);
-        writeInt(frac);
-    }
-
-    public void writeString8(String str) {
-        byte[] bytes = str.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
-        int length = -str.length() & 3;
-        ensureSpaceIsAvailable(bytes.length + length);
-        buffer.put(bytes);
-        if (length > 0) writePad(length);
-    }
-
-    public void write(byte[] data) {
-        write(data, 0, data.length);
-    }
-
-    public void write(byte[] data, int offset, int length) {
-        ensureSpaceIsAvailable(length);
-        buffer.put(data, offset, length);
-    }
-
-    public void write(ByteBuffer data) {
-        ensureSpaceIsAvailable(data.remaining());
-        buffer.put(data);
-    }
-
-    public void writePad(int length) {
-        write(ZERO, 0, length);
     }
 
     private void flush() throws IOException {
@@ -168,18 +103,10 @@ public class XOutputStream {
     }
 
     private void enqueue(ByteBuffer src, int fd) {
-        boolean motion = coalesceMotionEvents && fd == -1 && src.position() == 0 && src.remaining() == 32
-                && (src.get(0) & 0x7f) == MOTION_NOTIFY;
-        Pending last = backlog.peekLast();
-        if (motion && last != null && last.motion && last != inFlight) {
-            backlog.pollLast();
-            backlogBytes -= last.size;
-        }
-
         ByteBuffer copy = ByteBuffer.allocateDirect(src.remaining()).order(src.order());
         copy.put(src);
         copy.flip();
-        Pending pending = new Pending(copy, fd, motion);
+        Pending pending = new Pending(copy, fd);
         backlog.addLast(pending);
         backlogBytes += pending.size;
 

@@ -4,16 +4,18 @@
 //! races with `nativeDestroy` finds nothing and returns its default instead of touching freed
 //! memory. Every entry point is panic-guarded.
 
-use super::ahb::{self, AHardwareBuffer};
+use super::output::{self, RendererApi};
 use super::platform::{self, AndroidPlatform};
 use super::ahb_pixels::AhbPixels;
 use super::{guard, guard_or};
 use crate::bridge;
+use crate::frames::Output;
 use crate::log;
 use crate::proto::gfx::PixelStore;
 use crate::proto::{Config, Server};
 use crate::runtime::Runtime;
 use jni::objects::{JByteArray, JClass, JIntArray, JLongArray, JObject, JString};
+use jni::signature::{Primitive, ReturnType};
 use jni::sys::{jboolean, jdouble, jint, jlong, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use std::collections::HashMap;
@@ -91,6 +93,10 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeCreate(
         crate::proto::ext::register_all(&mut server);
         match Runtime::start(&path, server) {
             Ok(rt) => {
+                // Frames go straight to the renderer (when there is one), not through Java.
+                let out = output::output();
+                out.forget_drawables();
+                rt.set_output(Some(out as Arc<dyn Output>));
                 let handle = NEXT.fetch_add(1, Ordering::Relaxed);
                 registry().lock().unwrap_or_else(|e| e.into_inner()).insert(handle, Arc::new(rt));
                 log::warn(&format!("X server started on {path} ({w}x{h})"));
@@ -110,7 +116,10 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeDestroy(_env: 
         let rt = registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&handle);
         if let Some(rt) = rt {
             rt.set_on_events(None);
+            // Queued frames give their buffer references back before the server goes.
+            rt.set_output(None);
             rt.stop();
+            output::output().forget_drawables();
         }
     })
 }
@@ -118,7 +127,7 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeDestroy(_env: 
 /// Registers the object whose `void onServerEvents()` is called when events are waiting
 /// (from any thread, never under the server lock); null removes it.
 #[no_mangle]
-pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetListener(env: Env, _cls: JClass, handle: jlong, listener: JObject) {
+pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetListener(mut env: Env, _cls: JClass, handle: jlong, listener: JObject) {
     guard("nativeSetListener", || {
         let Some(rt) = get(handle) else { return };
         if listener.as_raw().is_null() {
@@ -126,11 +135,24 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetListener(en
             return;
         }
         let (Ok(vm), Ok(obj)) = (env.get_java_vm(), env.new_global_ref(&listener)) else { return };
+        // Resolved once here, not on every call (a class lookup + a method lookup each time).
+        let Ok(on_events) = env.get_object_class(&listener).and_then(|c| env.get_method_id(&c, "onServerEvents", "()V")) else {
+            return;
+        };
         rt.set_on_events(Some(Box::new(move || {
-            let Ok(mut guard) = vm.attach_current_thread() else { return };
-            let _ = guard.call_method(&obj, "onServerEvents", "()V", &[]);
-            if guard.exception_check().unwrap_or(false) {
-                let _ = guard.exception_clear();
+            // Mostly called on xcore-io, a thread of our own. `attach_current_thread` would attach
+            // it and detach it again when its guard drops, i.e. on every I/O turn that queued
+            // events (a new java.lang.Thread each time). Attached once, it stays attached until it
+            // exits; on a thread the JVM already knows this is just a lookup. The MIT-SHM calls of
+            // `platform.rs` run on the same thread and then find it attached too.
+            let Ok(mut env) = vm.attach_current_thread_permanently() else { return };
+            // SAFETY: the id was looked up for this object's class with this signature (no args,
+            // void); the global reference keeps the object, and so its class, alive.
+            unsafe {
+                let _ = env.call_method_unchecked(&obj, on_events, ReturnType::Primitive(Primitive::Void), &[]);
+            }
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_clear();
             }
         })));
     })
@@ -210,21 +232,6 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeScreenSize(_en
     })
 }
 
-/// The AHardwareBuffer of a drawable, with a reference for the caller (release it with
-/// `Drawable.releaseBuffer`), or 0.
-#[no_mangle]
-pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeAcquireBuffer(_env: Env, _cls: JClass, handle: jlong, drawable: jint) -> jlong {
-    on_server("nativeAcquireBuffer", handle, 0i64, |s| {
-        let Some(d) = s.drawables.get(&(drawable as u32)) else { return 0 };
-        let h = d.store.native_handle();
-        if h != 0 {
-            // Under the server lock: the drawable cannot be freed between the lookup and here.
-            unsafe { ahb::AHardwareBuffer_acquire(h as usize as *mut AHardwareBuffer) };
-        }
-        h
-    })
-}
-
 #[no_mangle]
 pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeConnectionCount(_env: Env, _cls: JClass, handle: jlong) -> jint {
     guard_or("nativeConnectionCount", 0, || get(handle).map(|rt| rt.connection_count() as jint).unwrap_or(0))
@@ -263,11 +270,24 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetFpsLimit(_e
     guard("nativeSetFpsLimit", || platform::set_fps_limit(fps))
 }
 
-/// The renderer's display clock: refresh period, last arrival-phase error and a sequence number
-/// that changes with every new measurement.
+/// The renderer that takes the frames: `VulkanXServerView.nativeRendererApi()` (the table of its
+/// C entry points) and its context (the view's native handle); 0, 0: none. Returns once no frame
+/// is being handed to the previous renderer, so it can be destroyed right after.
 #[no_mangle]
-pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetDisplayClock(_env: Env, _cls: JClass, period_ns: jlong, phase_ns: jlong, seq: jlong) {
-    guard("nativeSetDisplayClock", || platform::set_display_clock(period_ns, phase_ns, seq))
+pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetRenderer(_env: Env, _cls: JClass, api: jlong, ctx: jlong) {
+    guard("nativeSetRenderer", || {
+        output::output().set_renderer(api as usize as *const RendererApi, ctx as usize as *mut std::os::raw::c_void)
+    })
+}
+
+/// Hands the window's own content to the renderer again (a new renderer has none of it).
+#[no_mangle]
+pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeRefreshContent(_env: Env, _cls: JClass, handle: jlong, window: jint) {
+    guard("nativeRefreshContent", || {
+        if let Some(rt) = get(handle) {
+            rt.refresh_content(window as u32)
+        }
+    })
 }
 
 /// The `SysVSharedMemory` MIT-SHM attaches the guest's segments from (null: none).
@@ -284,16 +304,6 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeSetShmProvider
 }
 
 // ------------------------------------------------------------------ queries of the consumers
-
-/// Gives back a reference obtained with `nativeAcquireBuffer`.
-#[no_mangle]
-pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeReleaseBuffer(_env: Env, _cls: JClass, ahb: jlong) {
-    guard("nativeReleaseBuffer", || {
-        if ahb != 0 {
-            unsafe { ahb::AHardwareBuffer_release(ahb as usize as *mut AHardwareBuffer) };
-        }
-    })
-}
 
 /// The X cursor under the pointer: `[serial, hot_x, hot_y, visible (0/1), width, height]`, or an
 /// empty array when no window up to the root has one. A new serial means a new image.

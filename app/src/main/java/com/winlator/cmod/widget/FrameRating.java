@@ -228,6 +228,11 @@ public class FrameRating extends FrameLayout implements Runnable {
     }
 
     public void update() {
+        update(1);
+    }
+
+    /** {@code frames} frames of the rated window (the X server reports them in batches). */
+    public void update(int frames) {
         if (!userEnabled) return;
         if (lastTime == 0) lastTime = SystemClock.elapsedRealtime();
         long time = SystemClock.elapsedRealtime();
@@ -247,7 +252,7 @@ public class FrameRating extends FrameLayout implements Runnable {
             lastTime = time;
             frameCount = 0;
         }
-        frameCount++;
+        frameCount += frames;
     }
 
     @Override

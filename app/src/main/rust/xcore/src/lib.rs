@@ -11,6 +11,7 @@
 //! tested on the host; the `android` module is only the thin JNI / AHardwareBuffer layer.
 
 pub mod bridge;
+pub mod frames;
 pub mod log;
 pub mod pixels;
 pub mod proto;

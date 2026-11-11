@@ -32,18 +32,20 @@ public final class XCore {
     public static final long EV_UNMAP_WINDOW = 3;           // window
     public static final long EV_DESTROY_WINDOW = 4;         // window
     public static final long EV_CHANGE_Z_ORDER = 5;         // stackMode (0 above, 1 below), window, sibling
-    public static final long EV_CONTENT_UPDATE = 6;         // window (coalesced: at most one per drain)
+    // Frames go to the renderer directly (setRenderer); these two only report them, at most every
+    // 250 ms per window, with the number of frames since the previous report.
+    public static final long EV_CONTENT_UPDATE = 6;         // window, 0, frames
     public static final long EV_GEOMETRY = 7;               // window, resized (0/1)
     public static final long EV_ATTRIBUTES = 8;             // window, mask
     public static final long EV_PROPERTY = 9;               // window, atom
     public static final long EV_REPARENT = 10;              // window, parent, x, y
-    public static final long EV_DRAWABLE_REMOVED = 11;      // drawable
+    public static final long EV_DRAWABLE_REMOVED = 11;      // drawable (only without a frame output: host builds)
     public static final long EV_POINTER_MOVE = 12;          // x, y
     public static final long EV_POINTER_BUTTON = 13;        // button, pressed (0/1)
     public static final long EV_KEY = 14;                   // keycode, keysym, pressed (0/1)
     public static final long EV_RELATIVE_MOUSE_BUTTON = 15; // button, pressed (0/1), wheelDelta
-    public static final long EV_CONTENT_UPDATE_DIRECT = 16; // window, pixmap (DRI3 / Present frame of a direct content)
-    public static final long EV_DIRECT_CONTENT_ADDED = 17;  // window, pixmap (acquireBuffer(pixmap) is the buffer)
+    public static final long EV_CONTENT_UPDATE_DIRECT = 16; // window, pixmap, frames (DRI3 / Present frames)
+    public static final long EV_DIRECT_CONTENT_ADDED = 17;  // window, pixmap
     public static final long EV_DIRECT_CONTENT_REMOVED = 18; // window, pixmap
     public static final long EV_COMPOSITE_REDIRECT = 19;    // window, redirected (0/1)
 
@@ -155,9 +157,15 @@ public final class XCore {
         nativeSetFpsLimit(fps);
     }
 
-    /** The renderer's display clock: refresh period, last arrival-phase error, and a sequence number that changes with each measurement. */
-    public static void setDisplayClock(long periodNs, long phaseErrorNs, long sequence) {
-        nativeSetDisplayClock(periodNs, phaseErrorNs, sequence);
+    /**
+     * The renderer that takes the X server's frames: the table of its native entry points
+     * ({@code VulkanXServerView.nativeRendererApi()}) and its native handle; {@code 0, 0} for none.
+     * Frames then go from the server's own threads straight into it, and the renderer's display
+     * clock straight to Present. Returns once no frame is being handed to the previous renderer,
+     * so that one may be destroyed right after. Blocks briefly: not from a {@code @FastNative} path.
+     */
+    public static void setRenderer(long api, long rendererHandle) {
+        nativeSetRenderer(api, rendererHandle);
     }
 
     /** Where MIT-SHM finds the guest's SysV segments ({@code attach(int)}/{@code detach(int)}); null to remove. */
@@ -177,16 +185,11 @@ public final class XCore {
     }
 
     /**
-     * The AHardwareBuffer of a window or pixmap, with a reference for the caller, or 0 if there
-     * is none. The caller gives the reference back with {@link #releaseBuffer}.
+     * Hands the window's own (X-drawn) content to the renderer again, if the window is mapped and
+     * has one: a new renderer has none of what the last one was given.
      */
-    public long acquireBuffer(int drawableId) {
-        return nativeAcquireBuffer(handle, drawableId);
-    }
-
-    /** Gives back a reference obtained with {@link #acquireBuffer}. */
-    public static void releaseBuffer(long ahb) {
-        if (ahb != 0) nativeReleaseBuffer(ahb);
+    public void refreshContent(int window) {
+        nativeRefreshContent(handle, window);
     }
 
     public int connectionCount() {
@@ -270,8 +273,7 @@ public final class XCore {
     private static native void nativeSetMouseDisabled(long handle, boolean disabled);
     private static native long nativePointerPosition(long handle);
     private static native long nativeScreenSize(long handle);
-    private static native long nativeAcquireBuffer(long handle, int drawableId);
-    private static native void nativeReleaseBuffer(long ahb);
+    private static native void nativeRefreshContent(long handle, int window);
     private static native int nativeConnectionCount(long handle);
     private static native long[] nativeCursorState(long handle);
     private static native byte[] nativeCursorImage(long handle);
@@ -289,6 +291,6 @@ public final class XCore {
     private static native void nativeSetRefreshRates(long handle, int[] rates, int active);
     private static native void nativeSetActiveRate(long handle, int active);
     private static native void nativeSetFpsLimit(int fps);
-    private static native void nativeSetDisplayClock(long periodNs, long phaseNs, long seq);
+    private static native void nativeSetRenderer(long api, long rendererHandle);
     private static native void nativeSetShmProvider(Object provider);
 }

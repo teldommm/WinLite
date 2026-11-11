@@ -1,11 +1,11 @@
 //! JNI entry points of `XConnectorEpoll` and `ClientSocket`.
 //!
 //! The method IDs of the Java callbacks are looked up once and cached; the C code resolved them
-//! (`GetObjectClass` + `GetMethodID`) on every epoll wake-up and on every received message that
-//! carried descriptors.
+//! (`GetObjectClass` + `GetMethodID`) on every epoll wake-up. Descriptors only go out (ALSA and
+//! SysV shm replies): no connector receives any, so there is no `recvAncillaryMsg` any more.
 
 use super::{guard_or};
-use crate::sock::{self, Event, Wait, MAX_FDS};
+use crate::sock::{self, Event, Wait};
 use jni::objects::{JByteBuffer, JClass, JMethodID, JObject, JString, JValue};
 use jni::signature::{Primitive, ReturnType};
 use jni::sys::{jboolean, jint, JNI_FALSE, JNI_TRUE};
@@ -18,7 +18,6 @@ struct EpollIds {
 }
 
 static EPOLL_IDS: OnceLock<EpollIds> = OnceLock::new();
-static ANCILLARY_ID: OnceLock<JMethodID> = OnceLock::new();
 
 fn epoll_ids(env: &mut JNIEnv, obj: &JObject) -> Option<&'static EpollIds> {
     if let Some(ids) = EPOLL_IDS.get() {
@@ -189,43 +188,6 @@ pub extern "system" fn Java_com_winlator_cmod_xconnector_ClientSocket_writeNonBl
     guard_or("writeNonBlocking", -libc::EINVAL, || match direct(&mut env, &data, offset, length) {
         Some(p) => unsafe { sock::write_nonblocking(fd, p, length as usize) as jint },
         None => -libc::EINVAL,
-    })
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_winlator_cmod_xconnector_ClientSocket_recvAncillaryMsg(
-    mut env: JNIEnv,
-    obj: JObject,
-    client_fd: jint,
-    data: JByteBuffer,
-    offset: jint,
-    length: jint,
-) -> jint {
-    guard_or("recvAncillaryMsg", -1, || {
-        let Some(p) = direct(&mut env, &data, offset, length) else { return -1 };
-        let mut fds = [-1i32; MAX_FDS];
-        let (size, count) = unsafe { sock::recv_with_fds(client_fd, p, length as usize, &mut fds) };
-        if count > 0 {
-            let id = match ANCILLARY_ID.get() {
-                Some(id) => Some(*id),
-                None => env
-                    .get_object_class(&obj)
-                    .and_then(|cls| env.get_method_id(&cls, "addAncillaryFd", "(I)V"))
-                    .ok()
-                    .map(|id| *ANCILLARY_ID.get_or_init(|| id)),
-            };
-            if let Some(id) = id {
-                for fd in &fds[..count] {
-                    call_void_int(&mut env, &obj, id, *fd);
-                }
-            } else {
-                // Nobody can take the descriptors: do not leak them.
-                for fd in &fds[..count] {
-                    sock::close_fd(*fd);
-                }
-            }
-        }
-        size as jint
     })
 }
 

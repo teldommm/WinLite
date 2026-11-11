@@ -29,9 +29,10 @@ import dalvik.annotation.optimization.FastNative;
 
 /**
  * Draws the X server's screen with the native Vulkan renderer. It follows the server through
- * {@link XServer.Listener} (windows, their stacking, their pixels, the cursor) and mirrors what it
- * learns into the renderer's own window tree; the pixels themselves are the server's
- * AHardwareBuffers, imported by the renderer without a copy.
+ * {@link XServer.Listener} (windows, their stacking, the cursor) and mirrors what it learns into
+ * the renderer's own window tree. The pixels do not come through here: the renderer is registered
+ * with the server ({@link XCore#setRenderer}), which hands it every frame (the server's
+ * AHardwareBuffers, imported without a copy) and passes its display clock on to Present itself.
  *
  * <p>The listener methods run on the server's event thread, one after the other. Everything that
  * touches the native renderer holds {@link #lock}.
@@ -68,16 +69,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private volatile int rootWindowId = 0;
     // Windows that are mapped, as far as the events told (event thread only).
     private final HashSet<Integer> mappedWindows = new HashSet<>();
-    // The buffer last handed to the renderer for each drawable (a window, or a DRI3 pixmap shown in
-    // one); only to give it back when the server drops the drawable. Guarded by lock.
-    private final HashMap<Integer, Long> importedAhb = new HashMap<>();
 
     // The cursor image the renderer has (the server's serial of it; 0 = our default arrow).
     private long sentCursorSerial = -1;
     private ByteBuffer rootCursor;
     private int rootCursorWidth, rootCursorHeight;
-    private long lastClockSeq = -1;
-    private final long[] clockOut = new long[3];
 
     private int     pendingPresentMode    = 2;
     private int     pendingStretchMode    = 0;
@@ -152,8 +148,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
      * a fence wait when the cursor changes size; frameMutex across a whole frame) holds up every
      * garbage collection - and every thread, the UI thread included - until it returns. The
      * methods that lock renderMutex or frameMutex are plain native calls. */
-    private native void nativeUpdateWindowContentAHB(long handle, long id,
-        long ahbPtr, short width, short height, int x, int y);
     private native void nativeSetTransformAndScissor(long handle,
         float ox, float oy, float sx, float sy,
         boolean hasScissor, int scX, int scY, int scW, int scH);
@@ -163,7 +157,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY,
         boolean rgba);
     private native void nativeRemoveWindow(long handle, long id);
-    private native void nativeReleaseBuffer(long handle, long ahbPtr);
+    /** The table of the renderer's entry points for the X server (see XCore.setRenderer). */
+    private static native long nativeRendererApi();
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
     private native void nativeSetWfg(long handle, boolean enabled, int flowSide, boolean fastInterp,
@@ -261,6 +256,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (nativeHandle != 0) {
                     boolean ok = nativeReattachSurface(nativeHandle, surface);
                     if (!ok) {
+                        // No frame may reach the renderer from here on.
+                        XCore.setRenderer(0, 0);
                         nativeDestroy(nativeHandle);
                         nativeHandle = 0;
                     } else {
@@ -296,8 +293,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     updateTransform();
                     nativeSetCursorVisible(nativeHandle, false);
 
-                    // A fresh renderer has no buffers imported: nothing to give back later.
-                    importedAhb.clear();
+                    // The server hands the frames to this renderer from now on (and forgets what
+                    // it gave a previous one).
+                    XCore.setRenderer(nativeRendererApi(), nativeHandle);
                     if (isColdInit && rootWindowId != 0) {
                         int root = rootWindowId;
                         nativeInitRootWindow(nativeHandle, root, root,
@@ -363,6 +361,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         xServer.removeListener(this);
         synchronized (lock) {
             if (nativeHandle != 0) {
+                // Returns once no frame is being handed to it: then it can go.
+                XCore.setRenderer(0, 0);
                 nativeDestroy(nativeHandle);
                 nativeHandle = 0;
             }
@@ -470,7 +470,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if ((flags & XCore.WF_MAPPED) != 0) {
                     mappedWindows.add(id);
                     nativeMapWindow(nativeHandle, id);
-                    if (hasContent) updateContentLocked(core, id, id);
+                    // Straight from the server to the renderer, like every frame.
+                    if (hasContent) core.refreshContent(id);
                 }
             }
             // Exact stacking order (also drops any duplicate child entries the creates may leave).
@@ -515,7 +516,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @Override
     public void onServerStopped() {
         mappedWindows.clear();
-        synchronized (lock) { importedAhb.clear(); }
     }
 
     @Override
@@ -539,8 +539,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void onDestroyWindow(int window) {
         mappedWindows.remove(window);
         synchronized (lock) {
-            // The renderer drops the window's buffers with it; nothing of ours to give back.
-            importedAhb.remove(window);
+            // The renderer drops the window's buffers with it.
             if (nativeHandle != 0) nativeDestroyWindow(nativeHandle, window);
         }
     }
@@ -602,11 +601,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         final boolean hasContent = (info[XCore.W_FLAGS] & XCore.WF_HAS_CONTENT) != 0;
         synchronized (lock) {
             if (nativeHandle != 0) {
+                // A resized window's new buffer (same id) reaches the renderer from the server.
                 nativeUpdateWindowGeometry(nativeHandle, window, hasContent ? window : 0,
                     (int) info[XCore.W_X], (int) info[XCore.W_Y],
                     (int) info[XCore.W_WIDTH], (int) info[XCore.W_HEIGHT]);
-                // A resized window has a new buffer under the same id; the old one was given back.
-                if (resized && hasContent && mappedWindows.contains(window)) updateContentLocked(core, window, window);
             }
         }
         if (resized) refreshDesktopTransform();
@@ -622,75 +620,18 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         }
     }
 
-    // ------------------------------------------------------------------ pixels
+    // ------------------------------------------------------------------ frames
 
-    /**
-     * Points the renderer's content {@code window} at the buffer of {@code drawable} (the window
-     * itself, or a DRI3 pixmap shown in it). The renderer takes a reference of its own when it
-     * imports a buffer, so ours goes back at once. Caller holds {@link #lock}.
+    /*
+     * The frames themselves go from the server to the renderer directly (XCore.setRenderer), and
+     * so do the drawables the server drops and the display clock for Present. What is left here
+     * is counting the rated window's DRI3 frames for the HUD, from the server's periodic report.
      */
-    private void updateContentLocked(XCore core, int window, int drawable) {
-        if (nativeHandle == 0) return;
-        final long ahb = core.acquireBuffer(drawable);
-        if (ahb == 0) return;
-        try {
-            importedAhb.put(drawable, ahb);
-            nativeUpdateWindowContentAHB(nativeHandle, window, ahb, (short) 0, (short) 0, 0, 0);
-        } finally {
-            XCore.releaseBuffer(ahb);
-        }
-    }
-
     @Override
-    public void onUpdateWindowContent(int window) {
-        if (!mappedWindows.contains(window)) return;
-        final XCore core = xServer.core();
-        if (core == null) return;
-        synchronized (lock) {
-            updateContentLocked(core, window, window);
-            pushDisplayClockLocked();
-        }
-    }
-
-    @Override
-    public void onUpdateWindowContentDirect(int window, int pixmap) {
-        countFrameForHud(window);
-        final XCore core = xServer.core();
-        if (core == null) return;
-        synchronized (lock) {
-            updateContentLocked(core, window, pixmap);
-            pushDisplayClockLocked();
-        }
-    }
-
-    private void countFrameForHud(int window) {
+    public void onUpdateWindowContentDirect(int window, int pixmap, int frames) {
         if (window == fpsWindowId) {
-            if (hudRef != null) hudRef.onFrame();
-            if (classicHudRef != null) classicHudRef.update();
-        }
-    }
-
-    @Override
-    public void onDrawableRemoved(int drawable) {
-        // The server gives the buffer back: forget the renderer's import of it, now, under the
-        // lock every content update takes, so no update can import it again after that.
-        synchronized (lock) {
-            Long ahb = importedAhb.remove(drawable);
-            if (ahb != null && nativeHandle != 0) nativeReleaseBuffer(nativeHandle, ahb);
-        }
-    }
-
-    /** The renderer's display clock goes to the server: Present paces the game's frames by it. */
-    private void pushDisplayClockLocked() {
-        if (nativeHandle == 0) return;
-        if (nativeGetDisplayClock(nativeHandle, clockOut)) {
-            if (clockOut[2] != lastClockSeq) {
-                lastClockSeq = clockOut[2];
-                XCore.setDisplayClock(clockOut[0], clockOut[1], clockOut[2]);
-            }
-        } else if (lastClockSeq != -1) {
-            lastClockSeq = -1;
-            XCore.setDisplayClock(0, 0, 0);
+            if (hudRef != null) hudRef.onFrames(frames);
+            if (classicHudRef != null) classicHudRef.update(frames);
         }
     }
 

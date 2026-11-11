@@ -63,6 +63,11 @@ pub enum Notify {
     DirectContentRemoved { window: u32, pixmap: u32 },
     /// Composite redirected or unredirected the window.
     CompositeRedirect { window: u32, redirected: bool },
+    /// Only when a renderer takes the frames directly (`frames::Router`): `frames` content
+    /// updates of `window` since the last of these, of its own pixels (`pixmap` 0) or of DRI3
+    /// pixmaps (`pixmap` the latest). In place of [`Notify::ContentUpdate`] and
+    /// [`Notify::ContentUpdateDirect`] for the owner, at most every `frames::NOTIFY_INTERVAL`.
+    ContentFrames { window: u32, pixmap: u32, frames: u32 },
     /// The client's output has data to send.
     Output(ClientId),
     /// The connection must be closed (protocol violation the Java code also died on).

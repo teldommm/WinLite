@@ -4,16 +4,10 @@ import android.util.SparseArray;
 
 import androidx.annotation.Keep;
 
-import android.util.Log;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 public class XConnectorEpoll implements Runnable {
-    private static final String TAG = "XConnectorEpoll";
     private final ConnectionHandler connectionHandler;
     private final RequestHandler requestHandler;
     private final int epollFd;
@@ -22,7 +16,6 @@ public class XConnectorEpoll implements Runnable {
     private Thread epollThread;
     private volatile boolean running = false;
     private boolean multithreadedClients = false;
-    private boolean canReceiveAncillaryMessages = false;
     private int initialInputBufferCapacity = 4096;
     private int initialOutputBufferCapacity = 4096;
     private final SparseArray<Client> connectedClients = new SparseArray<>();
@@ -113,7 +106,7 @@ public class XConnectorEpoll implements Runnable {
         XInputStream inputStream = client.getInputStream();
         try {
             if (inputStream != null) {
-                if (inputStream.readMoreData(canReceiveAncillaryMessages) > 0) {
+                if (inputStream.readMoreData() > 0) {
                     int activePosition = 0;
                     while (running && requestHandler.handleRequest(client)) activePosition = inputStream.getActivePosition();
                     inputStream.setActivePosition(activePosition);
@@ -139,71 +132,8 @@ public class XConnectorEpoll implements Runnable {
         }
     }
 
-    public Client getClient(int fd) {
-        return connectedClients.get(fd);
-    }
-
-    /* Process-wide daemon scheduler, never shut down: connector teardown must not be involved,
-     * because stop() is synchronized and joins the epoll thread, so any scheduler cleanup on the
-     * shutdown path could deadlock against it. */
-    private static final class PauseScheduler {
-        static final ScheduledExecutorService INSTANCE =
-                Executors.newSingleThreadScheduledExecutor(runnable -> {
-                    Thread thread = new Thread(runnable, "XConnectorPause");
-                    thread.setDaemon(true);
-                    return thread;
-                });
-    }
-
-    /**
-     * Frame-pacing back-pressure for the alternative (MIT-SHM) FPS limiter: the client's fd
-     * leaves epoll until delayNs elapses, so the client stalls in its own blocking call while the
-     * epoll thread stays free for everyone else. Single-threaded mode only.
-     */
-    public void pauseClientReads(Client client, long delayNs) {
-        if (multithreadedClients || !client.connected || !running || client.pacingExempt) return;
-        long deadlineNs = System.nanoTime() + delayNs;
-        final ScheduledExecutorService scheduler = PauseScheduler.INSTANCE;
-        synchronized (client) {
-            /* One pending re-arm per client, keyed to the latest deadline; an earlier task firing
-             * first would resume reads before the newest frame's slot. */
-            if (client.pauseTask != null && !client.pauseTask.isDone()) {
-                /* Repeated supersedes within one pause window mean the client pipelines frames
-                 * without a per-frame sync; read-suspension cannot pace such a client smoothly
-                 * (its loop only feels the brake in whole batches), so it runs uncapped. */
-                if (client.pacedSupersedes++ >= 8) {
-                    client.pacingExempt = true;
-                    Log.i(TAG, "client fd " + client.clientSocket.fd
-                            + " pipelines frames without a per-frame sync; SHM pacing exempted");
-                    return;
-                }
-                if (client.pauseDeadlineNs >= deadlineNs) return;
-                client.pauseTask.cancel(false);
-            }
-            removeFdFromEpoll(epollFd, client.clientSocket.fd);
-            client.pauseDeadlineNs = deadlineNs;
-            client.pauseTask = scheduler.schedule(() -> {
-                synchronized (client) {
-                    client.pauseTask = null;
-                    client.pacedSupersedes = 0;
-                    if (client.connected && running) addFdToEpoll(epollFd, client.clientSocket.fd);
-                }
-            }, delayNs, TimeUnit.NANOSECONDS);
-        }
-    }
-
-    private void cancelPendingPause(Client client) {
-        synchronized (client) {
-            if (client.pauseTask != null) {
-                client.pauseTask.cancel(false);
-                client.pauseTask = null;
-            }
-        }
-    }
-
     public void killConnection(Client client) {
         client.connected = false;
-        cancelPendingPause(client);
         connectionHandler.handleConnectionShutdown(client);
         if (multithreadedClients) {
             if (Thread.currentThread() != client.pollThread) {
@@ -243,20 +173,12 @@ public class XConnectorEpoll implements Runnable {
         return initialInputBufferCapacity;
     }
 
-    public void setInitialInputBufferCapacity(int initialInputBufferCapacity) {
-        this.initialInputBufferCapacity = initialInputBufferCapacity;
-    }
-
     public int getInitialOutputBufferCapacity() {
         return initialOutputBufferCapacity;
     }
 
     public void setMultithreadedClients(boolean multithreadedClients) {
         this.multithreadedClients = multithreadedClients;
-    }
-
-    public void setCanReceiveAncillaryMessages(boolean canReceiveAncillaryMessages) {
-        this.canReceiveAncillaryMessages = canReceiveAncillaryMessages;
     }
 
     private void requestShutdown() {

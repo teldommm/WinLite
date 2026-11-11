@@ -70,21 +70,27 @@ impl Platform for AndroidPlatform {
         let guard = SHM.lock().unwrap_or_else(|e| e.into_inner());
         let p = guard.as_ref()?;
         let mut env = p.vm.attach_current_thread().ok()?;
-        let result = env.call_method(&p.obj, "attach", "(I)Ljava/nio/ByteBuffer;", &[JValue::Int(shmid)]);
-        let map = match result.and_then(|v| v.l()) {
-            Ok(obj) if !obj.as_raw().is_null() => {
-                let buf = JByteBuffer::from(obj);
-                match (env.get_direct_buffer_address(&buf), env.get_direct_buffer_capacity(&buf)) {
-                    (Ok(ptr), Ok(len)) if !ptr.is_null() => Some(ShmMap { ptr, len }),
-                    _ => None,
+        // The I/O thread stays attached to the JVM (see nativeSetListener), and a native thread
+        // has no Java frame that would free its local references: the returned ByteBuffer goes
+        // with this frame instead of piling up, one per ShmAttach.
+        let map: jni::errors::Result<Option<ShmMap>> = env.with_local_frame(4, |env| {
+            let result = env.call_method(&p.obj, "attach", "(I)Ljava/nio/ByteBuffer;", &[JValue::Int(shmid)]);
+            let map = match result.and_then(|v| v.l()) {
+                Ok(obj) if !obj.as_raw().is_null() => {
+                    let buf = JByteBuffer::from(obj);
+                    match (env.get_direct_buffer_address(&buf), env.get_direct_buffer_capacity(&buf)) {
+                        (Ok(ptr), Ok(len)) if !ptr.is_null() => Some(ShmMap { ptr, len }),
+                        _ => None,
+                    }
                 }
+                _ => None,
+            };
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_clear();
             }
-            _ => None,
-        };
-        if env.exception_check().unwrap_or(false) {
-            let _ = env.exception_clear();
-        }
-        map
+            Ok(map)
+        });
+        map.ok().flatten()
     }
 
     fn shm_detach(&mut self, shmid: i32) {
