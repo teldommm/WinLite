@@ -3,12 +3,10 @@ package com.winlator.cmod.widget;
 import android.content.Context;
 import android.view.SurfaceView;
 
-import com.winlator.cmod.renderer.GPUImage;
 import com.winlator.cmod.renderer.ViewTransformation;
-import com.winlator.cmod.xserver.Drawable;
-import com.winlator.cmod.xserver.Window;
 import com.winlator.cmod.xserver.XServer;
 
+/** What the activity and the input views need from the view that draws the X server's screen. */
 public abstract class XServerRendererView extends SurfaceView {
 
     public final ViewTransformation viewTransformation = new ViewTransformation();
@@ -40,14 +38,6 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract float getMagnifierZoom();
     public abstract void setUnviewableWMClasses(String... classes);
 
-    public abstract void addDirectContent(int windowId, Drawable drawable, GPUImage gpuImage);
-    public abstract void nativeRemoveDirectContent(int windowId, int pixmapId);
-    public abstract void nativeSetCompositeRedirected(int windowId, boolean redirected);
-    // Returns true if the copy was handled by moving windows; false means the caller must do a real pixel copy.
-    public abstract boolean nativeCompositeRedirect(int srcDrawableId, int dstDrawableId, short dstX, short dstY);
-
-    public abstract void onUpdateWindowContentDirect(Window window, Drawable drawable);
-    public abstract void onUpdateWindowContentDirect(Window window, Drawable drawable, short xOff, short yOff);
     public abstract void onPointerMove(short x, short y);
     public abstract void requestRender();
     public abstract void queueEvent(Runnable action);
@@ -56,14 +46,6 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract void setFpsWindowId(int windowId);
     public abstract void setPipMode(boolean pipMode);
     public abstract void setFrameRating(Object frameRating);
-
-    /** True if this renderer cooperates in freeing drawable buffers (see onBufferReleased). */
-    public boolean ownsDrawableBuffers() { return false; }
-    /**
-     * A drawable's buffer is about to be given back by the X server: forget any import of it.
-     * Only called when {@link #ownsDrawableBuffers()}; the renderer keeps what it needs alive itself.
-     */
-    public void onBufferReleased(long ahbPtr) {}
 
     public abstract void setFpsLimit(int fps);
     public abstract int getFpsLimit();

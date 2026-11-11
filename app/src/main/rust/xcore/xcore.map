@@ -1,0 +1,19 @@
+/*
+ * Linker version script for libwinlator.so (passed by app/src/main/cpp/CMakeLists.txt).
+ *
+ * xcore is linked whole so that its JNI entry points (Java_...) survive; without this script
+ * every Rust symbol of the standard library comes along as a dynamic export (~2000 of them).
+ * Only Rust-internal names are made local here. There is no `global:` section on purpose:
+ * everything else keeps its default visibility, so the exports of the C code do not change.
+ */
+{
+  local:
+    _R*;                      /* Rust v0 mangling */
+    _ZN*17h????????????????E; /* Rust legacy mangling */
+    rust_*;
+    __rust_*;
+    __rdl_*;
+    __rg_*;
+    __rustc*;
+    __emutls_get_address;
+};

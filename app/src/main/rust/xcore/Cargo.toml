@@ -1,0 +1,32 @@
+[package]
+name = "xcore"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+publish = false
+description = "WinLite X server core: pixel ops, shared memory, epoll I/O, X11 protocol core"
+
+[lib]
+# staticlib: linked into libwinlator.so by CMake. rlib: lets `cargo test` run on the host.
+crate-type = ["staticlib", "rlib"]
+
+[features]
+# `cargo build --features host` also builds the xcore_host test server.
+host = []
+
+[[bin]]
+name = "xcore_host"
+path = "src/bin/xcore_host.rs"
+required-features = ["host"]
+
+[dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false

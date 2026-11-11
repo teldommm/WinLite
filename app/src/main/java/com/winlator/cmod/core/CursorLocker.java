@@ -1,12 +1,12 @@
 package com.winlator.cmod.core;
 
 import com.winlator.cmod.math.Mathf;
-import com.winlator.cmod.xserver.XLock;
 import com.winlator.cmod.xserver.XServer;
 
 import java.util.Timer;
 import java.util.TimerTask;
 
+/** Pulls the pointer back from beyond the screen edge, a little each tick, while the mouse is not captured. */
 public class CursorLocker extends TimerTask {
     private final XServer xServer;
     private float damping = 0.25f;
@@ -17,7 +17,7 @@ public class CursorLocker extends TimerTask {
     public CursorLocker(XServer xServer) {
         this.xServer = xServer;
         maxDistance = (short)(xServer.screenInfo.width * 0.05f);
-        Timer timer = new Timer();
+        Timer timer = new Timer("CursorLocker", true);
         timer.scheduleAtFixedRate(this, 0, 1000 / 60);
     }
 
@@ -46,24 +46,25 @@ public class CursorLocker extends TimerTask {
             }
         }
 
-        /* same locks as every other pointer update (XServer.inject*, WarpPointer), so the
-         * read-modify-write below cannot interleave with input or request handling */
-        try (XLock lock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
-            short x = (short)Mathf.clamp(xServer.pointer.getX(), -maxDistance, xServer.screenInfo.width + maxDistance);
-            short y = (short)Mathf.clamp(xServer.pointer.getY(), -maxDistance, xServer.screenInfo.height + maxDistance);
+        if (!xServer.isRunning()) return;
+        final short width = xServer.screenInfo.width, height = xServer.screenInfo.height;
+        final short px = xServer.pointer.getX(), py = xServer.pointer.getY();
+        short x = (short)Mathf.clamp(px, -maxDistance, width + maxDistance);
+        short y = (short)Mathf.clamp(py, -maxDistance, height + maxDistance);
+        short nx = px, ny = py;
 
-            if (x < 0) {
-                xServer.pointer.setX((short)Math.ceil(x * damping));
-            }
-            else if (x >= xServer.screenInfo.width) {
-                xServer.pointer.setX((short)Math.floor(xServer.screenInfo.width + (x - xServer.screenInfo.width) * damping));
-            }
-            if (y < 0) {
-                xServer.pointer.setY((short)Math.ceil(y * damping));
-            }
-            else if (y >= xServer.screenInfo.height) {
-                xServer.pointer.setY((short)Math.floor(xServer.screenInfo.height + (y - xServer.screenInfo.height) * damping));
-            }
+        if (x < 0) {
+            nx = (short)Math.ceil(x * damping);
         }
+        else if (x >= width) {
+            nx = (short)Math.floor(width + (x - width) * damping);
+        }
+        if (y < 0) {
+            ny = (short)Math.ceil(y * damping);
+        }
+        else if (y >= height) {
+            ny = (short)Math.floor(height + (y - height) * damping);
+        }
+        if (nx != px || ny != py) xServer.pointer.setPositionSilently(nx, ny);
     }
 }

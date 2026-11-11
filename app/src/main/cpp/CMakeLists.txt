@@ -11,6 +11,33 @@ set_property(DIRECTORY APPEND PROPERTY COMPILE_OPTIONS
 add_subdirectory(adrenotools)
 set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "")
 
+# xcore: the Rust core of the X server, built with cargo into a static library and linked whole
+# into libwinlator.so (the JNI entry points are only referenced by the JVM, so the linker must
+# keep every object of the archive). Needs `cargo` and the Rust target aarch64-linux-android:
+#   rustup target add aarch64-linux-android
+if(NOT ANDROID_ABI STREQUAL "arm64-v8a")
+    message(FATAL_ERROR "xcore is built for arm64-v8a only (see abiFilters in app/build.gradle)")
+endif()
+find_program(CARGO_EXECUTABLE cargo
+        HINTS "$ENV{CARGO_HOME}/bin" "$ENV{HOME}/.cargo/bin" "$ENV{USERPROFILE}/.cargo/bin")
+if(NOT CARGO_EXECUTABLE)
+    message(FATAL_ERROR "cargo not found: install Rust (https://rustup.rs), then run "
+                        "`rustup target add aarch64-linux-android`")
+endif()
+set(XCORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../rust/xcore)
+set(XCORE_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/xcore-target)
+set(XCORE_LIB ${XCORE_TARGET_DIR}/aarch64-linux-android/release/libxcore.a)
+# Always run cargo: it knows what changed, and a no-op build takes well under a second.
+add_custom_target(xcore_cargo
+        COMMAND ${CARGO_EXECUTABLE} build --release --locked --target aarch64-linux-android
+                --manifest-path ${XCORE_DIR}/Cargo.toml --target-dir ${XCORE_TARGET_DIR}
+        BYPRODUCTS ${XCORE_LIB}
+        COMMENT "Building xcore (Rust)"
+        VERBATIM)
+add_library(xcore STATIC IMPORTED GLOBAL)
+set_target_properties(xcore PROPERTIES IMPORTED_LOCATION ${XCORE_LIB})
+add_dependencies(xcore xcore_cargo)
+
 # Add Winlator shared library
 # NOTE: the DisplayX and EGL X-server renderer path (winlator/renderer/{egl,window,shader,
 # cursor,displayx,renderer_jni}.* and renderer/effectcomposer/*)
@@ -18,11 +45,12 @@ set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "")
 # The OpenXR/VR module (xr/*.c, OpenXR-SDK/) was also removed: it was already fully
 # disconnected in this fork (no Java call site ever invoked its native entry points, and
 # the JNI symbol names didn't even match the actual Java package).
+# drawable.c, sysvshared_memory.c and xconnector_epoll.c are now the Rust crate `xcore`
+# (app/src/main/rust/xcore, linked in below): pixel ops, SysV/ashmem shared memory, and the
+# epoll/socket I/O of the X server connectors. Their JNI symbols are unchanged. The X server
+# itself (protocol, windows, drawing, DRI3/Present, ...) is the same crate; gpu_image.c (the
+# AHardwareBuffer helper of the old Java server's drawables) went with the Java server.
 add_library(winlator SHARED
-        winlator/drawable.c
-        winlator/gpu_image.c
-        winlator/sysvshared_memory.c
-        winlator/xconnector_epoll.c
         winlator/alsa_client.c
         winlator/vulkan.c
         winlator/thread_affinity.c
@@ -33,13 +61,25 @@ add_library(winlator SHARED
 target_compile_options(winlator PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
 target_link_libraries(winlator
+        -Wl,--whole-archive xcore -Wl,--no-whole-archive
         log
         android
         jnigraphics
         aaudio
         adrenotools
         vulkan
+        dl
+        m
 )
+
+# Keep the Rust runtime's own symbols out of libwinlator.so's dynamic table (whole-archive would
+# otherwise export ~2000 of them). Only Rust-internal names are made local; the Java_* JNI
+# entry points and everything the C code exports are untouched. See xcore.map.
+target_link_options(winlator PRIVATE
+        -Wl,--version-script=${XCORE_DIR}/xcore.map
+        -Wl,--gc-sections
+)
+set_property(TARGET winlator APPEND PROPERTY LINK_DEPENDS ${XCORE_DIR}/xcore.map)
 
 # Add Fake Input library for controller emulation (loaded via LD_PRELOAD)
 add_library(fakeinput SHARED

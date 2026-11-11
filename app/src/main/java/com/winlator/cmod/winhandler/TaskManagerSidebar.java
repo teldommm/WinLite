@@ -7,8 +7,6 @@ import android.graphics.Bitmap;
 import com.winlator.cmod.XServerDisplayActivity;
 import com.winlator.cmod.ui.ProcessRowData;
 import com.winlator.cmod.ui.TaskManagerPanelState;
-import com.winlator.cmod.xserver.Window;
-import com.winlator.cmod.xserver.XLock;
 import com.winlator.cmod.xserver.XServer;
 
 import java.util.ArrayList;
@@ -73,19 +71,8 @@ public class TaskManagerSidebar implements OnGetProcessInfoListener {
                 }
 
                 XServer xServer = activity.getXServer();
-                Window window;
-                try (XLock xlock = xServer.lock(XServer.Lockable.WINDOW_MANAGER)) {
-                    window = xServer.windowManager.findWindowByProcessName(processInfo.name);
-                }
-
-                // Reads pixmap buffers: hold the locks FreePixmap holds, so the icon pixmaps
-                // cannot be released underneath the copy.
-                Bitmap icon = null;
-                if (window != null) {
-                    try (XLock xlock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
-                        icon = xServer.pixmapManager.getWindowIcon(window);
-                    }
-                }
+                int window = xServer.findWindowByProcessName(processInfo.name);
+                Bitmap icon = window != 0 ? xServer.getWindowIcon(window) : null;
 
                 ProcessRowData row = new ProcessRowData(
                         processInfo.pid,

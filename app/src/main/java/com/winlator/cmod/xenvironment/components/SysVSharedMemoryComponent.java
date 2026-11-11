@@ -6,17 +6,13 @@ import com.winlator.cmod.sysvshm.SysVSharedMemory;
 import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xconnector.XConnectorEpoll;
 import com.winlator.cmod.xenvironment.EnvironmentComponent;
-import com.winlator.cmod.xserver.SHMSegmentManager;
-import com.winlator.cmod.xserver.XServer;
+import com.winlator.cmod.xserver.XCore;
 
 public class SysVSharedMemoryComponent extends EnvironmentComponent {
     private XConnectorEpoll connector;
     public final UnixSocketConfig socketConfig;
     private SysVSharedMemory sysVSharedMemory;
-    private final XServer xServer;
-
-    public SysVSharedMemoryComponent(XServer xServer, UnixSocketConfig socketConfig) {
-        this.xServer = xServer;
+    public SysVSharedMemoryComponent(UnixSocketConfig socketConfig) {
         this.socketConfig = socketConfig;
     }
 
@@ -27,7 +23,8 @@ public class SysVSharedMemoryComponent extends EnvironmentComponent {
         connector = new XConnectorEpoll(socketConfig, new SysVSHMConnectionHandler(sysVSharedMemory), new SysVSHMRequestHandler());
         connector.start();
 
-        xServer.setSHMSegmentManager(new SHMSegmentManager(sysVSharedMemory));
+        // MIT-SHM of the X server attaches the guest's segments from here.
+        XCore.setShmProvider(sysVSharedMemory);
     }
 
     @Override
@@ -37,6 +34,7 @@ public class SysVSharedMemoryComponent extends EnvironmentComponent {
             connector = null;
         }
 
-        sysVSharedMemory.deleteAll();
+        XCore.setShmProvider(null);
+        if (sysVSharedMemory != null) sysVSharedMemory.deleteAll();
     }
 }

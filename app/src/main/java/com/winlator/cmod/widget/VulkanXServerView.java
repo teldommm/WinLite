@@ -12,42 +12,39 @@ import android.widget.FrameLayout;
 import androidx.annotation.NonNull;
 
 import com.winlator.cmod.R;
-import java.io.File;
-import com.winlator.cmod.renderer.GPUImage;
-import com.winlator.cmod.xserver.Atom;
-import com.winlator.cmod.xserver.Bitmask;
-import com.winlator.cmod.xserver.Cursor;
-import com.winlator.cmod.xserver.Drawable;
-import com.winlator.cmod.xserver.Pixmap;
-import com.winlator.cmod.xserver.Pointer;
-import com.winlator.cmod.xserver.Property;
 import com.winlator.cmod.xserver.ScreenInfo;
-import com.winlator.cmod.xserver.SurfaceFormat;
-import com.winlator.cmod.xserver.Window;
-import com.winlator.cmod.xserver.WindowAttributes;
-import com.winlator.cmod.xserver.WindowManager;
-import com.winlator.cmod.xserver.XLock;
+import com.winlator.cmod.xserver.XCore;
 import com.winlator.cmod.xserver.XServer;
 
 import java.nio.ByteBuffer;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import dalvik.annotation.optimization.FastNative;
 
+/**
+ * Draws the X server's screen with the native Vulkan renderer. It follows the server through
+ * {@link XServer.Listener} (windows, their stacking, their pixels, the cursor) and mirrors what it
+ * learns into the renderer's own window tree; the pixels themselves are the server's
+ * AHardwareBuffers, imported by the renderer without a copy.
+ *
+ * <p>The listener methods run on the server's event thread, one after the other. Everything that
+ * touches the native renderer holds {@link #lock}.
+ */
 @SuppressLint("ViewConstructor")
 public class VulkanXServerView extends XServerRendererView implements SurfaceHolder.Callback,
-        WindowManager.OnWindowModificationListener, Pointer.OnPointerMotionListener,
-        OutputFrameSource {
+        XServer.Listener, OutputFrameSource {
+
+    /** WM_CLASS, a predefined atom of the X protocol. */
+    private static final int ATOM_WM_CLASS = 67;
 
     private long nativeHandle = 0;
     private final Object lock = new Object();
-    private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
-    private final Set<Integer> compositeRedirectedWindows = ConcurrentHashMap.newKeySet();
 
     // The part of the X screen that is shown (see XServer.getEffectiveScreenInfo): the Wine
     // desktop's size when a game shrank it below the container screen, else the screen itself.
@@ -66,8 +63,21 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private String driverLibraryName = null;
     private String nativeLibDir = null;
     private boolean validationEnabled = false;
-    private Drawable rootCursorDrawable;
-    private Cursor lastCursor = null;
+
+    // The server's window ids (also the renderer's keys, and those of the windows' contents).
+    private volatile int rootWindowId = 0;
+    // Windows that are mapped, as far as the events told (event thread only).
+    private final HashSet<Integer> mappedWindows = new HashSet<>();
+    // The buffer last handed to the renderer for each drawable (a window, or a DRI3 pixmap shown in
+    // one); only to give it back when the server drops the drawable. Guarded by lock.
+    private final HashMap<Integer, Long> importedAhb = new HashMap<>();
+
+    // The cursor image the renderer has (the server's serial of it; 0 = our default arrow).
+    private long sentCursorSerial = -1;
+    private ByteBuffer rootCursor;
+    private int rootCursorWidth, rootCursorHeight;
+    private long lastClockSeq = -1;
+    private final long[] clockOut = new long[3];
 
     private int     pendingPresentMode    = 2;
     private int     pendingStretchMode    = 0;
@@ -103,20 +113,29 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             ViewGroup.LayoutParams.MATCH_PARENT));
         getHolder().addCallback(this);
 
-        rootCursorDrawable = createRootCursorDrawable(xServer.getSurfaceFormat());
+        loadRootCursor();
         xServer.setXServerView(this);
         effectiveScreen = xServer.getEffectiveScreenInfo();
-        xServer.windowManager.addOnWindowModificationListener(this);
-        xServer.pointer.addOnPointerMotionListener(this);
+        xServer.addListener(this);
     }
 
-    private Drawable createRootCursorDrawable(SurfaceFormat format) {
+    /** The arrow shown where no window has an X cursor of its own. */
+    private void loadRootCursor() {
         try {
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inScaled = false;
             Bitmap bitmap = BitmapFactory.decodeResource(getContext().getResources(), R.drawable.cursor, options);
-            return Drawable.fromBitmap(bitmap, format);
-        } catch (Exception e) { return null; }
+            if (bitmap == null) return;
+            // An ARGB_8888 bitmap is R,G,B,A in memory: what the renderer's cursor texture wants.
+            ByteBuffer buf = ByteBuffer.allocateDirect(bitmap.getWidth() * bitmap.getHeight() * 4).order(ByteOrder.nativeOrder());
+            bitmap.copyPixelsToBuffer(buf);
+            buf.rewind();
+            rootCursor = buf;
+            rootCursorWidth = bitmap.getWidth();
+            rootCursorHeight = bitmap.getHeight();
+        } catch (Exception e) {
+            rootCursor = null;
+        }
     }
 
     private native long nativeInit(Surface surface,
@@ -172,12 +191,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                                                    int x, int y, int width, int height);
     private native void nativeSyncChildOrder(long handle, long parentId, long[] orderedChildIds, int count);
     private native void nativeSetWindowViewable(long handle, long id, boolean viewable);
-
-    // Renderer key of a drawable: its process-unique uid (0 for "no drawable", e.g. an
-    // InputOnly window).
-    private static long did(Drawable d) {
-        return d != null ? d.uid : 0L;
-    }
 
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
@@ -260,9 +273,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         applyWfg();
                         updateTransform();
                         // Not nativeSetCursorVisible(cursorVisible): that ignores an X cursor the
-                        // game made invisible (empty mask), and lastCursor is unchanged after the
+                        // game made invisible (empty mask), and the cursor is unchanged after the
                         // surface comes back, so nothing would hide it again.
-                        restoreCursorStateLocked();
+                        applyCursorLocked(false);
                         initComplete = true;
                         return;
                     }
@@ -283,14 +296,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     updateTransform();
                     nativeSetCursorVisible(nativeHandle, false);
 
-                    if (isColdInit) {
-                        Window root = xServer.windowManager.rootWindow;
-                        nativeInitRootWindow(nativeHandle, root.id, did(root.getContent()),
+                    // A fresh renderer has no buffers imported: nothing to give back later.
+                    importedAhb.clear();
+                    if (isColdInit && rootWindowId != 0) {
+                        int root = rootWindowId;
+                        nativeInitRootWindow(nativeHandle, root, root,
                             xServer.screenInfo.width, xServer.screenInfo.height);
                     }
                     // A fresh native renderer has no cursor image either: re-send the current
                     // X cursor (image + its own visibility), not just the global flag.
-                    restoreCursorStateLocked();
+                    applyCursorLocked(true);
                     // ...and no window tree. Window events only ever reached the renderer that
                     // existed when they happened: after a failed re-attach (renderer re-created)
                     // the screen stayed black for good, and windows created before the first
@@ -345,7 +360,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             initExecutor = null;
         }
-        compositeRedirectedWindows.clear();
+        xServer.removeListener(this);
         synchronized (lock) {
             if (nativeHandle != 0) {
                 nativeDestroy(nativeHandle);
@@ -354,7 +369,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         }
     }
 
-    public void queueEvent(Runnable r) { eventExecutor.execute(r); }
+    public void queueEvent(Runnable r) { xServer.runOnEventThread(r); }
     @Override
     public void onPause()  {}
     @Override
@@ -403,19 +418,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             viewTransformation.viewWidth,   viewTransformation.viewHeight);
     }
 
-    private boolean isRootChild(Window window) {
-        return window != null && window.getParent() == xServer.windowManager.rootWindow;
-    }
+    // ------------------------------------------------------------------ window tree
 
     /**
-     * Re-reads the effective screen size and re-applies the transform. Runs on eventExecutor:
-     * the X server locks are taken (inside getEffectiveScreenInfo) before {@code lock}, as
-     * everywhere else.
+     * Refreshes the effective screen size and re-applies the transform when it changed. Runs on
+     * the event thread.
      */
     private void refreshDesktopTransform() {
         final ScreenInfo inner = xServer.getEffectiveScreenInfo();
         final ScreenInfo old = effectiveScreen;
-        final boolean changed = old == null || old.width != inner.width || old.height != inner.height;
+        if (old != null && old.width == inner.width && old.height == inner.height) return;
         synchronized (lock) {
             effectiveScreen = inner;
             if (surfaceWidth > 0 && surfaceHeight > 0) {
@@ -423,367 +435,270 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             }
             updateTransform();
         }
-        if (changed) xServer.notifyEffectiveScreenChanged();
+        xServer.notifyEffectiveScreenChanged();
     }
 
     /**
-     * Re-applies the cursor after the native side was re-attached or re-created (e.g. on return
-     * from ControlsEditorActivity). Must be called with {@code lock} held. Takes the cursor of the
-     * window under the pointer, so a game-hidden cursor (Cursor.isVisible() == false) stays hidden.
-     */
-    private void restoreCursorStateLocked() {
-        if (nativeHandle == 0) return;
-        Window pw = xServer.inputDeviceManager.getPointWindow();
-        lastCursor = pw != null ? pw.attributes.getCursor() : null;
-        sendCursorToNative(lastCursor);
-    }
-
-    private void sendCursorToNative(Cursor cursor) {
-        if (nativeHandle == 0) return;
-        Drawable cd; short hotX = 0, hotY = 0;
-        boolean effVis = cursorVisible;
-        if (cursor != null) {
-            if (!cursor.isVisible()) effVis = false;
-            cd = cursor.cursorImage; hotX = (short)cursor.hotSpotX; hotY = (short)cursor.hotSpotY;
-        } else { cd = rootCursorDrawable; }
-        nativeSetCursorVisible(nativeHandle, effVis);
-        if (effVis && cd != null && cd.backingAHB != 0) {
-            synchronized (cd.renderLock) {
-                ByteBuffer pixels = cd.lockBuffer(cd.backingAHB);
-                if (pixels != null) {
-                    try {
-                        // The renderer's cursor texture is RGBA; the native side swaps R and B
-                        // when the cursor drawable is BGRA.
-                        nativeUpdateCursorImage(nativeHandle, pixels, cd.width, cd.height,
-                            cd.getStride(), hotX, hotY, cd.format == SurfaceFormat.RGBA);
-                    } finally {
-                        cd.unlockBuffer(cd.backingAHB);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Sends the X server's whole window tree (geometry, stacking, map state, viewability and the
-     * X-drawn content) to the native renderer. Runs on eventExecutor, in order with the window
+     * Sends the server's whole window tree (geometry, stacking, map state, viewability and the
+     * X-drawn content) to the native renderer. Runs on the event thread, in order with the window
      * events: a change made after the snapshot below is queued behind this and applied on top.
-     * Lock order is the X server's locks first, then {@code lock}, as everywhere else.
      */
     private void replayWindowTree() {
-        try (XLock xLock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
-            synchronized (lock) {
-                if (nativeHandle == 0) return;
-                Window root = xServer.windowManager.rootWindow;
-                nativeInitRootWindow(nativeHandle, root.id, did(root.getContent()),
-                    xServer.screenInfo.width, xServer.screenInfo.height);
-                replayChildrenLocked(root);
-            }
-        }
-    }
-
-    private void replayChildrenLocked(Window parent) {
-        List<Window> children = parent.getChildren();
-        if (children.isEmpty()) return;
-        final long[] orderedIds = new long[children.size()];
-        for (int i = 0; i < orderedIds.length; i++) {
-            Window window = children.get(i);
-            orderedIds[i] = window.id;
-            Drawable content = window.getContent();
-            nativeCreateWindow(nativeHandle, window.id, parent.id, did(content),
-                window.getX(), window.getY(), window.getWidth(), window.getHeight());
-            nativeSetWindowViewable(nativeHandle, window.id, isViewable(window));
-            if (window.attributes.isMapped()) {
-                nativeMapWindow(nativeHandle, window.id);
-                if (content != null) {
-                    synchronized (content.renderLock) {
-                        if (content.backingAHB != 0) {
-                            nativeUpdateWindowContentAHB(nativeHandle, did(content),
-                                content.backingAHB, content.width, content.height,
-                                window.getRootX(), window.getRootY());
-                        }
-                    }
-                }
-            }
-            replayChildrenLocked(window);
-        }
-        // Exact stacking order (also drops any duplicate child entries the creates may leave).
-        nativeSyncChildOrder(nativeHandle, parent.id, orderedIds, orderedIds.length);
-    }
-
-    /** checkViewable()'s verdict without its side effects. */
-    private boolean isViewable(Window window) {
-        if (unviewableWMClasses == null || window == xServer.windowManager.rootWindow) return true;
-        String wc = window.getClassName();
-        for (String cls : unviewableWMClasses) if (wc.contains(cls)) return false;
-        return true;
-    }
-
-    private void checkViewable(Window window) {
-        if (unviewableWMClasses == null || window == xServer.windowManager.rootWindow) return;
-        boolean viewable = true;
-        String wc = window.getClassName();
-        for (String cls : unviewableWMClasses) {
-            if (wc.contains(cls)) {
-                if (window.attributes.isEnabled()) window.disableAllDescendants();
-                viewable = false;
-                break;
-            }
-        }
-        final long id = window.id;
-        final boolean v = viewable;
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeSetWindowViewable(nativeHandle, id, v);
-            }
-        });
-    }
-
-    @Override
-    public void onCreateWindow(Window window, Window parent) {
-        final long id = window.id;
-        final long parentId = parent != null ? parent.id : 0;
-        final long contentId = did(window.getContent());
-        final int x = window.getX(), y = window.getY(), w = window.getWidth(), h = window.getHeight();
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeCreateWindow(nativeHandle, id, parentId, contentId, x, y, w, h);
-            }
-        });
-        checkViewable(window);
-    }
-
-    @Override
-    public void onDestroyWindow(Window window) {
-        final long id = window.id;
-        compositeRedirectedWindows.remove(window.id);
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeDestroyWindow(nativeHandle, id);
-            }
-        });
-    }
-
-    @Override
-    public void onMapWindow(Window window) {
-        if (isRootChild(window)) queueEvent(this::refreshDesktopTransform);
-        final long id = window.id;
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeMapWindow(nativeHandle, id);
-            }
-        });
-        checkViewable(window);
-    }
-
-    @Override
-    public void onUnmapWindow(Window window) {
-        if (isRootChild(window)) queueEvent(this::refreshDesktopTransform);
-        final long id = window.id;
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeUnmapWindow(nativeHandle, id);
-            }
-        });
-    }
-
-    @Override
-    public void onReparentWindow(Window window, Window newParent, short x, short y) {
-        final long id = window.id;
-        final long newParentId = newParent != null ? newParent.id : 0;
-        final long contentId = did(window.getContent());
-        final int w = window.getWidth(), h = window.getHeight();
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) {
-                    nativeReparentWindow(nativeHandle, id, newParentId);
-                    nativeUpdateWindowGeometry(nativeHandle, id, contentId, x, y, w, h);
-                }
-            }
-        });
-    }
-
-    @Override
-    public void onChangeWindowZOrder(Window.StackMode stackMode, Window window, Window sibling) {
-        Window parent = window.getParent();
-        if (parent == null) return;
-        List<Window> children = parent.getChildren();
-        final long parentId = parent.id;
-        final long[] orderedIds = new long[children.size()];
-        for (int i = 0; i < orderedIds.length; i++) orderedIds[i] = children.get(i).id;
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeSyncChildOrder(nativeHandle, parentId, orderedIds, orderedIds.length);
-            }
-        });
-    }
-
-    @Override
-    public void onUpdateWindowGeometry(Window window, boolean resized) {
-        if (resized && isRootChild(window)) queueEvent(this::refreshDesktopTransform);
-        final long id = window.id;
-        final long contentId = did(window.getContent());
-        final int x = window.getX(), y = window.getY(), w = window.getWidth(), h = window.getHeight();
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeUpdateWindowGeometry(nativeHandle, id, contentId, x, y, w, h);
-            }
-        });
-    }
-
-    @Override
-    public void onModifyWindowProperty(Window window, Property property) {
-        // WM_CLASS is what marks Wine's desktop window; it may be set after the window is mapped.
-        if (property != null && property.name == Atom.getId("WM_CLASS") && isRootChild(window)
-            && window.attributes.isMapped()) {
-            queueEvent(this::refreshDesktopTransform);
-        }
-
-        checkViewable(window);
-    }
-
-    @Override
-    public void onUpdateWindowAttributes(Window window, Bitmask mask) {
-        if (mask.isSet(WindowAttributes.FLAG_CURSOR)) {
-            synchronized (lock) {
-                Window pw = xServer.inputDeviceManager.getPointWindow();
-                if (pw == window) { lastCursor = window.attributes.getCursor(); sendCursorToNative(lastCursor); }
-            }
-        }
-    }
-
-    @Override
-    public void onUpdateWindowContentDirect(Window window, Drawable drawable) {
-        onUpdateWindowContentDirect(window, drawable, (short) 0, (short) 0);
-    }
-
-    public void onUpdateWindowContentDirect(Window window, Drawable pixmap, short xOff, short yOff) {
-        countFrameForHud(window);
+        final XCore core = xServer.core();
+        if (core == null) return;
+        final long[] tree = core.snapshotTree();
+        final int stride = XCore.WINDOW_STRIDE;
+        if (tree.length < stride) return;
+        rootWindowId = (int) tree[XCore.W_ID];
+        mappedWindows.clear();
+        // Children of each window, bottom-most first (the snapshot lists them in that order).
+        final HashMap<Integer, ArrayList<Long>> children = new HashMap<>();
         synchronized (lock) {
-            if (nativeHandle == 0 || pixmap == null) return;
-            final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
-            synchronized (pixmap.renderLock) {
-                if (pixmap.backingAHB != 0) {
-                    nativeUpdateWindowContentAHB(nativeHandle, did(window.getContent()),
-                        pixmap.backingAHB, pixmap.width, pixmap.height, rx, ry);
+            if (nativeHandle == 0) return;
+            nativeInitRootWindow(nativeHandle, rootWindowId, rootWindowId,
+                xServer.screenInfo.width, xServer.screenInfo.height);
+            for (int i = stride; i + stride <= tree.length; i += stride) {
+                final int id = (int) tree[i + XCore.W_ID];
+                final int parent = (int) tree[i + XCore.W_PARENT];
+                final long flags = tree[i + XCore.W_FLAGS];
+                final boolean hasContent = (flags & XCore.WF_HAS_CONTENT) != 0;
+                nativeCreateWindow(nativeHandle, id, parent, hasContent ? id : 0,
+                    (int) tree[i + XCore.W_X], (int) tree[i + XCore.W_Y],
+                    (int) tree[i + XCore.W_WIDTH], (int) tree[i + XCore.W_HEIGHT]);
+                nativeSetWindowViewable(nativeHandle, id, !isUnviewable(id));
+                children.computeIfAbsent(parent, k -> new ArrayList<>()).add((long) id);
+                if ((flags & XCore.WF_MAPPED) != 0) {
+                    mappedWindows.add(id);
+                    nativeMapWindow(nativeHandle, id);
+                    if (hasContent) updateContentLocked(core, id, id);
                 }
+            }
+            // Exact stacking order (also drops any duplicate child entries the creates may leave).
+            for (java.util.Map.Entry<Integer, ArrayList<Long>> e : children.entrySet()) {
+                ArrayList<Long> list = e.getValue();
+                long[] ordered = new long[list.size()];
+                for (int k = 0; k < ordered.length; k++) ordered[k] = list.get(k);
+                nativeSyncChildOrder(nativeHandle, e.getKey(), ordered, ordered.length);
+            }
+        }
+        refreshDesktopTransform();
+    }
+
+    /** The window's WM_CLASS names one of the classes that must not be drawn. */
+    private boolean isUnviewable(int window) {
+        if (unviewableWMClasses == null || window == rootWindowId) return false;
+        String wc = xServer.getWindowClassName(window);
+        for (String cls : unviewableWMClasses) if (wc.contains(cls)) return true;
+        return false;
+    }
+
+    /** Hides what {@link #setUnviewableWMClasses} names, and stops sending it input. */
+    private void checkViewable(int window) {
+        if (unviewableWMClasses == null || window == rootWindowId) return;
+        final boolean unviewable = isUnviewable(window);
+        if (unviewable) {
+            XCore core = xServer.core();
+            if (core != null) core.disableSubtree(window);
+        }
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeSetWindowViewable(nativeHandle, window, !unviewable);
+        }
+    }
+
+    @Override
+    public void onServerStarted() {
+        // Everything the renderer knows came from an earlier server (or nothing): start over.
+        replayWindowTree();
+        synchronized (lock) { applyCursorLocked(true); }
+    }
+
+    @Override
+    public void onServerStopped() {
+        mappedWindows.clear();
+        synchronized (lock) { importedAhb.clear(); }
+    }
+
+    @Override
+    public void onCreateWindow(int window, int parent) {
+        final XCore core = xServer.core();
+        if (core == null) return;
+        final long[] info = core.windowInfo(window);
+        if (info.length < XCore.WINDOW_STRIDE) return; // already gone: its destroy event follows
+        final boolean hasContent = (info[XCore.W_FLAGS] & XCore.WF_HAS_CONTENT) != 0;
+        synchronized (lock) {
+            if (nativeHandle != 0) {
+                nativeCreateWindow(nativeHandle, window, parent, hasContent ? window : 0,
+                    (int) info[XCore.W_X], (int) info[XCore.W_Y],
+                    (int) info[XCore.W_WIDTH], (int) info[XCore.W_HEIGHT]);
+            }
+        }
+        checkViewable(window);
+    }
+
+    @Override
+    public void onDestroyWindow(int window) {
+        mappedWindows.remove(window);
+        synchronized (lock) {
+            // The renderer drops the window's buffers with it; nothing of ours to give back.
+            importedAhb.remove(window);
+            if (nativeHandle != 0) nativeDestroyWindow(nativeHandle, window);
+        }
+    }
+
+    @Override
+    public void onMapWindow(int window) {
+        mappedWindows.add(window);
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeMapWindow(nativeHandle, window);
+        }
+        refreshDesktopTransform();
+        checkViewable(window);
+    }
+
+    @Override
+    public void onUnmapWindow(int window) {
+        mappedWindows.remove(window);
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeUnmapWindow(nativeHandle, window);
+        }
+        refreshDesktopTransform();
+    }
+
+    @Override
+    public void onReparentWindow(int window, int parent, int x, int y) {
+        final XCore core = xServer.core();
+        if (core == null) return;
+        final long[] info = core.windowInfo(window);
+        if (info.length < XCore.WINDOW_STRIDE) return;
+        final boolean hasContent = (info[XCore.W_FLAGS] & XCore.WF_HAS_CONTENT) != 0;
+        synchronized (lock) {
+            if (nativeHandle != 0) {
+                nativeReparentWindow(nativeHandle, window, parent);
+                nativeUpdateWindowGeometry(nativeHandle, window, hasContent ? window : 0,
+                    x, y, (int) info[XCore.W_WIDTH], (int) info[XCore.W_HEIGHT]);
             }
         }
     }
 
-    private void countFrameForHud(Window window) {
-        if (window.id == fpsWindowId) {
+    @Override
+    public void onChangeWindowZOrder(int stackMode, int window, int sibling) {
+        final XCore core = xServer.core();
+        if (core == null) return;
+        final long[] info = core.windowInfo(window);
+        if (info.length < XCore.WINDOW_STRIDE) return;
+        final int parent = (int) info[XCore.W_PARENT];
+        final long[] ordered = core.windowChildren(parent);
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeSyncChildOrder(nativeHandle, parent, ordered, ordered.length);
+        }
+    }
+
+    @Override
+    public void onUpdateWindowGeometry(int window, boolean resized) {
+        final XCore core = xServer.core();
+        if (core == null) return;
+        final long[] info = core.windowInfo(window);
+        if (info.length < XCore.WINDOW_STRIDE) return;
+        final boolean hasContent = (info[XCore.W_FLAGS] & XCore.WF_HAS_CONTENT) != 0;
+        synchronized (lock) {
+            if (nativeHandle != 0) {
+                nativeUpdateWindowGeometry(nativeHandle, window, hasContent ? window : 0,
+                    (int) info[XCore.W_X], (int) info[XCore.W_Y],
+                    (int) info[XCore.W_WIDTH], (int) info[XCore.W_HEIGHT]);
+                // A resized window has a new buffer under the same id; the old one was given back.
+                if (resized && hasContent && mappedWindows.contains(window)) updateContentLocked(core, window, window);
+            }
+        }
+        if (resized) refreshDesktopTransform();
+    }
+
+    @Override
+    public void onModifyWindowProperty(int window, int atom) {
+        // WM_CLASS is what marks Wine's desktop window and the windows that stay hidden; it may be
+        // set after the window is mapped.
+        if (atom == ATOM_WM_CLASS) {
+            if (mappedWindows.contains(window)) refreshDesktopTransform();
+            checkViewable(window);
+        }
+    }
+
+    // ------------------------------------------------------------------ pixels
+
+    /**
+     * Points the renderer's content {@code window} at the buffer of {@code drawable} (the window
+     * itself, or a DRI3 pixmap shown in it). The renderer takes a reference of its own when it
+     * imports a buffer, so ours goes back at once. Caller holds {@link #lock}.
+     */
+    private void updateContentLocked(XCore core, int window, int drawable) {
+        if (nativeHandle == 0) return;
+        final long ahb = core.acquireBuffer(drawable);
+        if (ahb == 0) return;
+        try {
+            importedAhb.put(drawable, ahb);
+            nativeUpdateWindowContentAHB(nativeHandle, window, ahb, (short) 0, (short) 0, 0, 0);
+        } finally {
+            XCore.releaseBuffer(ahb);
+        }
+    }
+
+    @Override
+    public void onUpdateWindowContent(int window) {
+        if (!mappedWindows.contains(window)) return;
+        final XCore core = xServer.core();
+        if (core == null) return;
+        synchronized (lock) {
+            updateContentLocked(core, window, window);
+            pushDisplayClockLocked();
+        }
+    }
+
+    @Override
+    public void onUpdateWindowContentDirect(int window, int pixmap) {
+        countFrameForHud(window);
+        final XCore core = xServer.core();
+        if (core == null) return;
+        synchronized (lock) {
+            updateContentLocked(core, window, pixmap);
+            pushDisplayClockLocked();
+        }
+    }
+
+    private void countFrameForHud(int window) {
+        if (window == fpsWindowId) {
             if (hudRef != null) hudRef.onFrame();
             if (classicHudRef != null) classicHudRef.update();
         }
     }
 
-    public void addDirectContent(int windowId, Drawable drawable, GPUImage gpuImage) {
-
-    }
-
     @Override
-    public boolean ownsDrawableBuffers() { return true; }
-
-    @Override
-    public void onBufferReleased(long ahbPtr) {
-        if (ahbPtr == 0) return;
-        // Synchronous, under the lock every content update takes: no update can import this
-        // buffer again after the renderer has dropped it. Lock order as elsewhere: X locks first.
+    public void onDrawableRemoved(int drawable) {
+        // The server gives the buffer back: forget the renderer's import of it, now, under the
+        // lock every content update takes, so no update can import it again after that.
         synchronized (lock) {
-            if (nativeHandle != 0) nativeReleaseBuffer(nativeHandle, ahbPtr);
+            Long ahb = importedAhb.remove(drawable);
+            if (ahb != null && nativeHandle != 0) nativeReleaseBuffer(nativeHandle, ahb);
         }
     }
+
+    /** The renderer's display clock goes to the server: Present paces the game's frames by it. */
+    private void pushDisplayClockLocked() {
+        if (nativeHandle == 0) return;
+        if (nativeGetDisplayClock(nativeHandle, clockOut)) {
+            if (clockOut[2] != lastClockSeq) {
+                lastClockSeq = clockOut[2];
+                XCore.setDisplayClock(clockOut[0], clockOut[1], clockOut[2]);
+            }
+        } else if (lastClockSeq != -1) {
+            lastClockSeq = -1;
+            XCore.setDisplayClock(0, 0, 0);
+        }
+    }
+
+    // ------------------------------------------------------------------ pointer and cursor
 
     @Override
-    public void nativeRemoveDirectContent(int windowId, int pixmapId) {
-        Pixmap pixmap = xServer.pixmapManager.getPixmap(pixmapId);
-        if (pixmap == null || pixmap.drawable == null) return;
-        final long contentId = did(pixmap.drawable);
-        queueEvent(() -> {
-            synchronized (lock) {
-                if (nativeHandle != 0) nativeRemoveWindow(nativeHandle, contentId);
-            }
-        });
-    }
-
-    @Override
-    public void nativeSetCompositeRedirected(int windowId, boolean redirected) {
-        if (xServer.windowManager.getWindow(windowId) == null) return;
-        if (redirected) compositeRedirectedWindows.add(windowId);
-        else compositeRedirectedWindows.remove(windowId);
-    }
-
-    private static boolean hasAncestor(Window window, Window ancestor) {
-        Window current = window;
-        while (current != null) {
-            if (current == ancestor) return true;
-            current = current.getParent();
-        }
-        return false;
-    }
-
-    private static Window getWindowSibling(Window window, Window other) {
-        Window current = window;
-        while (current != null) {
-            if (current.getParent() == other.getParent()) return current;
-            current = current.getParent();
-        }
-        return null;
-    }
-
-    @Override
-    public boolean nativeCompositeRedirect(int srcDrawableId, int dstDrawableId, short dstX, short dstY) {
-        Window srcWindow = xServer.windowManager.getWindow(srcDrawableId);
-        Window dstWindow = xServer.windowManager.getWindow(dstDrawableId);
-        // Pixmap destination or copy within the same window: needs a real pixel copy.
-        if (srcWindow == null || dstWindow == null || srcWindow == dstWindow) return false;
-        if (!hasAncestor(srcWindow, dstWindow)) {
-            Window sibling = getWindowSibling(srcWindow, dstWindow);
-            if (sibling == null) return false;
-
-            Window parent = sibling.getParent();
-            if (parent == null || parent != dstWindow.getParent()) return false;
-
-            int posX = dstWindow.getX() + dstX;
-            int posY = dstWindow.getY() + dstY;
-            boolean positionChanged = sibling.getX() != posX || sibling.getY() != posY;
-
-            if (positionChanged) {
-                sibling.setX((short)posX);
-                sibling.setY((short)posY);
-                onUpdateWindowGeometry(sibling, false);
-            }
-
-            List<Window> children = parent.getChildren();
-            int siblingIndex = children.indexOf(sibling);
-            int dstIndex = children.indexOf(dstWindow);
-            if (siblingIndex < 0 || dstIndex < 0) return false;
-
-            if (siblingIndex <= dstIndex) {
-                parent.moveChildAbove(sibling, dstWindow);
-                onChangeWindowZOrder(Window.StackMode.ABOVE, sibling, dstWindow);
-            }
-        }
-
-        return true;
-    }
-
-    @Override
-    public void onUpdateWindowContent(Window window) {
-        synchronized (lock) {
-            if (nativeHandle == 0) return;
-            Drawable drawable = window.getContent();
-            if (drawable == null || !window.attributes.isMapped()) return;
-
-            final int rx = window.getRootX(), ry = window.getRootY();
-            synchronized (drawable.renderLock) {
-                if (drawable.backingAHB != 0) {
-                    nativeUpdateWindowContentAHB(nativeHandle, did(drawable),
-                        drawable.backingAHB, drawable.width, drawable.height, rx, ry);
-                }
-            }
-        }
+    public void onPointerMove(int x, int y) {
+        onPointerMove((short) x, (short) y);
     }
 
     @Override
@@ -791,11 +706,49 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         synchronized (lock) {
             if (nativeHandle == 0) return;
             nativeSetPointerPos(nativeHandle, x, y);
-            Window pw = xServer.inputDeviceManager.getPointWindow();
-            Cursor cursor = pw != null ? pw.attributes.getCursor() : null;
-            if (cursor != lastCursor) { lastCursor = cursor; sendCursorToNative(cursor); }
             if (screenOffsetYRelativeToCursor || magnifierZoom != 1.0f) updateTransform();
         }
+    }
+
+    @Override
+    public void onCursorChanged() {
+        synchronized (lock) { applyCursorLocked(false); }
+    }
+
+    /**
+     * Gives the renderer the X cursor under the pointer: its visibility (a game hides the cursor
+     * with an empty mask) and, when it is a different one, its image. Caller holds {@link #lock}.
+     *
+     * @param force send the image even if the renderer is believed to have it (a new renderer)
+     */
+    private void applyCursorLocked(boolean force) {
+        if (nativeHandle == 0) return;
+        final long[] st = xServer.getCursorState();
+        final boolean hasXCursor = st.length >= 6;
+        final boolean visible = cursorVisible && (!hasXCursor || st[3] != 0);
+        nativeSetCursorVisible(nativeHandle, visible);
+        if (!visible) {
+            if (force) sentCursorSerial = -1;
+            return;
+        }
+        final long serial = hasXCursor ? st[0] : 0;
+        if (!force && serial == sentCursorSerial) return;
+        if (hasXCursor) {
+            final int w = (int) st[4], h = (int) st[5];
+            final byte[] rgba = xServer.getCursorImage();
+            if (rgba == null || w <= 0 || h <= 0 || rgba.length < w * h * 4) return;
+            // The renderer's cursor texture is R,G,B,A.
+            ByteBuffer pixels = ByteBuffer.allocateDirect(w * h * 4);
+            pixels.put(rgba, 0, w * h * 4).rewind();
+            nativeUpdateCursorImage(nativeHandle, pixels, (short) w, (short) h, (short) w,
+                (short) st[1], (short) st[2], true);
+        } else if (rootCursor != null) {
+            nativeUpdateCursorImage(nativeHandle, rootCursor, (short) rootCursorWidth,
+                (short) rootCursorHeight, (short) rootCursorWidth, (short) 0, (short) 0, true);
+        } else {
+            return;
+        }
+        sentCursorSerial = serial;
     }
 
     @Override
@@ -804,11 +757,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         synchronized (lock) {
             if (nativeHandle != 0) {
                 nativeSetCursorVisible(nativeHandle, visible);
-                if (visible) sendCursorToNative(lastCursor);
+                if (visible) applyCursorLocked(false);
             }
         }
     }
-
 
     public void setDriverInfo(String driverPath, String libraryName, String nativeLibDir) {
         this.driverPath = driverPath;
@@ -1076,6 +1028,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         int v = Math.max(0, Math.min(1000, limit));
         boolean changed = v != fpsLimit;
         this.fpsLimit = v;
+        // Present releases the game's buffers at this rate.
+        XCore.setFpsLimit(v);
         synchronized (lock) { if (nativeHandle != 0) nativeSetWfgFpsLimit(nativeHandle, fpsLimit); }
         // The panel mode follows the limit (and the WFG output rate, which depends on it).
         if (changed) requestDisplayMode();

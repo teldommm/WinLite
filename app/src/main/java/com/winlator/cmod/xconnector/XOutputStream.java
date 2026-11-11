@@ -2,7 +2,6 @@ package com.winlator.cmod.xconnector;
 
 import android.util.Log;
 
-import com.winlator.cmod.xserver.XServer;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -111,7 +110,7 @@ public class XOutputStream {
     }
 
     public void writeString8(String str) {
-        byte[] bytes = str.getBytes(XServer.LATIN1_CHARSET);
+        byte[] bytes = str.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
         int length = -str.length() & 3;
         ensureSpaceIsAvailable(bytes.length + length);
         buffer.put(bytes);

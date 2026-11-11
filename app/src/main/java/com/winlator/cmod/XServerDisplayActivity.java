@@ -134,13 +134,9 @@ import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
 import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;
 import com.winlator.cmod.xenvironment.components.XServerComponent;
 import com.winlator.cmod.xserver.Pointer;
-import com.winlator.cmod.xserver.Property;
 import com.winlator.cmod.xserver.ScreenInfo;
 import com.winlator.cmod.xserver.SurfaceFormat;
-import com.winlator.cmod.xserver.Window;
-import com.winlator.cmod.xserver.WindowManager;
 import com.winlator.cmod.xserver.XServer;
-import com.winlator.cmod.xserver.extensions.RandrExtension;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -302,9 +298,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private android.hardware.display.DisplayManager.DisplayListener randrDisplayListener;
 
     private void advertisePanelRefreshRates() {
-        RandrExtension randr = xServer.getExtension(RandrExtension.MAJOR_OPCODE);
-        if (randr == null) return;
-
         android.view.Display display = getWindowManager().getDefaultDisplay();
         android.view.Display.Mode[] modes = display.getSupportedModes();
         if (modes == null || modes.length == 0) return;
@@ -322,7 +315,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         for (short hz : distinct) rates[index++] = hz;
 
         short activeRate = (short)Math.round(display.getRefreshRate());
-        randr.setRefreshRates(rates, activeRate);
+        xServer.setRefreshRates(rates, activeRate);
 
         // Keep the current rate in step with the panel: its mode changes with the system setting
         // and with the modes WinLite asks for (WFG, FPS limit).
@@ -336,9 +329,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     @Override public void onDisplayRemoved(int id) {}
                     @Override public void onDisplayChanged(int id) {
                         if (id != displayId || xServer == null) return;
-                        RandrExtension r = xServer.getExtension(RandrExtension.MAJOR_OPCODE);
                         android.view.Display d = dm.getDisplay(id);
-                        if (r != null && d != null) r.setActiveRate((short)Math.round(d.getRefreshRate()));
+                        if (d != null) xServer.setActiveRate((short)Math.round(d.getRefreshRate()));
                     }
                 };
                 dm.registerDisplayListener(randrDisplayListener,
@@ -620,10 +612,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         boolean[] winStarted = { false };
 
-        xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
+        xServer.addListener(new XServer.Listener() {
             @Override
-            public void onUpdateWindowContent(Window window) {
-                if (!winStarted[0] && window.isApplicationWindow()) {
+            public void onUpdateWindowContent(int window) {
+                if (!winStarted[0] && xServer.isApplicationWindow(window)) {
                     if (isDrawnCursorVisible()) {
                         xServerView.setCursorVisible(true);
                     }
@@ -631,17 +623,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     winStarted[0] = true;
                 }
 
-                if (frameRatingWindowId == window.id) {
+                if (frameRatingWindowId == window) {
                     if (classicHud != null) classicHud.update();
                     if (modernHud != null) modernHud.onFrame();
                 } else if (frameRatingWindowId == -1 && lastRendererName != null
-                        && window.isApplicationWindow()
+                        && xServer.isApplicationWindow(window)
                         && ((modernHud != null && modernHud.isUserEnabled())
                          || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) {
 
-                    frameRatingWindowId = window.id;
-                    activeRendererWindowId = window.id;
-                    if (xServerView != null) xServerView.setFpsWindowId(window.id);
+                    frameRatingWindowId = window;
+                    activeRendererWindowId = window;
+                    if (xServerView != null) xServerView.setFpsWindowId(window);
                     if (classicHud != null) classicHud.update();
                     if (modernHud != null) modernHud.onFrame();
                     syncClassicHudRenderer();
@@ -650,17 +642,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onMapWindow(Window window) {
+            public void onMapWindow(int window) {
                 assignTaskAffinity(window);
             }
 
             @Override
-            public void onModifyWindowProperty(Window window, Property property) {
-                changeFrameRatingVisibility(window, property);
+            public void onModifyWindowProperty(int window, int atom) {
+                changeFrameRatingVisibility(window, xServer.getAtomName(atom));
             }
 
             @Override
-            public void onDestroyWindow(Window window) {
+            public void onDestroyWindow(int window) {
                 changeFrameRatingVisibility(window, null);
             }
         });
@@ -1220,7 +1212,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(
                 new SysVSharedMemoryComponent(
-                        xServer,
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.SYSVSHM_SERVER_PATH)));
         environment.addComponent(
                 new XServerComponent(
@@ -3149,38 +3140,39 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
-    private void assignTaskAffinity(Window window) {
+    private void assignTaskAffinity(int window) {
         if (taskAffinityMask == 0 || taskAffinityMaskWoW64 == 0)
             return;
-        int processId = window.getProcessId();
-        String className = window.getClassName();
-        int processAffinity = window.isWoW64() ? taskAffinityMaskWoW64 : taskAffinityMask;
+        int processId = xServer.getWindowProcessId(window);
+        String className = xServer.getWindowClassName(window);
+        int processAffinity = xServer.isWindowWoW64(window) ? taskAffinityMaskWoW64 : taskAffinityMask;
 
         if (processId > 0) {
             winHandler.setProcessAffinity(processId, processAffinity);
         } else if (!className.isEmpty()) {
-            winHandler.setProcessAffinity(window.getClassName(), processAffinity);
+            winHandler.setProcessAffinity(className, processAffinity);
         }
     }
 
-    private void changeFrameRatingVisibility(Window window, Property property) {
+    /** @param propName the property that was set on the window, null when the window is gone */
+    private void changeFrameRatingVisibility(int window, String propName) {
 
-        String propName = (property != null) ? property.nameAsString() : null;
+        final boolean hasProperty = propName != null;
 
-        if (property != null) {
+        if (hasProperty) {
             if (activeRendererWindowId == -1 && propName.contains("_MESA_DRV")) {
-                activeRendererWindowId = window.id;
+                activeRendererWindowId = window;
             }
 
             if (propName.contains("_MESA_DRV_ENGINE_NAME")
-                    && (activeRendererWindowId == -1 || window.id == activeRendererWindowId)) {
-                lastRendererName = property.toString();
+                    && (activeRendererWindowId == -1 || window == activeRendererWindowId)) {
+                lastRendererName = xServer.getPropertyString(window, propName);
             }
             if (propName.contains("_MESA_DRV_GPU_NAME")
-                    && (activeRendererWindowId == -1 || window.id == activeRendererWindowId)) {
-                lastGpuName = property.toString();
+                    && (activeRendererWindowId == -1 || window == activeRendererWindowId)) {
+                lastGpuName = xServer.getPropertyString(window, propName);
             }
-        } else if (activeRendererWindowId != -1 && window.id == activeRendererWindowId) {
+        } else if (activeRendererWindowId != -1 && window == activeRendererWindowId) {
 
             activeRendererWindowId = -1;
             lastRendererName = null;
@@ -3189,31 +3181,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         if (classicHud == null && modernHud == null) return;
 
-        if (property != null) {
+        if (hasProperty) {
             if (frameRatingWindowId == -1 && propName.contains("_MESA_DRV")) {
-                frameRatingWindowId = window.id;
-                if (xServerView != null) xServerView.setFpsWindowId(window.id);
-                Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
+                frameRatingWindowId = window;
+                if (xServerView != null) xServerView.setFpsWindowId(window);
+                Log.d("XServerDisplayActivity", "Showing hud for Window " + xServer.getWindowName(window));
                 if (classicHud != null) classicHud.update();
                 syncClassicHudRenderer();
                 syncModernHudRenderer();
             }
 
-            if (propName.contains("_MESA_DRV_ENGINE_NAME") && window.id == frameRatingWindowId) {
-                String rendererName = property.toString();
+            if (propName.contains("_MESA_DRV_ENGINE_NAME") && window == frameRatingWindowId) {
+                String rendererName = xServer.getPropertyString(window, propName);
                 if (classicHud != null) runOnUiThread(() -> classicHud.setRenderer(rendererName));
                 if (modernHud != null) runOnUiThread(() -> modernHud.setRenderer(rendererName));
             }
-            if (propName.contains("_MESA_DRV_GPU_NAME") && window.id == frameRatingWindowId) {
-                String gpuName = property.toString();
+            if (propName.contains("_MESA_DRV_GPU_NAME") && window == frameRatingWindowId) {
+                String gpuName = xServer.getPropertyString(window, propName);
                 if (classicHud != null) runOnUiThread(() -> classicHud.setGpuName(gpuName));
                 if (modernHud != null) runOnUiThread(() -> modernHud.setGpuName(gpuName));
             }
-        } else if (frameRatingWindowId != -1 && window.id == frameRatingWindowId) {
+        } else if (frameRatingWindowId != -1 && window == frameRatingWindowId) {
 
             frameRatingWindowId = -1;
             if (xServerView != null) xServerView.setFpsWindowId(-1);
-            Log.d("XServerDisplayActivity", "Hiding hud for Window " + window.getName());
+            Log.d("XServerDisplayActivity", "Hiding hud for Window " + xServer.getWindowName(window));
             if (classicHud != null) runOnUiThread(() -> {
                 classicHud.setVisibility(View.GONE);
                 classicHud.reset();

@@ -1,6 +1,5 @@
 package com.winlator.cmod.xconnector;
 
-import com.winlator.cmod.xserver.XServer;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -117,7 +116,7 @@ public class XInputStream {
     public String readString8(int length) {
         byte[] bytes = new byte[length];
         read(bytes);
-        String str = new String(bytes, XServer.LATIN1_CHARSET);
+        String str = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
         if ((-length & 3) > 0) skip(-length & 3);
         return str;
     }
