@@ -233,6 +233,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String rendererLogPath;
     private short taskAffinityMask = 0;
     private short taskAffinityMaskWoW64 = 0;
+    /** Windows PID -> mask already sent by assignTaskAffinity. */
+    private final HashMap<Integer, Integer> assignedAffinity = new HashMap<>();
     private String wineCpuTopologyValue = "";
     private int frameRatingWindowId = -1;
 
@@ -3148,6 +3150,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         int processAffinity = xServer.isWindowWoW64(window) ? taskAffinityMaskWoW64 : taskAffinityMask;
 
         if (processId > 0) {
+            // Once per process and mask. SetProcessAffinityMask rewrites the mask of every thread
+            // of the process even when nothing changes, so sending it on every map (menus,
+            // popups) undid the game's own SetThreadAffinityMask pins and the thread placement.
+            synchronized (assignedAffinity) {
+                Integer previous = assignedAffinity.put(processId, processAffinity);
+                if (previous != null && previous == processAffinity) return;
+            }
             winHandler.setProcessAffinity(processId, processAffinity);
         } else if (!className.isEmpty()) {
             winHandler.setProcessAffinity(className, processAffinity);

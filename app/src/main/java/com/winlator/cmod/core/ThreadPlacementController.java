@@ -28,17 +28,37 @@ import java.util.concurrent.TimeUnit;
  * Wine processes off those cores.
  *
  * It sits on top of the per-process settings and never widens them: the allowed cores of a
- * process (the "Processor Affinity" lists, applied through Wine) are read back from the process's
- * main thread and every decision is made inside that set. Sync CPU Topology is independent of this.
+ * process (the "Processor Affinity" lists, applied through Wine's SetProcessAffinityMask) are
+ * worked out from the masks of its threads and every decision is made inside that set. Sync CPU
+ * Topology is independent of this.
  *
- * Every {@link #TICK_MS} the controller samples utime+stime of every thread in
- * /proc/PID/task/TID/stat. A thread becomes "hot" after {@link #ENTER_SAMPLES} samples above
+ * Every {@link #TICK_MS} the controller samples utime+stime and the affinity mask of every thread
+ * of the Wine processes. A thread becomes "hot" after {@link #ENTER_SAMPLES} samples above
  * {@link #HOT_ENTER} of a core and stops being hot after {@link #EXIT_SAMPLES} samples below
- * {@link #HOT_EXIT}, so threads do not bounce between sets. With no hot thread nothing is changed
- * (and anything that was changed is put back to the process's own mask).
+ * {@link #HOT_EXIT}, so threads do not bounce between sets. For a thread sitting on the fast
+ * cores the exit test uses the load it would have on the slowest of the other cores, otherwise
+ * a thread that is light on a prime core but heavy on a little one would be moved back and forth.
+ * With no hot thread nothing is changed (and anything that was changed is put back to the
+ * process's own mask).
  *
- * Wine re-applies the process mask whenever a window is mapped; that shows up as a change of
- * the main thread's mask that the controller did not make, and is taken as the new base.
+ * Who owns which mask:
+ * <ul>
+ * <li>The process base is the OR of its threads' masks when it is first seen. Wine keeps every
+ *     thread mask inside the process mask, so a game that pins one thread (even the main one)
+ *     does not shrink the base.</li>
+ * <li>A process reset (SetProcessAffinityMask, sent by WinLite when a window is mapped or called
+ *     by the game itself) rewrites every thread to the same mask. It is recognised when the same
+ *     unexpected mask shows up on most of the threads; that mask becomes the new base.</li>
+ * <li>A single thread whose mask changed to something the controller never handed out was pinned
+ *     by the game (SetThreadAffinityMask). After {@link #FOREIGN_SAMPLES} samples it is left
+ *     alone until the game puts it back to the base or the process is reset.</li>
+ * <li>A thread that shows one of the masks the controller handed out without having been moved
+ *     inherited it from its creator (plain pthread_create, which Wine does not re-mask) and is
+ *     managed like any other thread.</li>
+ * </ul>
+ * sched_getaffinity reports the mask ANDed with the active CPUs, so masks are compared only on
+ * the CPUs that showed up in some thread's mask this tick: a core that is offline or paused
+ * (core_ctl) does not look like a change.
  */
 public final class ThreadPlacementController {
     private static final String TAG = "ThreadPlacement";
@@ -62,25 +82,31 @@ public final class ThreadPlacementController {
     static final int ENTER_SAMPLES = 2;
     static final int EXIT_SAMPLES = 3;
     static final int MAX_HOT = 4;
-    /** Every Nth tick the masks of managed threads are read back, to catch resets done by Wine. */
-    static final int VERIFY_EVERY = 5;
+    /** Samples a thread must show a mask nobody expected before it is treated as pinned by the game. */
+    static final int FOREIGN_SAMPLES = 2;
     /** The process list is rescanned every Nth tick, the thread lists of known processes every tick. */
     static final int PID_RESCAN_EVERY = 3;
     static final int GIVE_UP_AFTER_FAILURES = 24;
+    /** Masks handed out per process that are still recognised as "ours" (for inherited masks). */
+    private static final int MAX_HANDED_OUT = 8;
     private static final int ESRCH = 3;
 
     private static final class ProcState {
         final int pid;
-        /** The process's own allowed mask (what the player configured), 0 = not read yet. */
+        /** The process's own allowed mask (what the player configured), 0 = not known yet. */
         long baseMask;
-        /** Base changed during this sampling pass (Wine re-applied the process mask). */
-        boolean baseChanged;
-        /** Some thread of this process has been moved by the controller. */
-        boolean touched;
+        /** Masks the controller set on threads of this process, newest last. */
+        final ArrayList<Long> handedOut = new ArrayList<>();
         int seenTick;
 
         ProcState(int pid) {
             this.pid = pid;
+        }
+
+        void remember(long mask) {
+            handedOut.remove(Long.valueOf(mask));
+            handedOut.add(mask);
+            while (handedOut.size() > MAX_HANDED_OUT) handedOut.remove(0);
         }
     }
 
@@ -95,16 +121,33 @@ public final class ThreadPlacementController {
         int coldStreak;
         boolean hot;
         boolean placed;
-        boolean fresh = true;
         /** The mask the controller last asked for, 0 = thread is at its process's base. */
         long requested;
         /** The mask read back after our last change (the kernel may narrow it, e.g. by cpuset). */
         long effective;
+        /** The mask read this tick, 0 = unknown. */
+        long current;
+        /** Carries a mask the controller handed out to another thread (inherited at creation). */
+        boolean inherited;
+        /** Consecutive samples with a mask nobody expected. */
+        int foreignStreak;
+        /** Pinned by the game: never touched until it is back at the base or the process is reset. */
+        boolean foreign;
+        /**
+         * Factor from the measured load to the load on the slowest core outside the fast set,
+         * 1 when the thread is not on the fast set.
+         */
+        double exitScale = 1.0;
         int seenTick;
 
         ThreadState(int pid, int tid) {
             this.pid = pid;
             this.tid = tid;
+        }
+
+        /** Left alone this tick: pinned by the game, or maybe about to be found so. */
+        boolean handsOff() {
+            return foreign || foreignStreak > 0;
         }
     }
 
@@ -130,6 +173,8 @@ public final class ThreadPlacementController {
     private int tickCount;
     private long lastNs;
     private long totalDeltaTicks;
+    /** CPUs seen in any thread mask this tick (the active ones inside the processes' bases). */
+    private long seenCpus;
     private int consecutiveFailures;
     private boolean gaveUp;
     private String lastSignature = "";
@@ -265,7 +310,7 @@ public final class ThreadPlacementController {
         if (cachedPids.length == 0 || tickCount % PID_RESCAN_EVERY == 1) cachedPids = pidSource.pids();
 
         totalDeltaTicks = 0;
-        for (ProcState proc : procs.values()) proc.baseChanged = false;
+        seenCpus = 0;
         for (int pid : cachedPids) sampleProcess(pid, baseline ? 0 : dt);
 
         Iterator<ThreadState> threadIt = threads.values().iterator();
@@ -275,6 +320,21 @@ public final class ThreadPlacementController {
         Iterator<ProcState> procIt = procs.values().iterator();
         while (procIt.hasNext()) {
             if (procIt.next().seenTick != tickCount) procIt.remove();
+        }
+
+        // Masks are only judged once every thread of the tick has been read (seenCpus).
+        Map<Integer, List<ThreadState>> byPid = new HashMap<>();
+        for (ThreadState thread : threads.values()) {
+            List<ThreadState> list = byPid.get(thread.pid);
+            if (list == null) {
+                list = new ArrayList<>();
+                byPid.put(thread.pid, list);
+            }
+            list.add(thread);
+        }
+        for (ProcState proc : procs.values()) {
+            List<ThreadState> list = byPid.get(proc.pid);
+            if (list != null) classify(proc, list);
         }
 
         if (baseline) return;
@@ -321,11 +381,16 @@ public final class ThreadPlacementController {
             thread.name = sample.name;
             thread.seenTick = tickCount;
 
-            if (tid == pid) refreshBase(proc, thread);
+            long mask = api.get(tid);
+            thread.current = mask > 0 ? mask & onlineMask : 0;
+            seenCpus |= thread.current;
         }
     }
 
-    private static void updateLoad(ThreadState thread, double inst) {
+    private static void updateLoad(ThreadState thread, double measured) {
+        // On the fast set the thread is judged by the load it would have elsewhere, so that
+        // leaving the fast set does not make it hot again right away.
+        double inst = measured * thread.exitScale;
         thread.inst = inst;
         thread.avg = thread.avg * 0.5 + inst * 0.5;
         if (inst >= HOT_ENTER) {
@@ -343,26 +408,123 @@ public final class ThreadPlacementController {
         if (thread.hot && thread.coldStreak >= EXIT_SAMPLES) thread.hot = false;
     }
 
-    /**
-     * The main thread carries the process's own mask unless the controller moved it. Anything
-     * other than where we left it means the whole process was reset (Wine re-applies the process
-     * mask whenever a window is mapped, to every thread, even when the mask is the same as
-     * before): what the main thread has now is the base, and the process is placed again.
-     */
-    private void refreshBase(ProcState proc, ThreadState main) {
-        long current = api.get(main.tid);
-        if (current <= 0) return;
-        current &= onlineMask;
-        if (current == 0) return;
+    /** The mask as sched_getaffinity would report it now (only CPUs that are up). */
+    private long visible(long mask) {
+        long v = mask & seenCpus;
+        return v != 0 ? v : mask;
+    }
+
+    private boolean isHandedOut(ProcState proc, long current) {
+        for (int i = proc.handedOut.size() - 1; i >= 0; i--) {
+            if (visible(proc.handedOut.get(i)) == current) return true;
+        }
+        return false;
+    }
+
+    /** Works out the base of the process and who owns each thread's mask (see the class doc). */
+    private void classify(ProcState proc, List<ThreadState> list) {
         if (proc.baseMask == 0) {
-            proc.baseMask = current;
+            long base = 0;
+            for (ThreadState thread : list) base |= thread.current;
+            proc.baseMask = base;
             return;
         }
-        long expected = main.requested != 0 ? main.effective : proc.baseMask;
-        if (current != expected) {
-            proc.baseMask = current;
-            proc.baseChanged = true;
+
+        long base = visible(proc.baseMask);
+
+        // Process reset (SetProcessAffinityMask rewrites every thread): one mask M on most of the
+        // threads. Support counts every thread showing M, also where M is what we expected for it:
+        // a reset to a mask equal to one we handed out (the player picks "all but the prime core"
+        // in the task manager) leaves the threads already on it unchanged, and they still count.
+        // M must also be unexpected somewhere in a way inheritance cannot explain:
+        //  - on a thread we moved that no longer has our mask, or
+        //  - on an unmoved thread off the base, with a mask we never handed out, or
+        //  - a mask of ours on unmoved threads that are most of the process (a few threads
+        //    inherit a mask of ours from their creator; most of them never do).
+        Map<Long, int[]> candidates = new HashMap<>(); // M -> {support, strong, unmoved on M}
+        int known = 0;
+        for (ThreadState thread : list) {
+            if (thread.current == 0) continue;
+            known++;
+            boolean strong;
+            if (thread.requested != 0) {
+                strong = thread.current != visible(thread.effective);
+            } else {
+                strong = thread.current != base && !isHandedOut(proc, thread.current);
+            }
+            boolean inheritedLike = thread.requested == 0 && thread.current != base && !strong;
+            if (!strong && !inheritedLike) continue;
+            int[] c = candidates.get(thread.current);
+            if (c == null) {
+                c = new int[3];
+                candidates.put(thread.current, c);
+            }
+            if (strong) c[1] = 1;
         }
+        for (ThreadState thread : list) {
+            int[] c = candidates.get(thread.current);
+            if (c == null) continue;
+            c[0]++;
+            if (thread.requested == 0) c[2]++;
+        }
+        long resetMask = 0;
+        int resetCount = 0;
+        for (Map.Entry<Long, int[]> entry : candidates.entrySet()) {
+            int[] c = entry.getValue();
+            boolean seeded = c[1] != 0 || c[2] * 2 > known;
+            if (seeded && c[0] > resetCount) {
+                resetCount = c[0];
+                resetMask = entry.getKey();
+            }
+        }
+        if (resetCount * 2 > known && (resetCount >= 2 || known == 1)) {
+            // handedOut is kept: a thread read just before Wine got to it still carries an old
+            // mask of ours and must be taken as inherited, not as pinned by the game.
+            proc.baseMask = resetMask;
+            for (ThreadState thread : list) {
+                thread.requested = 0;
+                thread.effective = 0;
+                thread.inherited = false;
+                thread.foreign = false;
+                thread.foreignStreak = 0;
+                thread.exitScale = 1.0;
+            }
+            return;
+        }
+
+        for (ThreadState thread : list) {
+            thread.inherited = false;
+            if (thread.current == 0) continue;
+            if (thread.foreign) {
+                // The game's until it puts the thread back to the base.
+                if (thread.current == base) thread.foreign = false;
+                continue;
+            }
+            if (thread.requested != 0) {
+                if (thread.current == visible(thread.effective)) {
+                    thread.foreignStreak = 0;
+                } else if (++thread.foreignStreak >= FOREIGN_SAMPLES) {
+                    // The game set its own mask on a thread we had moved: hand it over.
+                    markForeign(thread);
+                }
+            } else if (thread.current == base) {
+                thread.foreignStreak = 0;
+            } else if (isHandedOut(proc, thread.current)) {
+                thread.inherited = true;
+                thread.foreignStreak = 0;
+            } else if (++thread.foreignStreak >= FOREIGN_SAMPLES) {
+                markForeign(thread);
+            }
+        }
+    }
+
+    private static void markForeign(ThreadState thread) {
+        thread.foreign = true;
+        thread.foreignStreak = 0;
+        thread.requested = 0;
+        thread.effective = 0;
+        thread.exitScale = 1.0;
+        thread.placed = false;
     }
 
     // ---------------------------------------------------------------------------------------
@@ -373,53 +535,42 @@ public final class ThreadPlacementController {
         List<ThreadState> hot = new ArrayList<>();
         for (ThreadState thread : threads.values()) {
             thread.placed = false;
-            if (thread.hot) hot.add(thread);
+            if (thread.hot && !thread.handsOff()) hot.add(thread);
         }
         Collections.sort(hot, (a, b) -> Double.compare(b.avg, a.avg));
         int placedCount = Math.min(MAX_HOT, hot.size());
         for (int i = 0; i < placedCount; i++) hot.get(i).placed = true;
 
-        boolean verify = tickCount % VERIFY_EVERY == 0;
-        Map<Long, Long> performanceByBase = new HashMap<>();
+        Map<Long, long[]> setsByBase = new HashMap<>();
 
         for (ThreadState thread : threads.values()) {
+            if (thread.handsOff()) continue;
             ProcState proc = procs.get(thread.pid);
-            if (proc == null) continue;
-            if (proc.baseChanged) {
-                // Wine reset the whole process to the new base.
-                thread.requested = 0;
-                thread.effective = 0;
-            }
+            if (proc == null || proc.baseMask == 0) continue;
 
-            long base = proc.baseMask != 0 ? proc.baseMask : onlineMask;
-            Long cached = performanceByBase.get(base);
-            if (cached == null) {
-                cached = performanceMask(base, placedCount, capacity);
-                performanceByBase.put(base, cached);
+            long base = proc.baseMask;
+            long[] sets = setsByBase.get(base);
+            if (sets == null) {
+                long perf = performanceMask(visible(base), placedCount, capacity);
+                long others = base & ~perf;
+                if (others == 0) others = base;
+                sets = new long[] {perf, others};
+                setsByBase.put(base, sets);
             }
-            long perf = cached;
-            long others = base & ~perf;
-            if (others == 0) others = base;
+            long perf = sets[0];
+            long others = sets[1];
             long want = placedCount == 0 ? base : (thread.placed ? perf : others);
 
             if (thread.requested == 0) {
-                // At the process's base.
-                if (want != base) {
-                    apply(proc, thread, want, base);
-                } else if (thread.fresh && proc.touched) {
-                    // New thread of a process we touched: it may have inherited a moved mask.
-                    long current = api.get(thread.tid);
-                    if (current > 0 && (current & onlineMask) != base) apply(proc, thread, base, base);
-                }
+                // At the process's base, or carrying an inherited mask of ours.
+                if (want != base || thread.inherited) apply(proc, thread, want, base);
             } else if (thread.requested != want) {
                 apply(proc, thread, want, base);
-            } else if (verify) {
-                long current = api.get(thread.tid);
-                if (current > 0 && current != thread.effective) apply(proc, thread, want, base);
             }
-            thread.fresh = false;
+
+            thread.exitScale = thread.requested != 0 && thread.requested == perf && perf != others
+                    ? exitScale(visible(perf), visible(others), capacity) : 1.0;
         }
-        for (ProcState proc : procs.values()) proc.baseChanged = false;
 
         logPlacement(hot, placedCount);
     }
@@ -428,14 +579,15 @@ public final class ThreadPlacementController {
         int result = api.set(thread.tid, want);
         if (result == 0) {
             consecutiveFailures = 0;
-            proc.touched = true;
+            thread.inherited = false;
             if (want == base) {
                 thread.requested = 0;
                 thread.effective = 0;
             } else {
+                proc.remember(want);
                 thread.requested = want;
                 long current = api.get(thread.tid);
-                thread.effective = current > 0 ? current : want;
+                thread.effective = current > 0 ? current & onlineMask : want;
             }
         } else if (result != -ESRCH) {
             if (++consecutiveFailures >= GIVE_UP_AFTER_FAILURES) {
@@ -494,6 +646,23 @@ public final class ThreadPlacementController {
         long mask = 0;
         for (int i = 0; i < count && i < cores.size(); i++) mask |= 1L << cores.get(i);
         return mask;
+    }
+
+    /**
+     * How much heavier a thread on {@code perf} would be on the slowest core of {@code others}:
+     * capacity of the fastest perf core / capacity of the slowest other core, at least 1, and 1
+     * when the capacities are unknown.
+     */
+    static double exitScale(long perf, long others, int[] capacity) {
+        int fast = 0;
+        int slow = Integer.MAX_VALUE;
+        for (int cpu = 0; cpu < capacity.length && cpu < 63; cpu++) {
+            long bit = 1L << cpu;
+            if ((perf & bit) != 0) fast = Math.max(fast, capacity[cpu]);
+            if ((others & bit) != 0) slow = Math.min(slow, capacity[cpu]);
+        }
+        if (fast <= 0 || slow <= 0 || slow == Integer.MAX_VALUE) return 1.0;
+        return Math.max(1.0, (double) fast / slow);
     }
 
     /**

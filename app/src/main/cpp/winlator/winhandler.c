@@ -209,15 +209,26 @@ void handleKillProcess(const char *payload, int len) {
   free(name);
 }
 
+/* SetProcessAffinityMask makes wineserver rewrite the mask of every thread of the process, even
+ * when the process mask stays the same. That undoes the game's own SetThreadAffinityMask pins
+ * and WinLite's thread placement, so it is only called when the mask really changes. */
+static void setAffinityIfChanged(HANDLE hProcess, DWORD_PTR mask) {
+  DWORD_PTR procAffinity, sysAffinity;
+  if (GetProcessAffinityMask(hProcess, &procAffinity, &sysAffinity) &&
+      procAffinity == (mask & sysAffinity))
+    return;
+  SetProcessAffinityMask(hProcess, mask);
+}
+
 void handleSetAffinity(const char *buffer, int len) {
 
   int pid = *(int *)(buffer + 5);
   int mask = *(int *)(buffer + 9);
 
   if (pid != 0) {
-    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
+    HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION, FALSE, pid);
     if (hProcess) {
-      SetProcessAffinityMask(hProcess, mask);
+      setAffinityIfChanged(hProcess, mask);
       CloseHandle(hProcess);
     }
   } else {
@@ -234,9 +245,10 @@ void handleSetAffinity(const char *buffer, int len) {
         do {
           if (_stricmp(pe32.szExeFile, name) == 0) {
             HANDLE hProcess =
-                OpenProcess(PROCESS_SET_INFORMATION, FALSE, pe32.th32ProcessID);
+                OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION,
+                            FALSE, pe32.th32ProcessID);
             if (hProcess) {
-              SetProcessAffinityMask(hProcess, mask);
+              setAffinityIfChanged(hProcess, mask);
               CloseHandle(hProcess);
             }
           }
