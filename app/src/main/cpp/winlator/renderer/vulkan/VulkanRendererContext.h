@@ -605,6 +605,9 @@ public:
     // WFG generates nothing and does not need the frames (vkr_dis_idle): the scene goes straight
     // to the swapchain, as without WFG, until a new game frame's plan says otherwise.
     bool             wfgIdle          = false;
+    // On each switch between idle and generating: the plain path's FPS-limit schedule, which
+    // paces the frames while idle, starts over.
+    void             wfgIdleSwitched();
     uint64_t         wfgGenFallbacks  = 0;   // generated frames WFG did not write (a repeat shown)
     uint64_t         wfgRealFrames    = 0;
     uint64_t         wfgLogReal       = 0;

@@ -266,6 +266,7 @@ bool VulkanRendererContext::wfgSync() {
             wfg = nullptr;
             wfgDestroyComposite();
         }
+        wfgIdle = false;
         wfgUnavailable = false;
     }
     if (want) {
@@ -702,16 +703,20 @@ bool VulkanRendererContext::limitSkipRender() {
 // grid, evenly spaced at the limit's interval, instead of the first refresh after its GPU work
 // (which flips between two refreshes whenever the frame lands near a latch, and the limiter's
 // clock slowly walks the phase across them). Returns the desiredPresentTime, 0 = as soon as
-// possible: no limit, WFG on, no display timing, a non-FIFO present mode, a render that carries
-// no new game frame (cursor, UI), or a game that does not hold its limit (pacing a slower game
-// to the limit's interval would only add latency).
+// possible: no limit, WFG on (generating), no display timing, a non-FIFO present mode, a render
+// that carries no new game frame (cursor, UI), or a game that does not hold its limit (pacing a
+// slower game to the limit's interval would only add latency).
+// WFG idle (vkr_dis_idle) sends the game frames this way too, straight to the swapchain, which
+// WFG keeps FIFO: they are paced here as without WFG. wfgBeginFrame starts this schedule over
+// on every switch between idle and generating (wfgIdleSwitched).
 uint64_t VulkanRendererContext::limitPlanPresent() {
     const uint64_t frames = contentFrames.load(std::memory_order_relaxed);
     const bool fresh = frames != lpSeenFrames;
     lpSeenFrames = frames;
     const uint32_t limit = wfgFpsLimit.load(std::memory_order_relaxed);
     auto unpaced = [&] { lpPace.restart(); };
-    if (!displayTiming_ || !swapchainFifo || limit == 0 || wfgRequested.load() || wfg) {
+    const bool wfgOwnsPresents = (wfgRequested.load() || wfg) && !wfgIdle;
+    if (!displayTiming_ || !swapchainFifo || limit == 0 || wfgOwnsPresents) {
         unpaced();
         lpLastArrival = 0;
         lpIntervalEma = 0;
@@ -758,6 +763,15 @@ uint64_t VulkanRendererContext::limitPlanPresent() {
     return at;
 }
 
+// WFG went idle or resumed: the plain path's schedule (limitPlanPresent) is not run while WFG
+// generates, so what it holds is from before the switch - an old refresh target and an arrival
+// that would read as one long frame interval. Both are taken afresh from the next game frames.
+void VulkanRendererContext::wfgIdleSwitched() {
+    lpPace.restart();
+    lpLastArrival = 0;
+    lpIntervalEma = 0;
+}
+
 // After the real swapchain image is acquired: decides whether the scene goes to the composite,
 // plans the generated frames for a new game frame and acquires their swapchain images.
 VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
@@ -796,13 +810,19 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
     // without the composite, its copy into the real image and WFG's per-frame copies. The plan
     // still runs on every game frame and asks for frames again when there is something to make.
     if (vkr_dis_idle(wfg)) {
-        if (!wfgIdle) WLOG_I("WFG idle: nothing to generate, frames go straight to the display");
+        if (!wfgIdle) {
+            WLOG_I("WFG idle: nothing to generate, frames go straight to the display");
+            wfgIdleSwitched();
+        }
         wfgIdle = true;
         vkr_dis_skip_frame(wfg);
         wfgPace.restart();   // the next paced batch starts its schedule over
         return WfgFrame{};
     }
-    if (wfgIdle) WLOG_I("WFG resumes generating");
+    if (wfgIdle) {
+        WLOG_I("WFG resumes generating");
+        wfgIdleSwitched();
+    }
     wfgIdle = false;
 
     // Images still waiting for the display beyond the next refresh. More than two means the
