@@ -67,7 +67,14 @@ pub enum Notify {
     /// updates of `window` since the last of these, of its own pixels (`pixmap` 0) or of DRI3
     /// pixmaps (`pixmap` the latest). In place of [`Notify::ContentUpdate`] and
     /// [`Notify::ContentUpdateDirect`] for the owner, at most every `frames::NOTIFY_INTERVAL`.
-    ContentFrames { window: u32, pixmap: u32, frames: u32 },
+    /// `time_ns`: CLOCK_MONOTONIC (Java's `System.nanoTime()`) of the latest of them, so the HUDs
+    /// measure the frames' own spacing, not when Java happened to drain the event queue.
+    ContentFrames { window: u32, pixmap: u32, frames: u32, time_ns: i64 },
+    /// The window's own pixels changed over at least [`FULL_FRAME_PERCENT`] of it (a PutImage,
+    /// ShmPutImage or CopyArea): a frame of a game that draws with X requests. Comes right before
+    /// that change's [`Notify::ContentUpdate`]; only `frames::Router` uses it (the HUD counts
+    /// these, not the small updates in between: a cursor rect, a text flush of Wine).
+    ContentFrame(u32),
     /// The client's output has data to send.
     Output(ClientId),
     /// The connection must be closed (protocol violation the Java code also died on).
@@ -746,6 +753,18 @@ impl Server {
         }
     }
 
+    /// [`Server::content_changed`] for a drawing into the rectangle `x, y, w, h` of `drawable`:
+    /// when that covers most of a window, it is also a frame of the window
+    /// ([`Notify::ContentFrame`], the same rule as the MIT-SHM FPS limiter).
+    pub fn content_changed_rect(&mut self, drawable: u32, x: i32, y: i32, w: i32, h: i32) {
+        if let Some(win) = self.windows.get(&drawable) {
+            if win.has_content && covers_most(win.width as i32, win.height as i32, x, y, w, h) {
+                self.notifications.push(Notify::ContentFrame(drawable));
+            }
+        }
+        self.content_changed(drawable);
+    }
+
     /// The Java `onDrawListener` of a window's content: tell the renderer.
     pub fn content_changed(&mut self, drawable: u32) {
         if self.windows.get(&drawable).map(|w| w.has_content).unwrap_or(false) {
@@ -1274,3 +1293,17 @@ fn is_event_boundary(out: &[u8], n: usize) -> bool {
 }
 
 pub const _VENDOR: &str = VENDOR_NAME;
+
+/// What of a window's area a drawing must cover to be a frame of it (the MIT-SHM limiter's rule).
+pub const FULL_FRAME_PERCENT: i64 = 80;
+
+/// Whether the rectangle `x, y, w, h`, clipped to a `dw x dh` drawable, covers at least
+/// [`FULL_FRAME_PERCENT`] of it.
+pub fn covers_most(dw: i32, dh: i32, x: i32, y: i32, w: i32, h: i32) -> bool {
+    if dw <= 0 || dh <= 0 || w <= 0 || h <= 0 {
+        return false;
+    }
+    let cw = (x.saturating_add(w)).min(dw) - x.max(0);
+    let ch = (y.saturating_add(h)).min(dh) - y.max(0);
+    cw > 0 && ch > 0 && (cw as i64 * ch as i64) * 100 >= dw as i64 * dh as i64 * FULL_FRAME_PERCENT
+}

@@ -66,10 +66,11 @@ pub fn encode_event(n: &Notify) -> Option<[i64; EVENT_STRIDE]> {
         Notify::DirectContentAdded { window, pixmap } => [EV_DIRECT_CONTENT_ADDED, window as i64, pixmap as i64, 0, 0],
         Notify::DirectContentRemoved { window, pixmap } => [EV_DIRECT_CONTENT_REMOVED, window as i64, pixmap as i64, 0, 0],
         Notify::CompositeRedirect { window, redirected } => [EV_COMPOSITE_REDIRECT, window as i64, b(redirected), 0, 0],
-        // The renderer got the frames already; this only tells how many there were.
-        Notify::ContentFrames { window, pixmap: 0, frames } => [EV_CONTENT_UPDATE, window as i64, 0, frames as i64, 0],
-        Notify::ContentFrames { window, pixmap, frames } => [EV_CONTENT_UPDATE_DIRECT, window as i64, pixmap as i64, frames as i64, 0],
-        Notify::Output(_) | Notify::Kill(_) => return None,
+        // The renderer got the frames already; this only tells how many there were, and when.
+        Notify::ContentFrames { window, pixmap: 0, frames, time_ns } => [EV_CONTENT_UPDATE, window as i64, 0, frames as i64, time_ns],
+        Notify::ContentFrames { window, pixmap, frames, time_ns } => [EV_CONTENT_UPDATE_DIRECT, window as i64, pixmap as i64, frames as i64, time_ns],
+        // Only for frames::Router; Java counts the ContentUpdate that follows.
+        Notify::Output(_) | Notify::Kill(_) | Notify::ContentFrame(_) => return None,
     })
 }
 

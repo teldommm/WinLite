@@ -48,8 +48,19 @@ public class XServer {
          * 250 ms per window, for what only needs to know that and how often (first frame, HUD).
          */
         default void onUpdateWindowContent(int window, int frames) {}
+        /**
+         * As above, with {@code timeNs}: when the server saw the latest of those frames, on the
+         * {@link System#nanoTime()} clock. The HUDs take the fps from these times, not from when
+         * the event reached Java (the queue is drained in batches).
+         */
+        default void onUpdateWindowContent(int window, int frames, long timeNs) {
+            onUpdateWindowContent(window, frames);
+        }
         /** A game presented DRI3 buffers to {@code window}, {@code frames} times, the latest {@code pixmap}; as above. */
         default void onUpdateWindowContentDirect(int window, int pixmap, int frames) {}
+        default void onUpdateWindowContentDirect(int window, int pixmap, int frames, long timeNs) {
+            onUpdateWindowContentDirect(window, pixmap, frames);
+        }
         default void onDirectContentAdded(int window, int pixmap) {}
         default void onDirectContentRemoved(int window, int pixmap) {}
         default void onCompositeRedirect(int window, boolean redirected) {}
@@ -172,6 +183,11 @@ public class XServer {
         if (drainScheduled.compareAndSet(false, true)) runOnEventThread(this::drainEvents);
     }
 
+    /** The server's frame time (CLOCK_MONOTONIC ns), or now when the event carries none. */
+    private static long frameTime(long serverNs) {
+        return serverNs > 0 ? serverNs : System.nanoTime();
+    }
+
     private void drainEvents() {
         drainScheduled.set(false);
         XCore c = core;
@@ -197,9 +213,11 @@ public class XServer {
                     case (int) XCore.EV_CHANGE_Z_ORDER:
                         for (Listener l : listeners) l.onChangeWindowZOrder(a, b, cc);
                         break;
-                    case (int) XCore.EV_CONTENT_UPDATE:
-                        for (Listener l : listeners) l.onUpdateWindowContent(a, Math.max(1, cc));
+                    case (int) XCore.EV_CONTENT_UPDATE: {
+                        final long t = frameTime(ev[i + 4]);
+                        for (Listener l : listeners) l.onUpdateWindowContent(a, Math.max(1, cc), t);
                         break;
+                    }
                     case (int) XCore.EV_GEOMETRY:
                         for (Listener l : listeners) l.onUpdateWindowGeometry(a, b != 0);
                         break;
@@ -224,9 +242,11 @@ public class XServer {
                         }
                         break;
                     }
-                    case (int) XCore.EV_CONTENT_UPDATE_DIRECT:
-                        for (Listener l : listeners) l.onUpdateWindowContentDirect(a, b, Math.max(1, cc));
+                    case (int) XCore.EV_CONTENT_UPDATE_DIRECT: {
+                        final long t = frameTime(ev[i + 4]);
+                        for (Listener l : listeners) l.onUpdateWindowContentDirect(a, b, Math.max(1, cc), t);
                         break;
+                    }
                     case (int) XCore.EV_DIRECT_CONTENT_ADDED:
                         for (Listener l : listeners) l.onDirectContentAdded(a, b);
                         break;

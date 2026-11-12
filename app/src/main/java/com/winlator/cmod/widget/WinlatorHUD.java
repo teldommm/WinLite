@@ -174,7 +174,7 @@ public class WinlatorHUD extends View {
                 });
             };
 
-    private final AtomicInteger frameAccum = new AtomicInteger(0);
+    private final FrameSpanMeter fpsMeter = new FrameSpanMeter();
     private long lastFpsNs = 0;
     // While WFG generates frames the FPS reads "game → output", as in WinNative.
     private static final String FPS_ARROW = " → ";
@@ -416,13 +416,20 @@ public class WinlatorHUD extends View {
     }
 
     public void onFrame() {
-        onFrames(1);
+        onFrames(1, System.nanoTime(), false);
     }
 
-    /** {@code frames} frames of the rated window (the X server reports them in batches). */
     public void onFrames(int frames) {
+        onFrames(frames, System.nanoTime(), false);
+    }
+
+    /**
+     * {@code frames} frames of the rated window (the X server reports them in batches), the latest
+     * at {@code timeNs} ({@link System#nanoTime()} clock); {@code direct}: DRI3 presents.
+     */
+    public void onFrames(int frames, long timeNs, boolean direct) {
         if (!rendererActive && !userEnabled) return;
-        frameAccum.addAndGet(frames);
+        fpsMeter.add(frames, timeNs, direct);
     }
 
     public void update() {
@@ -840,9 +847,9 @@ public class WinlatorHUD extends View {
         long dt = now - lastFpsNs;
         if (dt < 350_000_000L) return;
 
-        int frames = frameAccum.getAndSet(0);
-        float measuredFps = frames * 1_000_000_000f / dt;
-        snapFps = measuredFps;
+        // From one frame to another, not tick to tick: see FrameSpanMeter (a 30 fps limit read 32).
+        float measuredFps = fpsMeter.take(now, 250_000_000L);
+        if (measuredFps >= 0) snapFps = measuredFps;
         lastFpsNs = now;
 
         String value = String.format(Locale.US, "%.0f", snapFps);
@@ -1642,7 +1649,7 @@ public class WinlatorHUD extends View {
 
         uiHandler.postDelayed(() -> {
             if (rendererActive) return;
-            frameAccum.set(0);
+            fpsMeter.reset();
             snapFps = 0;
             lastFpsNs = 0;
             if (!"0".equals(strFps)) {
@@ -1719,7 +1726,7 @@ public class WinlatorHUD extends View {
     }
 
     public void reset() {
-        frameAccum.set(0);
+        fpsMeter.reset();
         snapFps = 0;
         lastFpsNs = 0;
         mesaRendererActive = false;

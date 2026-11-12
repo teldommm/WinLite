@@ -110,7 +110,7 @@ impl Extension for MitShm {
                 let (dw, dh) = (d.width as i32, d.height as i32);
                 let drew = d.draw_image(src_x, src_y, dst_x, dst_y, src_w, src_h, depth, data, total_w);
                 if drew {
-                    s.content_changed(drawable);
+                    s.content_changed_rect(drawable, dst_x as i32, dst_y as i32, src_w as i32, src_h as i32);
                 }
                 // XShmPutImage(send_event = True): the client waits for this before it reuses the
                 // segment, so it must not be left out.

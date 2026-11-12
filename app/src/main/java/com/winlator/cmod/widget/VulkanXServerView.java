@@ -423,10 +423,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
      * is counting the rated window's DRI3 frames for the HUD, from the server's periodic report.
      */
     @Override
-    public void onUpdateWindowContentDirect(int window, int pixmap, int frames) {
+    public void onUpdateWindowContentDirect(int window, int pixmap, int frames, long timeNs) {
         if (window == fpsWindowId) {
-            if (hudRef != null) hudRef.onFrames(frames);
-            if (classicHudRef != null) classicHudRef.update(frames);
+            if (hudRef != null) hudRef.onFrames(frames, timeNs, true);
+            if (classicHudRef != null) classicHudRef.update(frames, timeNs, true);
         }
     }
 

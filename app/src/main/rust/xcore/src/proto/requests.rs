@@ -1024,7 +1024,8 @@ impl Server {
         }
         let drew = gfx::copy_area(s, d, sx, sy, dx, dy, w, h, func);
         if drew {
-            self.content_changed(dst);
+            // A double-buffered game copies its back pixmap to the window: that is its frame.
+            self.content_changed_rect(dst, dx as i32, dy as i32, w as i32, h as i32);
         }
         Ok(())
     }
@@ -1146,7 +1147,7 @@ impl Server {
             }
         };
         if drew {
-            self.content_changed(dr);
+            self.content_changed_rect(dr, dx as i32, dy as i32, w as i32, h as i32);
         }
         Ok(())
     }

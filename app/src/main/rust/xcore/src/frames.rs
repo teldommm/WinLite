@@ -78,6 +78,10 @@ pub struct CursorImage {
 /// 250), which the sampling window does not show.
 pub const NOTIFY_INTERVAL: Duration = Duration::from_millis(8);
 
+/// After a window's latest whole frame ([`Notify::ContentFrame`]), its other updates do not count
+/// as frames for this long; a game that stops drawing whole frames is counted as before again.
+const FRAMED_HOLD: Duration = Duration::from_secs(1);
+
 /// One step for the renderer, in server order. Window ids are the server's (also the renderer's
 /// keys, and those of the windows' own contents).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,6 +137,9 @@ pub struct Router {
     pending: Vec<Item>,
     /// Per (window, direct): when Java last heard, and the frames since.
     rates: HashMap<(u32, bool), Rate>,
+    /// Windows drawn in whole frames ([`Notify::ContentFrame`]): when the latest came. While it
+    /// is recent, only those count, not every small update in between.
+    framed: HashMap<u32, Instant>,
     /// The cursor last queued (serial, client visibility; `None` inside: no X cursor); `None`:
     /// nothing queued yet.
     cursor: Option<Option<(u64, bool)>>,
@@ -148,6 +155,7 @@ impl Router {
             output,
             pending: Vec::new(),
             rates: HashMap::new(),
+            framed: HashMap::new(),
             cursor: None,
             cursor_dirty: false,
             disables: Vec::new(),
@@ -187,6 +195,17 @@ impl Router {
                 if is_mapped(server, w) {
                     self.show(server, w, w);
                 }
+                // A window drawn in whole frames counts those (ContentFrame), not this: a
+                // ShmCompletion or a reply between two drawings keeps them from collapsing, so a
+                // cursor rect or a text flush of Wine counted as a frame of its own (a 30 fps
+                // limit read 50..60). Others (no big drawings) still count every update.
+                if self.framed.get(&w).is_some_and(|t| now.saturating_duration_since(*t) < FRAMED_HOLD) {
+                    return None;
+                }
+                self.rate(w, 0, now)
+            }
+            Notify::ContentFrame(w) => {
+                self.framed.insert(w, now);
                 self.rate(w, 0, now)
             }
             Notify::ContentUpdateDirect { window, pixmap } => {
@@ -211,6 +230,7 @@ impl Router {
                 self.push(Item::Destroy(w));
                 self.rates.remove(&(w, false));
                 self.rates.remove(&(w, true));
+                self.framed.remove(&w);
                 self.cursor_dirty = true;
                 Some(n)
             }
@@ -419,7 +439,11 @@ impl Router {
         }
         r.last = Some(now);
         let frames = std::mem::take(&mut r.frames);
-        Some(Notify::ContentFrames { window, pixmap, frames })
+        // Stamped here, on the server thread right after the request that made the frame: Java
+        // drains the event queue in batches, and an arrival time taken there jitters by up to a
+        // frame, which is what made a 30 fps limit read 32 now and then.
+        let time_ns = crate::proto::platform::monotonic_ns();
+        Some(Notify::ContentFrames { window, pixmap, frames, time_ns })
     }
 }
 

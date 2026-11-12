@@ -26,7 +26,7 @@ import java.util.Locale;
 public class FrameRating extends FrameLayout implements Runnable {
     private Context context;
     private long lastTime = 0;
-    private int frameCount = 0;
+    private final FrameSpanMeter fpsMeter = new FrameSpanMeter();
     private float lastFPS = 0;
     // Output fps (real and WFG-generated frames shown), 0 while nothing is generated.
     private volatile float outputFPS = 0;
@@ -227,17 +227,29 @@ public class FrameRating extends FrameLayout implements Runnable {
         lastGenerated = -1;
     }
 
+    /** Shows the HUD (a rated window was picked); no frame of its own any more. */
     public void update() {
-        update(1);
+        if (!userEnabled) return;
+        post(this);
     }
 
-    /** {@code frames} frames of the rated window (the X server reports them in batches). */
     public void update(int frames) {
+        update(frames, System.nanoTime(), false);
+    }
+
+    /**
+     * {@code frames} frames of the rated window (the X server reports them in batches), the latest
+     * at {@code timeNs} ({@link System#nanoTime()} clock); {@code direct}: DRI3 presents. The fps
+     * runs from one frame's time to another's, see {@link FrameSpanMeter}.
+     */
+    public void update(int frames, long timeNs, boolean direct) {
         if (!userEnabled) return;
+        fpsMeter.add(frames, timeNs, direct);
         if (lastTime == 0) lastTime = SystemClock.elapsedRealtime();
         long time = SystemClock.elapsedRealtime();
         if (time >= lastTime + 500) {
-            lastFPS = ((float)(frameCount * 1000) / (time - lastTime));
+            float fps = fpsMeter.take(System.nanoTime(), 400_000_000L);
+            if (fps >= 0) lastFPS = fps;
             outputFPS = 0;
             OutputFrameSource source = outputSource;
             if (source != null) {
@@ -250,9 +262,7 @@ public class FrameRating extends FrameLayout implements Runnable {
             }
             post(this);
             lastTime = time;
-            frameCount = 0;
         }
-        frameCount += frames;
     }
 
     @Override
