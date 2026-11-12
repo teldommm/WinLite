@@ -96,7 +96,10 @@ class ControlsEditorOverlay(
     private val schemeColors: List<Int>,
     schemeColor: Int,
     private val actions: ControlsEditorActions,
-    private val settingsCallbacks: ControlElementSettingsCallbacks
+    private val settingsCallbacks: ControlElementSettingsCallbacks,
+    // In-game editor only: shows a Done button at the end of the toolbar (the Activity version
+    // exits with the system Back). Null = no button.
+    private val onExit: Runnable? = null
 ) {
     private val density = container.resources.displayMetrics.density
     private val touchSlop = ViewConfiguration.get(container.context).scaledTouchSlop
@@ -164,7 +167,8 @@ class ControlsEditorOverlay(
                         onSchemeColor = { color ->
                             schemeColorState.intValue = color
                             actions.onSchemeColorSelected(color)
-                        }
+                        },
+                        onDone = onExit?.let { exit -> { exit.run() } }
                     )
                 }
             }
@@ -234,6 +238,19 @@ class ControlsEditorOverlay(
     }
 
     fun isSettingsOpen(): Boolean = panelOpen.value
+
+    // Editor closed: stop the animators, dispose both compositions and take the views out of
+    // the container (the container may outlive the editor, e.g. the game's root layout).
+    fun release() {
+        toolbarDimAnimator?.cancel()
+        panelDimAnimator?.cancel()
+        toolbarView.animate().cancel()
+        panelView.animate().cancel()
+        toolbarView.disposeComposition()
+        panelView.disposeComposition()
+        container.removeView(toolbarView)
+        container.removeView(panelView)
+    }
 
     // Fades the toolbar and panel back while an element is dragged/pinched on the canvas, so
     // they don't hide what's under them. Touch-through isn't needed: the canvas already owns
@@ -402,7 +419,8 @@ private fun EditorToolbar(
     onDuplicate: () -> Unit,
     onUndo: () -> Unit,
     onSettings: () -> Unit,
-    onSchemeColor: (Int) -> Unit
+    onSchemeColor: (Int) -> Unit,
+    onDone: (() -> Unit)?
 ) {
     val colors = MaterialTheme.colorScheme
     FloatingSurface {
@@ -481,6 +499,17 @@ private fun EditorToolbar(
                         Box(Modifier.width(250.dp)) { HexColorField(schemeColor, onSchemeColor) }
                     }
                 }
+            }
+
+            if (onDone != null) {
+                ToolbarDivider()
+                ToolbarButton(
+                    TablerIcons.Check,
+                    uiStr(R.string.ui_controls_editor_done),
+                    iconSize = 24.dp,
+                    active = true,
+                    onClick = onDone
+                )
             }
         }
     }

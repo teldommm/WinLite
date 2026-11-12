@@ -92,6 +92,7 @@ import com.winlator.cmod.ui.GraphicsSidebarPanelHost;
 import com.winlator.cmod.ui.GraphicsSidebarPanelKt;
 import com.winlator.cmod.ui.HudPanelCallbacks;
 import com.winlator.cmod.ui.toast.WinToast;
+import com.winlator.cmod.ui.inputcontrols.ControlsEditorController;
 import com.winlator.cmod.ui.HudPanelState;
 import com.winlator.cmod.ui.HudSidebarPanelHost;
 import com.winlator.cmod.ui.InputPanelCallbacks;
@@ -188,6 +189,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Profile id the controls editor reported on exit (-1: none, e.g. the Input Controls screen).
     private int editorResultProfileId = -1;
     private Runnable refreshInputPanel;
+    // In-game controls editor: grid + floating toolbar over the running game (see
+    // startInGameControlsEditor). Non-null exactly while it is open.
+    private ControlsEditorController controlsEditor;
+    private FrameLayout controlsEditorHost;
+    // True when the editor froze a game that was running, so closing it thaws exactly that.
+    private boolean controlsEditorFroze = false;
     private Shortcut shortcut;
     private boolean graphicsFsrEnabled;
     private int graphicsUpscalerModeIndex;
@@ -877,7 +884,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             // "Suspend Wine when app is in background" (Settings, on by default). Off = the game
             // keeps running behind the app. Already paused by hand = already frozen.
-            if (!isPaused && preferences.getBoolean("pause_resume_wine", true)) {
+            if (!isPaused && !controlsEditorFroze && preferences.getBoolean("pause_resume_wine", true)) {
                 suspendGame();
                 backgroundSuspended = true;
             }
@@ -1066,6 +1073,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        releaseInGameControlsEditor();
         if (current == this) current = null;
         if (randrDisplayListener != null) {
             android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
@@ -1106,6 +1114,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
+        // Controls editor over the game: Back closes its settings panel first, then the editor.
+        if (controlsEditor != null) {
+            if (controlsEditor.isSettingsOpen()) controlsEditor.closeSettings();
+            else closeInGameControlsEditor();
+            return;
+        }
         if (environment != null) {
             if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
                 drawerLayout.openDrawer(GravityCompat.START);
@@ -1562,6 +1576,77 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     editInputControlsCallback = null;
                 }
             });
+
+    // Opens the controls editor over the running game: the game is frozen (its last frame stays
+    // under a light scrim and the grid), the live controls are hidden, and the same canvas +
+    // floating toolbar the full-screen editor uses is put on top of everything. Every edit is
+    // saved as it is made; closeInGameControlsEditor() then reloads the profile into the game
+    // through editInputControlsCallback, exactly like returning from the old editor screen.
+    private void startInGameControlsEditor(int profileId) {
+        if (controlsEditor != null) return;
+        ControlsProfile profile = InputControlsManager.loadProfile(this, ControlsProfile.getProfileFile(this, profileId));
+        if (profile == null) {
+            editInputControlsCallback = null;
+            WinToast.show(this, UiStrings.get(R.string.ui_profile_not_found), Toast.LENGTH_SHORT);
+            return;
+        }
+
+        drawerLayout.closeDrawers();
+        // Let go of mouse buttons / fingers the touch surface holds: the game stops seeing events
+        // while the editor is up, and their releases would never arrive.
+        if (touchpadView != null) touchpadView.resetInputState();
+        if (!isPaused) {
+            suspendGame();
+            controlsEditorFroze = true;
+        }
+        inputControlsView.setVisibility(View.GONE);
+
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        controlsEditorHost = new FrameLayout(this);
+        controlsEditorHost.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        // Whatever the canvas and toolbar don't take must not fall through to the touch surface.
+        controlsEditorHost.setClickable(true);
+        rootView.addView(controlsEditorHost);
+
+        // Done is tapped inside the toolbar's own composition: close on the next loop turn, so
+        // that composition isn't disposed while it is still handling the click.
+        controlsEditor = new ControlsEditorController(this, controlsEditorHost, profile, true,
+                () -> handler.post(this::closeInGameControlsEditor));
+        controlsEditor.showMixWarningIfNeeded();
+    }
+
+    private void closeInGameControlsEditor() {
+        if (controlsEditor == null) return;
+        int editedProfileId = controlsEditor.getProfileId();
+        releaseInGameControlsEditor();
+
+        if (controlsEditorFroze) {
+            controlsEditorFroze = false;
+            // A game paused by hand stays paused (that case never set the flag); one the system
+            // already suspended for the background is thawed by onResume().
+            if (!isPaused && !backgroundSuspended) resumeGame();
+        }
+
+        // Reload the edited profile into the game and re-sync the sidebar panel.
+        editorResultProfileId = editedProfileId;
+        if (editInputControlsCallback != null) {
+            editInputControlsCallback.run();
+            editInputControlsCallback = null;
+        }
+    }
+
+    private void releaseInGameControlsEditor() {
+        if (controlsEditor == null) return;
+        controlsEditor.flush();
+        controlsEditor.release();
+        controlsEditor = null;
+        if (controlsEditorHost != null) {
+            FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+            if (rootView != null) rootView.removeView(controlsEditorHost);
+            controlsEditorHost = null;
+        }
+    }
 
     private String parseShortcutNameFromDesktopFile(File desktopFile) {
         String shortcutName = "";
@@ -2281,13 +2366,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             @Override
             public void onEditProfiles(int selectedProfileId) {
-                // A profile is active -> straight into the controls editor on it (it can switch
-                // profiles itself). Controls Disabled -> the Input Controls screen, as before.
-                Intent intent;
-                if (selectedProfileId >= 0 && inputControlsManager.getProfile(selectedProfileId) != null) {
-                    intent = new Intent(XServerDisplayActivity.this, ControlsEditorActivity.class);
-                    intent.putExtra("profile_id", selectedProfileId);
-                } else {
+                // A profile is active -> the controls editor opens right over the game (grid and
+                // toolbar on top of the frozen picture; it can switch profiles itself).
+                // Controls Disabled -> the Input Controls screen, as before.
+                final boolean editInGame = selectedProfileId >= 0
+                        && inputControlsManager.getProfile(selectedProfileId) != null;
+                Intent intent = null;
+                if (!editInGame) {
                     intent = new Intent(XServerDisplayActivity.this, MainActivity.class);
                     intent.putExtra("edit_input_controls", true);
                     intent.putExtra("selected_profile_id", selectedProfileId >= 0 ? selectedProfileId : 0);
@@ -2314,7 +2399,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     );
                     refreshInputPanel.run();
                 };
-                controlsEditorActivityResultLauncher.launch(intent);
+                if (editInGame) startInGameControlsEditor(selectedProfileId);
+                else controlsEditorActivityResultLauncher.launch(intent);
             }
 
             @Override
@@ -2709,7 +2795,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public boolean dispatchTouchEvent(MotionEvent event) {
         // While paused, swallow touches so they don't reach the game - but not when the drawer is open
         // or a themed overlay (e.g. the Exit confirmation) is on screen, otherwise its buttons are dead.
-        if (isPaused && !ThemedAlertHost.isShowing()
+        // (The controls editor needs its touches even when the game was paused by hand.)
+        if (isPaused && controlsEditor == null && !ThemedAlertHost.isShowing()
                 && (drawerLayout == null || !drawerLayout.isDrawerOpen(GravityCompat.START))) return true;
         return super.dispatchTouchEvent(event);
     }
@@ -2721,7 +2808,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // focus. Returning true also stops the framework from turning the stick into D-pad keys.
         // Paused by hand: the game is frozen, so sticks / mouse must not pile up input that would
         // hit it all at once on Resume. The framework still handles it (drawer, dialogs).
-        if (isPaused) return super.dispatchGenericMotionEvent(event);
+        if (isPaused || controlsEditor != null) return super.dispatchGenericMotionEvent(event);
 
         if (winHandler != null && winHandler.onGenericMotionEvent(event)) return true;
 
@@ -2738,6 +2825,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // backspace as KeyEvents, which the X server keyboard would otherwise swallow below.
         if (isSidebarTextInputActive()) return super.dispatchKeyEvent(event);
 
+        // Controls editor over the game: nothing reaches the game; Back (onBackPressed) and text
+        // typed into the settings panel take the normal view path. As in game, everything from a
+        // game controller is consumed so it can't turn into focus navigation.
+        if (controlsEditor != null) {
+            if (ExternalController.isGameController(event.getDevice())) return true;
+            return super.dispatchKeyEvent(event);
+        }
 
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_MODE || event.getKeyCode() == KeyEvent.KEYCODE_HOME

@@ -70,6 +70,12 @@ public class InputControlsView extends View {
     public static final float DEFAULT_OVERLAY_OPACITY = 0.85f;
     private static final byte MOUSE_WHEEL_DELTA = 120;
     private boolean editMode = false;
+    // Editor shown over the running game (not on its own screen): drawGrid() paints a light scrim
+    // and a pale grid instead of an opaque background, so the game stays visible underneath.
+    private boolean editorOverlayMode = false;
+    private static final int OVERLAY_SCRIM = 0x55000000;
+    private static final int OVERLAY_GRID_LINE = 0x2EFFFFFF;
+    private static final int OVERLAY_GRID_CENTER = 0x66FFFFFF;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Path path = new Path();
     private final ColorFilter colorFilter = new PorterDuffColorFilter(0xff2184ff, PorterDuff.Mode.SRC_IN);
@@ -245,6 +251,11 @@ public class InputControlsView extends View {
         }
     }
 
+    public void setEditorOverlayMode(boolean overlayMode) {
+        this.editorOverlayMode = overlayMode;
+        invalidate();
+    }
+
     public void setEditorListener(EditorListener listener) {
         this.editorListener = listener;
     }
@@ -329,10 +340,10 @@ public class InputControlsView extends View {
         EditorCanvasColors colors = canvasColors != null ? canvasColors : EditorCanvasColors.resolve(getContext());
         paint.setStyle(Paint.Style.FILL);
         paint.setStrokeWidth(snappingSize * 0.0625f);
-        canvas.drawColor(colors.background);
+        canvas.drawColor(editorOverlayMode ? OVERLAY_SCRIM : colors.background);
 
         paint.setAntiAlias(false);
-        paint.setColor(colors.gridLine);
+        paint.setColor(editorOverlayMode ? OVERLAY_GRID_LINE : colors.gridLine);
 
         int width = getMaxWidth();
         int height = getMaxHeight();
@@ -342,7 +353,7 @@ public class InputControlsView extends View {
 
         float cx = Mathf.roundTo(width * 0.5f, snappingSize);
         float cy = Mathf.roundTo(height * 0.5f, snappingSize);
-        paint.setColor(colors.gridCenter);
+        paint.setColor(editorOverlayMode ? OVERLAY_GRID_CENTER : colors.gridCenter);
 
         for (int i = 0; i < height; i += snappingSize * 2) canvas.drawLine(cx, i, cx, i + snappingSize, paint);
         for (int i = 0; i < width; i += snappingSize * 2) canvas.drawLine(i, cy, i + snappingSize, cy, paint);

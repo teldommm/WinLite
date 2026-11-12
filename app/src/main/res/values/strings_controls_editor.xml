@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings of the in-game controls editor (kept apart from strings_ui.xml so the file can be
+     dropped over a source tree without touching the big string files). -->
+<resources>
+    <string name="ui_controls_editor_done">Done</string>
+</resources>
