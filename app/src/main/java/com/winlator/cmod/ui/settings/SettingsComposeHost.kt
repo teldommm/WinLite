@@ -322,15 +322,7 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text.uppercase(),
-        modifier = Modifier.padding(start = 3.dp, top = 16.dp, bottom = 4.dp),
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-}
+private fun SectionTitle(text: String) = com.winlator.cmod.ui.theme.WinZSectionTitle(text)
 
 @Composable
 private fun GroupCard(content: @Composable () -> Unit) {

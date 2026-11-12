@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.winlator.cmod.ui.theme.RevealOnEnter
+import com.winlator.cmod.ui.theme.WinZSectionTitle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -103,6 +106,8 @@ internal fun InputControlsScreen(model: InputControlsModel, callbacks: InputCont
     val configuration = LocalConfiguration.current
     val landscape = configuration.screenWidthDp > configuration.screenHeightDp
     val activity = LocalContext.current as? MainActivity
+    // Ids that already played their entrance, so scrolling back or a refresh doesn't replay it.
+    val revealed = remember { mutableSetOf<String>() }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (landscape) {
@@ -120,37 +125,31 @@ internal fun InputControlsScreen(model: InputControlsModel, callbacks: InputCont
                     contentPadding = PaddingValues(bottom = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    item { ProfileSection(model, selectedName, callbacks) }
-                    item { OpacityCard(model.opacityPercent, callbacks::onOpacityChanged) }
-                    item { TransferActions(callbacks) }
-                    item { EditorButton(callbacks) }
+                    item { RevealOnEnter("profile", 0, revealed) { ProfileSection(model, selectedName, callbacks) } }
+                    item { RevealOnEnter("opacity", 1, revealed) { OpacityCard(model.opacityPercent, callbacks::onOpacityChanged) } }
+                    item { RevealOnEnter("transfer", 2, revealed) { TransferActions(callbacks) } }
+                    item { RevealOnEnter("editor", 3, revealed) { EditorButton(callbacks) } }
                 }
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     contentPadding = PaddingValues(bottom = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    item {
-                        Text(
-                            uiStr(R.string.ui_external_controllers),
-                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    item { RevealOnEnter("controllers-title", 0, revealed) { WinZSectionTitle(uiStr(R.string.ui_external_controllers), Modifier.padding(start = 3.dp, top = 4.dp, bottom = 2.dp)) } }
+                    if (model.controllers.isEmpty()) item(key = "no-controllers") { RevealOnEnter("no-controllers", 1, revealed, Modifier.animateItem(fadeInSpec = null)) { EmptyControllers() } }
+                    else itemsIndexed(model.controllers, key = { _, controller -> "controller-${controller.index}-${controller.name}" }) { position, controller ->
+                        RevealOnEnter("controller-${controller.index}-${controller.name}", 1 + position, revealed, Modifier.animateItem(fadeInSpec = null)) { ControllerCard(controller, callbacks) }
                     }
-                    if (model.controllers.isEmpty()) item(key = "no-controllers") { Box(Modifier.animateItem()) { EmptyControllers() } }
-                    else items(model.controllers, key = { "controller-${it.index}-${it.name}" }) { Box(Modifier.animateItem()) { ControllerCard(it, callbacks) } }
                 }
             }
         } else {
-            PortraitContent(model, selectedName, callbacks)
+            PortraitContent(model, selectedName, callbacks, revealed)
         }
     }
 }
 
 @Composable
-private fun PortraitContent(model: InputControlsModel, selectedName: String, callbacks: InputControlsCallbacks) {
+private fun PortraitContent(model: InputControlsModel, selectedName: String, callbacks: InputControlsCallbacks, revealed: MutableSet<String>) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         // BottomNavigation floats over this list (64dp + 12dp margin) instead of sitting in
@@ -158,21 +157,15 @@ private fun PortraitContent(model: InputControlsModel, selectedName: String, cal
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 28.dp + 88.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { ProfileSection(model, selectedName, callbacks) }
-        item { OpacityCard(model.opacityPercent, callbacks::onOpacityChanged) }
-        item { TransferActions(callbacks) }
-        item { EditorButton(callbacks) }
-        item {
-            Text(
-                uiStr(R.string.ui_external_controllers),
-                modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        item { RevealOnEnter("profile", 0, revealed) { ProfileSection(model, selectedName, callbacks) } }
+        item { RevealOnEnter("opacity", 1, revealed) { OpacityCard(model.opacityPercent, callbacks::onOpacityChanged) } }
+        item { RevealOnEnter("transfer", 2, revealed) { TransferActions(callbacks) } }
+        item { RevealOnEnter("editor", 3, revealed) { EditorButton(callbacks) } }
+        item { RevealOnEnter("controllers-title", 4, revealed) { WinZSectionTitle(uiStr(R.string.ui_external_controllers), Modifier.padding(start = 3.dp, top = 4.dp, bottom = 2.dp)) } }
+        if (model.controllers.isEmpty()) item(key = "no-controllers") { RevealOnEnter("no-controllers", 5, revealed, Modifier.animateItem(fadeInSpec = null)) { EmptyControllers() } }
+        else itemsIndexed(model.controllers, key = { _, controller -> "controller-${controller.index}-${controller.name}" }) { position, controller ->
+            RevealOnEnter("controller-${controller.index}-${controller.name}", 5 + position, revealed, Modifier.animateItem(fadeInSpec = null)) { ControllerCard(controller, callbacks) }
         }
-        if (model.controllers.isEmpty()) item(key = "no-controllers") { Box(Modifier.animateItem()) { EmptyControllers() } }
-        else items(model.controllers, key = { "controller-${it.index}-${it.name}" }) { Box(Modifier.animateItem()) { ControllerCard(it, callbacks) } }
     }
 }
 
@@ -195,21 +188,20 @@ private fun ProfileSection(model: InputControlsModel, selectedName: String, call
 
 @Composable
 private fun TransferActions(callbacks: InputControlsCallbacks) {
-    val accent = controlAccentColor()
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedButton(
             onClick = callbacks::onImportProfile,
             modifier = Modifier.weight(1f).height(48.dp),
             shape = WinZShapes.Medium,
-            colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = accent),
-            border = BorderStroke(1.dp, accent)
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
+            border = BorderStroke(1.dp, hairlineColor())
         ) { Icon(TablerIcons.Download, null); Spacer(Modifier.width(8.dp)); Text(uiStr(R.string.ui_import)) }
         OutlinedButton(
             onClick = callbacks::onExportProfile,
             modifier = Modifier.weight(1f).height(48.dp),
             shape = WinZShapes.Medium,
-            colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = accent),
-            border = BorderStroke(1.dp, accent)
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
+            border = BorderStroke(1.dp, hairlineColor())
         ) { Icon(TablerIcons.Upload, null); Spacer(Modifier.width(8.dp)); Text(uiStr(R.string.export)) }
     }
 }
@@ -229,16 +221,24 @@ private fun EditorButton(callbacks: InputControlsCallbacks) {
 }
 
 @Composable
-private fun SettingsCard(title: String, content: @Composable () -> Unit) {
+private fun SettingsCard(
+    title: String,
+    trailing: (@Composable () -> Unit)? = null,
+    contentSpacing: androidx.compose.ui.unit.Dp = 12.dp,
+    content: @Composable () -> Unit
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = WinZShapes.Large,
+        shape = WinZShapes.Medium,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, hairlineColor())
     ) {
         Column(Modifier.padding(14.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                trailing?.invoke()
+            }
+            Spacer(Modifier.height(contentSpacing))
             content()
         }
     }
@@ -315,10 +315,11 @@ private fun RoundAction(icon: androidx.compose.ui.graphics.vector.ImageVector, d
 @Composable
 private fun OpacityCard(initialPercent: Int, onOpacityChanged: (Int) -> Unit) {
     var opacity by remember(initialPercent) { mutableFloatStateOf(initialPercent.toFloat()) }
-    SettingsCard(title = uiStr(R.string.overlay_opacity)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text("${opacity.roundToInt()}%", style = MaterialTheme.typography.titleMedium.tabularNumbers(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+    SettingsCard(
+        title = uiStr(R.string.overlay_opacity),
+        trailing = { Text("${opacity.roundToInt()}%", style = MaterialTheme.typography.titleMedium.tabularNumbers(), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+        contentSpacing = 2.dp
+    ) {
         Slider(
             value = opacity,
             onValueChange = { opacity = it },
@@ -332,7 +333,7 @@ private fun OpacityCard(initialPercent: Int, onOpacityChanged: (Int) -> Unit) {
 @Composable
 private fun EmptyControllers() {
     Surface(
-        modifier = Modifier.fillMaxWidth(), shape = WinZShapes.Large,
+        modifier = Modifier.fillMaxWidth(), shape = WinZShapes.Medium,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, hairlineColor())
     ) {
@@ -348,7 +349,7 @@ private fun EmptyControllers() {
 private fun ControllerCard(controller: InputControllerItem, callbacks: InputControlsCallbacks) {
     Surface(
         onClick = { callbacks.onOpenController(controller.index) },
-        modifier = Modifier.fillMaxWidth(), shape = WinZShapes.Large,
+        modifier = Modifier.fillMaxWidth(), shape = WinZShapes.Medium,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, hairlineColor())
     ) {
