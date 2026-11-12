@@ -345,21 +345,27 @@ impl Extension for Present {
         }
         if let Some(idle) = self.limited.remove(&token) {
             self.send_idle(s, idle);
-            return;
-        }
-        // Safety timeout of a pending idle (a stale token matches nothing).
-        let window = self.pending.iter().find(|(_, p)| p.token == token).map(|(w, _)| *w);
-        if let Some(w) = window {
-            if let Some(p) = self.pending.remove(&w) {
-                self.send_idle(s, p.idle);
+        } else {
+            // Safety timeout of a pending idle (a stale token matches nothing).
+            let window = self.pending.iter().find(|(_, p)| p.token == token).map(|(w, _)| *w);
+            if let Some(w) = window {
+                if let Some(p) = self.pending.remove(&w) {
+                    self.send_idle(s, p.idle);
+                }
             }
         }
+        // `send_idle` triggers the idle fence through `SyncState::trigger`, which runs no hook:
+        // a present held for that fence goes ahead now, not at the next PresentPixmap.
+        self.release_waiting(s);
     }
 
     fn on_hook(&mut self, s: &mut Server, hook: &Hook) {
         match *hook {
             Hook::WindowGeometry { window, .. } => self.send_configure(s, window, 0),
-            Hook::WindowUnmapped(w) => self.flush_pending(s, w),
+            Hook::WindowUnmapped(w) => {
+                self.flush_pending(s, w);
+                self.release_waiting(s); // the flushed idle may trigger a held present's fence
+            }
             Hook::FenceTriggered(_) => self.release_waiting(s),
             Hook::PixmapFreed(p) => {
                 self.drop_waiting(s, |w| w.idle.pixmap == p);
@@ -373,6 +379,8 @@ impl Extension for Present {
                     }
                 }
                 self.single.retain(|_, v| *v != p);
+                // The idle fences triggered above may be what other held presents wait for.
+                self.release_waiting(s);
             }
             Hook::WindowFreed(w) => {
                 self.drop_waiting(s, |q| q.idle.window == w);
@@ -380,6 +388,8 @@ impl Extension for Present {
                 self.deadlines.remove(&w);
                 self.send_configure(s, w, PIXMAP_FLAG_WINDOW_DESTROYED);
                 self.events.retain(|_, e| e.window != w);
+                // Idle fences triggered by the drop and the flush: release what waited for them.
+                self.release_waiting(s);
             }
             _ => {}
         }

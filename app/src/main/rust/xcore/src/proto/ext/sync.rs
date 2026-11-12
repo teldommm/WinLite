@@ -138,6 +138,9 @@ impl Extension for Sync {
                 if s.sync.fences.remove(&id).is_none() {
                     return Err(bad_fence(id));
                 }
+                // A present held for this fence must not wait for it any more (a fence that is
+                // gone counts as passed, see `Present::release_waiting`).
+                s.run_hook(Hook::FenceTriggered(id));
             }
             AWAIT_FENCE => {
                 let mut ids = Vec::new();

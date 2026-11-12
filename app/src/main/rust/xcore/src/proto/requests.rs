@@ -1195,7 +1195,9 @@ impl Server {
                 return Err(bad(err::BAD_MATCH, 0));
             }
         }
-        let col = |r: &mut Reader| -> Res<u32> { Ok(r.u16()? as u32 & 0xff) };
+        // 16-bit X colour channels: the high byte is the 8-bit value (as in CreateGlyphCursor
+        // and RecolorCursor).
+        let col = |r: &mut Reader| -> Res<u32> { Ok(r.u16()? as u32 >> 8) };
         let (fr, fg, fb) = (col(r)?, col(r)?, col(r)?);
         let (br, bg, bb) = (col(r)?, col(r)?, col(r)?);
         let (fore, back) = ((fr << 16) | (fg << 8) | fb, (br << 16) | (bg << 8) | bb);
