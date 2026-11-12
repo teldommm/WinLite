@@ -188,6 +188,20 @@ class SteamActivity : ImmersiveSteamActivity() {
         SteamService.shutdown(this); finish()
     }
     private fun showDetail(id: Int) {
-        supportFragmentManager.beginTransaction().replace(android.R.id.content, SteamGameDetailFragment.newInstance(id)).commit()
+        // A fragment replaces only fragments: the manager's own ComposeView (setContent) would stay in
+        // android.R.id.content under the game page. This app targets SDK 28, where window insets go to the
+        // children one after another until one consumes them, and a ComposeView consumes them - so the page,
+        // being the second child, got a zero status-bar inset and its cover slid under the clock / battery bar.
+        // The manager is dropped (after the tap that opened the game has been handled) so the page is the only child.
+        val content = findViewById<android.view.ViewGroup>(android.R.id.content)
+        content.post {
+            val pageView = supportFragmentManager.findFragmentById(android.R.id.content)?.view
+            for (i in content.childCount - 1 downTo 0) {
+                val child = content.getChildAt(i)
+                if (child is androidx.compose.ui.platform.ComposeView && child !== pageView) content.removeViewAt(i)
+            }
+            supportFragmentManager.beginTransaction().replace(android.R.id.content, SteamGameDetailFragment.newInstance(id)).commit()
+            androidx.core.view.ViewCompat.requestApplyInsets(content)
+        }
     }
 }

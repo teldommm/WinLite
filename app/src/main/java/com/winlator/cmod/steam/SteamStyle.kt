@@ -1,7 +1,14 @@
 package com.winlator.cmod.steam
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -294,6 +301,7 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
             Modifier.fillMaxWidth()
                 .widthIn(max = if (landscape) 920.dp else 760.dp)
                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                .animateContentSize(tween(260, easing = FastOutSlowInEasing))
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = if (landscape) 10.dp else 24.dp)
                 .align(Alignment.CenterHorizontally),
@@ -308,7 +316,10 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
         onClick = onClick, enabled = enabled, modifier = modifier, shape = WinZShapes.Medium,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .42f), border = BorderStroke(1.dp, hairlineColor())
     ) {
-        Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center
+        ) {
             Icon(icon, null, Modifier.size(23.dp), tint = tint)
             Spacer(Modifier.width(9.dp))
             Text(label, style = MaterialTheme.typography.labelLarge, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -345,4 +356,19 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
             }
         }
     )
+}
+
+/**
+ * Fade + grow-in / fade + shrink-out of a block that appears once its data has arrived (store text, version and
+ * language pickers, ...), so late content eases in instead of shoving everything below it. A block that is
+ * already visible on the first frame (data came from the cache) is shown as is, without an animation.
+ */
+@Composable internal fun SteamReveal(visible: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val state = remember { MutableTransitionState(visible) }
+    state.targetState = visible
+    AnimatedVisibility(
+        visibleState = state, modifier = modifier,
+        enter = fadeIn(tween(240, easing = FastOutSlowInEasing)) + expandVertically(tween(240, easing = FastOutSlowInEasing)),
+        exit = fadeOut(tween(140)) + shrinkVertically(tween(160, easing = FastOutSlowInEasing))
+    ) { content() }
 }

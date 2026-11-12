@@ -64,10 +64,12 @@ object SteamDetailHost {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent { WinZTheme { CompositionLocalProvider(LocalArtworkMotion provides rememberArtworkMotionEnabled()) {
                 val revision = com.winlator.cmod.steam.SteamGames.version
-                val shortcut by produceState<Shortcut?>(null, id, revision) {
-                    value = withContext(Dispatchers.IO) { com.winlator.cmod.steam.SteamGames.shortcut(context, id) }
+                // The shortcut is read off the main thread; until then the page does not know which of WinLite's
+                // own pictures (banner / cover of the game) it shows, so it does not draw a placeholder first.
+                val found by produceState<Pair<Boolean, Shortcut?>>(false to null, id, revision) {
+                    value = true to withContext(Dispatchers.IO) { com.winlator.cmod.steam.SteamGames.shortcut(context, id) }
                 }
-                SteamDetailScreen(title, "Steam", artwork, null, context.getSharedPreferences("steam-settings", 0).getBoolean("favorite-$id", false), shortcut, callbacks, id)
+                SteamDetailScreen(title, "Steam", artwork, null, context.getSharedPreferences("steam-settings", 0).getBoolean("favorite-$id", false), found.second, callbacks, id, found.first)
             } } }
         }
 }
@@ -79,21 +81,43 @@ private val LocalSteamExecutable = compositionLocalOf { "" }
 private val LocalSteamMode = compositionLocalOf { "RealSteam" }
 
 @Composable
-private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: String?, fallback: Bitmap?, initialFavorite: Boolean, shortcut: Shortcut?, callbacks: SteamDetailCallbacks, steamId: Int? = null) {
+private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: String?, fallback: Bitmap?, initialFavorite: Boolean, shortcut: Shortcut?, callbacks: SteamDetailCallbacks, steamId: Int? = null, shortcutReady: Boolean = true) {
     val context = LocalContext.current.applicationContext
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
-    val artworkRevision = 0
-    val key = LibraryImageCache.keyFor(artworkPath)
-    val artwork by produceState(LibraryImageCache.peek(key) ?: fallback, key, fallback, artworkRevision) {
+    // The picture is the one WinLite shows for this game (the Library tile / game page): the user's own background,
+    // the downloaded banner, the user's own cover; then Steam's banner (cache / CDN); then the downloaded cover and
+    // the offline placeholder. The shortcut's name decides the file (Winlator/banners|covers/NAME[.user].png).
+    val baseName = remember(shortcut) { shortcut?.let { com.winlator.cmod.core.FileUtils.getBasename(it.file.path) } }
+    val steamKey = LibraryImageCache.keyFor(artworkPath)
+    val art by produceState<SteamArt?>(
+        if (shortcutReady && baseName == null) LibraryImageCache.peek(steamKey)?.let { SteamArt(it, steamKey, false, false) } else null,
+        baseName, shortcutReady, artworkPath, fallback
+    ) {
+        if (!shortcutReady) return@produceState
         value = withContext(Dispatchers.IO) {
-            LibraryImageCache.load(artworkPath) ?: fallback ?: steamId?.let { id ->
+            fun usable(f: File) = f.isFile && f.length() > 0
+            fun load(f: File?, coverOnly: Boolean, user: Boolean): SteamArt? {
+                if (f == null || !usable(f)) return null
+                val bitmap = LibraryImageCache.load(f.path) ?: return null
+                return SteamArt(bitmap, LibraryImageCache.keyFor(f.path), coverOnly, user)
+            }
+            val root = android.os.Environment.getExternalStorageDirectory()
+            val banners = File(root, "Winlator/banners")
+            val covers = File(root, "Winlator/covers")
+            val own = baseName?.let { name ->
+                load(File(banners, "$name.user.png"), false, false)
+                    ?: load(File(banners, "$name.png"), false, false)
+                    ?: load(File(covers, "$name.user.png"), true, true)
+            }
+            own ?: (LibraryImageCache.load(artworkPath) ?: fallback ?: steamId?.let { id ->
                 runCatching {
                     val request = com.bumptech.glide.Glide.with(context).downloadOnly()
                         .load("https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg").submit()
                     try { android.graphics.BitmapFactory.decodeFile(request.get(20, java.util.concurrent.TimeUnit.SECONDS).path) }
                     finally { com.bumptech.glide.Glide.with(context).clear(request) }
                 }.getOrNull()
-            }
+            })?.let { SteamArt(it, steamKey, false, false) }
+                ?: baseName?.let { name -> load(File(covers, "$name.png"), true, false) ?: load(File(covers, "$name.gen.png"), true, false) }
         }
     }
     var resumeSerial by remember { mutableIntStateOf(0) }
@@ -136,8 +160,8 @@ private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: Stri
     val executable = shortcut?.getExtra("steamExecutable").orEmpty()
     val items = steamDetailItems(callbacks, steamId != null)
     androidx.compose.runtime.CompositionLocalProvider(LocalSteamExecutable provides executable, LocalSteamInfoId provides steamId, LocalSteamDetail provides (steamId != null), LocalSteamReady provides configured, LocalSteamMode provides (steamId?.let { com.winlator.cmod.steam.SteamSettings.mode(context, it) } ?: "RealSteam")) {
-    if (landscape) LandscapeDetail(title, subtitle, artwork, favorite, stats, items, callbacks, toggle)
-    else PortraitDetail(title, subtitle, artwork, favorite, stats, items, callbacks, toggle)
+    if (landscape) LandscapeDetail(title, subtitle, art, favorite, stats, items, callbacks, toggle)
+    else PortraitDetail(title, subtitle, art, favorite, stats, items, callbacks, toggle)
     }
 }
 
@@ -160,13 +184,8 @@ private fun steamDetailItems(callbacks: SteamDetailCallbacks, steam: Boolean): L
     )
 }
 
-// The picture of the page: sharp, full-bleed, slowly breathing (a banner, as on WinLite's page).
-@Composable
-private fun SteamArtwork(artwork: Bitmap) {
-    Box(Modifier.fillMaxSize().clipToBounds()) {
-        Image(artwork.asImageBitmap(), null, Modifier.fillMaxSize().kenBurns(), contentScale = ContentScale.Crop)
-    }
-}
+// A resolved picture of the page: where it came from decides how DetailArtwork draws it (WinLite's own rules).
+private class SteamArt(val bitmap: Bitmap, val key: String?, val coverOnly: Boolean, val coverIsUser: Boolean)
 
 // Landscape: the picture stays open, the controls sit in the corners (layout of WinLite's landscape game page).
 //   top-left     : back plate, then the title under it      top-right : favorite plate
@@ -174,11 +193,11 @@ private fun SteamArtwork(artwork: Bitmap) {
 //   bottom-left  : the stat chips, then Game info / Achievements; where the picture and the panel leave no
 //                  room (small phone) they move into the panel.
 @Composable
-private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: SteamDetailCallbacks, toggle: () -> Unit) {
+private fun LandscapeDetail(title: String, subtitle: String, artwork: SteamArt?, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: SteamDetailCallbacks, toggle: () -> Unit) {
     val activity = LocalContext.current as? androidx.activity.ComponentActivity
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         val artAlpha by animateFloatAsState(if (artwork != null) 1f else 0f, tween(420), label = "steamDetailArt")
-        Box(Modifier.fillMaxSize().graphicsLayer { alpha = artAlpha }) { if (artwork != null) SteamArtwork(artwork) }
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = artAlpha }) { if (artwork != null) DetailArtwork(artwork.bitmap, artwork.key, artwork.coverOnly, artwork.coverIsUser, landscape = true) }
         Box(Modifier.align(Alignment.TopStart).fillMaxWidth().height(132.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(.66f), Color.Transparent))))
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(210.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.60f)))))
 
@@ -187,7 +206,13 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, f
             val iconCell = (panelWidth - 28.dp - 8.dp * (items.size - 1)) / items.size
             val compactCaptions = iconCell < 64.dp
             val infoId = LocalSteamInfoId.current
-            val leftStart = 34.dp
+            // The user's own portrait cover is a poster at the bottom-left (as on WinLite's page); the chips sit beside it.
+            val posterRatio: Float? = if (artwork != null && artwork.coverIsUser && !usesAsBackground(artwork.bitmap, artwork.coverOnly, artwork.coverIsUser)) {
+                (artwork.bitmap.width.toFloat() / artwork.bitmap.height.toFloat()).coerceIn(0.5f, 1.29f)
+            } else null
+            if (posterRatio != null && artwork != null) DetailPoster(artwork.bitmap, posterRatio, Modifier.align(Alignment.BottomStart))
+            val posterWidth = if (posterRatio != null) (maxHeight - (POSTER_TOP + 24.dp)).coerceAtLeast(0.dp) * posterRatio else 0.dp
+            val leftStart = 34.dp + if (posterRatio != null) posterWidth + 14.dp else 0.dp
             val leftWidth = maxWidth - leftStart - (panelWidth + 34.dp + 16.dp)
             val inPanel = leftWidth < 190.dp
             val panelMax = (maxHeight - 132.dp - 24.dp).coerceAtLeast(120.dp)
@@ -233,12 +258,12 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, f
 }
 
 @Composable
-private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: SteamDetailCallbacks, toggle: () -> Unit) {
+private fun PortraitDetail(title: String, subtitle: String, artwork: SteamArt?, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: SteamDetailCallbacks, toggle: () -> Unit) {
     val activity = LocalContext.current as? androidx.activity.ComponentActivity
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // The stat chips sit under the title, over the picture, exactly as on WinLite's page.
         Box(Modifier.fillMaxWidth().aspectRatio(1.12f).background(MaterialTheme.colorScheme.surface)) {
-            if (artwork != null) SteamArtwork(artwork)
+            if (artwork != null) DetailArtwork(artwork.bitmap, artwork.key, artwork.coverOnly, artwork.coverIsUser, landscape = false, bottomReserve = 150.dp)
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(.38f), Color.Transparent, Color.Black.copy(.88f)))))
             ArtPlateButton(onClick = { activity?.onBackPressedDispatcher?.onBackPressed() }, modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 14.dp)) {
                 Icon(TablerIcons.ArrowLeft, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp))

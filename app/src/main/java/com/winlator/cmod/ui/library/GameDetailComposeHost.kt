@@ -264,7 +264,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
 }
 
 // Top of the poster in landscape: clears the title block (two title lines + container).
-private val POSTER_TOP = 132.dp
+internal val POSTER_TOP = 132.dp
 
 // Round plate for a control that sits on the artwork (back, favorite). Same translucent look as the
 // selected All / Favorites / Recent chip, but always light-on-dark: the artwork under it is darkened
@@ -332,7 +332,7 @@ internal fun DetailIconAction(item: DetailActionItem, modifier: Modifier, compac
 // The user's own portrait cover as a poster, bottom-left, kept sharp above the scrims and clear of
 // the title (top padding) and of the action panel (it is on the right).
 @Composable
-private fun DetailPoster(artwork: Bitmap, ratio: Float, modifier: Modifier) {
+internal fun DetailPoster(artwork: Bitmap, ratio: Float, modifier: Modifier) {
     Image(
         artwork.asImageBitmap(),
         null,
@@ -348,7 +348,7 @@ private fun DetailPoster(artwork: Bitmap, ratio: Float, modifier: Modifier) {
 
 // A wide picture of the user's own is the background itself; anything else that is only a cover
 // gets the soft wash with the cover shown in front.
-private fun usesAsBackground(artwork: Bitmap, coverOnly: Boolean, coverIsUser: Boolean): Boolean =
+internal fun usesAsBackground(artwork: Bitmap, coverOnly: Boolean, coverIsUser: Boolean): Boolean =
     !coverOnly || (coverIsUser && artwork.width >= artwork.height * 1.3f)
 
 // What the header shows, by where the picture came from (all of it moves only when the screen
@@ -360,7 +360,7 @@ private fun usesAsBackground(artwork: Bitmap, coverOnly: Boolean, coverIsUser: B
 //    (In landscape the user's own cover is a poster drawn above the scrims: see DetailPoster.)
 //  - the user's own cover keeps its own proportions instead of being cropped to 2:3.
 @Composable
-private fun DetailArtwork(artwork: Bitmap?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, landscape: Boolean, bottomReserve: Dp = 112.dp) {
+internal fun DetailArtwork(artwork: Bitmap?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, landscape: Boolean, bottomReserve: Dp = 112.dp) {
     if (artwork == null) return
     val image = artwork.asImageBitmap()
     val ratio = artwork.width.toFloat() / artwork.height.toFloat()

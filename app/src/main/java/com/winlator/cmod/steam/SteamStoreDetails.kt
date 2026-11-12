@@ -3,6 +3,15 @@ package com.winlator.cmod.steam
 import com.winlator.cmod.ui.theme.TablerIcons
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -56,6 +65,10 @@ internal object SteamStoreMetadata {
     }
 }
 
+// What the sheet read last time for a game (PICS info + store page). Opening the sheet again shows it at once,
+// so Version / Language and the text do not appear (and shift everything) on every open; it is refreshed behind.
+private val detailsCache = java.util.concurrent.ConcurrentHashMap<String, Pair<JSONObject, JSONObject>>()
+
 @Composable
 internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapshot) {
     val context = LocalContext.current
@@ -64,16 +77,21 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
     var language by remember(id) { mutableStateOf(SteamInstallOptions.language(context, id)) }
     var branchMenu by remember { mutableStateOf(false) }
     var languageMenu by remember { mutableStateOf(false) }
-    val data by produceState(Pair(JSONObject(), JSONObject()), id, state.signedIn, installed) {
-        value = withContext(Dispatchers.IO) {
+    val cacheKey = "$id-$installed"
+    val loaded by produceState<Pair<JSONObject, JSONObject>?>(detailsCache[cacheKey], id, state.signedIn, installed) {
+        val fresh = withContext(Dispatchers.IO) {
             Pair(
                 runCatching { if (installed) SteamGames.info(context, id) else if (state.signedIn) SteamSession.info(id) else JSONObject() }.getOrDefault(JSONObject()),
                 runCatching { SteamStoreMetadata.fetch(id) }.getOrDefault(JSONObject())
             )
         }
+        // A failed refresh (offline, signed out) must not blank what was already shown.
+        if (fresh.second.length() > 0 || fresh.first.length() > 0 || value == null) value = fresh
+        if (fresh.second.length() > 0) detailsCache[cacheKey] = fresh
     }
-    val pics = data.first
-    val store = data.second
+    val dataReady = loaded != null
+    val pics = loaded?.first ?: JSONObject()
+    val store = loaded?.second ?: JSONObject()
     val branches = remember(pics) { SteamCatalog.branches(pics) }
     val languages = remember(pics) { SteamCatalog.languages(pics) }
     val downloadSize = remember(pics, branch, language) {
@@ -110,52 +128,66 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
     }
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         SteamTabRow(tabs.mapIndexed { index, title -> SteamTabItem(index, title) }, tab) { tab = it }
-        Column(
-            Modifier.fillMaxWidth().heightIn(min = 96.dp, max = 270.dp).verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            when (tab) {
+        val scroll = rememberScrollState()
+        LaunchedEffect(tab) { if (scroll.value > 0) scroll.animateScrollTo(0, tween(200)) }
+        // The tab body is cross-faded; the box around it follows the new height smoothly instead of jumping.
+        Box(Modifier.fillMaxWidth().animateContentSize(tween(240, easing = FastOutSlowInEasing)).heightIn(min = 96.dp, max = 270.dp).verticalScroll(scroll)) {
+          AnimatedContent(
+            targetState = tab,
+            transitionSpec = { (fadeIn(tween(200, delayMillis = 80)) togetherWith fadeOut(tween(110))).using(SizeTransform(clip = false) { _, _ -> snap() }) },
+            label = "steamStoreTab"
+          ) { page ->
+           Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = if (page == 0) Arrangement.Top else Arrangement.spacedBy(10.dp)
+           ) {
+            when (page) {
                 0 -> {
+                    // Every block eases in when its data arrives (SteamReveal); each carries its own bottom gap so the
+                    // spacing appears with it. With cached data they are already there on the first frame.
+                    val gap = Modifier.padding(bottom = 10.dp)
                     val description = store.optString("short_description")
                         .replace(Regex("<[^>]+>"), "").trim()
-                    if (description.isNotBlank()) Text(description, style = MaterialTheme.typography.bodyMedium)
+                    SteamReveal(dataReady && description.isNotBlank()) { Text(description, gap, style = MaterialTheme.typography.bodyMedium) }
                     val bytes = installedSize?.takeIf { installed } ?: downloadSize
                     Text(uiStr(R.string.steam_store_game_size,
                         if (bytes > 0) readableSize(bytes) else uiStr(R.string.steam_store_size_unknown)),
-                        style = MaterialTheme.typography.bodySmall)
-                    if (pics.optJSONObject("depots") != null) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.weight(1f)) {
-                                SteamDropdownButton(uiStr(R.string.steam_store_version) + ": " + branch, Modifier.fillMaxWidth(),
-                                    enabled = !state.downloading && !state.gameActive) { branchMenu = true }
-                                SteamMenu(branchMenu, { branchMenu = false }) {
-                                    branches.forEach { option ->
-                                        SteamChoiceItem(option, option == branch) {
-                                            SteamInstallOptions.setBranch(context, id, option)
-                                            branch = option
-                                            branchMenu = false
+                        gap, style = MaterialTheme.typography.bodySmall)
+                    SteamReveal(pics.optJSONObject("depots") != null) {
+                        Column(gap) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(Modifier.weight(1f)) {
+                                    SteamDropdownButton(uiStr(R.string.steam_store_version) + ": " + branch, Modifier.fillMaxWidth(),
+                                        enabled = !state.downloading && !state.gameActive) { branchMenu = true }
+                                    SteamMenu(branchMenu, { branchMenu = false }) {
+                                        branches.forEach { option ->
+                                            SteamChoiceItem(option, option == branch) {
+                                                SteamInstallOptions.setBranch(context, id, option)
+                                                branch = option
+                                                branchMenu = false
+                                            }
+                                        }
+                                    }
+                                }
+                                Box(Modifier.weight(1f)) {
+                                    SteamDropdownButton(uiStr(R.string.steam_store_language) + ": " + language, Modifier.fillMaxWidth(),
+                                        enabled = !state.downloading && !state.gameActive) { languageMenu = true }
+                                    SteamMenu(languageMenu, { languageMenu = false }) {
+                                        languages.forEach { option ->
+                                            SteamChoiceItem(option, option == language) {
+                                                SteamInstallOptions.setLanguage(context, id, option)
+                                                language = option
+                                                languageMenu = false
+                                            }
                                         }
                                     }
                                 }
                             }
-                            Box(Modifier.weight(1f)) {
-                                SteamDropdownButton(uiStr(R.string.steam_store_language) + ": " + language, Modifier.fillMaxWidth(),
-                                    enabled = !state.downloading && !state.gameActive) { languageMenu = true }
-                                SteamMenu(languageMenu, { languageMenu = false }) {
-                                    languages.forEach { option ->
-                                        SteamChoiceItem(option, option == language) {
-                                            SteamInstallOptions.setLanguage(context, id, option)
-                                            language = option
-                                            languageMenu = false
-                                        }
-                                    }
-                                }
+                            SteamReveal(installed && (recordedBranch != branch || recordedLanguage != language)) {
+                                SteamPrimaryButton(uiStr(R.string.steam_store_apply_options), Modifier.padding(top = 10.dp),
+                                    enabled = state.signedIn && !state.downloading && !state.gameActive,
+                                    icon = TablerIcons.Download) { SteamSession.install(id) }
                             }
-                        }
-                        if (installed && (recordedBranch != branch || recordedLanguage != language)) {
-                            SteamPrimaryButton(uiStr(R.string.steam_store_apply_options), enabled = state.signedIn && !state.downloading && !state.gameActive,
-                                icon = TablerIcons.Download) { SteamSession.install(id) }
                         }
                     }
                     val common = pics.optJSONObject("common")
@@ -163,12 +195,12 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
                     val publishers = store.optJSONArray("publishers")
                     for ((label, values) in listOf(uiStr(R.string.steam_ui_developer) to developers, uiStr(R.string.steam_ui_publisher) to publishers)) {
                         val names = (0 until (values?.length() ?: 0)).map { values!!.optString(it) }.filter { it.isNotBlank() }
-                        if (names.isNotEmpty()) Text("$label: ${names.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
+                        SteamReveal(names.isNotEmpty()) { Text("$label: ${names.joinToString(", ")}", gap, style = MaterialTheme.typography.bodySmall) }
                     }
                     val release = store.optJSONObject("release_date")?.optString("date")
                         .orEmpty().ifBlank { common?.optString("steam_release_date").orEmpty() }
-                    if (release.isNotBlank()) Text(uiStr(R.string.steam_ui_release, release), style = MaterialTheme.typography.bodySmall)
-                    if (description.isBlank() && release.isBlank() && developers == null) Text(uiStr(R.string.steam_store_no_data))
+                    SteamReveal(release.isNotBlank()) { Text(uiStr(R.string.steam_ui_release, release), gap, style = MaterialTheme.typography.bodySmall) }
+                    SteamReveal(dataReady && description.isBlank() && release.isBlank() && developers == null) { Text(uiStr(R.string.steam_store_no_data), gap) }
                 }
                 1 -> {
                     if (ach == null) {
@@ -219,7 +251,7 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
                     }
                 }
                 3 -> {
-                    val cloud by produceState<Pair<JSONObject?, String>>(null to "", id, state.signedIn, state.gameActive, tab) {
+                    val cloud by produceState<Pair<JSONObject?, String>>(null to "", id, state.signedIn, state.gameActive, page) {
                         value = if (state.signedIn && !state.gameActive) withContext(Dispatchers.IO) {
                             runCatching { SteamStoreMetadata.cloudListing(id) }
                                 .fold({ it to "" }, { null to (it.message ?: "Steam Cloud unavailable") })
@@ -270,6 +302,8 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
                     }
                 }
             }
+           }
+          }
         }
     }
     if (showCloud && shortcut != null) {
