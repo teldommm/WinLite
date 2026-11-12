@@ -7,6 +7,17 @@ import android.graphics.Bitmap
 import java.io.File
 import java.nio.file.Files
 import org.json.JSONObject
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -52,6 +63,8 @@ interface SteamDetailCallbacks {
     fun onHome()
     fun onSteamMode(mode: String)
     fun onSteamExecutable()
+    // The page has finished closing (after its exit animation): leave to the screen it was opened from.
+    fun onClose()
 }
 
 // Steam game page used by SteamActivity. It is WinLite's own game page (GameDetailComposeHost) in every detail:
@@ -62,7 +75,9 @@ object SteamDetailHost {
     fun create(context: Context, title: String, artwork: String?, id: Int, callbacks: SteamDetailCallbacks): ComposeView =
         ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            setContent { WinZTheme { CompositionLocalProvider(LocalArtworkMotion provides rememberArtworkMotionEnabled()) {
+            // The overlay theme has no opaque root surface: the Steam manager stays visible under the page while it
+            // slides in / out, exactly as WinLite's tabs do under a game page (SteamPageFrame draws the page's own background).
+            setContent { WinZOverlayTheme { SteamPageFrame(callbacks::onClose) { CompositionLocalProvider(LocalArtworkMotion provides rememberArtworkMotionEnabled()) {
                 val revision = com.winlator.cmod.steam.SteamGames.version
                 // The shortcut is read off the main thread; until then the page does not know which of WinLite's
                 // own pictures (banner / cover of the game) it shows, so it does not draw a placeholder first.
@@ -70,8 +85,48 @@ object SteamDetailHost {
                     value = true to withContext(Dispatchers.IO) { com.winlator.cmod.steam.SteamGames.shortcut(context, id) }
                 }
                 SteamDetailScreen(title, "Steam", artwork, null, context.getSharedPreferences("steam-settings", 0).getBoolean("favorite-$id", false), found.second, callbacks, id, found.first)
-            } } }
+            } } } }
         }
+}
+
+// The frame of the page: WinLite's detail transition (ShellDetails.kt - fade + a slide of 1/10 of the width, 220 / 160 ms;
+// only a fade in landscape) and its back handling. Back (system button, gesture or the page's back plate) plays the exit
+// first and only then calls onClosed, which returns to the Steam manager the page was opened from.
+@Composable
+private fun SteamPageFrame(onClosed: () -> Unit, content: @Composable () -> Unit) {
+    val transition = remember { MutableTransitionState(false).apply { targetState = true } }
+    androidx.activity.compose.BackHandler(enabled = transition.targetState) { transition.targetState = false }
+    LaunchedEffect(transition.currentState, transition.isIdle) {
+        if (!transition.targetState && transition.isIdle && !transition.currentState) onClosed()
+    }
+    // System bars as WinlatorTheme sets them for a full-screen host (this frame does not use that theme).
+    val activity = LocalContext.current as? android.app.Activity
+    ApplySystemBarsPolicy(activity?.window)
+    val whiteTheme = WinlatorThemeManager.currentTheme() == WinlatorThemeType.WHITE
+    DisposableEffect(activity, whiteTheme) {
+        activity?.window?.let { window ->
+            androidx.core.view.WindowInsetsControllerCompat(window, window.decorView).apply {
+                isAppearanceLightStatusBars = whiteTheme
+                isAppearanceLightNavigationBars = whiteTheme
+            }
+        }
+        onDispose { }
+    }
+    val landscape = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val enter = if (landscape) fadeIn(tween(180, easing = FastOutSlowInEasing))
+        else fadeIn(tween(220, easing = LinearOutSlowInEasing)) + slideInHorizontally(tween(220, easing = LinearOutSlowInEasing)) { it / 10 }
+    val exit = if (landscape) fadeOut(tween(180, easing = FastOutSlowInEasing))
+        else fadeOut(tween(160, easing = FastOutLinearInEasing)) + slideOutHorizontally(tween(160, easing = FastOutLinearInEasing)) { it / 10 }
+    AnimatedVisibility(visibleState = transition, enter = enter, exit = exit) {
+        Box(
+            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) { }
+        ) {
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+                // Portrait: the status bar stays visible, the page starts below it (0 while the bar is hidden in landscape).
+                Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars), propagateMinConstraints = true) { content() }
+            }
+        }
+    }
 }
 
 private val LocalSteamInfoId = compositionLocalOf<Int?> { null }
@@ -130,7 +185,10 @@ private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: Stri
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
     val steamDataRevision = if (steamId != null) com.winlator.cmod.steam.SteamUserData.contentRevision.intValue else 0
-    val stats by produceState(GameStats(), shortcut?.file?.path, steamId, steamDataRevision, resumeSerial) {
+    // Stats are remembered per game for the process: reopening the page shows them from the first frame, and what
+    // is read again only replaces the values (the chips themselves are always there - see steamStatEntries).
+    val stats by produceState(steamId?.let { steamStatsCache[it] } ?: GameStats(), shortcut?.file?.path, steamId, steamDataRevision, resumeSerial, shortcutReady) {
+        if (!shortcutReady) return@produceState
         val loaded = withContext(Dispatchers.IO) {
             shortcut?.let { GameStatsLoader.load(context, it) } ?: GameStats()
         }
@@ -145,7 +203,8 @@ private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: Stri
                 steamPlay?.optLong("rtimeLastPlayed")?.coerceAtLeast(0L)?.times(1000L) ?: 0L),
             loaded = true
         )
-        value = basic
+        // Keep the size already shown while the rest is read again (no dash flicker on every resume).
+        value = basic.copy(sizeText = value.sizeText)
         value = withContext(Dispatchers.IO) {
             val cached = shortcut?.let { GameStatsLoader.cachedSize(context, it) }
             val existingSize = shortcut?.let {
@@ -153,6 +212,7 @@ private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: Stri
             }
             basic.copy(sizeText = existingSize ?: steamId?.let { installedSteamSizeText(context, it) })
         }
+        steamId?.let { steamStatsCache[it] = value }
     }
     var favorite by remember(initialFavorite) { mutableStateOf(initialFavorite) }
     val toggle = { favorite = !favorite; callbacks.onFavorite(favorite) }
@@ -184,6 +244,16 @@ private fun steamDetailItems(callbacks: SteamDetailCallbacks, steam: Boolean): L
     )
 }
 
+private val steamStatsCache = java.util.concurrent.ConcurrentHashMap<Int, GameStats>()
+
+// The stat chips of the page. They are drawn from the first frame (WinLite's chips are always there too), so nothing
+// pops in or shoves the title / buttons: until the numbers are read the values are dashes.
+@Composable
+private fun steamStatEntries(stats: GameStats): List<StatEntry> {
+    val entries = rememberStatEntries(stats, always = true)
+    return if (stats.loaded) entries else remember(entries) { entries.map { StatEntry(it.icon, it.label, "\u2014") } }
+}
+
 // A resolved picture of the page: where it came from decides how DetailArtwork draws it (WinLite's own rules).
 private class SteamArt(val bitmap: Bitmap, val key: String?, val coverOnly: Boolean, val coverIsUser: Boolean)
 
@@ -212,9 +282,11 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: SteamArt?,
             } else null
             if (posterRatio != null && artwork != null) DetailPoster(artwork.bitmap, posterRatio, Modifier.align(Alignment.BottomStart))
             val posterWidth = if (posterRatio != null) (maxHeight - (POSTER_TOP + 24.dp)).coerceAtLeast(0.dp) * posterRatio else 0.dp
-            val leftStart = 34.dp + if (posterRatio != null) posterWidth + 14.dp else 0.dp
+            // The poster is known only once the picture is decoded: the column beside it slides over instead of jumping.
+            val leftStartTarget = 34.dp + if (posterRatio != null) posterWidth + 14.dp else 0.dp
+            val leftStart by androidx.compose.animation.core.animateDpAsState(leftStartTarget, tween(320), label = "steamLeftStart")
             val leftWidth = maxWidth - leftStart - (panelWidth + 34.dp + 16.dp)
-            val inPanel = leftWidth < 190.dp
+            val inPanel = maxWidth - leftStartTarget - (panelWidth + 34.dp + 16.dp) < 190.dp
             val panelMax = (maxHeight - 132.dp - 24.dp).coerceAtLeast(120.dp)
 
             if (!inPanel) {
@@ -223,7 +295,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: SteamArt?,
                         .heightIn(max = panelMax).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (stats.loaded) StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
+                    StatChipRow(steamStatEntries(stats), Modifier.fillMaxWidth())
                     infoId?.let { com.winlator.cmod.steam.SteamGameInfoPanel(it, landscape = true, onArtwork = true) }
                 }
             }
@@ -245,7 +317,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: SteamArt?,
                 shape = WinZShapes.Large, color = OnArtwork.PanelFill, border = BorderStroke(1.dp, OnArtwork.PlateBorder)
             ) {
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (inPanel && stats.loaded) StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
+                    if (inPanel) StatChipRow(steamStatEntries(stats), Modifier.fillMaxWidth())
                     PlayButton(callbacks::onPlay, { mode -> callbacks.onSteamMode(mode) }, { callbacks.onSteamExecutable() }, onArtwork = true, height = 58.dp)
                     if (inPanel) infoId?.let { com.winlator.cmod.steam.SteamGameInfoPanel(it, landscape = true, onArtwork = true) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -272,10 +344,8 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: SteamArt?, 
             Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodyMedium)
-                if (stats.loaded) {
-                    Spacer(Modifier.height(6.dp))
-                    StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
-                }
+                Spacer(Modifier.height(6.dp))
+                StatChipRow(steamStatEntries(stats), Modifier.fillMaxWidth())
             }
         }
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -301,7 +371,8 @@ private fun PlayButton(click: () -> Unit, chooseMode: (String) -> Unit, chooseEx
     val modeBusy = modeProgress?.busy == true
     val accent = controlAccentColor()
     var expanded by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // The mode-switch progress / error line appears under the button: the column grows smoothly instead of pushing what is below.
+    Column(Modifier.fillMaxWidth().animateContentSize(tween(240)), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 click, enabled = LocalSteamReady.current && !modeBusy,

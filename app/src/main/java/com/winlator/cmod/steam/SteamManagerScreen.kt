@@ -3,6 +3,10 @@ package com.winlator.cmod.steam
 import com.winlator.cmod.ui.uiStr
 
 import android.widget.ImageView
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
@@ -48,8 +52,10 @@ import java.io.File
     var menu by remember { mutableStateOf(false) }
     var sorting by remember { mutableStateOf(false) }
     var sort by rememberSaveable { mutableStateOf("Recent") }
-    val apps = rememberSteamLibrary(context, state.library)
-    val demos = rememberSteamLibrary(context, state.library, enabled = tab == 4, filterType = "demo")
+    val appsRead = rememberSteamLibraryOrNull(context, state.library)
+    val demosRead = rememberSteamLibraryOrNull(context, state.library, enabled = tab == 4, filterType = "demo")
+    val apps = appsRead ?: emptyList()
+    val demos = demosRead ?: emptyList()
     val installed = remember(apps) { apps.count { it.containerName == "Steam · Installed" } }
     val user = rememberSteamUserSnapshot(context)
     val profile = user.profile
@@ -90,7 +96,7 @@ import java.io.File
                 SteamProgress(state.libraryProgress / 100f, Modifier.fillMaxWidth())
             }
         }
-        if (!(state.signedIn && state.libraryLoading) && state.libraryError.isNotEmpty()) Text(state.libraryError, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
+        RevealSection(!(state.signedIn && state.libraryLoading) && state.libraryError.isNotEmpty()) { Text(state.libraryError, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
         val revealed = remember { mutableSetOf<String>() }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             AnimatedContent(tab, transitionSpec = { fadeIn(WinZMotion.enter()) togetherWith fadeOut(WinZMotion.exit()) }, label = "steamTab") { currentTab ->
@@ -135,7 +141,7 @@ import java.io.File
                     val id = SteamLibrary.appId(app.shortcutPath)!!
                     val isInstalled = app.containerName == "Steam · Installed"
                     RevealOnEnter("g$currentTab-$id", index, revealed, Modifier.fillMaxWidth()) { SteamCard(Modifier.fillMaxWidth(), onClick = { if (isInstalled) openGame(id) else SteamSheets.game(context, id) }) {
-                        SteamArt("https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg", Modifier.fillMaxWidth().padding(6.dp).aspectRatio(460f / 215f).clip(WinZShapes.Small))
+                        SteamGameArt(id, isInstalled, Modifier.fillMaxWidth().padding(6.dp).aspectRatio(460f / 215f).clip(WinZShapes.Small))
                         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(app.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
@@ -150,9 +156,51 @@ import java.io.File
                         }
                     } }
                 }
-                if (visible.isEmpty() && !state.libraryLoading) item(span = { GridItemSpan(maxLineSpan) }) { Text(if (currentTab == 2) uiStr(R.string.steam_ui_no_installed) else if (currentTab == 4) uiStr(R.string.steam_ui_no_demos) else uiStr(R.string.steam_ui_no_games), Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (visible.isEmpty() && !state.libraryLoading && (if (currentTab == 4) demosRead else appsRead) != null) item(span = { GridItemSpan(maxLineSpan) }) { Text(if (currentTab == 2) uiStr(R.string.steam_ui_no_installed) else if (currentTab == 4) uiStr(R.string.steam_ui_no_demos) else uiStr(R.string.steam_ui_no_games), Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         }
+            }
+        }
+    }
+}
+
+// What the game card shows. An installed game is also a WinLite shortcut: when it has its own picture there
+// (the user's background, the downloaded banner, the user's own cover - the same pick as WinLite's game page), that
+// picture is drawn over Steam's header, which stays under it until it is decoded and for games without one.
+// A banner / wide picture fills the card; a portrait cover is shown whole over a dimmed copy of Steam's header.
+@Composable private fun SteamGameArt(id: Int, installed: Boolean, modifier: Modifier) {
+    val context = LocalContext.current.applicationContext
+    val revision = SteamGames.version
+    val own by produceState<Pair<android.graphics.Bitmap, Boolean>?>(null, id, installed, revision) {
+        value = if (!installed) null else withContext(Dispatchers.IO) {
+            runCatching {
+                val shortcut = SteamGames.shortcut(context, id) ?: return@runCatching null
+                val name = com.winlator.cmod.core.FileUtils.getBasename(shortcut.file.path)
+                val root = android.os.Environment.getExternalStorageDirectory()
+                fun pick(dir: String, file: String, wideOnly: Boolean): Pair<android.graphics.Bitmap, Boolean>? {
+                    val f = File(File(root, dir), file)
+                    if (!f.isFile || f.length() <= 0) return null
+                    val bitmap = com.winlator.cmod.ui.library.LibraryImageCache.load(f.path) ?: return null
+                    val wide = bitmap.width >= bitmap.height * 1.3f
+                    return if (wideOnly && !wide) bitmap to false else bitmap to wide
+                }
+                pick("Winlator/banners", "$name.user.png", false)?.let { it.first to true }
+                    ?: pick("Winlator/banners", "$name.png", false)?.let { it.first to true }
+                    ?: pick("Winlator/covers", "$name.user.png", false)
+            }.getOrNull()
+        }
+    }
+    Box(modifier) {
+        SteamArt("https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg", Modifier.fillMaxSize())
+        own?.let { (bitmap, fill) ->
+            val alpha by androidx.compose.animation.core.animateFloatAsState(1f, androidx.compose.animation.core.tween(320), label = "steamCardArt")
+            Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }) {
+                if (fill) {
+                    androidx.compose.foundation.Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                } else {
+                    Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .62f)))
+                    androidx.compose.foundation.Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize().padding(vertical = 4.dp), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                }
             }
         }
     }

@@ -49,6 +49,7 @@ class SteamActivity : ImmersiveSteamActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         supportActionBar?.hide()
+        supportFragmentManager.addOnBackStackChangedListener { if (supportFragmentManager.backStackEntryCount == 0) detailOpening = false }
         com.winlator.cmod.ui.applyAppFullscreen(this)
         if (!SteamSettings.enabled(this)) { startActivity(Intent(this, StoreSettingsActivity::class.java)); finish(); return }
         startForegroundService(Intent(this, SteamService::class.java))
@@ -187,21 +188,19 @@ class SteamActivity : ImmersiveSteamActivity() {
         File(filesDir, "steam-library-cache.json").delete()
         SteamService.shutdown(this); finish()
     }
+    private var detailOpening = false
     private fun showDetail(id: Int) {
-        // A fragment replaces only fragments: the manager's own ComposeView (setContent) would stay in
-        // android.R.id.content under the game page. This app targets SDK 28, where window insets go to the
-        // children one after another until one consumes them, and a ComposeView consumes them - so the page,
-        // being the second child, got a zero status-bar inset and its cover slid under the clock / battery bar.
-        // The manager is dropped (after the tap that opened the game has been handled) so the page is the only child.
+        if (detailOpening || supportFragmentManager.fragments.any { it is SteamGameDetailFragment }) return
+        detailOpening = true
         val content = findViewById<android.view.ViewGroup>(android.R.id.content)
-        content.post {
-            val pageView = supportFragmentManager.findFragmentById(android.R.id.content)?.view
-            for (i in content.childCount - 1 downTo 0) {
-                val child = content.getChildAt(i)
-                if (child is androidx.compose.ui.platform.ComposeView && child !== pageView) content.removeViewAt(i)
-            }
-            supportFragmentManager.beginTransaction().replace(android.R.id.content, SteamGameDetailFragment.newInstance(id)).commit()
-            androidx.core.view.ViewCompat.requestApplyInsets(content)
-        }
+        // Opened from the manager: the page goes on a back stack over it, so Back returns to the list (with its scroll,
+        // tab and search kept) instead of leaving Steam. The manager's ComposeView must not swallow the window insets:
+        // this app targets SDK 28, where they go to the children one after another until one consumes them, and the
+        // page - the second child - got a zero status-bar inset (its cover slid under the clock / battery bar).
+        val manager = content.getChildAt(0) as? androidx.compose.ui.platform.ComposeView
+        manager?.consumeWindowInsets = false
+        val transaction = supportFragmentManager.beginTransaction().replace(android.R.id.content, SteamGameDetailFragment.newInstance(id))
+        if (manager != null) transaction.addToBackStack(null) else detailOpening = false
+        transaction.commit()
     }
 }

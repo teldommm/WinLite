@@ -45,10 +45,11 @@ import java.util.Date
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         SteamInfoAction(TablerIcons.InfoCircle, uiStr(R.string.steam_ui_game_info), landscape, onArtwork, Modifier.weight(1f)) { showInfo = true }
+        // The caption never changes; the count arrives as a badge that fades in, so the button does not re-flow.
         SteamInfoAction(
-            TablerIcons.Trophy,
-            achievements?.let { "${it.count { a -> a.unlocked }} / ${it.size}" } ?: uiStr(R.string.steam_ui_achievements),
-            landscape, onArtwork, Modifier.weight(1f)
+            TablerIcons.Trophy, uiStr(R.string.steam_ui_achievements),
+            landscape, onArtwork, Modifier.weight(1f),
+            badge = achievements?.let { "${it.count { a -> a.unlocked }} / ${it.size}" }
         ) { showAchievements = true }
     }
     if (showInfo) ThemedDialog(onDismissRequest = { showInfo = false }) {
@@ -113,6 +114,7 @@ private fun SteamInfoAction(
     landscape: Boolean,
     onArtwork: Boolean,
     modifier: Modifier,
+    badge: String? = null,
     onClick: () -> Unit
 ) {
     val glass = landscape || onArtwork
@@ -124,11 +126,19 @@ private fun SteamInfoAction(
         contentColor = if (glass) Color.White else MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(1.dp, if (glass) com.winlator.cmod.ui.theme.OnArtwork.PlateBorder else MaterialTheme.colorScheme.outlineVariant)
     ) {
-        Row(Modifier.heightIn(min = if (glass) 48.dp else 54.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.height(if (glass) 48.dp else 54.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, Modifier.size(if (glass) 20.dp else 22.dp))
             Spacer(Modifier.width(8.dp))
-            Text(label, style = if (glass) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+            Text(label, Modifier.weight(1f, fill = false), style = if (glass) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
                 fontWeight = if (glass) FontWeight.Medium else FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            androidx.compose.animation.AnimatedVisibility(
+                badge != null,
+                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(240)) + androidx.compose.animation.expandHorizontally(androidx.compose.animation.core.tween(240)),
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140))
+            ) {
+                Text(badge.orEmpty(), Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                    fontWeight = FontWeight.Bold, color = com.winlator.cmod.ui.theme.controlAccentColor(), maxLines = 1)
+            }
         }
     }
 }

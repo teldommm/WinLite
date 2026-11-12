@@ -55,6 +55,11 @@ class SteamGameDetailFragment : Fragment() {
                 }.invokeOnCompletion { preparing = false }
             }
             override fun onSteamExecutable() { setupPlay(false) }
+            override fun onClose() {
+                // Opened from the Steam manager (back stack): back to it. Opened straight from WinLite: leave.
+                if (!isAdded) return
+                if (parentFragmentManager.backStackEntryCount > 0) parentFragmentManager.popBackStack() else activity?.finish()
+            }
             override fun onSteamMode(mode: String) {
                 if (preparing || SteamSession.gameActive || SteamLaunch.modeStatus(appId)?.busy == true) return
                 val shortcut = SteamGames.shortcut(context, appId)
@@ -118,7 +123,8 @@ class SteamGameDetailFragment : Fragment() {
                         try { result.get() } catch (error: java.util.concurrent.ExecutionException) { throw (error.cause ?: error) }
                     }, Runnable {
                         SteamGames.changed()
-                        activity?.finish()
+                        // Through the page's own back handling: it plays the exit and returns to the list.
+                        activity?.onBackPressedDispatcher?.onBackPressed()
                     })
             }
         })
