@@ -6,8 +6,9 @@
 //! * QueryVersion: 0.8 (libXcursor wants 0.5 for ARGB cursors and 0.8 for animated ones).
 //! * QueryPictFormats: A1, RGB24 and ARGB32, one screen; the root visual maps to ARGB32 (the
 //!   server's visual is 32 bits deep).
-//! * CreatePicture / FreePicture: a picture is a name for a drawable, with the depth of its format.
-//! * CreateCursor: a snapshot of a 32-bit picture. Xcursor sends premultiplied ARGB, the renderer
+//! * CreatePicture / FreePicture: a picture has the depth of its format; a cursor-sized 32-bit one
+//!   keeps a copy of the pixels, because libXcursor frees the pixmap before CreateCursor.
+//! * CreateCursor: a cursor from the pixels of a 32-bit picture. Xcursor sends premultiplied ARGB, the renderer
 //!   blends straight alpha, so the colors are divided by alpha on the way in. A cursor without a
 //!   single visible pixel hides the pointer, as an empty core cursor mask does.
 //! * CreateAnimCursor: the first frame, still (the renderer takes one image per cursor).
@@ -44,8 +45,11 @@ const MAX_CURSOR_PIXELS: usize = 512 * 512;
 
 struct Picture {
     client: ClientId,
-    drawable: u32,
     depth: u8,
+    /// The pixels of a cursor-sized 32-bit drawable, taken in CreatePicture: libXcursor frees its
+    /// pixmap before CreateCursor, and a BadMatch there makes Wine exit (its X error handler ends
+    /// in Xlib's default one).
+    image: Option<(i16, i16, Vec<u8>)>,
 }
 
 #[derive(Default)]
@@ -143,7 +147,12 @@ impl Render {
         if d.depth != depth {
             return Err(bad(err::BAD_MATCH, 0));
         }
-        self.pictures.insert(pid, Picture { client: c, drawable, depth });
+        let image = if depth == 32 && d.width as usize * d.height as usize <= MAX_CURSOR_PIXELS {
+            d.get_image(0, 0, d.width, d.height).map(|px| (d.width, d.height, px))
+        } else {
+            None
+        };
+        self.pictures.insert(pid, Picture { client: c, depth, image });
         Ok(())
     }
 
@@ -156,17 +165,14 @@ impl Render {
         let (x, y) = (r.u16()? as i32, r.u16()? as i32);
         self.new_id(s, c, cid)?;
         let Some(pic) = self.pictures.get(&src) else { return Err(bad(BAD_PICTURE, src)) };
-        let (depth, drawable) = (pic.depth, pic.drawable);
-        // The picture's drawable may be gone (libXcursor frees its pixmap after the cursor is made).
-        let Some(d) = s.drawables.get(&drawable) else { return Err(bad(err::BAD_MATCH, 0)) };
-        let (w, h) = (d.width, d.height);
-        if depth != 32 || d.depth != 32 || x >= w as i32 || y >= h as i32 {
+        // A picture without pixels is a 32-bit drawable larger than a cursor.
+        let Some((w, h, px)) = &pic.image else {
+            return Err(bad(if pic.depth == 32 { BAD_ALLOC } else { err::BAD_MATCH }, 0));
+        };
+        let (w, h, mut px) = (*w, *h, px.clone());
+        if x >= w as i32 || y >= h as i32 {
             return Err(bad(err::BAD_MATCH, 0));
         }
-        if w as usize * h as usize > MAX_CURSOR_PIXELS {
-            return Err(bad(BAD_ALLOC, 0));
-        }
-        let Some(mut px) = d.get_image(0, 0, w, h) else { return Err(bad(err::BAD_MATCH, 0)) };
         let visible = unpremultiply(&mut px);
         let visual = s.visual_for_depth(32);
         let Some(image) = s.new_drawable_with(0, w, h, 32, visual) else { return Err(bad(BAD_ALLOC, 0)) };
