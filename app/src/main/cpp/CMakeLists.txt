@@ -191,3 +191,13 @@ target_link_libraries(vulkan_renderer
         atomic
         wfg
 )
+
+# Optional Steam backend (Rust protocol client, libwinlitesteam.so). Packaged through a separate
+# native target so the emulator core never loads Steam as a DT_NEEDED dependency when the
+# feature is disabled.
+add_subdirectory(winlite-steam-client)
+add_dependencies(winlator winlitesteam_rust_build)
+add_library(steam_optional SHARED steam_optional.c)
+target_link_options(steam_optional PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(steam_optional winlitesteam)
+add_dependencies(steam_optional winlitesteam_rust_build)

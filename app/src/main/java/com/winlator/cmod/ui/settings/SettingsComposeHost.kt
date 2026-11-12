@@ -169,6 +169,12 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
             item("appearance-title") { SectionTitle("APPEARANCE") }
             item("theme") { WinlatorThemePreferenceCard() }
 
+            item("steam") {
+                NavigationRow(TablerIcons.BrandSteam, "Steam", uiStr(R.string.steam_ui_account_downloads)) {
+                    context.startActivity(android.content.Intent(context, com.winlator.cmod.steam.SteamActivity::class.java))
+                }
+            }
+
             item("environment-title") { SectionTitle("ENVIRONMENTS") }
             item("containers") {
                 NavigationRow(TablerIcons.Server, uiStr(R.string.ui_containers), uiStr(R.string.ui_create_and_manage_windows_environments), callbacks::onOpenContainers)

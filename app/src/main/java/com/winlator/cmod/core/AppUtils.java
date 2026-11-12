@@ -78,6 +78,8 @@ public abstract class AppUtils {
     }
 
     public static void restartApplication(Context context, int selectedMenuItemId) {
+        // A restart exits the process without service teardown callbacks: close the Steam session first.
+        com.winlator.cmod.steam.SteamService.shutdown(context);
         Intent intent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         Intent mainIntent = Intent.makeRestartActivityTask(intent.getComponent());
         if (selectedMenuItemId > 0) mainIntent.putExtra("selected_menu_item_id", selectedMenuItemId);

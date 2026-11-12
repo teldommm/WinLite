@@ -195,7 +195,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     val container: Container = shortcut.container
     val arm64 = container.getWineVersion().contains("arm64ec", true)
 
-    var name by mutableStateOf(shortcut.name)
+    var name by mutableStateOf(com.winlator.cmod.steam.SteamGames.displayName(shortcut))
     var saveProfileMode by mutableStateOf(SaveProfiles.getMode(shortcut))
     var screen by mutableStateOf(normalizeResolution(shortcut.getExtra("screenSize", container.getScreenSize())))
     var renderer by mutableStateOf("Vulkan")
@@ -645,6 +645,12 @@ internal fun ShortcutEditorV2(
             return
         }
         HomeShortcuts.updatePinned(context, Shortcut(target, moved))
+        // A Steam game keeps its Steam files inside the prefix, so it must be set up again in the new container.
+        shortcut.getExtra("steamAppId").toIntOrNull()?.let { steamId ->
+            Shortcut(target, moved).apply { putExtra("steamConfigured", "0"); saveData() }
+            context.getSharedPreferences("steam-settings", 0).edit().putInt("steam-container-$steamId", target.id).apply()
+            com.winlator.cmod.steam.SteamGames.changed()
+        }
         onShortcutsChanged()
         close()
         WinToast.show(context, uiStr(R.string.ui_moved_to, target.name), Toast.LENGTH_SHORT)

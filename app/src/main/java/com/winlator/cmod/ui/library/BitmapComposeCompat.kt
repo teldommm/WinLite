@@ -324,6 +324,7 @@ internal fun LibraryLandscapeHeader(
             LibraryTopIcon(if (grid) TablerIcons.LayoutList else TablerIcons.LayoutGrid, if (grid) stringResource(R.string.ui_list_view) else stringResource(R.string.ui_grid_view), false) {
                 onGridViewChanged(!grid)
             }
+            LibrarySteamButton()
             LibraryTopIcon(TablerIcons.Plus, stringResource(R.string.ui_add_games), false) { activity?.navigateToMainDestination(R.id.main_menu_file_manager) }
             LibraryOrientationMenu(activity)
         }
@@ -377,11 +378,22 @@ internal fun LibraryPortraitHeader(
                 LibraryTopIcon(if (grid) TablerIcons.LayoutList else TablerIcons.LayoutGrid, if (grid) stringResource(R.string.ui_list_view) else stringResource(R.string.ui_grid_view), false) {
                     onGridViewChanged(!grid)
                 }
+                LibrarySteamButton()
                 LibraryTopIcon(TablerIcons.Plus, stringResource(R.string.ui_add_games), false) { onOpenFileManager() }
                 LibraryOrientationMenu(activity)
             }
         }
     }
+    }
+}
+
+// Opens the Steam store/manager (SteamActivity); hidden while Steam is switched off in Steam settings.
+@Composable
+private fun LibrarySteamButton() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    if (!com.winlator.cmod.steam.SteamSettings.enabled(context)) return
+    LibraryTopIcon(TablerIcons.BrandSteam, "Steam", false) {
+        context.startActivity(android.content.Intent(context, com.winlator.cmod.steam.SteamActivity::class.java))
     }
 }
 

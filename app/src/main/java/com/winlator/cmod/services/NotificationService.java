@@ -139,6 +139,7 @@ public class NotificationService extends Service {
             } catch (Exception ignored) {
                 // Quitting anyway.
             } finally {
+                com.winlator.cmod.steam.SteamService.shutdown(this);
                 stopForeground(STOP_FOREGROUND_REMOVE);
                 stopSelf();
                 isRunning = false;
@@ -165,6 +166,7 @@ public class NotificationService extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
+        com.winlator.cmod.steam.SteamService.shutdown(this);
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
         isRunning = false;

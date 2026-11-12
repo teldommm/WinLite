@@ -280,6 +280,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private SharedPreferences playtimePrefs;
     private String shortcutName;
     private Handler handler;
+    private boolean ownsPrefixLease;
+    private volatile boolean ownsSteamSessionPause;
+    public void markSteamSessionPaused() { ownsSteamSessionPause = true; }
+    public void exitSteamLaunchFailure() { exit(); }
     private Runnable savePlaytimeRunnable;
     private static final long SAVE_INTERVAL_MS = 1000;
 
@@ -497,10 +501,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
             return;
         }
 
+        if (!com.winlator.cmod.core.ContainerSessionGate.start(container.id)) {
+            android.widget.Toast.makeText(this, "This container is busy applying components.", android.widget.Toast.LENGTH_LONG).show();
+            finish(); return;
+        }
+        ownsPrefixLease = true;
         containerManager.activateContainer(container);
 
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
             shortcut = new Shortcut(container, new File(shortcutPath));
+            if (!com.winlator.cmod.steam.SteamLaunch.canLaunch(this, shortcut)) {
+                android.widget.Toast.makeText(this, "Configure the Steam game first, then enable Steam and sign in if required.", android.widget.Toast.LENGTH_LONG).show();
+                finish(); return;
+            }
         }
 
         taskAffinityMask = (short) ProcessHelper.getAffinityMask(container.getCPUList(true));
@@ -966,12 +979,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 .getBoolean("remove_loading_bar_when_booting_games", false);
         View shutdownOverlay = removeLoadingBar ? null : ThemedLoadingOverlayHost.show(this, getString(R.string.shutdown));
 
+        savePlaytimeData();
+        handler.removeCallbacks(savePlaytimeRunnable);
+
+        // The genuine Steam client must flush Cloud saves while Wine, network and audio are still up.
+        if (shortcut != null && "RealSteam".equals(shortcut.getExtra("steamLaunchMode")) && !shortcut.getExtra("steamAppId").isEmpty()) {
+            new Thread(() -> {
+                com.winlator.cmod.steam.SteamCloud.awaitShutdown(this, shortcut);
+                runOnUiThread(() -> finishExitAfterSteam(shutdownOverlay));
+            }, "SteamCloudShutdown").start();
+        } else finishExitAfterSteam(shutdownOverlay);
+    }
+
+    private void finishExitAfterSteam(View shutdownOverlay) {
         if (xServerView != null) {
             xServerView.forceCleanup();
         }
-
-        savePlaytimeData();
-        handler.removeCallbacks(savePlaytimeRunnable);
 
         stopThreadPlacement(true);
         gpuTurboWanted = false;
@@ -986,6 +1009,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             winHandler.stop();
         if (wineRequestHandler != null)
             wineRequestHandler.stop();
+        if (ownsPrefixLease) {
+            com.winlator.cmod.core.ContainerSessionGate.stop(container.id);
+            ownsPrefixLease = false;
+        }
 
         Executors.newSingleThreadExecutor().execute(() -> {
 
@@ -1055,6 +1082,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
         stopThreadPlacement(true);
         gpuTurboWanted = false;
         GpuTurbo.revert();
+        if (ownsPrefixLease && container != null) {
+            com.winlator.cmod.core.ContainerSessionGate.stop(container.id);
+            ownsPrefixLease = false;
+        }
+        if (ownsSteamSessionPause) {
+            ownsSteamSessionPause = false;
+            if (shortcut != null && !shortcut.getExtra("steamAppId").isEmpty()) {
+                com.winlator.cmod.steam.SteamSocial.closeGuest();
+                com.winlator.cmod.steam.SteamAchievements.stop();
+            }
+            com.winlator.cmod.steam.SteamSession.endGame(getApplicationContext());
+        }
         super.onDestroy();
     }
 
@@ -1281,6 +1320,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             envVars.put("WRAPPER_AHB_UBWC", "1");
         }
 
+        com.winlator.cmod.steam.SteamLaunch.apply(this, shortcut, envVars);
         guestProgramLauncherComponent.setEnvVars(envVars);
         guestProgramLauncherComponent.setTerminationCallback((status) -> runOnUiThread(this::exit));
 
