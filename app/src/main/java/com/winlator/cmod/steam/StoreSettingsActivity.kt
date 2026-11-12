@@ -95,12 +95,12 @@ class StoreSettingsActivity : ImmersiveSteamActivity() {
                     }
                 }
             }
-            if (help.isNotBlank()) ThemedDialog(onDismissRequest = { help = "" }) {
+            if (help.isNotBlank()) SteamDialog(onDismissRequest = { help = "" }) {
                 Text(help, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(12.dp))
                 SteamDialogButtons { SteamPrimaryButton(uiStr(R.string.ui_close)) { help = "" } }
             }
-            if (showFolder) ThemedDialog(onDismissRequest = { showFolder = false }) {
+            if (showFolder) SteamDialog(onDismissRequest = { showFolder = false }) {
                 ThemedDialogTitle(uiStr(R.string.steam_store_location))
                 Text(folder, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(12.dp))

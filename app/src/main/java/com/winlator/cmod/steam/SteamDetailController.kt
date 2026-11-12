@@ -33,7 +33,10 @@ internal class SteamDetailController(private val activity: SteamActivity, privat
     private fun startActivity(intent: Intent) = activity.startActivity(intent)
     private fun notice(text: String) = com.winlator.cmod.ui.toast.WinToast.show(context, text)
 
-    val title: String = SteamGames.info(activity, appId).optJSONObject("common")?.optString("name").orEmpty().ifBlank { "Steam $appId" }
+    // The name comes from the list the manager already holds; the game's PICS file is read (on the main thread, during the
+    // page's entrance) only when the page was opened without it.
+    val title: String = cachedSteamGameName(appId)
+        ?: SteamGames.info(activity, appId).optJSONObject("common")?.optString("name").orEmpty().ifBlank { "Steam $appId" }
     val artworkPath: String = File(activity.cacheDir, "steam-art/$appId-banner.jpg").path
 
     val callbacks: SteamDetailCallbacks = object : SteamDetailCallbacks {

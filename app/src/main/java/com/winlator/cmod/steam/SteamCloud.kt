@@ -91,7 +91,7 @@ object SteamCloud {
                                         result.onSuccess { close() }.onFailure { com.winlator.cmod.ui.toast.WinToast.show(activity, uiStr(R.string.steam_cloud_pending)) }
                                     }
                                 }
-                                ThemedDialog(onDismissRequest = { answer("cancel") }) {
+                                SteamDialog(onDismissRequest = { answer("cancel") }) {
                                     ThemedDialogTitle(uiStr(R.string.steam_cloud_conflict))
                                     Text(uiStr(R.string.steam_cloud_conflict_help), style = MaterialTheme.typography.bodyMedium)
                                     androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(12.dp))
@@ -105,7 +105,7 @@ object SteamCloud {
                         if (reportText != previous && parse(reportText)?.let { it.id == id && it.phase == "launch" && it.state !in listOf(0, 2, 3, 5, 7) } == true) {
                             panel(activity, "steam-cloud-error") { close ->
                                 val leave = { close(); (activity as? com.winlator.cmod.XServerDisplayActivity)?.exitSteamLaunchFailure(); Unit }
-                                ThemedDialog(onDismissRequest = leave) {
+                                SteamDialog(onDismissRequest = leave) {
                                     ThemedDialogTitle(uiStr(R.string.steam_cloud_saves))
                                     Text(uiStr(R.string.steam_cloud_failed), style = MaterialTheme.typography.bodyMedium)
                                     androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(12.dp))

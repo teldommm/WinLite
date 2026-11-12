@@ -44,14 +44,7 @@ object ConfirmActionDialog {
             var error by remember { mutableStateOf("") }
             val scope = rememberCoroutineScope()
             ThemedDialog(onDismissRequest = { if (!busy) close() }) {
-                val local = androidx.compose.ui.platform.LocalView.current
-                DisposableEffect(local) {
-                    val window = (local.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
-                    window?.decorView?.systemUiVisibility = activity.window.decorView.systemUiVisibility
-                    if (activity.window.attributes.flags and android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN != 0)
-                        window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
-                    onDispose { }
-                }
+                com.winlator.cmod.ui.theme.DialogSystemBarsPolicy()
                 ThemedDialogTitle(title, leading = { Icon(TablerIcons.Trash, null, tint = destructiveColor()) })
                 Text(message, style = MaterialTheme.typography.bodyMedium)
                 if (busy) { Spacer(Modifier.height(10.dp)); WinZProgressBar(null) }

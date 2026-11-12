@@ -372,3 +372,11 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
         exit = fadeOut(tween(140)) + shrinkVertically(tween(160, easing = FastOutSlowInEasing))
     ) { content() }
 }
+
+/**
+ * WinLite's dialog shell on the app's system-bar policy: a Compose Dialog is a window of its own and does not inherit the
+ * activity's immersive state, so in landscape opening it brought the status bar back and shoved the layout (the same
+ * thing the sheets did). Every Steam dialog goes through this.
+ */
+@Composable internal fun SteamDialog(onDismissRequest: () -> Unit, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) =
+    com.winlator.cmod.ui.theme.ThemedDialog(onDismissRequest, modifier) { DialogSystemBarsPolicy(); content() }

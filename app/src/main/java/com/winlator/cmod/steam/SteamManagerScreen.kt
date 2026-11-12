@@ -245,7 +245,7 @@ import java.io.File
         }
     }
     if (confirmRemove && state.id > 0 && !installed && !state.downloading) {
-        com.winlator.cmod.ui.theme.ThemedDialog(onDismissRequest = { confirmRemove = false }) {
+        SteamDialog(onDismissRequest = { confirmRemove = false }) {
             com.winlator.cmod.ui.theme.ThemedDialogTitle(uiStr(R.string.steam_download_cancel_delete))
             Text(uiStr(R.string.steam_download_cancel_confirm), style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(12.dp))

@@ -12,6 +12,10 @@ import org.json.JSONObject
 private val libraryCache = java.util.concurrent.ConcurrentHashMap<String, List<LibraryItem>>()
 @Volatile private var userSnapshotCache: SteamUserSnapshot? = null
 
+/** Name of a game from the library list the manager has already read (no disk access), or null. */
+internal fun cachedSteamGameName(id: Int): String? =
+    libraryCache.values.asSequence().flatten().firstOrNull { SteamLibrary.appId(it.shortcutPath) == id }?.name?.takeIf { it.isNotBlank() }
+
 /** null until the list has been read for the first time (nothing cached either): "no games" must not be shown for that. */
 @Composable internal fun rememberSteamLibraryOrNull(context: Context, json: String, enabled: Boolean = true, filterType: String = "game"): List<LibraryItem>? {
     val changes = SteamGames.version

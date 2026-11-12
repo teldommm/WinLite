@@ -59,7 +59,7 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
     val remoteDate = saveDate(remote.size, remote.maxOfOrNull { it.time * 1000L } ?: 0L, R.string.steam_cloud_no_remote)
     val localDate = saveDate(local.size, local.maxOfOrNull { it.local.lastModified() } ?: 0L, R.string.steam_cloud_no_local)
 
-    com.winlator.cmod.ui.theme.ThemedDialog(onDismissRequest = { if (!transferring) close() }) {
+    SteamDialog(onDismissRequest = { if (!transferring) close() }) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     com.winlator.cmod.ui.theme.ThemedDialogTitle(uiStr(R.string.steam_cloud_saves))
                     Text(container.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

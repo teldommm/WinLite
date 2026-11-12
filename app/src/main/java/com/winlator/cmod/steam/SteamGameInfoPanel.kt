@@ -52,7 +52,7 @@ import java.util.Date
             badge = achievements?.let { "${it.count { a -> a.unlocked }} / ${it.size}" }
         ) { showAchievements = true }
     }
-    if (showInfo) ThemedDialog(onDismissRequest = { showInfo = false }) {
+    if (showInfo) SteamDialog(onDismissRequest = { showInfo = false }) {
         ThemedDialogTitle(uiStr(R.string.steam_ui_game_info))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val info = data.info
@@ -74,7 +74,7 @@ import java.util.Date
         Spacer(Modifier.height(12.dp))
         SteamDialogButtons { SteamPrimaryButton(uiStr(R.string.ui_close)) { showInfo = false } }
     }
-    if (showAchievements) ThemedDialog(onDismissRequest = { showAchievements = false }) {
+    if (showAchievements) SteamDialog(onDismissRequest = { showAchievements = false }) {
         run {
             Column(Modifier.fillMaxWidth().heightIn(max = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .8f).dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
