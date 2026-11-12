@@ -122,7 +122,7 @@ class SteamActivity : ImmersiveSteamActivity() {
                             visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = { IconButton(onClick = { visible = !visible }) { Icon(if (visible) TablerIcons.EyeOff else TablerIcons.Eye, uiStr(R.string.steam_ui_show_password)) } },
                             singleLine = true, enabled = !state.busy, shape = WinZShapes.Medium, modifier = Modifier.fillMaxWidth())
-                        Button(colors = steamButtonColors(), onClick = { SteamSession.login(username, password); password = ""; visible = false },
+                        Button(onClick = { SteamSession.login(username, password); password = ""; visible = false },
                             enabled = state.ready && !state.busy && username.isNotBlank() && password.isNotEmpty(),
                             shape = WinZShapes.Medium, colors = steamButtonColors(), modifier = Modifier.fillMaxWidth().height(50.dp)) {
                             if (state.busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White) else Text(uiStr(R.string.steam_ui_sign_in))
