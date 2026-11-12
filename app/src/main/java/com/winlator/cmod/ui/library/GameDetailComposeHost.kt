@@ -270,7 +270,7 @@ private val POSTER_TOP = 132.dp
 // selected All / Favorites / Recent chip, but always light-on-dark: the artwork under it is darkened
 // by a scrim in every theme, so the White theme's dark glyph would vanish.
 @Composable
-private fun ArtPlateButton(onClick: () -> Unit, modifier: Modifier, content: @Composable () -> Unit) {
+internal fun ArtPlateButton(onClick: () -> Unit, modifier: Modifier, content: @Composable () -> Unit) {
     Surface(
         onClick = onClick,
         modifier = modifier.size(44.dp),
@@ -283,7 +283,7 @@ private fun ArtPlateButton(onClick: () -> Unit, modifier: Modifier, content: @Co
 
 // Favorite star on the same plate as the back arrow; filled and in the accent colour when set.
 @Composable
-private fun FavoriteButton(favorite: Boolean, onToggle: () -> Unit, modifier: Modifier) {
+internal fun FavoriteButton(favorite: Boolean, onToggle: () -> Unit, modifier: Modifier) {
     ArtPlateButton(onClick = onToggle, modifier = modifier) {
         Icon(
             if (favorite) TablerIcons.StarFilled else TablerIcons.Star,
@@ -296,7 +296,7 @@ private fun FavoriteButton(favorite: Boolean, onToggle: () -> Unit, modifier: Mo
 
 // Square button for the landscape panel: icon over a short caption, light on the dark panel.
 @Composable
-private fun DetailIconAction(item: DetailActionItem, modifier: Modifier, compactCaption: Boolean) {
+internal fun DetailIconAction(item: DetailActionItem, modifier: Modifier, compactCaption: Boolean) {
     val content = when {
         item.destructive -> destructiveColor()
         item.accent -> controlAccentColor()
@@ -443,7 +443,7 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, ar
 
 // Full-width row of the portrait list: theme surface and outline; only a destructive row is red.
 @Composable
-private fun DetailAction(item: DetailActionItem, modifier: Modifier) {
+internal fun DetailAction(item: DetailActionItem, modifier: Modifier) {
     val tint = if (item.destructive) destructiveColor() else MaterialTheme.colorScheme.onSurface
     Surface(
         onClick = item.onClick,
@@ -464,7 +464,7 @@ private fun DetailAction(item: DetailActionItem, modifier: Modifier) {
 
 // Playtime, plays, last launch and size, as dark glass chips (they always sit on the artwork) with
 
-private class StatEntry(val icon: ImageVector, val label: String, val value: String)
+internal class StatEntry(val icon: ImageVector, val label: String, val value: String)
 
 // The chips are measured, not guessed, so no chip is ever left alone on a second line under another:
 //  1. one row at full size when it fits;
@@ -477,7 +477,7 @@ private fun StatChips(stats: GameStats, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun rememberStatEntries(stats: GameStats, always: Boolean = false): List<StatEntry> {
+internal fun rememberStatEntries(stats: GameStats, always: Boolean = false): List<StatEntry> {
     // Labels resolved here: the remember block below is not a composable context.
     val playtimeLabel = stringResource(R.string.ui_stat_playtime)
     val playsLabel = stringResource(R.string.ui_stat_plays)
@@ -500,7 +500,7 @@ private fun rememberStatEntries(stats: GameStats, always: Boolean = false): List
 }
 
 @Composable
-private fun StatChipRow(entries: List<StatEntry>, modifier: Modifier = Modifier) {
+internal fun StatChipRow(entries: List<StatEntry>, modifier: Modifier = Modifier) {
     if (entries.isEmpty()) return
     SubcomposeLayout(modifier) { constraints ->
         val gap = 8.dp.roundToPx()
@@ -584,7 +584,7 @@ private fun StatChip(entry: StatEntry, fill: Boolean) {
     }
 }
 
-private class DetailActionItem(
+internal class DetailActionItem(
     val icon: ImageVector,
     // Caption under the icon in the landscape panel / the row text in the portrait list.
     val label: String,

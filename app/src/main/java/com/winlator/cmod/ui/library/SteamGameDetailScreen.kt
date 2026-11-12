@@ -7,6 +7,8 @@ import android.graphics.Bitmap
 import java.io.File
 import java.nio.file.Files
 import org.json.JSONObject
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -18,18 +20,24 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
 import com.winlator.cmod.container.Shortcut
+import com.winlator.cmod.steam.SteamChoiceItem
+import com.winlator.cmod.steam.SteamMenu
 import com.winlator.cmod.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,8 +54,9 @@ interface SteamDetailCallbacks {
     fun onSteamExecutable()
 }
 
-// Steam game page used by SteamActivity (ported from Winlator-Ludashi 5.0, laid out like WinLite's own
-// game page). Installed Steam games also exist as ordinary shortcuts, so the Library lists them too.
+// Steam game page used by SteamActivity. It is WinLite's own game page (GameDetailComposeHost) in every detail:
+// the same scrims, plates, dark-glass stat chips on the picture, accent Play button and action tiles/rows,
+// built from the same pieces. Installed Steam games also exist as ordinary shortcuts, so the Library lists them too.
 object SteamDetailHost {
     @JvmStatic
     fun create(context: Context, title: String, artwork: String?, id: Int, callbacks: SteamDetailCallbacks): ComposeView =
@@ -104,11 +113,13 @@ private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: Stri
         val steamPlay = withContext(Dispatchers.IO) {
             steamId?.let { com.winlator.cmod.steam.SteamUserData.game(context, it) }
         }
+        // loaded = true even for a game that was never run: the chips are always drawn (zeros / dashes), as on WinLite's page.
         val basic = loaded.copy(
             playtimeMillis = maxOf(loaded.playtimeMillis,
                 steamPlay?.optLong("playtimeForever")?.coerceAtLeast(0L)?.times(60000L) ?: 0L),
             lastPlayedMillis = maxOf(loaded.lastPlayedMillis,
-                steamPlay?.optLong("rtimeLastPlayed")?.coerceAtLeast(0L)?.times(1000L) ?: 0L)
+                steamPlay?.optLong("rtimeLastPlayed")?.coerceAtLeast(0L)?.times(1000L) ?: 0L),
+            loaded = true
         )
         value = basic
         value = withContext(Dispatchers.IO) {
@@ -123,73 +134,97 @@ private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: Stri
     val toggle = { favorite = !favorite; callbacks.onFavorite(favorite) }
     val configured = true
     val executable = shortcut?.getExtra("steamExecutable").orEmpty()
+    val items = steamDetailItems(callbacks, steamId != null)
     androidx.compose.runtime.CompositionLocalProvider(LocalSteamExecutable provides executable, LocalSteamInfoId provides steamId, LocalSteamDetail provides (steamId != null), LocalSteamReady provides configured, LocalSteamMode provides (steamId?.let { com.winlator.cmod.steam.SteamSettings.mode(context, it) } ?: "RealSteam")) {
-    if (landscape) LandscapeDetail(title, subtitle, artwork, favorite, stats, callbacks, toggle)
-    else PortraitDetail(title, subtitle, artwork, favorite, stats, callbacks, toggle)
+    if (landscape) LandscapeDetail(title, subtitle, artwork, favorite, stats, items, callbacks, toggle)
+    else PortraitDetail(title, subtitle, artwork, favorite, stats, items, callbacks, toggle)
     }
 }
 
+// The same five actions as WinLite's game page (caption under the icon in landscape / row text in portrait).
 @Composable
-private fun Artwork(artwork: Bitmap?, modifier: Modifier) {
-    Box(modifier.clipToBounds().background(MaterialTheme.colorScheme.background)) {
-        if (artwork != null) Image(artwork.asImageBitmap(), null, Modifier.fillMaxSize().kenBurns(), contentScale = ContentScale.Crop)
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(.22f), Color.Transparent, Color.Black.copy(.88f)))))
+private fun steamDetailItems(callbacks: SteamDetailCallbacks, steam: Boolean): List<DetailActionItem> {
+    val configure = stringResource(R.string.ui_configure)
+    val container = stringResource(R.string.ui_container)
+    val enterContainer = stringResource(R.string.ui_enter_container)
+    val home = stringResource(R.string.ui_home)
+    val addToHome = stringResource(R.string.ui_add_to_home)
+    val saves = savesLabel()
+    val remove = if (steam) stringResource(R.string.steam_ui_uninstall) else stringResource(R.string.remove)
+    return listOf(
+        DetailActionItem(TablerIcons.Settings, configure, configure, callbacks::onConfigure),
+        DetailActionItem(TablerIcons.Server, container, enterContainer, callbacks::onArguments),
+        DetailActionItem(TablerIcons.CloudUpload, saves, saves, callbacks::onSaves),
+        DetailActionItem(TablerIcons.Home, home, addToHome, callbacks::onHome),
+        DetailActionItem(TablerIcons.Trash, remove, remove, callbacks::onRemove, destructive = true)
+    )
+}
+
+// The picture of the page: sharp, full-bleed, slowly breathing (a banner, as on WinLite's page).
+@Composable
+private fun SteamArtwork(artwork: Bitmap) {
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        Image(artwork.asImageBitmap(), null, Modifier.fillMaxSize().kenBurns(), contentScale = ContentScale.Crop)
     }
 }
 
+// Landscape: the picture stays open, the controls sit in the corners (layout of WinLite's landscape game page).
+//   top-left     : back plate, then the title under it      top-right : favorite plate
+//   bottom-right : one compact panel - Play (+ exe / mode pickers) and a row of icon buttons with captions
+//   bottom-left  : the stat chips, then Game info / Achievements; where the picture and the panel leave no
+//                  room (small phone) they move into the panel.
 @Composable
-private fun ArtControls(favorite: Boolean, toggle: () -> Unit) {
+private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: SteamDetailCallbacks, toggle: () -> Unit) {
     val activity = LocalContext.current as? androidx.activity.ComponentActivity
-    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        ArtButton({ activity?.onBackPressedDispatcher?.onBackPressed() }) { Icon(TablerIcons.ArrowLeft, stringResource(R.string.ui_back)) }
-        ArtButton(toggle) { Icon(if (favorite) TablerIcons.StarFilled else TablerIcons.Star, stringResource(R.string.ui_favorite)) }
-    }
-}
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        val artAlpha by animateFloatAsState(if (artwork != null) 1f else 0f, tween(420), label = "steamDetailArt")
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = artAlpha }) { if (artwork != null) SteamArtwork(artwork) }
+        Box(Modifier.align(Alignment.TopStart).fillMaxWidth().height(132.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(.66f), Color.Transparent))))
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(210.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.60f)))))
 
-@Composable
-private fun ArtButton(onClick: () -> Unit, content: @Composable () -> Unit) {
-    Surface(onClick, Modifier.size(44.dp), shape = WinZShapes.Medium, color = Color.Black.copy(.55f), contentColor = Color.White,
-        border = BorderStroke(1.dp, Color.White.copy(.18f))) { Box(contentAlignment = Alignment.Center) { content() } }
-}
-
-@Composable
-private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, stats: GameStats, callbacks: SteamDetailCallbacks, toggle: () -> Unit) {
-    Box(Modifier.fillMaxSize()) {
-        Artwork(artwork, Modifier.fillMaxSize())
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
-            ArtControls(favorite, toggle)
-            Column(Modifier.align(Alignment.TopStart).padding(start = 76.dp, end = 76.dp, top = 18.dp)) {
-                Text(title, color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(subtitle, color = Color.White.copy(.75f), style = MaterialTheme.typography.bodyMedium, maxLines = 2)
-            }
-            val compact = maxWidth < 700.dp || maxHeight < 360.dp
-            val available = (maxWidth - 54.dp).coerceAtLeast(200.dp)
-            val panelWidth = minOf(available * .55f, if (compact) 340.dp else 420.dp)
-            val statsWidth = (available - panelWidth).coerceAtLeast(100.dp)
-            Surface(Modifier.align(Alignment.BottomEnd).padding(18.dp).width(panelWidth).heightIn(max = (maxHeight - 116.dp).coerceAtLeast(100.dp)),
-                shape = WinZShapes.ExtraLarge, color = Color.Black.copy(.48f), border = BorderStroke(1.dp, Color.White.copy(.18f))) {
-                Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PlayButton(callbacks::onPlay, { mode -> callbacks.onSteamMode(mode) }, { callbacks.onSteamExecutable() })
-                    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LandscapeAction(TablerIcons.Settings, stringResource(R.string.ui_configure), Modifier.weight(1f), callbacks::onConfigure)
-                        LandscapeAction(TablerIcons.Server, stringResource(R.string.ui_container), Modifier.weight(1f), callbacks::onArguments)
-                        LandscapeAction(TablerIcons.CloudUpload, savesLabel(), Modifier.weight(1f), callbacks::onSaves)
-                        LandscapeAction(TablerIcons.Home, stringResource(R.string.ui_home), Modifier.weight(1f), callbacks::onHome)
-                        LandscapeAction(TablerIcons.Trash, if (LocalSteamDetail.current) stringResource(R.string.steam_ui_uninstall) else stringResource(R.string.remove), Modifier.weight(1f), callbacks::onRemove, true)
-                    }
-                }
-            }
-            if (stats.hasAny || LocalSteamDetail.current) {
+            val panelWidth = (maxWidth * 0.42f).coerceIn(320.dp, 400.dp)
+            val iconCell = (panelWidth - 28.dp - 8.dp * (items.size - 1)) / items.size
+            val compactCaptions = iconCell < 64.dp
+            val infoId = LocalSteamInfoId.current
+            val leftStart = 34.dp
+            val leftWidth = maxWidth - leftStart - (panelWidth + 34.dp + 16.dp)
+            val inPanel = leftWidth < 190.dp
+            val panelMax = (maxHeight - 132.dp - 24.dp).coerceAtLeast(120.dp)
+
+            if (!inPanel) {
                 Column(
-                    Modifier.align(Alignment.BottomStart).padding(18.dp)
-                        .width(minOf(statsWidth, 440.dp))
-                        .heightIn(max = (maxHeight - 128.dp).coerceAtLeast(80.dp))
-                        .verticalScroll(rememberScrollState()),
+                    Modifier.align(Alignment.BottomStart).padding(start = leftStart, bottom = 24.dp).width(leftWidth)
+                        .heightIn(max = panelMax).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (stats.hasAny) StatsGrid(stats, Modifier.fillMaxWidth(), onArtwork = true)
-                    LocalSteamInfoId.current?.let {
-                        com.winlator.cmod.steam.SteamGameInfoPanel(it, landscape = true, onArtwork = true)
+                    if (stats.loaded) StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
+                    infoId?.let { com.winlator.cmod.steam.SteamGameInfoPanel(it, landscape = true, onArtwork = true) }
+                }
+            }
+
+            ArtPlateButton(onClick = { activity?.onBackPressedDispatcher?.onBackPressed() }, modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 16.dp)) {
+                Icon(TablerIcons.ArrowLeft, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp))
+            }
+            Column(Modifier.align(Alignment.TopStart).padding(start = 74.dp, end = 74.dp, top = 15.dp)) {
+                Text(title, color = Color.White,
+                    style = MaterialTheme.typography.headlineLarge.copy(shadow = Shadow(OnArtwork.TextShadow, Offset(0f, 2f), 6f)),
+                    fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, color = OnArtwork.TextSecondary,
+                    style = MaterialTheme.typography.bodyLarge.copy(shadow = Shadow(OnArtwork.TextShadow, Offset(0f, 1f), 4f)))
+            }
+            FavoriteButton(favorite, toggle, Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 16.dp))
+
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 34.dp, bottom = 24.dp).width(panelWidth).heightIn(max = panelMax),
+                shape = WinZShapes.Large, color = OnArtwork.PanelFill, border = BorderStroke(1.dp, OnArtwork.PlateBorder)
+            ) {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (inPanel && stats.loaded) StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
+                    PlayButton(callbacks::onPlay, { mode -> callbacks.onSteamMode(mode) }, { callbacks.onSteamExecutable() }, onArtwork = true, height = 58.dp)
+                    if (inPanel) infoId?.let { com.winlator.cmod.steam.SteamGameInfoPanel(it, landscape = true, onArtwork = true) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items.forEach { DetailIconAction(it, Modifier.weight(1f), compactCaptions) }
                     }
                 }
             }
@@ -198,26 +233,30 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, f
 }
 
 @Composable
-private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, stats: GameStats, callbacks: SteamDetailCallbacks, toggle: () -> Unit) {
-    // One scrolling column: title, two-column statistics and actions stay reachable at large fonts.
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).verticalScroll(rememberScrollState())) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1.28f)) {
-            Artwork(artwork, Modifier.fillMaxSize())
-            ArtControls(favorite, toggle)
-            Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
-                Text(title, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(subtitle, color = Color.White.copy(.75f), style = MaterialTheme.typography.bodyMedium)
+private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: SteamDetailCallbacks, toggle: () -> Unit) {
+    val activity = LocalContext.current as? androidx.activity.ComponentActivity
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // The stat chips sit under the title, over the picture, exactly as on WinLite's page.
+        Box(Modifier.fillMaxWidth().aspectRatio(1.12f).background(MaterialTheme.colorScheme.surface)) {
+            if (artwork != null) SteamArtwork(artwork)
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(.38f), Color.Transparent, Color.Black.copy(.88f)))))
+            ArtPlateButton(onClick = { activity?.onBackPressedDispatcher?.onBackPressed() }, modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 14.dp)) {
+                Icon(TablerIcons.ArrowLeft, stringResource(R.string.ui_back), modifier = Modifier.size(24.dp))
+            }
+            FavoriteButton(favorite, toggle, Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 14.dp))
+            Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                if (stats.loaded) {
+                    Spacer(Modifier.height(6.dp))
+                    StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
+                }
             }
         }
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (stats.hasAny) StatsGrid(stats, Modifier.fillMaxWidth())
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PlayButton(callbacks::onPlay, { mode -> callbacks.onSteamMode(mode) }, { callbacks.onSteamExecutable() }, onArtwork = false, height = 54.dp)
             LocalSteamInfoId.current?.let { com.winlator.cmod.steam.SteamGameInfoPanel(it) }
-            PlayButton(callbacks::onPlay, { mode -> callbacks.onSteamMode(mode) }, { callbacks.onSteamExecutable() })
-            DetailAction(TablerIcons.Settings, stringResource(R.string.ui_configure), callbacks::onConfigure)
-            DetailAction(TablerIcons.Server, stringResource(R.string.ui_enter_container), callbacks::onArguments)
-            DetailAction(TablerIcons.CloudUpload, savesLabel(), callbacks::onSaves)
-            DetailAction(TablerIcons.Home, stringResource(R.string.ui_add_to_home), callbacks::onHome)
-            DetailAction(TablerIcons.Trash, if (LocalSteamDetail.current) stringResource(R.string.steam_ui_uninstall) else stringResource(R.string.remove), callbacks::onRemove, true)
+            items.forEach { DetailAction(it, Modifier.fillMaxWidth()) }
             Spacer(Modifier.height(12.dp))
         }
     }
@@ -227,103 +266,67 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, fa
 private fun savesLabel(): String = if (LocalSteamDetail.current && LocalSteamMode.current == "RealSteam")
     stringResource(R.string.steam_cloud_saves) else stringResource(R.string.ui_saves)
 
+// Play = WinLite's Play button (accent fill, white content, 14dp radius). Steam adds two square buttons next to it:
+// choose the executable and choose how to launch (Steam client / offline), on the same plates as the rest of the page.
 @Composable
-private fun PlayButton(click: () -> Unit, chooseMode: (String) -> Unit, chooseExecutable: () -> Unit) {
+private fun PlayButton(click: () -> Unit, chooseMode: (String) -> Unit, chooseExecutable: () -> Unit, onArtwork: Boolean, height: Dp) {
     val steam = LocalSteamDetail.current
     val mode = LocalSteamMode.current
     val modeProgress = LocalSteamInfoId.current?.let { com.winlator.cmod.steam.SteamLaunch.modeStatus(it) }
     val modeBusy = modeProgress?.busy == true
+    val accent = controlAccentColor()
     var expanded by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth()) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Button(click, enabled = LocalSteamReady.current && !modeBusy, modifier = Modifier.weight(1f).heightIn(min = if (steam) 44.dp else 52.dp), shape = WinZShapes.Medium) {
-            Icon(TablerIcons.PlayerPlay, null); Spacer(Modifier.width(8.dp))
-            Text(if (!LocalSteamReady.current) stringResource(R.string.steam_ui_configure_first)
-                else if (steam) stringResource(if (mode == "RealSteam") R.string.steam_ui_client else R.string.steam_ui_offline)
-                else stringResource(R.string.ui_play), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        if (steam) IconButton(onClick = chooseExecutable, enabled = !modeBusy, modifier = Modifier.size(40.dp)) {
-            Icon(TablerIcons.FolderOpen, stringResource(R.string.steam_ui_choose_exe), Modifier.size(20.dp))
-        }
-        if (steam) Box {
-            FilledTonalIconButton(onClick = { expanded = true }, enabled = !com.winlator.cmod.steam.SteamSession.gameActive && !modeBusy) {
-                Icon(TablerIcons.ChevronDown, stringResource(R.string.steam_ui_launch))
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                click, enabled = LocalSteamReady.current && !modeBusy,
+                modifier = Modifier.weight(1f).height(height), shape = WinZShapes.Medium,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = accent, contentColor = Color.White,
+                    disabledContainerColor = accent.copy(alpha = .38f), disabledContentColor = Color.White.copy(alpha = .62f)
+                )
+            ) {
+                Icon(TablerIcons.PlayerPlay, null, Modifier.size(if (height >= 58.dp) 30.dp else 24.dp)); Spacer(Modifier.width(8.dp))
+                Text(if (!LocalSteamReady.current) stringResource(R.string.steam_ui_configure_first)
+                    else if (steam) stringResource(if (mode == "RealSteam") R.string.steam_ui_client else R.string.steam_ui_offline)
+                    else stringResource(R.string.ui_play), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            DropdownMenu(expanded, { expanded = false }) {
-                listOf("RealSteam" to R.string.steam_ui_client, "Goldberg" to R.string.steam_ui_offline).forEach { (value, label) ->
-                    DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { expanded = false; chooseMode(value) },
-                        trailingIcon = { if (mode == value) Icon(TablerIcons.Check, null) })
-                }
-            }
-        }
-    }
-    if (modeProgress != null && modeBusy) {
-        WinZProgressBar(if (modeProgress.total > 0) (modeProgress.done.toFloat() / modeProgress.total).coerceIn(0f, 1f) else null)
-        Text(when (modeProgress.stage) {
-            "download" -> stringResource(R.string.steam_mode_downloading)
-            "verify" -> stringResource(R.string.steam_mode_verifying)
-            "extract" -> stringResource(R.string.steam_mode_extracting)
-            "client" -> stringResource(R.string.steam_mode_client)
-            else -> stringResource(R.string.steam_mode_preparing)
-        }, style = MaterialTheme.typography.labelSmall)
-    } else if (modeProgress?.error?.isNotBlank() == true) {
-        Text(modeProgress.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-    }
-    }
-}
-
-@Composable
-private fun LandscapeAction(icon: ImageVector, label: String, modifier: Modifier, click: () -> Unit, destructive: Boolean = false) {
-    Surface(click, modifier.fillMaxHeight(), shape = WinZShapes.Medium, color = Color.White.copy(.10f), contentColor = if (destructive) MaterialTheme.colorScheme.error else Color.White,
-        border = BorderStroke(1.dp, Color.White.copy(.16f))) {
-        Column(Modifier.padding(horizontal = 3.dp, vertical = if (LocalSteamDetail.current) 6.dp else 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Icon(icon, null, Modifier.size(if (LocalSteamDetail.current) 20.dp else 23.dp)); Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-private fun DetailAction(icon: ImageVector, label: String, click: () -> Unit, destructive: Boolean = false) {
-    Surface(click, Modifier.fillMaxWidth().heightIn(min = if (LocalSteamDetail.current) 48.dp else 54.dp), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null); Spacer(Modifier.width(12.dp)); Text(label, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-private data class Stat(val icon: ImageVector, val label: String, val value: String)
-@Composable
-private fun StatsGrid(stats: GameStats, modifier: Modifier = Modifier, onArtwork: Boolean = false) {
-    val entries = buildList {
-        if (stats.playtimeMillis > 0) add(Stat(TablerIcons.Clock, stringResource(R.string.ui_stat_playtime), formatPlaytime(stats.playtimeMillis)))
-        if (stats.playCount > 0) add(Stat(TablerIcons.DeviceGamepad2, stringResource(R.string.ui_stat_plays), stats.playCount.toString()))
-        if (stats.lastPlayedMillis > 0) add(Stat(TablerIcons.History, stringResource(R.string.ui_stat_last_played), formatLastPlayed(stats.lastPlayedMillis)))
-        stats.sizeText?.let { add(Stat(TablerIcons.Database, stringResource(R.string.ui_stat_size), it)) }
-    }
-    BoxWithConstraints(modifier) {
-        val columns = if (maxWidth >= (if (onArtwork) 200.dp else 280.dp) && LocalConfiguration.current.fontScale <= 1.3f) 2 else 1
-        val showIcons = maxWidth >= 280.dp
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            entries.chunked(columns).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { entry ->
-                        Surface(Modifier.weight(1f), shape = WinZShapes.Small, color = if (onArtwork) Color.Black.copy(.58f) else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (onArtwork) Color.White else MaterialTheme.colorScheme.onSurface,
-                            border = BorderStroke(1.dp, if (onArtwork) Color.White.copy(.16f) else MaterialTheme.colorScheme.outlineVariant)) {
-                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (showIcons) { Icon(entry.icon, null, Modifier.size(20.dp)); Spacer(Modifier.width(10.dp)) }
-                                Column(Modifier.weight(1f)) {
-                                    Text(entry.label, style = MaterialTheme.typography.labelSmall, color = LocalContentColor.current.copy(.7f))
-                                    Text(entry.value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                }
-                            }
-                        }
+            if (steam) SteamSquareButton(TablerIcons.FolderOpen, stringResource(R.string.steam_ui_choose_exe), !modeBusy, onArtwork, chooseExecutable)
+            if (steam) Box {
+                SteamSquareButton(TablerIcons.ChevronDown, stringResource(R.string.steam_ui_launch), !com.winlator.cmod.steam.SteamSession.gameActive && !modeBusy, onArtwork) { expanded = true }
+                SteamMenu(expanded, { expanded = false }) {
+                    listOf("RealSteam" to R.string.steam_ui_client, "Goldberg" to R.string.steam_ui_offline).forEach { (value, label) ->
+                        SteamChoiceItem(stringResource(label), mode == value) { expanded = false; chooseMode(value) }
                     }
-                    if (row.size < columns) Spacer(Modifier.weight(1f))
                 }
             }
+        }
+        if (modeProgress != null && modeBusy) {
+            WinZProgressBar(if (modeProgress.total > 0) (modeProgress.done.toFloat() / modeProgress.total).coerceIn(0f, 1f) else null)
+            Text(when (modeProgress.stage) {
+                "download" -> stringResource(R.string.steam_mode_downloading)
+                "verify" -> stringResource(R.string.steam_mode_verifying)
+                "extract" -> stringResource(R.string.steam_mode_extracting)
+                "client" -> stringResource(R.string.steam_mode_client)
+                else -> stringResource(R.string.steam_mode_preparing)
+            }, style = MaterialTheme.typography.labelSmall, color = if (onArtwork) OnArtwork.TextSecondary else MaterialTheme.colorScheme.onSurfaceVariant)
+        } else if (modeProgress?.error?.isNotBlank() == true) {
+            Text(modeProgress.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+// Square icon button beside Play: dark glass on the artwork panel, the theme surface in the portrait list.
+@Composable
+private fun SteamSquareButton(icon: ImageVector, description: String, enabled: Boolean, onArtwork: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick, enabled = enabled, modifier = Modifier.size(48.dp), shape = WinZShapes.Medium,
+        color = if (onArtwork) OnArtwork.PlateFill else MaterialTheme.colorScheme.surface,
+        contentColor = if (onArtwork) Color.White else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, if (onArtwork) OnArtwork.PlateBorder else MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, description, Modifier.size(22.dp), tint = LocalContentColor.current.copy(alpha = if (enabled) 1f else .38f))
         }
     }
 }

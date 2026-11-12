@@ -86,8 +86,8 @@ class StoreSettingsActivity : ImmersiveSteamActivity() {
                             Box {
                                 SteamRow(TablerIcons.Gauge, uiStr(R.string.steam_ui_download_speed), speedLabel(tier), onClick = { speedMenu = true },
                                     trailing = { Icon(TablerIcons.ChevronDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) })
-                                DropdownMenu(speedMenu, { speedMenu = false }) {
-                                    SteamDownloadSettings.tiers.forEach { index -> DropdownMenuItem(text = { Text(speedLabel(index)) }, onClick = { tier = index; SteamDownloadSettings.setTier(this@StoreSettingsActivity, index); speedMenu = false }) }
+                                SteamMenu(speedMenu, { speedMenu = false }) {
+                                    SteamDownloadSettings.tiers.forEach { index -> SteamChoiceItem(speedLabel(index), index == tier) { tier = index; SteamDownloadSettings.setTier(this@StoreSettingsActivity, index); speedMenu = false } }
                                 }
                             }
                         }

@@ -68,7 +68,7 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
                         Text(uiStr(R.string.steam_native_cloud_checking), style = MaterialTheme.typography.bodySmall)
                     } else if (previewError.isNotBlank()) {
                         Text(previewError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                        TextButton(onClick = { refresh++ }) { Text(uiStr(R.string.steam_cloud_retry)) }
+                        SteamSecondaryButton(uiStr(R.string.steam_cloud_retry), icon = TablerIcons.Refresh) { refresh++ }
                     } else {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Icon(TablerIcons.Download, null, Modifier.size(22.dp))
@@ -78,7 +78,7 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
                                 Text(remoteDate, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+                        HorizontalDivider(color = com.winlator.cmod.ui.theme.dividerColor())
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Icon(TablerIcons.Database, null, Modifier.size(22.dp))
                             Spacer(Modifier.width(12.dp))
@@ -89,13 +89,11 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
                         }
                         if (direction == null && result.isBlank()) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(modifier = Modifier.weight(1f), enabled = remote.isNotEmpty(),
-                                    onClick = { direction = SteamNativeCloud.Direction.Download; transferError = "" }) {
-                                    Text(uiStr(R.string.steam_cloud_download_action), maxLines = 2)
+                                SteamSecondaryButton(uiStr(R.string.steam_cloud_download_action), Modifier.weight(1f), enabled = remote.isNotEmpty(), icon = TablerIcons.Download) {
+                                    direction = SteamNativeCloud.Direction.Download; transferError = ""
                                 }
-                                OutlinedButton(modifier = Modifier.weight(1f), enabled = local.isNotEmpty(),
-                                    onClick = { direction = SteamNativeCloud.Direction.Upload; transferError = "" }) {
-                                    Text(uiStr(R.string.steam_cloud_upload_action), maxLines = 2)
+                                SteamSecondaryButton(uiStr(R.string.steam_cloud_upload_action), Modifier.weight(1f), enabled = local.isNotEmpty(), icon = TablerIcons.CloudUpload) {
+                                    direction = SteamNativeCloud.Direction.Upload; transferError = ""
                                 }
                             }
                         } else if (transferring) {
@@ -122,7 +120,7 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
                         } else {
                             SteamSecondaryButton(if (result.isNotBlank()) uiStr(R.string.ui_close) else uiStr(R.string.steam_ui_back), enabled = !transferring) { if (result.isNotBlank()) close() else direction = null }
                             if (!previewLoading && previewError.isBlank() && result.isBlank() && transferError.isBlank() && !transferring && needsTransfer > 0) {
-                                Button(colors = steamButtonColors(), onClick = {
+                                SteamPrimaryButton(uiStr(if (direction == SteamNativeCloud.Direction.Download) R.string.steam_cloud_apply_download else R.string.steam_cloud_confirm_upload), onClick = {
                                     transferring = true
                                     finished = 0
                                     total = 0
@@ -137,9 +135,7 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
                                         transferring = false
                                         synced.onSuccess { result = it }.onFailure { transferError = it.message ?: uiStr(R.string.steam_cloud_failed) }
                                     }
-                                }) {
-                                    Text(uiStr(if (direction == SteamNativeCloud.Direction.Download) R.string.steam_cloud_apply_download else R.string.steam_cloud_confirm_upload))
-                                }
+                                })
                             }
                         }
                     }

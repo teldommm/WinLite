@@ -42,31 +42,28 @@ import kotlinx.coroutines.withContext
             .onFailure { error = it.message.orEmpty() }
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(uiStr(R.string.steam_play_setup), style = MaterialTheme.typography.titleLarge)
+        com.winlator.cmod.ui.theme.ThemedDialogTitle(uiStr(R.string.steam_play_setup))
         Box {
-            OutlinedButton(enabled = !busy, onClick = { containerMenu = true }) {
-                Text(selected?.name ?: uiStr(R.string.steam_ui_create_container))
-            }
-            DropdownMenu(containerMenu, { containerMenu = false }) {
+            SteamDropdownButton(selected?.name ?: uiStr(R.string.steam_ui_create_container), Modifier.fillMaxWidth(), enabled = !busy) { containerMenu = true }
+            SteamMenu(containerMenu, { containerMenu = false }) {
                 containers.forEach { c ->
-                    DropdownMenuItem(text = { Text(c.name) }, onClick = { selected = c; containerMenu = false })
+                    SteamChoiceItem(c.name, c.id == selected?.id) { selected = c; containerMenu = false }
                 }
             }
         }
         Box {
-            OutlinedButton(enabled = !busy, onClick = { menu = true }) {
-                Text(exe.ifBlank { uiStr(R.string.steam_ui_choose_exe) }, maxLines = 2)
-            }
-            DropdownMenu(menu, { menu = false }, Modifier.heightIn(max = 260.dp)) {
+            SteamDropdownButton(exe.ifBlank { uiStr(R.string.steam_ui_choose_exe) }, Modifier.fillMaxWidth(), enabled = !busy, maxLines = 2) { menu = true }
+            SteamMenu(menu, { menu = false }, Modifier.heightIn(max = 260.dp)) {
                 executables.forEach { path ->
-                    DropdownMenuItem(text = { Text(path) }, onClick = { exe = path; menu = false })
+                    SteamChoiceItem(path, path == exe) { exe = path; menu = false }
                 }
             }
         }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         SteamDialogButtons {
             SteamSecondaryButton(uiStr(R.string.steam_ui_cancel), enabled = !busy, onClick = dismiss)
-            Button(colors = steamButtonColors(), enabled = selected != null && exe.isNotBlank() && !busy, onClick = {
+            SteamPrimaryButton(if (busy) uiStr(R.string.steam_ui_preparing) else if (play) uiStr(R.string.ui_play) else uiStr(R.string.steam_ui_save_launch),
+                enabled = selected != null && exe.isNotBlank() && !busy, onClick = {
                 busy = true
                 scope.launch {
                     val result = withContext(Dispatchers.IO) { runCatching {
@@ -85,7 +82,7 @@ import kotlinx.coroutines.withContext
                         done(shortcut)
                     }.onFailure { error = it.message.orEmpty() }
                 }
-            }) { Text(if (busy) uiStr(R.string.steam_ui_preparing) else if (play) uiStr(R.string.ui_play) else uiStr(R.string.steam_ui_save_launch)) }
+            })
         }
     }
 

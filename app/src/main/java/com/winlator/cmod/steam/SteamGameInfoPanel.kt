@@ -21,6 +21,7 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import com.bumptech.glide.Glide
 import java.text.DateFormat
 import java.util.Date
@@ -76,9 +77,10 @@ import java.util.Date
         run {
             Column(Modifier.fillMaxWidth().heightIn(max = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .8f).dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(uiStr(R.string.steam_ui_achievements), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    Text(uiStr(R.string.steam_ui_achievements), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
                     IconButton(enabled = state.signedIn && !state.gameActive && !SteamUserData.busy("achievements-$id"), onClick = { SteamUserData.refreshAchievements(context, id, true) }) { Icon(TablerIcons.Refresh, uiStr(R.string.steam_ui_refresh_info)) }
                 }
+                HorizontalDivider(color = com.winlator.cmod.ui.theme.dividerColor())
                 if (achievements == null) Text(if (SteamUserData.busy("achievements-$id")) uiStr(R.string.steam_ui_loading_achievements) else uiStr(R.string.steam_ui_connect_achievements))
                 else {
                     Text(uiStr(R.string.steam_ui_ach_count, achievements.count { it.unlocked }, achievements.size))
@@ -102,6 +104,8 @@ import java.util.Date
     }
 }
 
+// Game info / Achievements buttons. On the artwork (landscape page) they are dark-glass plates like the rest of WinLite's
+// page controls; in the portrait list they are the same theme-surface rows as the page's action rows.
 @Composable
 private fun SteamInfoAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -111,26 +115,20 @@ private fun SteamInfoAction(
     modifier: Modifier,
     onClick: () -> Unit
 ) {
+    val glass = landscape || onArtwork
     Surface(
         onClick = onClick,
-        modifier = modifier.heightIn(min = if (landscape) 60.dp else 48.dp),
+        modifier = modifier,
         shape = WinZShapes.Medium,
-        color = if (onArtwork) Color.Black.copy(alpha = .58f) else if (landscape) Color.White.copy(alpha = .10f) else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (landscape || onArtwork) Color.White else MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, if (landscape || onArtwork) Color.White.copy(alpha = .16f) else MaterialTheme.colorScheme.outlineVariant)
+        color = if (glass) com.winlator.cmod.ui.theme.OnArtwork.PlateFill else MaterialTheme.colorScheme.surface,
+        contentColor = if (glass) Color.White else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, if (glass) com.winlator.cmod.ui.theme.OnArtwork.PlateBorder else MaterialTheme.colorScheme.outlineVariant)
     ) {
-        if (landscape) {
-            Column(Modifier.padding(horizontal = 3.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Icon(icon, null, Modifier.size(20.dp))
-                Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-        } else {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+        Row(Modifier.heightIn(min = if (glass) 48.dp else 54.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, Modifier.size(if (glass) 20.dp else 22.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = if (glass) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+                fontWeight = if (glass) FontWeight.Medium else FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }

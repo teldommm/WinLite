@@ -65,7 +65,7 @@ import java.io.File
             }) { Icon(TablerIcons.Refresh, uiStr(R.string.steam_ui_refresh)) }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(TablerIcons.DotsVertical, uiStr(R.string.steam_ui_options)) }
-                DropdownMenu(menu, { menu = false }) {
+                SteamMenu(menu, { menu = false }) {
                     DropdownMenuItem(text = { Text(uiStr(R.string.steam_friends)) }, leadingIcon = { Icon(TablerIcons.Users, null) }, onClick = { menu = false; context.startActivity(android.content.Intent(context, SteamFriendsActivity::class.java)) })
                     DropdownMenuItem(text = { Text(uiStr(R.string.settings)) }, leadingIcon = { Icon(TablerIcons.Settings, null) }, onClick = { menu = false; context.startActivity(android.content.Intent(context, StoreSettingsActivity::class.java)) })
                     DropdownMenuItem(text = { Text(uiStr(R.string.steam_ui_sign_out)) }, leadingIcon = { Icon(TablerIcons.Logout, null) }, onClick = { menu = false; signOut() })
@@ -124,11 +124,11 @@ import java.io.File
                             IconButton(onClick = { search = !search }) { Icon(TablerIcons.Search, uiStr(R.string.steam_ui_search_games)) }
                             Box {
                                 TextButton(onClick = { sorting = true }) { Icon(TablerIcons.ArrowsSort, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(steamSortLabel(sort)); Icon(TablerIcons.ChevronDown, null, Modifier.size(18.dp)) }
-                                DropdownMenu(sorting, { sorting = false }) { listOf("Recent", "Name", "Playtime").forEach { title -> DropdownMenuItem(text = { Text(steamSortLabel(title)) }, onClick = { sort = title; sorting = false }) } }
+                                SteamMenu(sorting, { sorting = false }) { listOf("Recent", "Name", "Playtime").forEach { title -> SteamChoiceItem(steamSortLabel(title), title == sort) { sort = title; sorting = false } } }
                             }
                             IconButton(onClick = { grid = !grid }) { Icon(if (grid) TablerIcons.LayoutList else TablerIcons.LayoutGrid, uiStr(R.string.steam_ui_layout)) }
                         }
-                        RevealSection(search) { OutlinedTextField(query, { query = it }, label = { Text(uiStr(R.string.steam_ui_search)) }, leadingIcon = { Icon(TablerIcons.Search, null) }, singleLine = true, shape = WinZShapes.Medium, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) }
+                        RevealSection(search) { SteamSearchField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) }
                     }
                 }
                 itemsIndexed(visible, key = { _, it -> it.id }) { index, app ->
@@ -140,7 +140,11 @@ import java.io.File
                             Column(Modifier.weight(1f)) {
                                 Text(app.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                 val minutes = owned[id]?.optLong("playtimeForever")
-                                Text(if (minutes != null) "◷ ${"%.1f".format(minutes / 60.0)} h" else if (isInstalled) uiStr(R.string.steam_ui_installed_game) else uiStr(R.string.steam_ui_not_installed), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (minutes != null) Icon(TablerIcons.Clock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(if (minutes != null) "${"%.1f".format(minutes / 60.0)} h" else if (isInstalled) uiStr(R.string.steam_ui_installed_game) else uiStr(R.string.steam_ui_not_installed),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                             IconButton(onClick = { if (isInstalled) openGame(id) else SteamSheets.game(context, id) }) { Icon(if (isInstalled) TablerIcons.PlayerPlay else TablerIcons.Download, if (isInstalled) uiStr(R.string.steam_ui_game_details) else uiStr(R.string.steam_ui_download_game), tint = if (isInstalled) com.winlator.cmod.ui.theme.controlAccentColor() else MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
@@ -176,21 +180,12 @@ import java.io.File
                     Text("${state.done / 1048576} / ${state.total / 1048576} MB", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (state.downloading) {
-                            OutlinedButton(onClick = { SteamSession.cancel() }, shape = WinZShapes.Medium) {
-                                Icon(TablerIcons.PlayerPause, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-                                Text(uiStr(R.string.steam_ui_pause))
-                            }
+                            SteamOutlineButton(uiStr(R.string.steam_ui_pause), icon = TablerIcons.PlayerPause) { SteamSession.cancel() }
                         } else if (installed) {
-                            Button(onClick = { openGame(state.id) }, shape = WinZShapes.Medium, colors = steamButtonColors()) { Text(uiStr(R.string.steam_ui_view_game)) }
+                            SteamAccentButton(uiStr(R.string.steam_ui_view_game), icon = TablerIcons.DeviceGamepad2) { openGame(state.id) }
                         } else {
-                            Button(enabled = state.signedIn && !state.gameActive, onClick = { SteamSession.install(state.id) }, shape = WinZShapes.Medium, colors = steamButtonColors()) {
-                                Icon(TablerIcons.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-                                Text(uiStr(R.string.steam_ui_resume))
-                            }
-                            OutlinedButton(enabled = !state.gameActive, onClick = { confirmRemove = true }, shape = WinZShapes.Medium) {
-                                Icon(TablerIcons.Trash, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-                                Text(uiStr(R.string.steam_download_cancel_delete))
-                            }
+                            SteamAccentButton(uiStr(R.string.steam_ui_resume), enabled = state.signedIn && !state.gameActive, icon = TablerIcons.Download) { SteamSession.install(state.id) }
+                            SteamOutlineButton(uiStr(R.string.steam_download_cancel_delete), enabled = !state.gameActive, icon = TablerIcons.Trash) { confirmRemove = true }
                         }
                     }
                     if (state.status.startsWith("Download failed"))

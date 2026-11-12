@@ -106,9 +106,8 @@ class SteamActivity : ImmersiveSteamActivity() {
                         if (!landscape) Text(uiStr(R.string.steam_qr_scan), style = MaterialTheme.typography.titleLarge)
                         if (!landscape) Text(uiStr(R.string.steam_qr_help), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        OutlinedButton(onClick = { SteamSession.cancelLogin(); SteamSession.loginQr() }, enabled = state.ready && !state.gameActive,
-                            shape = WinZShapes.Medium, modifier = Modifier.fillMaxWidth()) {
-                            Icon(TablerIcons.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(uiStr(R.string.steam_qr_refresh))
+                        SteamOutlineButton(uiStr(R.string.steam_qr_refresh), Modifier.fillMaxWidth(), enabled = state.ready && !state.gameActive, icon = TablerIcons.Refresh) {
+                            SteamSession.cancelLogin(); SteamSession.loginQr()
                         }
                     } else if (mode == 2) {
                         Text(steamStatusText(state.guard), style = MaterialTheme.typography.titleSmall)

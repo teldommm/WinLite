@@ -16,6 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import com.winlator.cmod.ui.theme.WinZShapes
+import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import kotlinx.coroutines.Dispatchers
@@ -105,15 +108,11 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
     LaunchedEffect(tab, id, state.signedIn) {
         if (tab == 1 && state.signedIn && !state.gameActive) SteamUserData.refreshAchievements(context, id)
     }
-    Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 12.dp) {
-            tabs.forEachIndexed { index, title ->
-                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title, maxLines = 1) })
-            }
-        }
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        SteamTabRow(tabs.mapIndexed { index, title -> SteamTabItem(index, title) }, tab) { tab = it }
         Column(
             Modifier.fillMaxWidth().heightIn(min = 96.dp, max = 270.dp).verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             when (tab) {
@@ -128,43 +127,35 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
                     if (pics.optJSONObject("depots") != null) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Box(Modifier.weight(1f)) {
-                                OutlinedButton(onClick = { branchMenu = true }, enabled = !state.downloading && !state.gameActive,
-                                    modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 10.dp)) {
-                                    Text(uiStr(R.string.steam_store_version) + ": " + branch,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                DropdownMenu(branchMenu, { branchMenu = false }) {
+                                SteamDropdownButton(uiStr(R.string.steam_store_version) + ": " + branch, Modifier.fillMaxWidth(),
+                                    enabled = !state.downloading && !state.gameActive) { branchMenu = true }
+                                SteamMenu(branchMenu, { branchMenu = false }) {
                                     branches.forEach { option ->
-                                        DropdownMenuItem(text = { Text(option) }, onClick = {
+                                        SteamChoiceItem(option, option == branch) {
                                             SteamInstallOptions.setBranch(context, id, option)
                                             branch = option
                                             branchMenu = false
-                                        })
+                                        }
                                     }
                                 }
                             }
                             Box(Modifier.weight(1f)) {
-                                OutlinedButton(onClick = { languageMenu = true }, enabled = !state.downloading && !state.gameActive,
-                                    modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 10.dp)) {
-                                    Text(uiStr(R.string.steam_store_language) + ": " + language,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                DropdownMenu(languageMenu, { languageMenu = false }) {
+                                SteamDropdownButton(uiStr(R.string.steam_store_language) + ": " + language, Modifier.fillMaxWidth(),
+                                    enabled = !state.downloading && !state.gameActive) { languageMenu = true }
+                                SteamMenu(languageMenu, { languageMenu = false }) {
                                     languages.forEach { option ->
-                                        DropdownMenuItem(text = { Text(option) }, onClick = {
+                                        SteamChoiceItem(option, option == language) {
                                             SteamInstallOptions.setLanguage(context, id, option)
                                             language = option
                                             languageMenu = false
-                                        })
+                                        }
                                     }
                                 }
                             }
                         }
                         if (installed && (recordedBranch != branch || recordedLanguage != language)) {
-                            TextButton(enabled = state.signedIn && !state.downloading && !state.gameActive,
-                                onClick = { SteamSession.install(id) }) {
-                                Text(uiStr(R.string.steam_store_apply_options))
-                            }
+                            SteamPrimaryButton(uiStr(R.string.steam_store_apply_options), enabled = state.signedIn && !state.downloading && !state.gameActive,
+                                icon = TablerIcons.Download) { SteamSession.install(id) }
                         }
                     }
                     val common = pics.optJSONObject("common")
@@ -183,15 +174,13 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
                     if (ach == null) {
                         Text(uiStr(if (SteamUserData.busy("achievements-$id")) R.string.steam_ui_loading_achievements else R.string.steam_ui_connect_achievements))
                         if (state.signedIn && !state.gameActive)
-                            TextButton(onClick = { SteamUserData.refreshAchievements(context, id, true) }) {
-                                Text(uiStr(R.string.steam_ui_refresh_info))
-                            }
+                            SteamSecondaryButton(uiStr(R.string.steam_ui_refresh_info), icon = TablerIcons.Refresh) { SteamUserData.refreshAchievements(context, id, true) }
                     } else {
                         Text(uiStr(R.string.steam_ui_ach_count, ach.count { it.unlocked }, ach.size))
                         ach.forEach { achievement ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Icon(if (achievement.unlocked) TablerIcons.CircleCheck else TablerIcons.Lock,
-                                    null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                    null, Modifier.size(18.dp), tint = if (achievement.unlocked) controlAccentColor() else MaterialTheme.colorScheme.onSurfaceVariant)
                                 Column {
                                     Text(achievement.title, style = MaterialTheme.typography.labelLarge)
                                     if (achievement.description.isNotBlank())
@@ -250,8 +239,8 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
                         }
                     }
                     if (shortcut != null) {
-                        Button(colors = steamButtonColors(), enabled = state.signedIn && !state.gameActive && !SteamNativeCloud.busy,
-                            onClick = { showCloud = true }) { Text(uiStr(R.string.steam_cloud_saves)) }
+                        SteamPrimaryButton(uiStr(R.string.steam_cloud_saves), enabled = state.signedIn && !state.gameActive && !SteamNativeCloud.busy,
+                            icon = TablerIcons.CloudUpload) { showCloud = true }
                     } else Text(uiStr(R.string.steam_store_cloud_setup), style = MaterialTheme.typography.bodySmall)
                 }
                 4 -> {
@@ -262,7 +251,7 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
                         val pictures = (0 until images.length()).mapNotNull { images.optJSONObject(it)?.optString("path_thumbnail")?.takeIf { url -> url.startsWith("https://") } }
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                             items(pictures) { url ->
-                                SteamArt(url, Modifier.width(220.dp).aspectRatio(16f / 9f).clickable {
+                                SteamArt(url, Modifier.width(220.dp).aspectRatio(16f / 9f).clip(WinZShapes.Small).clickable {
                                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
                                 })
                             }
@@ -272,9 +261,10 @@ internal fun SteamStoreDetails(id: Int, installed: Boolean, state: SteamUiSnapsh
                             for (i in 0 until movies.length()) {
                                 val movie = movies.optJSONObject(i) ?: continue
                                 val url = movie.optJSONObject("mp4")?.optString("max") ?: ""
-                                TextButton(enabled = url.startsWith("https://"), onClick = {
+                                SteamSecondaryButton(movie.optString("name").ifBlank { uiStr(R.string.steam_store_videos) }, Modifier.fillMaxWidth(),
+                                    enabled = url.startsWith("https://"), icon = TablerIcons.PlayerPlay) {
                                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                                }) { Icon(TablerIcons.PlayerPlay, null); Spacer(Modifier.width(6.dp)); Text(movie.optString("name").ifBlank { uiStr(R.string.steam_store_videos) }, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                }
                             }
                         }
                     }

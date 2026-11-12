@@ -34,7 +34,7 @@ data class SteamUiSnapshot(val signedIn: Boolean, val gameActive: Boolean, val s
 
 @Composable fun SteamDownloadPanel(state: SteamUiSnapshot) {
     if (!state.downloading) return
-    SteamCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
+    SteamCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             androidx.compose.ui.viewinterop.AndroidView(factory = { android.widget.ImageView(it).apply { scaleType = android.widget.ImageView.ScaleType.CENTER_CROP } },
                 update = { com.bumptech.glide.Glide.with(it).load("https://shared.steamstatic.com/store_item_assets/steam/apps/${state.id}/library_600x900_2x.jpg").into(it) },

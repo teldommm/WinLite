@@ -13,6 +13,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import com.winlator.cmod.ui.theme.SlidingPillHost
+import com.winlator.cmod.ui.theme.SlidingPillState
 import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.keepInViewWhen
 import com.winlator.cmod.ui.theme.rememberSlidingPillState
@@ -40,6 +41,18 @@ import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.destructiveColor
 import com.winlator.cmod.ui.theme.dividerColor
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.DialogSystemBarsPolicy
+import com.winlator.cmod.ui.SidebarChoiceItem
+import com.winlator.cmod.ui.library.translucentControlFill
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import com.winlator.cmod.ui.uiStr
 
 // Steam screens use WinLite's own look and nothing of their own: the WinZ theme (black / white /
@@ -128,36 +141,40 @@ import com.winlator.cmod.ui.uiStr
     }
 }
 
-/** One entry of a [SteamTabRow]. */
-internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVector)
+/** One entry of a [SteamTabRow]. The icon is optional (the store-details tabs have none). */
+internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVector? = null)
 
 /**
- * Library tabs: hairline chips with ONE highlight that slides between them (the same SlidingPillHost
- * WinLite's navigation and All / Favorites / Recent chips use) and keeps the selected chip in view.
+ * Library tabs: exactly WinLite's All / Favorites / Recent chips (same SlidingPillHost, translucent pill,
+ * 14dp radius, 15x8dp padding, accent-tinted outline on the selected chip), with an optional icon. The
+ * pill target sits on the chip's CONTENT, not on the clickable Surface: a clickable Surface pads itself to
+ * the 48dp touch target outside its border, which used to make the pill taller than the chip.
  */
-@Composable internal fun SteamTabRow(tabs: List<SteamTabItem>, selected: Int, onSelect: (Int) -> Unit) {
+@Composable internal fun SteamTabRow(tabs: List<SteamTabItem>, selected: Int, modifier: Modifier = Modifier, onSelect: (Int) -> Unit) {
     val pill = rememberSlidingPillState()
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-        SlidingPillHost(pill, selected, MaterialTheme.colorScheme.surfaceVariant, 10.dp) {
+    Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+        SlidingPillHost(pill, selected, translucentControlFill(), 14.dp) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                tabs.forEach { tab ->
-                    val isSelected = tab.key == selected
-                    val tint by animateColorAsState(
-                        if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                        tween(WinZMotion.DurationSelectionTint), label = "steamTabTint"
-                    )
-                    Box(Modifier.slidingPillTarget(pill, tab.key).keepInViewWhen(isSelected)) {
-                        Surface(
-                            onClick = { onSelect(tab.key) }, shape = WinZShapes.Small, color = Color.Transparent,
-                            contentColor = tint, border = BorderStroke(1.dp, hairlineColor())
-                        ) {
-                            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                Icon(tab.icon, null, Modifier.size(18.dp))
-                                Text(tab.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                            }
-                        }
-                    }
-                }
+                tabs.forEach { tab -> SteamTabChip(pill, tab, tab.key == selected) { onSelect(tab.key) } }
+            }
+        }
+    }
+}
+
+@Composable private fun SteamTabChip(pill: SlidingPillState, tab: SteamTabItem, selected: Boolean, click: () -> Unit) {
+    val content by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        tween(WinZMotion.DurationSelectionTint), label = "steamTabTint"
+    )
+    val outline by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .55f) else hairlineColor(),
+        tween(WinZMotion.DurationSelectionTint), label = "steamTabOutline"
+    )
+    Surface(onClick = click, shape = WinZShapes.Medium, color = Color.Transparent, contentColor = content, border = BorderStroke(1.dp, outline)) {
+        Box(Modifier.slidingPillTarget(pill, tab.key).keepInViewWhen(selected)) {
+            Row(Modifier.padding(horizontal = 15.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                tab.icon?.let { Icon(it, null, Modifier.size(18.dp)) }
+                Text(tab.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
             }
         }
     }
@@ -182,8 +199,7 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
                 val tint by animateColorAsState(if (on) Color.White else MaterialTheme.colorScheme.onSurface, tween(WinZMotion.DurationSelectionTint), label = "steamSegmentTint")
                 Surface(onClick = { onSelect(option.key) }, modifier = Modifier.weight(1f), shape = WinZShapes.Small, color = Color.Transparent, contentColor = tint) {
                     Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                        Icon(option.icon, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
+                        option.icon?.let { Icon(it, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)) }
                         Text(option.label, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
                     }
                 }
@@ -205,13 +221,128 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
 @Composable internal fun SteamDialogButtons(content: @Composable RowScope.() -> Unit) =
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically, content = content)
 
+@Composable private fun steamSecondaryColors() =
+    ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface)
+
 /** Cancel / back / close: the outlined button every WinLite dialog uses for the non-primary action. */
-@Composable internal fun SteamSecondaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) =
-    OutlinedButton(onClick = onClick, enabled = enabled,
-        colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
-        border = BorderStroke(1.dp, hairlineColor())) { Text(text) }
+@Composable internal fun SteamSecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, icon: ImageVector? = null, onClick: () -> Unit) =
+    OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled, colors = steamSecondaryColors(), border = BorderStroke(1.dp, hairlineColor())) {
+        icon?.let { Icon(it, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)) }
+        Text(text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
 
 /** The confirming action: accent fill, or the destructive red for removals. */
-@Composable internal fun SteamPrimaryButton(text: String, enabled: Boolean = true, destructive: Boolean = false, onClick: () -> Unit) =
-    Button(onClick = onClick, enabled = enabled, colors = if (destructive) steamDestructiveColors() else steamButtonColors()) { Text(text) }
+@Composable internal fun SteamPrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, destructive: Boolean = false, icon: ImageVector? = null, onClick: () -> Unit) =
+    Button(onClick = onClick, modifier = modifier, enabled = enabled, colors = if (destructive) steamDestructiveColors() else steamButtonColors()) {
+        icon?.let { Icon(it, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)) }
+        Text(text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
 
+/** In-page primary action (Play / Download / Resume): accent fill, white content, WinLite's 14dp button radius. */
+@Composable internal fun SteamAccentButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, icon: ImageVector? = null, height: Dp = 48.dp, onClick: () -> Unit) =
+    Button(onClick = onClick, modifier = modifier.heightIn(min = height), enabled = enabled, shape = WinZShapes.Medium, colors = steamButtonColors()) {
+        icon?.let { Icon(it, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)) }
+        Text(text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+
+/** Outlined in-page action on the theme surface (Pause, Cancel download, ...), 14dp radius like [SteamAccentButton]. */
+@Composable internal fun SteamOutlineButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, icon: ImageVector? = null, onClick: () -> Unit) =
+    OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled, shape = WinZShapes.Medium, colors = steamSecondaryColors(), border = BorderStroke(1.dp, hairlineColor())) {
+        icon?.let { Icon(it, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)) }
+        Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+
+/** Field-like button that opens a choice menu: current value plus a chevron (branch, language, container, exe...). */
+@Composable internal fun SteamDropdownButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, maxLines: Int = 1, onClick: () -> Unit) =
+    OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled, shape = WinZShapes.Medium, colors = steamSecondaryColors(),
+        border = BorderStroke(1.dp, hairlineColor()), contentPadding = PaddingValues(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp)) {
+        Text(text, Modifier.weight(1f, fill = false), maxLines = maxLines, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.width(6.dp))
+        Icon(TablerIcons.ChevronDown, null, Modifier.size(18.dp))
+    }
+
+/** Dropdown menu container every WinLite menu uses: 14dp radius, themed (translucent) surface fill. */
+@Composable internal fun SteamMenu(expanded: Boolean, onDismiss: () -> Unit, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) =
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, modifier = modifier, shape = WinZShapes.Medium, containerColor = MaterialTheme.colorScheme.surface, content = content)
+
+/** Choice-list item of WinLite's menus: selected = accent semibold text with a trailing accent check. */
+@Composable internal fun SteamChoiceItem(label: String, selected: Boolean, onClick: () -> Unit) = SidebarChoiceItem(label, selected, onClick)
+
+/**
+ * Bottom sheet exactly like WinLite's own (Appearance, drive picker, game menu): the translucent theme surface,
+ * no tonal tint, a small drag handle, and [DialogSystemBarsPolicy] first, so opening the sheet no longer slides
+ * the Android status bar in and shoves the layout.
+ */
+@Composable internal fun SteamSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.screenWidthDp > configuration.screenHeightDp
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp,
+        dragHandle = {
+            Surface(
+                modifier = Modifier.padding(top = 10.dp, bottom = 8.dp).size(width = 36.dp, height = 4.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .42f)
+            ) {}
+        }
+    ) {
+        DialogSystemBarsPolicy()
+        Column(
+            Modifier.fillMaxWidth()
+                .widthIn(max = if (landscape) 920.dp else 760.dp)
+                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = if (landscape) 10.dp else 24.dp)
+                .align(Alignment.CenterHorizontally),
+            content = content
+        )
+    }
+}
+
+/** Tile of a sheet's action row: the same fill and outline as the tiles of WinLite's game menu. */
+@Composable internal fun SteamActionTile(icon: ImageVector, label: String, modifier: Modifier = Modifier, enabled: Boolean = true, tint: Color = MaterialTheme.colorScheme.onSurface, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick, enabled = enabled, modifier = modifier, shape = WinZShapes.Medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .42f), border = BorderStroke(1.dp, hairlineColor())
+    ) {
+        Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, Modifier.size(23.dp), tint = tint)
+            Spacer(Modifier.width(9.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Compact search field of WinLite's Library header (44dp, surface fill, hairline outline, clear button). */
+@Composable internal fun SteamSearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    val shape = WinZShapes.Medium
+    androidx.compose.foundation.text.BasicTextField(
+        value = query, onValueChange = onQueryChange, singleLine = true,
+        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(controlAccentColor()),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+        modifier = modifier.focusRequester(focusRequester),
+        decorationBox = { inner ->
+            Row(
+                Modifier.fillMaxWidth().height(44.dp).clip(shape).background(MaterialTheme.colorScheme.surface)
+                    .border(BorderStroke(1.dp, hairlineColor()), shape).padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(TablerIcons.Search, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                    if (query.isEmpty()) Text(uiStr(R.string.steam_ui_search_games), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    inner()
+                }
+                if (query.isNotEmpty()) Box(
+                    Modifier.offset(x = 8.dp).size(width = 36.dp, height = 44.dp).clip(WinZShapes.Small).clickable { onQueryChange("") },
+                    contentAlignment = Alignment.Center
+                ) { Icon(TablerIcons.X, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+        }
+    )
+}
