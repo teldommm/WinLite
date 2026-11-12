@@ -144,11 +144,12 @@ object SteamCloud {
             }
         }.onFailure { android.util.Log.w("SteamCloud", "Graceful shutdown did not complete", it) }
     }
-    fun showStatus(fragment: Fragment, id: Int, shortcut: Shortcut) {
-        panel(fragment.requireActivity(), "steam-cloud-status") { close ->
+    fun showStatus(fragment: Fragment, id: Int, shortcut: Shortcut) = showStatus(fragment.requireActivity(), id, shortcut)
+    fun showStatus(activity: ComponentActivity, id: Int, shortcut: Shortcut) {
+        panel(activity, "steam-cloud-status") { close ->
             SteamNativeCloudPanel(id, shortcut.container, close, onBackup = {
                 close()
-                GameSavesComposeDialog.show(fragment.requireActivity(), shortcut)
+                GameSavesComposeDialog.show(activity, shortcut)
             })
         }
     }

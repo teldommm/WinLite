@@ -71,27 +71,29 @@ interface SteamDetailCallbacks {
 // the same scrims, plates, dark-glass stat chips on the picture, accent Play button and action tiles/rows,
 // built from the same pieces. Installed Steam games also exist as ordinary shortcuts, so the Library lists them too.
 object SteamDetailHost {
-    @JvmStatic
-    fun create(context: Context, title: String, artwork: String?, id: Int, callbacks: SteamDetailCallbacks): ComposeView =
-        ComposeView(context).apply {
-            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            // The overlay theme has no opaque root surface: the Steam manager stays visible under the page while it
-            // slides in / out, exactly as WinLite's tabs do under a game page (SteamPageFrame draws the page's own background).
-            setContent { WinZOverlayTheme { SteamPageFrame(callbacks::onClose) { CompositionLocalProvider(LocalArtworkMotion provides rememberArtworkMotionEnabled()) {
-                val revision = com.winlator.cmod.steam.SteamGames.version
-                // The shortcut is read off the main thread; until then the page does not know which of WinLite's
-                // own pictures (banner / cover of the game) it shows, so it does not draw a placeholder first.
-                val found by produceState<Pair<Boolean, Shortcut?>>(false to null, id, revision) {
-                    value = true to withContext(Dispatchers.IO) { com.winlator.cmod.steam.SteamGames.shortcut(context, id) }
-                }
-                SteamDetailScreen(title, "Steam", artwork, null, context.getSharedPreferences("steam-settings", 0).getBoolean("favorite-$id", false), found.second, callbacks, id, found.first)
-            } } } }
-        }
+    /**
+     * The game's page as a part of SteamActivity's own Compose root (see SteamDetailController): the theme root pads the
+     * status bar and paints behind it exactly as for WinLite's detail pages, and the manager stays visible under the page
+     * while it slides in / out. [onClosed] is called after the exit animation, when Back (or the page's back plate) was used.
+     */
+    @Composable
+    fun Page(title: String, artwork: String?, id: Int, callbacks: SteamDetailCallbacks, onClosed: () -> Unit) {
+        val context = LocalContext.current
+        SteamPageFrame(onClosed) { CompositionLocalProvider(LocalArtworkMotion provides rememberArtworkMotionEnabled()) {
+            val revision = com.winlator.cmod.steam.SteamGames.version
+            // The shortcut is read off the main thread; until then the page does not know which of WinLite's
+            // own pictures (banner / cover of the game) it shows, so it does not draw a placeholder first.
+            val found by produceState<Pair<Boolean, Shortcut?>>(false to null, id, revision) {
+                value = true to withContext(Dispatchers.IO) { com.winlator.cmod.steam.SteamGames.shortcut(context, id) }
+            }
+            SteamDetailScreen(title, "Steam", artwork, null, context.getSharedPreferences("steam-settings", 0).getBoolean("favorite-$id", false), found.second, callbacks, id, found.first)
+        } }
+    }
 }
 
 // The frame of the page: WinLite's detail transition (ShellDetails.kt - fade + a slide of 1/10 of the width, 220 / 160 ms;
-// only a fade in landscape) and its back handling. Back (system button, gesture or the page's back plate) plays the exit
-// first and only then calls onClosed, which returns to the Steam manager the page was opened from.
+// only a fade in landscape), its opaque background and its back handling. Back (system button, gesture or the page's back
+// plate) plays the exit first and only then calls onClosed.
 @Composable
 private fun SteamPageFrame(onClosed: () -> Unit, content: @Composable () -> Unit) {
     val transition = remember { MutableTransitionState(false).apply { targetState = true } }
@@ -99,33 +101,14 @@ private fun SteamPageFrame(onClosed: () -> Unit, content: @Composable () -> Unit
     LaunchedEffect(transition.currentState, transition.isIdle) {
         if (!transition.targetState && transition.isIdle && !transition.currentState) onClosed()
     }
-    // System bars as WinlatorTheme sets them for a full-screen host (this frame does not use that theme).
-    val activity = LocalContext.current as? android.app.Activity
-    ApplySystemBarsPolicy(activity?.window)
-    val whiteTheme = WinlatorThemeManager.currentTheme() == WinlatorThemeType.WHITE
-    DisposableEffect(activity, whiteTheme) {
-        activity?.window?.let { window ->
-            androidx.core.view.WindowInsetsControllerCompat(window, window.decorView).apply {
-                isAppearanceLightStatusBars = whiteTheme
-                isAppearanceLightNavigationBars = whiteTheme
-            }
-        }
-        onDispose { }
-    }
     val landscape = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val enter = if (landscape) fadeIn(tween(180, easing = FastOutSlowInEasing))
         else fadeIn(tween(220, easing = LinearOutSlowInEasing)) + slideInHorizontally(tween(220, easing = LinearOutSlowInEasing)) { it / 10 }
     val exit = if (landscape) fadeOut(tween(180, easing = FastOutSlowInEasing))
         else fadeOut(tween(160, easing = FastOutLinearInEasing)) + slideOutHorizontally(tween(160, easing = FastOutLinearInEasing)) { it / 10 }
     AnimatedVisibility(visibleState = transition, enter = enter, exit = exit) {
-        Box(
-            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) { }
-        ) {
-            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
-                // Portrait: the status bar stays visible, the page starts below it (0 while the bar is hidden in landscape).
-                Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars), propagateMinConstraints = true) { content() }
-            }
-        }
+        // The status-bar inset is padded by the theme root (WinZTheme), like for every WinLite screen.
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) { }, propagateMinConstraints = true) { content() }
     }
 }
 

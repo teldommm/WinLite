@@ -30,8 +30,10 @@ import kotlinx.coroutines.withContext
 
 /** Shared destructive action UI; filesystem work stays off the UI thread. */
 object ConfirmActionDialog {
-    @JvmStatic fun show(fragment: Fragment, title: String, message: String, confirm: String, action: Runnable, success: Runnable) {
-        val activity = fragment.requireActivity()
+    @JvmStatic fun show(fragment: Fragment, title: String, message: String, confirm: String, action: Runnable, success: Runnable) =
+        show(fragment.requireActivity(), title, message, confirm, action, success)
+
+    @JvmStatic fun show(activity: android.app.Activity, title: String, message: String, confirm: String, action: Runnable, success: Runnable) {
         val root = activity.findViewById<ViewGroup>(android.R.id.content)
         val tag = "confirm-destructive-action"
         if (root.findViewWithTag<android.view.View>(tag) != null) return
@@ -66,7 +68,7 @@ object ConfirmActionDialog {
                         scope.launch {
                             val result = withContext(Dispatchers.IO) { runCatching { action.run() } }
                             busy = false
-                            result.onSuccess { close(); if (fragment.isAdded) success.run() }.onFailure { error = it.message.orEmpty() }
+                            result.onSuccess { close(); if (!activity.isFinishing && !activity.isDestroyed) success.run() }.onFailure { error = it.message.orEmpty() }
                         }
                     }) { Text(confirm) }
                 }

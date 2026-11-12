@@ -49,20 +49,30 @@ class SteamActivity : ImmersiveSteamActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         supportActionBar?.hide()
-        supportFragmentManager.addOnBackStackChangedListener { if (supportFragmentManager.backStackEntryCount == 0) detailOpening = false }
         com.winlator.cmod.ui.applyAppFullscreen(this)
         if (!SteamSettings.enabled(this)) { startActivity(Intent(this, StoreSettingsActivity::class.java)); finish(); return }
         startForegroundService(Intent(this, SteamService::class.java))
-        if (savedInstanceState != null && supportFragmentManager.findFragmentById(android.R.id.content) is SteamGameDetailFragment) return
-        val selectedId = intent.getIntExtra("steam_app_id", 0)
-        if (selectedId > 0 && isInstalled(selectedId)) showDetail(selectedId)
-        else setContent { WinZTheme { SteamScreen() } }
+        // Opened straight on an installed game (from WinLite): only its page, and Back leaves Steam.
+        val direct = intent.getIntExtra("steam_app_id", 0).takeIf { it > 0 && isInstalled(it) } ?: 0
+        setContent { WinZTheme { SteamRoot(direct) } }
     }
-    @Composable private fun SteamScreen() {
+    // One Compose root for the manager and the game's page, like MainShell for the tabs and WinLite's detail pages:
+    // the page lies over the manager (which keeps its tab / scroll / search), Back returns to it.
+    @Composable private fun SteamRoot(direct: Int) {
+        var detailId by rememberSaveable { mutableIntStateOf(direct) }
+        if (direct == 0) SteamScreen { detailId = it }
+        if (detailId > 0) key(detailId) {
+            val controller = remember(detailId) { SteamDetailController(this, detailId, { if (direct > 0) finish() else detailId = 0 }) }
+            LaunchedEffect(detailId) { SteamLibrary.requestArtwork(this@SteamActivity, "steam://$detailId", "banner") }
+            com.winlator.cmod.ui.library.SteamDetailHost.Page(controller.title, controller.artworkPath, detailId, controller.callbacks,
+                onClosed = { if (direct > 0) finish() else detailId = 0 })
+        }
+    }
+    @Composable private fun SteamScreen(openGame: (Int) -> Unit) {
         val state = observeSteam()
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (state.signedIn || state.savedAccount) {
-                SteamManagerScreen(state, intent.getIntExtra("steam_tab", 0), { finish() }, ::signOut, ::showDetail)
+                SteamManagerScreen(state, intent.getIntExtra("steam_tab", 0), { finish() }, ::signOut, openGame)
             } else {
                 Column(Modifier.fillMaxSize().imePadding()) {
                     SteamTopBar("Steam", null, onBack = { finish() }, modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)))
@@ -187,20 +197,5 @@ class SteamActivity : ImmersiveSteamActivity() {
         SteamCredentials.clear(this)
         File(filesDir, "steam-library-cache.json").delete()
         SteamService.shutdown(this); finish()
-    }
-    private var detailOpening = false
-    private fun showDetail(id: Int) {
-        if (detailOpening || supportFragmentManager.fragments.any { it is SteamGameDetailFragment }) return
-        detailOpening = true
-        val content = findViewById<android.view.ViewGroup>(android.R.id.content)
-        // Opened from the manager: the page goes on a back stack over it, so Back returns to the list (with its scroll,
-        // tab and search kept) instead of leaving Steam. The manager's ComposeView must not swallow the window insets:
-        // this app targets SDK 28, where they go to the children one after another until one consumes them, and the
-        // page - the second child - got a zero status-bar inset (its cover slid under the clock / battery bar).
-        val manager = content.getChildAt(0) as? androidx.compose.ui.platform.ComposeView
-        manager?.consumeWindowInsets = false
-        val transaction = supportFragmentManager.beginTransaction().replace(android.R.id.content, SteamGameDetailFragment.newInstance(id))
-        if (manager != null) transaction.addToBackStack(null) else detailOpening = false
-        transaction.commit()
     }
 }
