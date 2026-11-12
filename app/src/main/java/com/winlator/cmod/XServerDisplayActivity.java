@@ -3050,6 +3050,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 registryEditor.removeValue(x11DriverKey, "EmulateModelist");
                 registryEditor.removeValue(x11DriverKey, "EmulateModeset");
             }
+            registryEditor.setStringValue(x11DriverKey, "ClientSideWithRender", "N");
         }
 
         Log.d("XServerDisplayActivity", "RandR Wine mode emulation: "
