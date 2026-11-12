@@ -30,7 +30,7 @@ class SteamGameDetailFragment : Fragment() {
     private var configuring = false
     private var preparing = false
     private val appId get() = requireArguments().getInt("appId")
-    private fun notice(text: String) = Toast.makeText(requireContext(), text, Toast.LENGTH_LONG).show()
+    private fun notice(text: String) = com.winlator.cmod.ui.toast.WinToast.show(requireContext(), text)
     override fun onCreateView(inflater: LayoutInflater, parent: ViewGroup?, state: Bundle?): View {
         val context = requireContext()
         val title = SteamGames.info(context, appId).optJSONObject("common")?.optString("name").orEmpty().ifBlank { "Steam $appId" }

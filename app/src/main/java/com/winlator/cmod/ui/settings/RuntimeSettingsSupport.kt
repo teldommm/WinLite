@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.theme.WinZSpinner
 import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
@@ -620,7 +621,7 @@ internal fun SettingWineRuntimeChoice(
                         }
                     },
                     trailingIcon = {
-                        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        if (busy) WinZSpinner(20.dp, 2.dp)
                         else if (isSelected) Icon(TablerIcons.Check, null, tint = accent)
                     },
                     onClick = {
@@ -685,7 +686,7 @@ internal fun SettingInstallChoice(
                         }
                     },
                     trailingIcon = {
-                        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        if (busy) WinZSpinner(20.dp, 2.dp)
                         else if (isSelected) Icon(TablerIcons.Check, null, tint = accent)
                     },
                     onClick = {
@@ -755,7 +756,7 @@ internal fun SettingDriverChoice(
                         }
                     },
                     trailingIcon = {
-                        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        if (busy) WinZSpinner(20.dp, 2.dp)
                         else if (isSelected) Icon(TablerIcons.Check, null, tint = accent)
                     },
                     onClick = {

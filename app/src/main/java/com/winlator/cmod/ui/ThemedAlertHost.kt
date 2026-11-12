@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.accentCheckboxColors
 import com.winlator.cmod.R
 import androidx.compose.ui.res.stringResource
 import com.winlator.cmod.ui.theme.DialogScrimColor
@@ -349,7 +350,7 @@ object ThemedAlertHost {
                         Checkbox(
                             checked = checked[index],
                             onCheckedChange = { checked[index] = it },
-                            colors = CheckboxDefaults.colors(checkedColor = controlAccentColor())
+                            colors = accentCheckboxColors()
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(entries[index], style = MaterialTheme.typography.bodyMedium)

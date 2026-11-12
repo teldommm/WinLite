@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.inputcontrols
 
+import com.winlator.cmod.ui.theme.accentSliderColors
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.tabularNumbers
 import androidx.compose.foundation.BorderStroke
@@ -323,7 +324,7 @@ private fun OpacityCard(initialPercent: Int, onOpacityChanged: (Int) -> Unit) {
             onValueChange = { opacity = it },
             onValueChangeFinished = { onOpacityChanged(opacity.roundToInt()) },
             modifier = Modifier.fillMaxWidth(), valueRange = 0f..100f,
-            colors = SliderDefaults.colors(thumbColor = controlAccentColor(), activeTrackColor = controlAccentColor())
+            colors = accentSliderColors()
         )
     }
 }

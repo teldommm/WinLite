@@ -37,6 +37,6 @@ internal fun encodeSteamQr(url: String): Bitmap {
     Box(Modifier.padding(top = 4.dp).size(qrSize).clip(com.winlator.cmod.ui.theme.WinZShapes.Large).border(1.dp, com.winlator.cmod.ui.theme.hairlineColor(), com.winlator.cmod.ui.theme.WinZShapes.Large).background(Color.White).padding(14.dp),
         contentAlignment = androidx.compose.ui.Alignment.Center) {
         bitmap?.let { Image(it.asImageBitmap(), com.winlator.cmod.ui.uiStr(com.winlator.cmod.R.string.steam_login_qr), Modifier.fillMaxSize()) }
-            ?: CircularProgressIndicator(Modifier.size(32.dp), color = Color.Black)
+            ?: com.winlator.cmod.ui.theme.WinZSpinner(32.dp, 3.dp)
     }
 }

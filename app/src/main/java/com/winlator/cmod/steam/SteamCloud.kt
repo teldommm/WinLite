@@ -88,16 +88,16 @@ object SteamCloud {
                                             temp.writeText(choice)
                                             check(temp.renameTo(File(root, "winlite-steam-cloud-conflict-answer.txt")))
                                         } }
-                                        result.onSuccess { close() }.onFailure { android.widget.Toast.makeText(activity, uiStr(R.string.steam_cloud_pending), android.widget.Toast.LENGTH_LONG).show() }
+                                        result.onSuccess { close() }.onFailure { com.winlator.cmod.ui.toast.WinToast.show(activity, uiStr(R.string.steam_cloud_pending)) }
                                     }
                                 }
                                 ThemedDialog(onDismissRequest = { answer("cancel") }) {
                                     ThemedDialogTitle(uiStr(R.string.steam_cloud_conflict))
                                     Text(uiStr(R.string.steam_cloud_conflict_help), style = MaterialTheme.typography.bodyMedium)
                                     androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(12.dp))
-                                    androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
-                                        TextButton(onClick = { answer("local") }) { Text(uiStr(R.string.steam_cloud_keep_local)) }
-                                        TextButton(onClick = { answer("cloud") }) { Text(uiStr(R.string.steam_cloud_use_remote)) }
+                                    SteamDialogButtons {
+                                        SteamSecondaryButton(uiStr(R.string.steam_cloud_keep_local)) { answer("local") }
+                                        SteamPrimaryButton(uiStr(R.string.steam_cloud_use_remote)) { answer("cloud") }
                                     }
                                 }
                             }
@@ -109,8 +109,8 @@ object SteamCloud {
                                     ThemedDialogTitle(uiStr(R.string.steam_cloud_saves))
                                     Text(uiStr(R.string.steam_cloud_failed), style = MaterialTheme.typography.bodyMedium)
                                     androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(12.dp))
-                                    androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
-                                        TextButton(onClick = leave) { Text(uiStr(R.string.ui_back)) }
+                                    SteamDialogButtons {
+                                        SteamPrimaryButton(uiStr(R.string.ui_back), onClick = leave)
                                     }
                                 }
                             }

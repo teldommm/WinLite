@@ -102,8 +102,11 @@ object SteamAchievements {
                     val view = ComposeView(activity)
                     overlay = view
                     view.setContent { WinZTheme {
-                        Surface(tonalElevation = 8.dp, shape = MaterialTheme.shapes.large, modifier = Modifier.padding(12.dp)) {
-                            Text("🏆 $message", Modifier.padding(14.dp), style = MaterialTheme.typography.titleSmall)
+                        Surface(shape = com.winlator.cmod.ui.theme.WinZShapes.Medium, color = MaterialTheme.colorScheme.surface, border = androidx.compose.foundation.BorderStroke(1.dp, com.winlator.cmod.ui.theme.hairlineColor()), modifier = Modifier.padding(12.dp)) {
+                            Row(Modifier.padding(14.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                com.winlator.cmod.ui.theme.TablerIcons.Trophy.let { Icon(it, null, Modifier.size(20.dp), tint = com.winlator.cmod.ui.theme.controlAccentColor()) }
+                                Text(message, style = MaterialTheme.typography.titleSmall)
+                            }
                         }
                     } }
                     root.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL))

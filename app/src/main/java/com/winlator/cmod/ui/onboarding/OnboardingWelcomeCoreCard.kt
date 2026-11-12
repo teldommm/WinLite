@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.onboarding
 
+import com.winlator.cmod.ui.theme.WinZProgressRing
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.BorderStroke
@@ -38,13 +39,7 @@ internal fun ClassicCoreStatusCard(readyState: State<Boolean>, progressState: St
             if (ready) {
                 Icon(TablerIcons.Check, null, Modifier.size(32.dp))
             } else {
-                CircularProgressIndicator(
-                    progress = { progress / 100f },
-                    modifier = Modifier.size(24.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    strokeWidth = 5.dp
-                )
+                WinZProgressRing(progress / 100f, 24.dp, 5.dp)
             }
             Spacer(Modifier.size(14.dp))
             Text(

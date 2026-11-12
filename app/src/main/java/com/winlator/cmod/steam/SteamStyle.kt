@@ -171,7 +171,7 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
     val accent = controlAccentColor()
     val index = options.indexOfFirst { it.key == selected }.coerceAtLeast(0)
     Surface(modifier.fillMaxWidth(), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surfaceVariant, border = BorderStroke(1.dp, hairlineColor())) {
-        val slide by animateFloatAsState(index.toFloat(), tween(260, easing = FastOutSlowInEasing), label = "steamSegmentSlide")
+        val slide by animateFloatAsState(index.toFloat(), tween(WinZMotion.DurationPill, easing = FastOutSlowInEasing), label = "steamSegmentSlide")
         val radius = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.toPx() }
         Row(Modifier.padding(3.dp).drawBehind {
             val w = size.width / options.size
@@ -179,7 +179,7 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
         }) {
             options.forEach { option ->
                 val on = option.key == selected
-                val tint by animateColorAsState(if (on) Color.White else MaterialTheme.colorScheme.onSurface, tween(220), label = "steamSegmentTint")
+                val tint by animateColorAsState(if (on) Color.White else MaterialTheme.colorScheme.onSurface, tween(WinZMotion.DurationSelectionTint), label = "steamSegmentTint")
                 Surface(onClick = { onSelect(option.key) }, modifier = Modifier.weight(1f), shape = WinZShapes.Small, color = Color.Transparent, contentColor = tint) {
                     Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                         Icon(option.icon, null, Modifier.size(18.dp))
@@ -194,10 +194,24 @@ internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVect
 
 /** Progress bar that glides to its new value instead of stepping. */
 @Composable internal fun SteamProgress(progress: Float, modifier: Modifier = Modifier) {
-    val shown by animateFloatAsState(progress.coerceIn(0f, 1f), tween(WinZMotion.DurationM, easing = FastOutSlowInEasing), label = "steamProgress")
-    LinearProgressIndicator(progress = { shown }, modifier = modifier, color = controlAccentColor(), trackColor = MaterialTheme.colorScheme.surfaceVariant)
+    com.winlator.cmod.ui.theme.WinZProgressBar(progress, modifier)
 }
 
 @Composable internal fun steamButtonColors() = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
 
 @Composable internal fun steamDestructiveColors() = ButtonDefaults.buttonColors(containerColor = destructiveColor(), contentColor = Color.White)
+
+/** Button row of a dialog: secondary on the left of the primary, right-aligned like the app's own dialogs. */
+@Composable internal fun SteamDialogButtons(content: @Composable RowScope.() -> Unit) =
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically, content = content)
+
+/** Cancel / back / close: the outlined button every WinLite dialog uses for the non-primary action. */
+@Composable internal fun SteamSecondaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) =
+    OutlinedButton(onClick = onClick, enabled = enabled,
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
+        border = BorderStroke(1.dp, hairlineColor())) { Text(text) }
+
+/** The confirming action: accent fill, or the destructive red for removals. */
+@Composable internal fun SteamPrimaryButton(text: String, enabled: Boolean = true, destructive: Boolean = false, onClick: () -> Unit) =
+    Button(onClick = onClick, enabled = enabled, colors = if (destructive) steamDestructiveColors() else steamButtonColors()) { Text(text) }
+

@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.accentSliderColors
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.BorderStroke
@@ -260,7 +261,7 @@ internal fun SidebarSlider(
         onValueChange = onValueChange,
         onValueChangeFinished = onValueChangeFinished,
         valueRange = valueRange,
-        colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent)
+        colors = accentSliderColors()
     )
 }
 

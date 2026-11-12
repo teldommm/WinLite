@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.theme.WinZSpinner
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.tabularNumbers
@@ -390,7 +391,7 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                    WinZSpinner(28.dp, 3.dp)
                     Spacer(Modifier.width(12.dp))
                     Text(uiStr(R.string.ui_calculating_storage), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -444,7 +445,7 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
                 colors = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = androidx.compose.ui.graphics.Color.White)
             ) {
                 if (clearing) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    WinZSpinner(16.dp, 2.dp, color = androidx.compose.ui.graphics.Color.White)
                     Spacer(Modifier.width(8.dp))
                     Text(uiStr(R.string.ui_clearing))
                 } else {

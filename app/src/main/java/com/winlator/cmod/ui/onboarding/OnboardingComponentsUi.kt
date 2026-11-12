@@ -74,6 +74,8 @@ import com.winlator.cmod.ui.theme.keepInViewWhen
 import com.winlator.cmod.ui.theme.rememberSlidingPillState
 import com.winlator.cmod.ui.theme.slidingPillTarget
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.theme.WinZProgressBar
+import com.winlator.cmod.ui.theme.WinZSpinner
 import com.winlator.cmod.ui.theme.TablerIcons
 import com.winlator.cmod.ui.theme.RevealOnEnter
 
@@ -565,7 +567,7 @@ private fun CoreComponentCard(
                 Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
             when {
-                busy || (!ready.value && !installed) -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
+                busy || (!ready.value && !installed) -> WinZSpinner(24.dp, 3.dp)
                 installed -> Button(
                     onClick = onRemove,
                     enabled = !locked && !inUse,
@@ -657,7 +659,7 @@ private fun ComponentCard(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
+                if (busy) WinZSpinner(24.dp, 3.dp)
                 else if (item.installed && item.removable) {
                     Button(
                         onClick = { cb.onRemove(item.id) },
@@ -686,14 +688,7 @@ private fun ComponentCard(
             }
             if (busy) {
                 Spacer(Modifier.height(9.dp))
-                if (installingProgress >= 0) {
-                    LinearProgressIndicator(
-                        progress = { installingProgress.coerceIn(0, 100) / 100f },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
+                WinZProgressBar(if (installingProgress >= 0) installingProgress.coerceIn(0, 100) / 100f else null)
             }
         }
     }
@@ -705,7 +700,7 @@ private fun InstallProgressCard(label: String?, progress: Int) {
         Modifier.fillMaxWidth(),
         shape = WinZShapes.Medium,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .55f))
+        border = BorderStroke(1.dp, hairlineColor())
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -722,17 +717,9 @@ private fun InstallProgressCard(label: String?, progress: Int) {
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
             }
             Spacer(Modifier.height(10.dp))
-            if (progress >= 0) {
-                LinearProgressIndicator(
-                    progress = { progress.coerceIn(0, 100) / 100f },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            } else {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            WinZProgressBar(if (progress >= 0) progress.coerceIn(0, 100) / 100f else null)
         }
     }
 }
@@ -750,7 +737,7 @@ private fun LoadingCard() {
     AnimatedVisibility(visible, enter = fadeIn(tween(250))) {
         Surface(Modifier.fillMaxWidth(), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surface) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
+                WinZSpinner(22.dp, 3.dp)
                 Spacer(Modifier.width(12.dp))
                 Text(uiStr(R.string.ui_loading_component_catalog))
             }

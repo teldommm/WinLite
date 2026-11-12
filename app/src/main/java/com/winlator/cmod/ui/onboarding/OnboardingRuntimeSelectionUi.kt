@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.onboarding
 
+import com.winlator.cmod.ui.theme.WinZProgressBar
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.BorderStroke
@@ -106,7 +107,7 @@ internal fun OnboardingRuntimeSelectionScreen(
                     ) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(uiStr(R.string.ui_preparing_environment), fontWeight = FontWeight.SemiBold)
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            WinZProgressBar(null)
                         }
                     }
                   }

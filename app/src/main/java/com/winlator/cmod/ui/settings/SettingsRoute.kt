@@ -205,6 +205,10 @@ internal class SettingsScreenState(
         (activity as? MainActivity)?.openComponentManager()
     }
 
+    override fun onOpenFileManager() {
+        (activity as? MainActivity)?.navigateToMainDestination(R.id.main_menu_file_manager)
+    }
+
     override fun onOpenContainers() {
         (activity as? MainActivity)?.openContainersSettings()
     }

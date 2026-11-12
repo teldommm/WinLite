@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.ui.theme.WinZSpinner
 import androidx.compose.ui.res.stringResource
 import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.WinZMotion
@@ -400,7 +401,7 @@ private fun ColumnScope.GameSavesPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 1 -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = controlAccentColor())
+                    WinZSpinner(18.dp, 2.dp)
                     Text(
                         "  " + stringResource(R.string.ui_detecting),
                         style = MaterialTheme.typography.bodySmall,
@@ -424,7 +425,7 @@ private fun ColumnScope.GameSavesPanel(
             message?.let {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (busy) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = controlAccentColor())
+                        WinZSpinner(16.dp, 2.dp)
                         Text("  ")
                     }
                     Text(

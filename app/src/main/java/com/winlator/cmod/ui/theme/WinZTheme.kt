@@ -32,9 +32,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CheckboxColors
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.SliderColors
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwitchColors
 import androidx.compose.material3.SwitchDefaults
@@ -209,6 +213,17 @@ fun hairlineColor(): Color = MaterialTheme.colorScheme.outlineVariant
 
 @Composable
 fun dividerColor(): Color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+
+// Checkbox and Slider counterparts of accentSwitchColors(): the blue control accent, so every
+// control that is "on" reads the same colour.
+@Composable
+fun accentCheckboxColors(): CheckboxColors = CheckboxDefaults.colors(checkedColor = controlAccentColor())
+
+@Composable
+fun accentSliderColors(): SliderColors {
+    val accent = controlAccentColor()
+    return SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent)
+}
 
 // Shared Switch styling for the whole app — matches claude.ai's own switch look:
 // no visible border/outline when off, thumb stays white in both states (never gray).

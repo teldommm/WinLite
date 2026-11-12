@@ -59,28 +59,12 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
     val remoteDate = saveDate(remote.size, remote.maxOfOrNull { it.time * 1000L } ?: 0L, R.string.steam_cloud_no_remote)
     val localDate = saveDate(local.size, local.maxOfOrNull { it.local.lastModified() } ?: 0L, R.string.steam_cloud_no_local)
 
-    Dialog(onDismissRequest = { if (!transferring) close() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        val view = LocalView.current
-        DisposableEffect(view) {
-            (view.parent as? DialogWindowProvider)?.window?.apply {
-                setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
-                clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                setDimAmount(0f)
-            }
-            onDispose { }
-        }
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(.88f).widthIn(max = 440.dp),
-                shape = WinZShapes.Large,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = .68f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f))
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(uiStr(R.string.steam_cloud_saves), style = MaterialTheme.typography.titleMedium)
+    com.winlator.cmod.ui.theme.ThemedDialog(onDismissRequest = { if (!transferring) close() }) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    com.winlator.cmod.ui.theme.ThemedDialogTitle(uiStr(R.string.steam_cloud_saves))
                     Text(container.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (previewLoading) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        com.winlator.cmod.ui.theme.WinZProgressBar(null)
                         Text(uiStr(R.string.steam_native_cloud_checking), style = MaterialTheme.typography.bodySmall)
                     } else if (previewError.isNotBlank()) {
                         Text(previewError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -116,10 +100,10 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
                             }
                         } else if (transferring) {
                             if (total > 0) {
-                                LinearProgressIndicator(progress = { (finished.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                                com.winlator.cmod.ui.theme.WinZProgressBar((finished.toFloat() / total).coerceIn(0f, 1f))
                                 Text("$finished / $total", style = MaterialTheme.typography.bodySmall)
                             } else {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                com.winlator.cmod.ui.theme.WinZProgressBar(null)
                                 Text(uiStr(R.string.steam_native_cloud_checking), style = MaterialTheme.typography.bodySmall)
                             }
                         } else if (result.isNotBlank()) {
@@ -131,16 +115,14 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
                             if (transferError.isNotBlank()) Text(transferError, color = MaterialTheme.colorScheme.error)
                         }
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    SteamDialogButtons {
                         if (direction == null) {
-                            if (onBackup != null) TextButton(onClick = onBackup) { Text(uiStr(R.string.steam_cloud_backup)) }
-                            TextButton(onClick = close) { Text(uiStr(R.string.ui_close)) }
+                            if (onBackup != null) SteamSecondaryButton(uiStr(R.string.steam_cloud_backup), onClick = onBackup)
+                            SteamPrimaryButton(uiStr(R.string.ui_close), onClick = close)
                         } else {
-                            TextButton(enabled = !transferring, onClick = { if (result.isNotBlank()) close() else direction = null }) {
-                                Text(if (result.isNotBlank()) uiStr(R.string.ui_close) else uiStr(R.string.steam_ui_back))
-                            }
+                            SteamSecondaryButton(if (result.isNotBlank()) uiStr(R.string.ui_close) else uiStr(R.string.steam_ui_back), enabled = !transferring) { if (result.isNotBlank()) close() else direction = null }
                             if (!previewLoading && previewError.isBlank() && result.isBlank() && transferError.isBlank() && !transferring && needsTransfer > 0) {
-                                TextButton(onClick = {
+                                Button(colors = steamButtonColors(), onClick = {
                                     transferring = true
                                     finished = 0
                                     total = 0
@@ -162,7 +144,5 @@ fun SteamNativeCloudPanel(id: Int, container: Container, close: () -> Unit, onBa
                         }
                     }
                 }
-            }
-        }
     }
 }

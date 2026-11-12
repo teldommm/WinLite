@@ -126,7 +126,7 @@ class SteamActivity : ImmersiveSteamActivity() {
                         Button(onClick = { SteamSession.login(username, password); password = ""; visible = false },
                             enabled = state.ready && !state.busy && username.isNotBlank() && password.isNotEmpty(),
                             shape = WinZShapes.Medium, colors = steamButtonColors(), modifier = Modifier.fillMaxWidth().height(50.dp)) {
-                            if (state.busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White) else Text(uiStr(R.string.steam_ui_sign_in))
+                            if (state.busy) com.winlator.cmod.ui.theme.WinZSpinner(22.dp, 2.dp, color = Color.White) else Text(uiStr(R.string.steam_ui_sign_in))
                         }
                     }
                     }
@@ -183,7 +183,7 @@ class SteamActivity : ImmersiveSteamActivity() {
     }
     private fun isInstalled(id: Int) = File(filesDir, "steam-library/$id.json").isFile
     private fun signOut() {
-        if (SteamSession.downloading) { Toast.makeText(this, uiStr(R.string.steam_ui_pause_logout), Toast.LENGTH_SHORT).show(); return }
+        if (SteamSession.downloading) { com.winlator.cmod.ui.toast.WinToast.show(this, uiStr(R.string.steam_ui_pause_logout)); return }
         SteamCredentials.clear(this)
         File(filesDir, "steam-library-cache.json").delete()
         SteamService.shutdown(this); finish()

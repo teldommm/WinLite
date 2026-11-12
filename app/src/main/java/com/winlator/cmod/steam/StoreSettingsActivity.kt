@@ -98,7 +98,7 @@ class StoreSettingsActivity : ImmersiveSteamActivity() {
             if (help.isNotBlank()) ThemedDialog(onDismissRequest = { help = "" }) {
                 Text(help, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton(onClick = { help = "" }) { Text(uiStr(R.string.ui_close)) } }
+                SteamDialogButtons { SteamPrimaryButton(uiStr(R.string.ui_close)) { help = "" } }
             }
             if (showFolder) ThemedDialog(onDismissRequest = { showFolder = false }) {
                 ThemedDialogTitle(uiStr(R.string.steam_store_location))
@@ -106,12 +106,12 @@ class StoreSettingsActivity : ImmersiveSteamActivity() {
                 Spacer(Modifier.height(12.dp))
                 Text(uiStr(R.string.steam_folder_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(enabled = !SteamSession.downloading && !SteamSession.gameActive, onClick = {
+                SteamDialogButtons {
+                    SteamSecondaryButton(uiStr(R.string.steam_default_folder), enabled = !SteamSession.downloading && !SteamSession.gameActive) {
                         error = runCatching { SteamStorage.setRoot(this@StoreSettingsActivity, null); folder = SteamStorage.root(this@StoreSettingsActivity).path }.exceptionOrNull()?.message.orEmpty()
                         showFolder = false
-                    }) { Text(uiStr(R.string.steam_default_folder)) }
-                    TextButton(enabled = !SteamSession.downloading && !SteamSession.gameActive, onClick = { showFolder = false; picker.launch(null) }) { Text(uiStr(R.string.steam_choose_folder)) }
+                    }
+                    SteamPrimaryButton(uiStr(R.string.steam_choose_folder), enabled = !SteamSession.downloading && !SteamSession.gameActive) { showFolder = false; picker.launch(null) }
                 }
             }
         } }

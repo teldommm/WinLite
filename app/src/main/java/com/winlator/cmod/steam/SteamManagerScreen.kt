@@ -80,7 +80,7 @@ import java.io.File
         RevealSection(state.restoring || (!state.signedIn && state.savedAccount)) {
             Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(steamStatusText(state.status), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                if (state.restoring) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = com.winlator.cmod.ui.theme.controlAccentColor())
+                if (state.restoring) com.winlator.cmod.ui.theme.WinZSpinner(18.dp, 2.dp)
                 else if (!state.gameActive) TextButton(onClick = { SteamSession.reconnect() }) { Text(uiStr(R.string.steam_ui_retry)) }
             }
         }
@@ -206,12 +206,12 @@ import java.io.File
             com.winlator.cmod.ui.theme.ThemedDialogTitle(uiStr(R.string.steam_download_cancel_delete))
             Text(uiStr(R.string.steam_download_cancel_confirm), style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { confirmRemove = false }) { Text(uiStr(R.string.steam_ui_cancel)) }
-                TextButton(onClick = {
+            SteamDialogButtons {
+                SteamSecondaryButton(uiStr(R.string.steam_ui_cancel)) { confirmRemove = false }
+                SteamPrimaryButton(uiStr(R.string.steam_download_cancel_delete), destructive = true) {
                     confirmRemove = false
                     SteamSession.discardPaused(state.id)
-                }) { Text(uiStr(R.string.steam_download_cancel_delete), color = com.winlator.cmod.ui.theme.destructiveColor()) }
+                }
             }
         }
     }

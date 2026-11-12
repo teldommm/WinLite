@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.WinZProgressBar
 import com.winlator.cmod.R
 import androidx.compose.ui.res.stringResource
 import com.winlator.cmod.ui.theme.DialogScrimColor
@@ -75,14 +76,7 @@ object ThemedProgressHost {
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(Modifier.height(8.dp))
-                            LinearProgressIndicator(
-                                progress = { progress.percent / 100f },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(6.dp),
-                                color = controlAccentColor(),
-                                trackColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
+                            WinZProgressBar(progress.percent / 100f, Modifier.fillMaxWidth().height(6.dp))
                             Spacer(Modifier.height(10.dp))
                             Text(
                                 progress.statusText,

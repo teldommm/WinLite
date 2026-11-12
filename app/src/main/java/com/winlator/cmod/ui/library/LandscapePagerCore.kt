@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.R
 import androidx.compose.ui.res.stringResource
 import com.winlator.cmod.ui.theme.OnArtwork
@@ -237,7 +238,7 @@ internal fun LandscapePagerCore(
                         targetState = item,
                         transitionSpec = {
                             (fadeIn(tween(300, delayMillis = 90)) + slideInVertically(tween(360)) { it / 6 }) togetherWith
-                                fadeOut(tween(160))
+                                fadeOut(tween(WinZMotion.DurationS))
                         },
                         contentKey = { it.id },
                         label = "libraryTitle"

@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.WinZSpinner
 import com.winlator.cmod.ui.theme.DialogScrimColor
 import android.app.Activity
 import android.view.View
@@ -108,12 +109,7 @@ internal fun LoadingOverlayContent(message: String) {
 private fun LoadingCard(message: String) {
     ThemedDialogSurface {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(60.dp),
-                color = controlAccentColor(),
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                strokeWidth = 5.dp
-            )
+            WinZSpinner(60.dp, 5.dp, color = controlAccentColor())
             Spacer(Modifier.width(16.dp))
             Text(
                 message,

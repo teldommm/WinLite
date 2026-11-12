@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.library
 
+import com.winlator.cmod.ui.theme.WinZProgressBar
 import com.winlator.cmod.ui.theme.TablerIcons
 import android.content.Context
 import android.graphics.Bitmap
@@ -257,10 +258,7 @@ private fun PlayButton(click: () -> Unit, chooseMode: (String) -> Unit, chooseEx
         }
     }
     if (modeProgress != null && modeBusy) {
-        if (modeProgress.total > 0) LinearProgressIndicator(
-            progress = { (modeProgress.done.toFloat() / modeProgress.total).coerceIn(0f, 1f) },
-            modifier = Modifier.fillMaxWidth()
-        ) else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        WinZProgressBar(if (modeProgress.total > 0) (modeProgress.done.toFloat() / modeProgress.total).coerceIn(0f, 1f) else null)
         Text(when (modeProgress.stage) {
             "download" -> stringResource(R.string.steam_mode_downloading)
             "verify" -> stringResource(R.string.steam_mode_verifying)

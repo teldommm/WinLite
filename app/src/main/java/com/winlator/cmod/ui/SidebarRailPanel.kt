@@ -289,7 +289,7 @@ private fun RailSessionButton(state: SidebarRailState, callbacks: SidebarRailCal
     // External changes (reset on sidebar close) and settled swipes both land here.
     LaunchedEffect(exitMode) {
         val target = if (exitMode) 1f else 0f
-        if (progress.value != target) progress.animateTo(target, tween(160))
+        if (progress.value != target) progress.animateTo(target, tween(WinZMotion.DurationS))
     }
 
     fun setMode(exit: Boolean) {
@@ -297,7 +297,7 @@ private fun RailSessionButton(state: SidebarRailState, callbacks: SidebarRailCal
             currentState.exitMode = exit
             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         } else {
-            scope.launch { progress.animateTo(if (exit) 1f else 0f, tween(160)) }
+            scope.launch { progress.animateTo(if (exit) 1f else 0f, tween(WinZMotion.DurationS)) }
         }
     }
 

@@ -70,7 +70,7 @@ import java.util.Date
             }
         }
         Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton(onClick = { showInfo = false }) { Text(uiStr(R.string.ui_close)) } }
+        SteamDialogButtons { SteamPrimaryButton(uiStr(R.string.ui_close)) { showInfo = false } }
     }
     if (showAchievements) ThemedDialog(onDismissRequest = { showAchievements = false }) {
         run {
@@ -96,7 +96,7 @@ import java.util.Date
                         }
                     }
                 }
-                TextButton(onClick = { showAchievements = false }, modifier = Modifier.align(Alignment.End)) { Text(uiStr(R.string.ui_close)) }
+                SteamDialogButtons { SteamPrimaryButton(uiStr(R.string.ui_close)) { showAchievements = false } }
             }
         }
     }

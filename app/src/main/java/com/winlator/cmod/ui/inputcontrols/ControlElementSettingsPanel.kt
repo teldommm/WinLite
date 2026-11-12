@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.inputcontrols
 
+import com.winlator.cmod.ui.theme.accentSliderColors
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.ui.uiStr
@@ -363,7 +364,7 @@ private fun PercentSlider(
             onValueChangeFinished = { onChange(live.roundToInt()) },
             modifier = Modifier.fillMaxWidth(),
             valueRange = range,
-            colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent)
+            colors = accentSliderColors()
         )
     }
 }

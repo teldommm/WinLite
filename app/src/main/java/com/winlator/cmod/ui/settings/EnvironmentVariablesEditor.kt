@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.theme.WinZMotion
+import com.winlator.cmod.ui.theme.accentCheckboxColors
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.ThemedDialogScrollBody
@@ -373,7 +375,7 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
                                     if (option !in selected) selected.add(option)
                                 } else selected.remove(option)
                             },
-                            colors = CheckboxDefaults.colors(checkedColor = accent)
+                            colors = accentCheckboxColors()
                         )
                         Text(option, modifier = Modifier.weight(1f))
                     }
@@ -538,7 +540,7 @@ private fun ModeSwitch(mode: AddMode, presetEnabled: Boolean, onMode: (AddMode) 
         border = BorderStroke(1.dp, hairlineColor())
     ) {
         // The accent pill slides between the two options instead of jumping.
-        val slide by animateFloatAsState(if (mode == AddMode.PRESET) 0f else 1f, tween(260, easing = FastOutSlowInEasing), label = "modeSlide")
+        val slide by animateFloatAsState(if (mode == AddMode.PRESET) 0f else 1f, tween(WinZMotion.DurationPill, easing = FastOutSlowInEasing), label = "modeSlide")
         val pillRadius = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.toPx() }
         Row(
             Modifier.padding(3.dp).drawBehind {

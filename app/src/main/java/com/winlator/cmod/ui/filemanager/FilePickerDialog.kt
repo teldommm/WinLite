@@ -468,16 +468,16 @@ private fun ColumnScope.FilePickerPanel(
         transitionSpec = {
             val deeper = targetState.path.startsWith(initialState.path + File.separator)
             val higher = initialState.path.startsWith(targetState.path + File.separator)
-            val enter = fadeIn(tween(200, easing = FastOutSlowInEasing))
-            val exit = fadeOut(tween(140, easing = FastOutSlowInEasing))
+            val enter = fadeIn(tween(WinZMotion.DurationM, easing = FastOutSlowInEasing))
+            val exit = fadeOut(tween(WinZMotion.DurationS, easing = FastOutSlowInEasing))
             val spec = when {
-                deeper -> (enter + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 8 }) togetherWith
-                    (exit + slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 8 })
-                higher -> (enter + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 8 }) togetherWith
-                    (exit + slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 8 })
+                deeper -> (enter + slideInHorizontally(tween(WinZMotion.DurationPill, easing = FastOutSlowInEasing)) { it / 8 }) togetherWith
+                    (exit + slideOutHorizontally(tween(WinZMotion.DurationPill, easing = FastOutSlowInEasing)) { -it / 8 })
+                higher -> (enter + slideInHorizontally(tween(WinZMotion.DurationPill, easing = FastOutSlowInEasing)) { -it / 8 }) togetherWith
+                    (exit + slideOutHorizontally(tween(WinZMotion.DurationPill, easing = FastOutSlowInEasing)) { it / 8 })
                 else -> enter togetherWith exit
             }
-            spec.using(SizeTransform(clip = true) { _, _ -> tween(260, easing = FastOutSlowInEasing) })
+            spec.using(SizeTransform(clip = true) { _, _ -> tween(WinZMotion.DurationPill, easing = FastOutSlowInEasing) })
         },
         label = "pickerList"
     ) { key ->

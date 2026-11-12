@@ -64,9 +64,9 @@ import kotlinx.coroutines.withContext
             }
         }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(enabled = !busy, onClick = dismiss) { Text(uiStr(R.string.steam_ui_cancel)) }
-            TextButton(enabled = selected != null && exe.isNotBlank() && !busy, onClick = {
+        SteamDialogButtons {
+            SteamSecondaryButton(uiStr(R.string.steam_ui_cancel), enabled = !busy, onClick = dismiss)
+            Button(colors = steamButtonColors(), enabled = selected != null && exe.isNotBlank() && !busy, onClick = {
                 busy = true
                 scope.launch {
                     val result = withContext(Dispatchers.IO) { runCatching {

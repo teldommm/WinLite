@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.theme.accentCheckboxColors
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.BorderStroke
@@ -134,7 +135,7 @@ internal fun VulkanExtensionsDialog(
                     Checkbox(
                         checked = checked,
                         onCheckedChange = { enabled[name] = it },
-                        colors = CheckboxDefaults.colors(checkedColor = accent)
+                        colors = accentCheckboxColors()
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(name, style = MaterialTheme.typography.bodyMedium)

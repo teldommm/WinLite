@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.settings
 
+import com.winlator.cmod.ui.theme.accentSliderColors
+import com.winlator.cmod.ui.theme.accentCheckboxColors
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.RevealSection
 import androidx.compose.material3.LocalTextStyle
@@ -125,6 +127,7 @@ data class SettingsModel(
 interface SettingsCallbacks {
     fun onOpenComponents()
     fun onOpenContainers()
+    fun onOpenFileManager()
     fun onBox64PresetSelected(id: String)
     fun onFexPresetSelected(id: String)
     fun onInstallSoundFont()
@@ -181,6 +184,9 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
             }
             item("components") {
                 NavigationRow(TablerIcons.Apps, uiStr(R.string.ui_components), uiStr(R.string.ui_wine_proton_dxvk_vkd3d_and_runtimes), callbacks::onOpenComponents)
+            }
+            item("file-manager") {
+                NavigationRow(TablerIcons.Folder, uiStr(R.string.ui_file_manager), null, callbacks::onOpenFileManager)
             }
 
             item("presets-title") { SectionTitle("PRESETS") }
@@ -411,7 +417,7 @@ private fun SpeedRow(title: String, value: Int, onChanged: (Int) -> Unit) {
             onValueChange = { draft = it },
             onValueChangeFinished = { onChanged(draft.roundToInt()) },
             valueRange = 10f..200f,
-            colors = SliderDefaults.colors(thumbColor = controlAccentColor(), activeTrackColor = controlAccentColor())
+            colors = accentSliderColors()
         )
     }
 }
@@ -654,7 +660,7 @@ private fun WineDebugChannelsDialog(
                                     if (checked) add(channel) else remove(channel)
                                 }
                             },
-                            colors = CheckboxDefaults.colors(checkedColor = accent)
+                            colors = accentCheckboxColors()
                         )
                         Text(channel, modifier = Modifier.weight(1f))
                     }

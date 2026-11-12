@@ -1,5 +1,7 @@
 package com.winlator.cmod.ui.filemanager
 
+import com.winlator.cmod.ui.theme.WinZMotion
+import com.winlator.cmod.ui.theme.WinZProgressBar
 import com.winlator.cmod.ui.uiStr
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -99,7 +101,7 @@ private fun FileManagerIcon.painter(): Painter = when (this) {
     FileManagerIcon.FOLDER -> rememberVectorPainter(TablerIcons.Folder)
     FileManagerIcon.FILE -> rememberVectorPainter(TablerIcons.FileDescription)
     FileManagerIcon.WINE -> painterResource(R.drawable.icon_wine)
-    FileManagerIcon.INTERNAL_STORAGE -> painterResource(R.drawable.ic_internal_storage)
+    FileManagerIcon.INTERNAL_STORAGE -> rememberVectorPainter(TablerIcons.DeviceMobile)
     FileManagerIcon.SYSTEM_DRIVE -> rememberVectorPainter(TablerIcons.Database)
 }
 
@@ -304,14 +306,7 @@ private fun StorageMeter(path: String, usedText: String, percent: Int, modifier:
                 Text(usedText, style = MaterialTheme.typography.bodySmall, maxLines = 1)
             }
             Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { percent / 100f },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp),
-                color = controlAccentColor(),
-                trackColor = MaterialTheme.colorScheme.surfaceVariant
-            )
+            WinZProgressBar(percent / 100f, Modifier.fillMaxWidth().height(4.dp))
         }
     }
 }
@@ -546,8 +541,8 @@ private fun PasteFab(visible: Boolean, onClick: () -> Unit, modifier: Modifier) 
     AnimatedVisibility(
         visible = visible,
         modifier = modifier,
-        enter = fadeIn(tween(180)) + scaleIn(tween(200), initialScale = 0.7f),
-        exit = fadeOut(tween(130)) + scaleOut(tween(150), targetScale = 0.7f)
+        enter = fadeIn(tween(180)) + scaleIn(tween(WinZMotion.DurationM), initialScale = 0.7f),
+        exit = fadeOut(tween(130)) + scaleOut(tween(WinZMotion.DurationS), targetScale = 0.7f)
     ) {
         FloatingActionButton(
             onClick = onClick,

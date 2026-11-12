@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui.onboarding
 
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.uiStr
 import android.content.Context
@@ -302,7 +303,7 @@ private fun OnboardingFlow(
             val dir = if (forward) 1 else -1
             (fadeIn(tween(300, delayMillis = 70, easing = FastOutSlowInEasing)) +
                 slideInHorizontally(tween(380, easing = FastOutSlowInEasing)) { dir * it / 9 }) togetherWith
-                (fadeOut(tween(160)) +
+                (fadeOut(tween(WinZMotion.DurationS)) +
                     slideOutHorizontally(tween(380, easing = FastOutSlowInEasing)) { -dir * it / 9 }) using
                 SizeTransform(clip = false)
         },

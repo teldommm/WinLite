@@ -102,7 +102,7 @@ public class NotificationService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
         return new NotificationCompat.Builder(this, MainActivity.NOTIFICATION_CHANNEL_ID)
-                .setSmallIcon(session ? R.drawable.ic_stat_ab_gear_0011 : R.drawable.winlator_mark)
+                .setSmallIcon(session ? R.drawable.ic_stat_settings : R.drawable.winlator_mark)
                 .setContentTitle("WinLite")
                 .setContentText("WinLite is running, do not kill or swipe this notification")
                 .setPriority(NotificationCompat.PRIORITY_LOW)

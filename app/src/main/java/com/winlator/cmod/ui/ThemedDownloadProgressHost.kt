@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.WinZProgressRing
 import com.winlator.cmod.R
 import androidx.compose.ui.res.stringResource
 import com.winlator.cmod.ui.theme.DialogScrimColor
@@ -70,13 +71,7 @@ object ThemedDownloadProgressHost {
                             val progress = state.value
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(
-                                        progress = { progress.percent / 100f },
-                                        modifier = Modifier.size(60.dp),
-                                        color = controlAccentColor(),
-                                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                                        strokeWidth = 5.dp
-                                    )
+                                    WinZProgressRing(progress.percent / 100f, 60.dp, 5.dp)
                                     Text(
                                         "${progress.percent}%",
                                         style = MaterialTheme.typography.labelLarge.tabularNumbers(),

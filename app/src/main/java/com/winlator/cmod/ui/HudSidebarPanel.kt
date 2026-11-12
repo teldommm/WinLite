@@ -1,5 +1,6 @@
 package com.winlator.cmod.ui
 
+import com.winlator.cmod.ui.theme.accentCheckboxColors
 import com.winlator.cmod.R
 import com.winlator.cmod.ui.theme.RevealSection
 import android.content.Context
@@ -231,7 +232,7 @@ private fun MetricCheckbox(context: Context, label: String, bit: Int, modifier: 
         Checkbox(
             checked = checked,
             onCheckedChange = null,
-            colors = CheckboxDefaults.colors(checkedColor = controlAccentColor())
+            colors = accentCheckboxColors()
         )
         Spacer(Modifier.width(8.dp))
         Text(

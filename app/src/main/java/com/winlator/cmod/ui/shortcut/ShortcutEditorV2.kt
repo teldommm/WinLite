@@ -2,6 +2,7 @@
 
 package com.winlator.cmod.ui.shortcut
 
+import com.winlator.cmod.ui.theme.accentSliderColors
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.contentdialog.DXVKConfig
@@ -1217,7 +1218,7 @@ private fun SharpnessSliderV2(label: String, value: String, onChanged: (String) 
             value = numeric,
             onValueChange = { onChanged(it.roundToInt().coerceIn(0, 100).toString()) },
             valueRange = 0f..100f,
-            colors = SliderDefaults.colors(thumbColor = controlAccentColor(), activeTrackColor = controlAccentColor())
+            colors = accentSliderColors()
         )
     }
 }
@@ -1240,7 +1241,7 @@ private fun ExecArgumentsEditorV2(value: String, onChanged: (String) -> Unit) {
                 shape = WinZShapes.Small
             )
             Box {
-                TextButton(onClick = { open = true }) { Text("⋮", style = MaterialTheme.typography.headlineSmall) }
+                IconButton(onClick = { open = true }) { Icon(TablerIcons.DotsVertical, null) }
                 DropdownMenu(
                     expanded = open,
                     onDismissRequest = { open = false },

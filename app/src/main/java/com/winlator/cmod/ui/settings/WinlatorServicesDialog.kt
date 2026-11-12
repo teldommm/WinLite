@@ -301,8 +301,8 @@ private fun ColumnScope.ServicesScreen(
 private fun AddRepoOverlayHost(visible: Boolean, content: @Composable () -> Unit) {
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(200)),
-        exit = fadeOut(tween(150))
+        enter = fadeIn(tween(WinZMotion.DurationM)),
+        exit = fadeOut(tween(WinZMotion.DurationS))
     ) { content() }
 }
 

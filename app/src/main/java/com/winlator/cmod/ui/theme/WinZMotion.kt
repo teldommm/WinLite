@@ -29,6 +29,9 @@ object WinZMotion {
     // Main tab switch (MainShell): the incoming tab slides in while the outgoing one slides out.
     const val DurationTabSlide = 260
 
+    // Sliding pill of a segmented switch / chip row (env-variable mode switch, Steam Account/QR).
+    const val DurationPill = 260
+
     private fun <T> spec(durationMillis: Int, delayMillis: Int): FiniteAnimationSpec<T> =
         androidx.compose.animation.core.tween(durationMillis, delayMillis, FastOutSlowInEasing)
 
