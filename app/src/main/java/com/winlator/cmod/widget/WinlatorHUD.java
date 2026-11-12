@@ -20,6 +20,7 @@ import android.view.View;
 
 import com.winlator.cmod.core.CPUStatus;
 import com.winlator.cmod.core.GPUInformation;
+import com.winlator.cmod.core.KgslGpuLoad;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -218,9 +219,8 @@ public class WinlatorHUD extends View {
     private final IntentFilter batteryIntentFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
 
     private String[] gpuPaths = new String[0];
-    // Only "no readable GPU node exists at all". Read failures are never latched any more:
-    // the old code gave up for good after 3 failed reads and left the last value frozen.
-    private boolean gpuUnavailable;
+    // Read failures are never latched: the old code gave up for good after 3 failed reads and left
+    // the last value frozen.
     private int gpuConsecutiveFailures;
     private int battConsecutiveFailures;
     // After this many failed reads in a row the metric shows N/A (and keeps being retried).
@@ -374,7 +374,6 @@ public class WinlatorHUD extends View {
         scanPlatformGpuNodesOnce(new File("/sys/devices/platform"), found);
 
         gpuPaths = found.toArray(new String[0]);
-        gpuUnavailable = gpuPaths.length == 0;
     }
 
     private void scanGpuNodesOnce(File root, LinkedHashSet<String> found) {
@@ -477,19 +476,23 @@ public class WinlatorHUD extends View {
     private void readStats() {
         int mask = showMask;
         if ((mask & SHOW_GPU_USAGE) != 0) readGpu();
+        else KgslGpuLoad.stop();
         if ((mask & (SHOW_CPU_USAGE | SHOW_CPU_TEMP)) != 0) readCpu();
         if ((mask & SHOW_RAM) != 0) readRam();
         if ((mask & (SHOW_POWER | SHOW_BATTERY_TEMP | SHOW_CHARGE_STATE)) != 0) readBattery();
     }
 
     private void readGpu() {
-        if (gpuUnavailable) return;
-
         int value = -1;
         for (String path : gpuPaths) {
             value = readGpuSample(path);
             if (value >= 0) break;
         }
+
+        // No sysfs node gave a value (none readable for an app, or the read fails): on Adreno the
+        // load is taken from the kgsl memstore instead. It is not sampled while sysfs works.
+        if (value >= 0) KgslGpuLoad.stop();
+        else value = KgslGpuLoad.busyPercent();
 
         if (value >= 0) {
             gpuConsecutiveFailures = 0;
@@ -1427,7 +1430,12 @@ public class WinlatorHUD extends View {
     }
 
     private void stopStatsThread() {
-        if (statsHandler != null) statsHandler.removeCallbacks(statsRunnable);
+        if (statsHandler != null) {
+            statsHandler.removeCallbacks(statsRunnable);
+            // On the stats thread itself, after its last reading: stopping here could be followed by
+            // one more reading that opens the memstore sampler again.
+            statsHandler.post(KgslGpuLoad::stop);
+        }
         if (statsThread != null) {
             statsThread.quitSafely();
             statsThread = null;

@@ -1895,7 +1895,7 @@ VkrDis* vkr_dis_create(VkDevice device, VkPhysicalDevice physical_device) {
 
     // Flow estimator: DIS unless asked for Farneback, by WFG_ENGINE=farneback in the
     // environment (the desktop bench) or, on a device,
-    //   adb shell setprop debug.winnative.wfg.engine farneback
+    //   adb shell setprop debug.winlite.wfg.engine farneback
     // The hybrid is the default: on the bench it matches DIS overall (better on fast camera
     // motion, worse on small fast objects with a periodic texture) at 2.3x less flow time on
     // Adreno 750, nearly all of DIS's time there being the level-0 SOR sweeps.
@@ -1903,7 +1903,7 @@ VkrDis* vkr_dis_create(VkDevice device, VkPhysicalDevice physical_device) {
     const char* engine = getenv("WFG_ENGINE");
 #ifdef __ANDROID__
     char engine_prop[PROP_VALUE_MAX] = {0};
-    if (__system_property_get("debug.winnative.wfg.engine", engine_prop) > 0) engine = engine_prop;
+    if (__system_property_get("debug.winlite.wfg.engine", engine_prop) > 0) engine = engine_prop;
 #endif
     if (engine && strcmp(engine, "dis") == 0) d->flow_engine = DIS_ENGINE_DIS;
     if (engine && strcmp(engine, "farneback") == 0) d->flow_engine = DIS_ENGINE_FARNEBACK;

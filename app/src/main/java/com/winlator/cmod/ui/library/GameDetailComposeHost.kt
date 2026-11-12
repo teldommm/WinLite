@@ -6,6 +6,7 @@ import com.winlator.cmod.ui.theme.OnArtwork
 import com.winlator.cmod.ui.theme.tabularNumbers
 import androidx.compose.material3.LocalTextStyle
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -79,9 +80,8 @@ import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import kotlin.math.roundToInt
 import com.winlator.cmod.ui.theme.TablerIcons
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -124,6 +124,12 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
     val artwork by produceState<Bitmap?>(LibraryImageCache.peek(artworkKey), artworkKey) {
         value = withContext(Dispatchers.IO) { LibraryImageCache.load(artworkPath) }
     }
+    // The landscape layout (where the stat chips sit) depends on the picture's proportions. The bitmap
+    // may still be decoding when the page opens, so the ratio is read from the file header (a few
+    // bytes, cached per file) and the layout is final from the first frame: nothing shifts when the
+    // bitmap arrives, it only fades in.
+    val ratioHint = remember(artworkKey) { artworkRatioOf(artworkPath, artworkKey) }
+    val artworkRatio = ratioHint ?: artwork?.let { it.width.toFloat() / it.height.toFloat() }
     var favorite by remember(initialFavorite) { mutableStateOf(initialFavorite) }
     val toggle = {
         favorite = !favorite
@@ -143,8 +149,20 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
         ),
         DetailActionItem(TablerIcons.Trash, stringResource(R.string.remove), stringResource(R.string.remove), callbacks::onRemove, destructive = true)
     )
-    if (landscape) LandscapeDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, favorite, stats, items, callbacks, toggle)
+    if (landscape) LandscapeDetail(title, subtitle, artwork, artworkRatio, artworkKey, coverOnly, coverIsUser, favorite, stats, items, callbacks, toggle)
     else PortraitDetail(title, subtitle, artwork, artworkKey, coverOnly, coverIsUser, fallback, favorite, stats, items, callbacks, toggle)
+}
+
+private val artworkRatioCache = java.util.concurrent.ConcurrentHashMap<String, Float>()
+
+// Width / height of the picture from its header only (no pixels decoded), or null when it can't be read.
+private fun artworkRatioOf(artworkPath: String?, artworkKey: String?): Float? {
+    if (artworkPath == null || artworkKey == null) return null
+    artworkRatioCache[artworkKey]?.let { return it }
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    runCatching { BitmapFactory.decodeFile(artworkPath, bounds) }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    return (bounds.outWidth.toFloat() / bounds.outHeight.toFloat()).also { artworkRatioCache[artworkKey] = it }
 }
 
 // Landscape game page: the picture stays open, the controls sit in the corners.
@@ -156,7 +174,7 @@ internal fun GameDetailScreen(title: String, subtitle: String, bannerPath: Strin
 // Everything eases in once, staggered. Two soft scrims (top for the title, bottom for the panel)
 // replace the old heavy left-to-right darkening, so most of the picture keeps its own colours.
 @Composable
-private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
+private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, artworkRatio: Float?, artworkKey: String?, coverOnly: Boolean, coverIsUser: Boolean, favorite: Boolean, stats: GameStats, items: List<DetailActionItem>, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // The picture fades in once it is decoded instead of popping in.
         val artAlpha by animateFloatAsState(if (artwork != null) 1f else 0f, tween(420), label = "detailArt")
@@ -181,11 +199,14 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
             val compactCaptions = iconCell < 64.dp
 
             // The poster: the user's own cover when it is not itself the background.
-            val posterRatio: Float? = if (artwork != null && coverIsUser && !usesAsBackground(artwork, coverOnly, coverIsUser)) {
-                (artwork.width.toFloat() / artwork.height.toFloat()).coerceIn(0.5f, 1.29f)
+            // Decided from the ratio, not from the decoded bitmap, so the room it takes (and with it
+            // the place of the chips) is the same from the first frame; the poster itself fades in.
+            val posterRatio: Float? = if (artworkRatio != null && coverIsUser && !usesAsBackground(artworkRatio, coverOnly, coverIsUser)) {
+                artworkRatio.coerceIn(0.5f, 1.29f)
             } else null
+            val posterAlpha by animateFloatAsState(if (artwork != null) 1f else 0f, tween(420), label = "detailPoster")
             if (posterRatio != null && artwork != null) {
-                DetailPoster(artwork, posterRatio, Modifier.align(Alignment.BottomStart))
+                DetailPoster(artwork, posterRatio, Modifier.align(Alignment.BottomStart).graphicsLayer { alpha = posterAlpha })
             }
 
             // The stat chips sit bottom-left, beside the poster when there is one. Where the picture
@@ -193,17 +214,18 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
             val posterWidth = if (posterRatio != null) {
                 (maxHeight - (POSTER_TOP + 24.dp)).coerceAtLeast(0.dp) * posterRatio
             } else 0.dp
-            val chipsStart = 34.dp + if (posterRatio != null) posterWidth + 14.dp else 0.dp
+            val chipsStartTarget = 34.dp + if (posterRatio != null) posterWidth + 14.dp else 0.dp
+            // Only a late change of the picture (no readable header) can move it: it then slides over.
+            val chipsStart by animateDpAsState(chipsStartTarget, tween(320), label = "detailChipsStart")
             val chipsEndReserve = panelWidth + 34.dp + 16.dp
-            val chipsInPanel = maxWidth - chipsStart - chipsEndReserve < 190.dp
+            val chipsInPanel = maxWidth - chipsStartTarget - chipsEndReserve < 190.dp
+            // The chips are there from the first frame (dashes until the numbers are read), so they
+            // neither pop in nor shove the panel / the title when the stats arrive.
             if (!chipsInPanel) {
-                AnimatedVisibility(
-                    stats.loaded,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(start = chipsStart, end = chipsEndReserve, bottom = 24.dp),
-                    enter = EnterTransition.None
-                ) {
-                    StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
-                }
+                StatChipRow(
+                    detailStatEntries(stats),
+                    Modifier.align(Alignment.BottomStart).padding(start = chipsStart, end = chipsEndReserve, bottom = 24.dp).fillMaxWidth()
+                )
             }
 
             ArtPlateButton(
@@ -241,9 +263,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, a
                 border = BorderStroke(1.dp, OnArtwork.PlateBorder)
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (chipsInPanel) {
-                        if (stats.loaded) StatChipRow(rememberStatEntries(stats, always = true), Modifier.fillMaxWidth())
-                    }
+                    if (chipsInPanel) StatChipRow(detailStatEntries(stats), Modifier.fillMaxWidth())
                     Button(
                         onClick = callbacks::onPlay,
                         modifier = Modifier.fillMaxWidth().height(58.dp),
@@ -351,6 +371,10 @@ internal fun DetailPoster(artwork: Bitmap, ratio: Float, modifier: Modifier) {
 internal fun usesAsBackground(artwork: Bitmap, coverOnly: Boolean, coverIsUser: Boolean): Boolean =
     !coverOnly || (coverIsUser && artwork.width >= artwork.height * 1.3f)
 
+// Same rule from the picture's width / height alone (known before the bitmap is decoded).
+internal fun usesAsBackground(ratio: Float, coverOnly: Boolean, coverIsUser: Boolean): Boolean =
+    !coverOnly || (coverIsUser && ratio >= 1.3f)
+
 // What the header shows, by where the picture came from (all of it moves only when the screen
 // allowed motion: LocalArtworkMotion, the "Animated artwork" setting):
 //  - banner or the user's own background: sharp, full-bleed, slowly breathing;
@@ -421,11 +445,10 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, ar
             Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, color = OnArtwork.TextSecondary, style = MaterialTheme.typography.bodyMedium)
-                // Same as landscape: the chips are always drawn (zeros / dashes for a game never run).
-                if (stats.loaded) {
-                    Spacer(Modifier.height(6.dp))
-                    StatChips(stats, modifier = Modifier.fillMaxWidth())
-                }
+                // Same as landscape: the chips are there from the first frame (dashes until the numbers
+                // are read), so the title block above them does not jump up when the stats arrive.
+                Spacer(Modifier.height(6.dp))
+                StatChips(stats, modifier = Modifier.fillMaxWidth())
             }
         }
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -464,7 +487,11 @@ internal fun DetailAction(item: DetailActionItem, modifier: Modifier) {
 
 // Playtime, plays, last launch and size, as dark glass chips (they always sit on the artwork) with
 
-internal class StatEntry(val icon: ImageVector, val label: String, val value: String)
+// minValueWidth: the value never gets narrower than this, so a chip whose value arrives late (the
+// folder size) does not change the row's width - and with it the row's layout - when it does.
+internal class StatEntry(val icon: ImageVector, val label: String, val value: String, val minValueWidth: Dp = 0.dp)
+
+private val SIZE_VALUE_MIN_WIDTH = 60.dp
 
 // The chips are measured, not guessed, so no chip is ever left alone on a second line under another:
 //  1. one row at full size when it fits;
@@ -472,8 +499,16 @@ internal class StatEntry(val icon: ImageVector, val label: String, val value: St
 //  3. else (a very narrow spot) two equal columns at full size, so the last chip sits in a tidy grid.
 @Composable
 private fun StatChips(stats: GameStats, modifier: Modifier = Modifier) {
-    val entries = rememberStatEntries(stats, always = true)
+    val entries = detailStatEntries(stats)
     if (entries.isNotEmpty()) StatChipRow(entries, modifier)
+}
+
+// The chips of the game page. Until the numbers are read (stats.loaded) every value is a dash, so the
+// chips can be drawn from the very first frame instead of appearing after the read.
+@Composable
+internal fun detailStatEntries(stats: GameStats): List<StatEntry> {
+    val entries = rememberStatEntries(stats, always = true)
+    return if (stats.loaded) entries else remember(entries) { entries.map { StatEntry(it.icon, it.label, "\u2014", it.minValueWidth) } }
 }
 
 @Composable
@@ -493,8 +528,8 @@ internal fun rememberStatEntries(stats: GameStats, always: Boolean = false): Lis
             else if (always) add(StatEntry(TablerIcons.History, lastPlayedLabel, "\u2014"))
             // Size is measured later (or unknown for a broad folder): with always the chip is there
             // from the start, with a dash until the value arrives, so it doesn't pop in.
-            if (stats.sizeText != null) add(StatEntry(TablerIcons.Database, sizeLabel, stats.sizeText))
-            else if (always) add(StatEntry(TablerIcons.Database, sizeLabel, "\u2014"))
+            if (stats.sizeText != null) add(StatEntry(TablerIcons.Database, sizeLabel, stats.sizeText, SIZE_VALUE_MIN_WIDTH))
+            else if (always) add(StatEntry(TablerIcons.Database, sizeLabel, "\u2014", SIZE_VALUE_MIN_WIDTH))
         }
     }
 }
@@ -578,7 +613,7 @@ private fun StatChip(entry: StatEntry, fill: Boolean) {
             Icon(entry.icon, null, Modifier.size(16.dp), tint = OnArtwork.InfoIcon)
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(entry.label.uppercase(), color = OnArtwork.TextTertiary, style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 12.sp), fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(entry.value, modifier = Modifier.widthIn(max = 150.dp), color = OnArtwork.Text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall.tabularNumbers())
+                Text(entry.value, modifier = Modifier.widthIn(min = entry.minValueWidth, max = 150.dp), color = OnArtwork.Text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall.tabularNumbers())
             }
         }
     }

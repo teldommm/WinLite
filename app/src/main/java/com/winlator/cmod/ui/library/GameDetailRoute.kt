@@ -60,6 +60,9 @@ fun GameDetailRoute(shortcutPath: String, preloaded: Shortcut? = null, onClose: 
     GameDetailLoaded(shortcutPath, loaded, activity, onClose, onLibraryChanged)
 }
 
+// Stats of the games whose page was opened in this process, by shortcut path.
+private val gameStatsCache = java.util.concurrent.ConcurrentHashMap<String, GameStats>()
+
 @Composable
 private fun GameDetailLoaded(
     shortcutPath: String,
@@ -82,12 +85,16 @@ private fun GameDetailLoaded(
     }
     // Playtime / plays / last launch and the stored folder size first (cheap); the folder is only
     // measured again when the stored size is missing or out of date.
-    val stats by produceState(GameStats(), shortcut, refreshTick) {
+    // The last numbers of this game seen in the process are the starting value: the chips show them
+    // from the first frame and what is read again only replaces them (no dash -> number change).
+    val stats by produceState(gameStatsCache[shortcutPath] ?: GameStats(), shortcut, refreshTick) {
         val basic = withContext(Dispatchers.IO) { GameStatsLoader.load(activity, shortcut) }
         val cached = withContext(Dispatchers.IO) { GameStatsLoader.cachedSize(activity, shortcut) }
         value = basic.copy(sizeText = cached?.text ?: value.sizeText)
+        gameStatsCache[shortcutPath] = value
         if (cached == null || !cached.fresh) {
             value = value.copy(sizeText = withContext(Dispatchers.IO) { GameStatsLoader.sizeText(activity, shortcut) })
+            gameStatsCache[shortcutPath] = value
         }
     }
     val homePinned by produceState(false, shortcut, refreshTick, pinTick) {
