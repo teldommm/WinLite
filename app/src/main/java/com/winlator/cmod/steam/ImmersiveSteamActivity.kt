@@ -3,6 +3,7 @@ package com.winlator.cmod.steam
 import android.content.res.Configuration
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
+import com.winlator.cmod.core.AppUtils
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.theme.DialogSystemBarsPolicy
 
@@ -15,6 +16,9 @@ import com.winlator.cmod.ui.theme.DialogSystemBarsPolicy
 open class ImmersiveSteamActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The Library menu's Vertical / Horizontal mode (and the orientation lock) apply to the Steam screens
+        // too; without this they fell back on the manifest's screenOrientation="sensor".
+        AppUtils.applyOrientationMode(this)
         supportActionBar?.hide()
         applyAppFullscreen(this)
     }
