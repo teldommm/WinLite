@@ -92,7 +92,22 @@ jobs:
           cp "$LAYER" app/src/main/jniLibs/arm64-v8a/libVkLayer_khronos_validation.so
           test -s app/src/main/jniLibs/arm64-v8a/libVkLayer_khronos_validation.so
 
+      - name: Prepare release signing key
+        env:
+          WINLITE_KEYSTORE_BASE64: ${{ secrets.WINLITE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$WINLITE_KEYSTORE_BASE64" ]; then
+            echo "$WINLITE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/winlite-release.jks"
+            echo "WINLITE_KEYSTORE_FILE=$RUNNER_TEMP/winlite-release.jks" >> "$GITHUB_ENV"
+          else
+            echo "No signing key configured, the release will use the debug key."
+          fi
+
       - name: Build with Gradle
+        env:
+          WINLITE_KEYSTORE_PASSWORD: ${{ secrets.WINLITE_KEYSTORE_PASSWORD }}
+          WINLITE_KEY_ALIAS: ${{ secrets.WINLITE_KEY_ALIAS }}
+          WINLITE_KEY_PASSWORD: ${{ secrets.WINLITE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
       - name: Upload APK Artifact
