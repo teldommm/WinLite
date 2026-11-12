@@ -1207,6 +1207,13 @@ void VulkanRendererContext::renderFrame() {
 
     res = vk_.QueuePresentKHR(graphicsQueue, &pi);
     if (res==VK_SUCCESS||res==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
+    {
+        // The whole burst of this real frame is out: stamp it for the HUD (see PresentStamp).
+        const uint64_t stampNs = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        std::lock_guard<std::mutex> g(presentStampMutex);
+        presentStamp = { presentedFrames.load(std::memory_order_relaxed), stampNs };
+    }
     if (wf.active) wfgNotePresented(wf,1+wf.genCount,acquireWaitNs);
 
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);

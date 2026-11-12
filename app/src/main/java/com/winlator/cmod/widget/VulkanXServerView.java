@@ -627,13 +627,23 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
 
-    private final long[] frameCounts = new long[2];
+    private final long[] frameCounts = new long[4];
 
     private long frameCount(int which) {
         synchronized (lock) {
             if (nativeHandle == 0) return 0;
             nativeGetFrameCounts(nativeHandle, frameCounts);
             return frameCounts[which];
+        }
+    }
+
+    @Override
+    public boolean readFrameCounts(long[] out) {
+        synchronized (lock) {
+            if (nativeHandle == 0) return false;
+            nativeGetFrameCounts(nativeHandle, frameCounts);
+            System.arraycopy(frameCounts, 0, out, 0, 4);
+            return true;
         }
     }
 

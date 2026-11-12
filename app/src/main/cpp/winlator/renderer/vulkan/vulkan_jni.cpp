@@ -399,13 +399,19 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetDisplayClock(
     return JNI_TRUE;
 }
 
-// {presented frames (real and generated), WFG-generated frames}
+// {presented frames (real and generated), WFG-generated frames, presented frames as of the
+// latest real frame's burst, that burst's time (ns, System.nanoTime() clock)}; a 2-long array
+// gets the first two only.
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetFrameCounts(
     JNIEnv* env, jobject, jlong handle, jlongArray out)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || !out || env->GetArrayLength(out) < 2) return;
-    jlong vals[2] = { (jlong)r->getPresentedFrames(), (jlong)r->getWfgGeneratedFrames() };
-    env->SetLongArrayRegion(out, 0, 2, vals);
+    if (!r || !out) return;
+    const jsize n = env->GetArrayLength(out);
+    if (n < 2) return;
+    const auto stamp = r->getPresentStamp();
+    jlong vals[4] = { (jlong)r->getPresentedFrames(), (jlong)r->getWfgGeneratedFrames(),
+                      (jlong)stamp.frames, (jlong)stamp.ns };
+    env->SetLongArrayRegion(out, 0, n >= 4 ? 4 : 2, vals);
 }

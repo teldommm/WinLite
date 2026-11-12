@@ -31,7 +31,7 @@ public class FrameRating extends FrameLayout implements Runnable {
     // Output fps (real and WFG-generated frames shown), 0 while nothing is generated.
     private volatile float outputFPS = 0;
     private OutputFrameSource outputSource;
-    private long lastPresented = -1, lastGenerated = -1;
+    private final OutputRateMeter outputMeter = new OutputRateMeter();
     private String totalRAM = null;
     private final TextView tvFPS;
     private final TextView tvRenderer;
@@ -223,8 +223,8 @@ public class FrameRating extends FrameLayout implements Runnable {
 
     public void setOutputFrameSource(OutputFrameSource source) {
         outputSource = source;
-        lastPresented = -1;
-        lastGenerated = -1;
+        outputMeter.reset();
+        outputFPS = 0;
     }
 
     /** Shows the HUD (a rated window was picked); no frame of its own any more. */
@@ -250,16 +250,9 @@ public class FrameRating extends FrameLayout implements Runnable {
         if (time >= lastTime + 500) {
             float fps = fpsMeter.take(System.nanoTime(), 400_000_000L);
             if (fps >= 0) lastFPS = fps;
-            outputFPS = 0;
-            OutputFrameSource source = outputSource;
-            if (source != null) {
-                long presented = source.getPresentedFrameCount();
-                long generated = source.getGeneratedFrameCount();
-                if (lastPresented >= 0 && generated > lastGenerated && presented >= lastPresented)
-                    outputFPS = (float)((presented - lastPresented) * 1000) / (time - lastTime);
-                lastPresented = presented;
-                lastGenerated = generated;
-            }
+            // From one burst of presents to another, see OutputRateMeter.
+            float out = outputMeter.take(outputSource, System.nanoTime(), 400_000_000L);
+            if (out >= 0) outputFPS = out;
             post(this);
             lastTime = time;
         }

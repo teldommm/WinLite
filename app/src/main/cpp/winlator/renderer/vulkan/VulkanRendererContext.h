@@ -210,6 +210,15 @@ public:
     void setWfgFpsLimit(int fps);
     uint64_t getWfgGeneratedFrames() const { return wfgMadeFrames.load(std::memory_order_relaxed); }
     uint64_t getPresentedFrames() const { return presentedFrames.load(std::memory_order_relaxed); }
+    // presentedFrames as of the latest real frame's presents (its generated ones included) and
+    // when they went out (steady_clock = CLOCK_MONOTONIC = Java's System.nanoTime()), read
+    // together. The HUD's output fps runs from one such burst to another: counted per HUD tick,
+    // it moved in steps of the WFG multiplier (x2 at 30 fps read 58..65, x3 read 87..97).
+    struct PresentStamp { uint64_t frames = 0; uint64_t ns = 0; };
+    PresentStamp getPresentStamp() const {
+        std::lock_guard<std::mutex> g(presentStampMutex);
+        return presentStamp;
+    }
 
     void setCustomScissor(int x, int y, int w, int h);
     void clearCustomScissor();
@@ -578,6 +587,8 @@ public:
     std::atomic<uint64_t> contentFrames{0};       // the game window's content updates
     std::atomic<uint64_t> wfgMadeFrames{0};
     std::atomic<uint64_t> presentedFrames{0};     // real and generated frames shown
+    mutable std::mutex    presentStampMutex;
+    PresentStamp          presentStamp;           // under presentStampMutex
     // The game window: the largest window whose content changed lately. Updates of other
     // windows (launchers, tooltips, the desktop) are not game frames for WFG's pacing.
     struct ContentRate { int64_t area = 0; uint64_t lastNs = 0; };
