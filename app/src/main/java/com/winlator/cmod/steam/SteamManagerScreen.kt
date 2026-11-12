@@ -26,6 +26,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.bumptech.glide.Glide
 import com.winlator.cmod.R
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.winlator.cmod.ui.theme.RevealOnEnter
+import com.winlator.cmod.ui.theme.RevealSection
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.TablerIcons
 import com.winlator.cmod.ui.theme.WinZShapes
 import org.json.JSONObject
@@ -64,51 +72,55 @@ import java.io.File
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(0 to (uiStr(R.string.steam_ui_games) to TablerIcons.DeviceGamepad2), 4 to (uiStr(R.string.steam_ui_demos) to TablerIcons.DeviceGamepad), 1 to (uiStr(R.string.steam_ui_downloads) to TablerIcons.Download), 2 to (uiStr(R.string.steam_ui_installed) to TablerIcons.CircleCheck), 3 to (uiStr(R.string.steam_ui_achievements) to TablerIcons.Trophy)).forEach { (index, entry) ->
-                val (title, icon) = entry
-                SteamTab(tab == index, title, icon) { tab = index }
-            }
-        }
+        SteamTabRow(listOf(
+            SteamTabItem(0, uiStr(R.string.steam_ui_games), TablerIcons.DeviceGamepad2), SteamTabItem(4, uiStr(R.string.steam_ui_demos), TablerIcons.DeviceGamepad),
+            SteamTabItem(1, uiStr(R.string.steam_ui_downloads), TablerIcons.Download), SteamTabItem(2, uiStr(R.string.steam_ui_installed), TablerIcons.CircleCheck),
+            SteamTabItem(3, uiStr(R.string.steam_ui_achievements), TablerIcons.Trophy)), tab) { tab = it }
         Spacer(Modifier.height(8.dp))
-        if (state.restoring || (!state.signedIn && state.savedAccount)) {
+        RevealSection(state.restoring || (!state.signedIn && state.savedAccount)) {
             Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(steamStatusText(state.status), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 if (state.restoring) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = com.winlator.cmod.ui.theme.controlAccentColor())
                 else if (!state.gameActive) TextButton(onClick = { SteamSession.reconnect() }) { Text(uiStr(R.string.steam_ui_retry)) }
             }
         }
-        if (state.signedIn && state.libraryLoading) {
+        RevealSection(state.signedIn && state.libraryLoading) {
             Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(uiStr(R.string.steam_ui_loading_library, state.libraryProgress), style = MaterialTheme.typography.labelMedium)
-                LinearProgressIndicator(progress = { state.libraryProgress / 100f }, modifier = Modifier.fillMaxWidth(), color = com.winlator.cmod.ui.theme.controlAccentColor(), trackColor = MaterialTheme.colorScheme.surfaceVariant)
+                SteamProgress(state.libraryProgress / 100f, Modifier.fillMaxWidth())
             }
-        } else if (state.libraryError.isNotEmpty()) Text(state.libraryError, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
-        if (tab == 1) {
-            SteamDownloadsScreen(state, openGame, Modifier.weight(1f))
-        } else if (tab == 3) {
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        }
+        if (!(state.signedIn && state.libraryLoading) && state.libraryError.isNotEmpty()) Text(state.libraryError, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
+        val revealed = remember { mutableSetOf<String>() }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            AnimatedContent(tab, transitionSpec = { fadeIn(WinZMotion.enter()) togetherWith fadeOut(WinZMotion.exit()) }, label = "steamTab") { currentTab ->
+        if (currentTab == 1) {
+            SteamDownloadsScreen(state, openGame, Modifier.fillMaxSize())
+        } else if (currentTab == 3) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 item { SteamAccountCard(profile, state.signedIn, apps.size, installed) }
                 item { SteamSectionTitle(uiStr(R.string.steam_ui_achievements), Modifier.padding(top = 0.dp)) }
                 item { Text(uiStr(R.string.steam_ui_achievements_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 3.dp)) }
-                items(achievementCache.keys.toList()) { id ->
+                itemsIndexed(achievementCache.keys.toList()) { index, id ->
                     val list = achievementCache[id].orEmpty()
-                    SteamCard(Modifier.fillMaxWidth(), onClick = { if (File(context.filesDir, "steam-library/$id.json").isFile) openGame(id) else SteamSheets.game(context, id) }) {
-                        SteamRow(TablerIcons.Trophy, apps.find { SteamLibrary.appId(it.shortcutPath) == id }?.name ?: uiStr(R.string.steam_ui_game),
-                            uiStr(R.string.steam_ui_ach_count, list.count { it.unlocked }, list.size))
+                    RevealOnEnter("a$id", index, revealed, Modifier.fillMaxWidth()) {
+                        SteamCard(Modifier.fillMaxWidth(), onClick = { if (File(context.filesDir, "steam-library/$id.json").isFile) openGame(id) else SteamSheets.game(context, id) }) {
+                            SteamRow(TablerIcons.Trophy, apps.find { SteamLibrary.appId(it.shortcutPath) == id }?.name ?: uiStr(R.string.steam_ui_game),
+                                uiStr(R.string.steam_ui_ach_count, list.count { it.unlocked }, list.size))
+                        }
                     }
                 }
             }
         } else {
-            val sourceApps = if (tab == 4) demos else apps
-            val filtered = remember(sourceApps, query, tab) { sourceApps.filter { it.name.contains(query, true) && (tab != 2 || it.containerName == "Steam · Installed") } }
+            val sourceApps = if (currentTab == 4) demos else apps
+            val filtered = remember(sourceApps, query, currentTab) { sourceApps.filter { it.name.contains(query, true) && (currentTab != 2 || it.containerName == "Steam · Installed") } }
             val visible = remember(filtered, owned, sort) { sortSteamLibrary(filtered, owned, sort) }
-            LazyVerticalGrid(if (grid) GridCells.Adaptive(160.dp) else GridCells.Fixed(1), Modifier.weight(1f), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyVerticalGrid(if (grid) GridCells.Adaptive(160.dp) else GridCells.Fixed(1), Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item(key = "account", span = { GridItemSpan(maxLineSpan) }) { SteamAccountCard(profile, state.signedIn, apps.size, installed) }
                 item(key = "controls", span = { GridItemSpan(maxLineSpan) }) {
                     Column {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (tab == 2) uiStr(R.string.steam_ui_installed) else if (tab == 4) uiStr(R.string.steam_ui_demos) else uiStr(R.string.steam_ui_library), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
+                            Text(if (currentTab == 2) uiStr(R.string.steam_ui_installed) else if (currentTab == 4) uiStr(R.string.steam_ui_demos) else uiStr(R.string.steam_ui_library), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
                             IconButton(onClick = { search = !search }) { Icon(TablerIcons.Search, uiStr(R.string.steam_ui_search_games)) }
                             Box {
                                 TextButton(onClick = { sorting = true }) { Icon(TablerIcons.ArrowsSort, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(steamSortLabel(sort)); Icon(TablerIcons.ChevronDown, null, Modifier.size(18.dp)) }
@@ -116,13 +128,13 @@ import java.io.File
                             }
                             IconButton(onClick = { grid = !grid }) { Icon(if (grid) TablerIcons.LayoutList else TablerIcons.LayoutGrid, uiStr(R.string.steam_ui_layout)) }
                         }
-                        if (search) OutlinedTextField(query, { query = it }, label = { Text(uiStr(R.string.steam_ui_search)) }, leadingIcon = { Icon(TablerIcons.Search, null) }, singleLine = true, shape = WinZShapes.Medium, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+                        RevealSection(search) { OutlinedTextField(query, { query = it }, label = { Text(uiStr(R.string.steam_ui_search)) }, leadingIcon = { Icon(TablerIcons.Search, null) }, singleLine = true, shape = WinZShapes.Medium, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) }
                     }
                 }
-                items(visible, key = { it.id }) { app ->
+                itemsIndexed(visible, key = { _, it -> it.id }) { index, app ->
                     val id = SteamLibrary.appId(app.shortcutPath)!!
                     val isInstalled = app.containerName == "Steam · Installed"
-                    SteamCard(onClick = { if (isInstalled) openGame(id) else SteamSheets.game(context, id) }) {
+                    RevealOnEnter("g$currentTab-$id", index, revealed, Modifier.fillMaxWidth()) { SteamCard(Modifier.fillMaxWidth(), onClick = { if (isInstalled) openGame(id) else SteamSheets.game(context, id) }) {
                         SteamArt("https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg", Modifier.fillMaxWidth().padding(6.dp).aspectRatio(460f / 215f).clip(WinZShapes.Small))
                         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -132,9 +144,11 @@ import java.io.File
                             }
                             IconButton(onClick = { if (isInstalled) openGame(id) else SteamSheets.game(context, id) }) { Icon(if (isInstalled) TablerIcons.PlayerPlay else TablerIcons.Download, if (isInstalled) uiStr(R.string.steam_ui_game_details) else uiStr(R.string.steam_ui_download_game), tint = if (isInstalled) com.winlator.cmod.ui.theme.controlAccentColor() else MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
-                    }
+                    } }
                 }
-                if (visible.isEmpty() && !state.libraryLoading) item(span = { GridItemSpan(maxLineSpan) }) { Text(if (tab == 2) uiStr(R.string.steam_ui_no_installed) else if (tab == 4) uiStr(R.string.steam_ui_no_demos) else uiStr(R.string.steam_ui_no_games), Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (visible.isEmpty() && !state.libraryLoading) item(span = { GridItemSpan(maxLineSpan) }) { Text(if (currentTab == 2) uiStr(R.string.steam_ui_no_installed) else if (currentTab == 4) uiStr(R.string.steam_ui_no_demos) else uiStr(R.string.steam_ui_no_games), Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+        }
             }
         }
     }
@@ -157,7 +171,7 @@ import java.io.File
                     Text(state.name, style = MaterialTheme.typography.titleLarge)
                     Text(if (state.downloading) uiStr(R.string.steam_ui_downloading) else if (installed) uiStr(R.string.steam_ui_installed_game) else uiStr(R.string.steam_ui_paused), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (state.downloading && state.total > 0)
-                        LinearProgressIndicator(progress = { (state.done.toFloat() / state.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = com.winlator.cmod.ui.theme.controlAccentColor(), trackColor = MaterialTheme.colorScheme.surfaceVariant)
+                        SteamProgress(state.done.toFloat() / state.total, Modifier.fillMaxWidth())
                     if (state.downloading) Text(downloadTimingText(state), style = MaterialTheme.typography.bodySmall)
                     Text("${state.done / 1048576} / ${state.total / 1048576} MB", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

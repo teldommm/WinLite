@@ -42,7 +42,7 @@ data class SteamUiSnapshot(val signedIn: Boolean, val gameActive: Boolean, val s
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(state.name, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    if (state.total > 0) LinearProgressIndicator(progress = { (state.done.toFloat() / state.total).coerceIn(0f, 1f) }, modifier = Modifier.weight(1f), color = com.winlator.cmod.ui.theme.controlAccentColor(), trackColor = MaterialTheme.colorScheme.surfaceVariant)
+                    if (state.total > 0) SteamProgress(state.done.toFloat() / state.total, Modifier.weight(1f))
                     else LinearProgressIndicator(modifier = Modifier.weight(1f), color = com.winlator.cmod.ui.theme.controlAccentColor(), trackColor = MaterialTheme.colorScheme.surfaceVariant)
                     IconButton(onClick = { SteamSession.cancel() }, modifier = Modifier.size(36.dp)) {
                         Icon(TablerIcons.PlayerPause, uiStr(R.string.steam_ui_pause_download))

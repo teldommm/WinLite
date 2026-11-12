@@ -31,6 +31,13 @@ import androidx.compose.foundation.verticalScroll
 import com.bumptech.glide.Glide
 import com.winlator.cmod.XServerDisplayActivity
 import com.winlator.cmod.container.ContainerManager
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import com.winlator.cmod.ui.theme.FadeInOnShow
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.TablerIcons
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.WinZTheme
@@ -84,23 +91,17 @@ class SteamActivity : ImmersiveSteamActivity() {
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
         val form: @Composable () -> Unit = {
-                    SteamCard(Modifier.fillMaxWidth()) {
-                        Row(Modifier.fillMaxWidth().padding(3.dp)) {
-                            listOf(false to R.string.steam_login_account, true to R.string.steam_login_qr).forEach { (value, label) ->
-                                val choose = {
-                                    if (qr != value) { SteamSession.cancelLogin(); password = ""; code = ""; qr = value }
-                                }
-                                if (qr == value) Button(onClick = choose, modifier = Modifier.weight(1f), shape = WinZShapes.Small, colors = steamButtonColors()) {
-                                    Icon(if (value) TablerIcons.QrCode else TablerIcons.User, null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp)); Text(uiStr(label))
-                                } else TextButton(onClick = choose, modifier = Modifier.weight(1f), shape = WinZShapes.Small) {
-                                    Icon(if (value) TablerIcons.QrCode else TablerIcons.User, null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp)); Text(uiStr(label))
-                                }
-                            }
-                        }
-                    }
-                    if (qr) {
+                    SteamSegmented(
+                        listOf(SteamTabItem(0, uiStr(R.string.steam_login_account), TablerIcons.User), SteamTabItem(1, uiStr(R.string.steam_login_qr), TablerIcons.QrCode)),
+                        if (qr) 1 else 0, { index ->
+                            val value = index == 1
+                            if (qr != value) { SteamSession.cancelLogin(); password = ""; code = ""; qr = value }
+                        })
+                    AnimatedContent(if (qr) 1 else if (state.guard.isNotEmpty()) 2 else 0,
+                        transitionSpec = { (fadeIn(WinZMotion.enter()) + scaleIn(WinZMotion.enter(), initialScale = 0.96f)) togetherWith fadeOut(WinZMotion.exit()) },
+                        label = "steamLoginMode") { mode ->
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (mode == 1) {
                         SteamQrCode(SteamSession.qrUrl, if (landscape) 150.dp else 240.dp)
                         if (!landscape) Text(uiStr(R.string.steam_qr_scan), style = MaterialTheme.typography.titleLarge)
                         if (!landscape) Text(uiStr(R.string.steam_qr_help), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -109,7 +110,7 @@ class SteamActivity : ImmersiveSteamActivity() {
                             shape = WinZShapes.Medium, modifier = Modifier.fillMaxWidth()) {
                             Icon(TablerIcons.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(uiStr(R.string.steam_qr_refresh))
                         }
-                    } else if (state.guard.isNotEmpty()) {
+                    } else if (mode == 2) {
                         Text(steamStatusText(state.guard), style = MaterialTheme.typography.titleSmall)
                         OutlinedTextField(code, { code = it }, singleLine = true, label = { Text(uiStr(R.string.steam_ui_guard_code)) }, shape = WinZShapes.Medium, modifier = Modifier.fillMaxWidth())
                         Button(onClick = { SteamSession.guard.submit(code); code = "" }, enabled = code.isNotBlank(), shape = WinZShapes.Medium, colors = steamButtonColors(), modifier = Modifier.fillMaxWidth()) { Text(uiStr(R.string.steam_ui_confirm_code)) }
@@ -128,12 +129,15 @@ class SteamActivity : ImmersiveSteamActivity() {
                             if (state.busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White) else Text(uiStr(R.string.steam_ui_sign_in))
                         }
                     }
+                    }
+                    }
                     if (state.authError.isNotEmpty()) Text(steamStatusText(state.authError), color = MaterialTheme.colorScheme.error)
                     Text(steamStatusText(state.status), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (!state.gameActive && !state.ready && !state.busy) TextButton(onClick = { SteamSession.reconnect() }) { Text(uiStr(R.string.steam_ui_reconnect)) }
                     if (!qr && (state.busy || state.guard.isNotEmpty())) TextButton(onClick = { SteamSession.cancelLogin() }) { Text(uiStr(R.string.steam_ui_cancel_login)) }
         }
         StoreTheme {
+            FadeInOnShow {
             Box(Modifier.fillMaxSize().storeBackground(), contentAlignment = Alignment.TopCenter) {
                 if (landscape) {
                     Row(
@@ -173,6 +177,7 @@ class SteamActivity : ImmersiveSteamActivity() {
                         form()
                     }
                 }
+            }
             }
         }
     }

@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.ui.theme.TablerIcons
 import com.winlator.cmod.ui.theme.ThemedDialog
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
@@ -57,7 +58,8 @@ class StoreSettingsActivity : ImmersiveSteamActivity() {
                         }
                     }
                     if (error.isNotEmpty()) Text(steamStatusText(error), Modifier.padding(horizontal = 3.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    if (enabled) {
+                    RevealSection(enabled) {
+                      Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         SteamSectionTitle("Steam")
                         StoreSection {
                             SteamRow(TablerIcons.DeviceGamepad2, uiStr(R.string.steam_store_library), uiStr(R.string.steam_store_library_help),
@@ -89,6 +91,7 @@ class StoreSettingsActivity : ImmersiveSteamActivity() {
                                 }
                             }
                         }
+                      }
                     }
                 }
             }

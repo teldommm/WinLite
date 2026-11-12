@@ -1,6 +1,22 @@
 package com.winlator.cmod.steam
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import com.winlator.cmod.ui.theme.SlidingPillHost
+import com.winlator.cmod.ui.theme.WinZMotion
+import com.winlator.cmod.ui.theme.keepInViewWhen
+import com.winlator.cmod.ui.theme.rememberSlidingPillState
+import com.winlator.cmod.ui.theme.slidingPillTarget
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -112,19 +128,74 @@ import com.winlator.cmod.ui.uiStr
     }
 }
 
-/** Selectable pill used for the library tabs; neutral fill when selected, hairline outline otherwise. */
-@Composable internal fun SteamTab(selected: Boolean, label: String, icon: ImageVector, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick, shape = WinZShapes.Small,
-        color = if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
-        contentColor = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-        border = BorderStroke(1.dp, hairlineColor())
-    ) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Icon(icon, null, Modifier.size(18.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+/** One entry of a [SteamTabRow]. */
+internal class SteamTabItem(val key: Int, val label: String, val icon: ImageVector)
+
+/**
+ * Library tabs: hairline chips with ONE highlight that slides between them (the same SlidingPillHost
+ * WinLite's navigation and All / Favorites / Recent chips use) and keeps the selected chip in view.
+ */
+@Composable internal fun SteamTabRow(tabs: List<SteamTabItem>, selected: Int, onSelect: (Int) -> Unit) {
+    val pill = rememberSlidingPillState()
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+        SlidingPillHost(pill, selected, MaterialTheme.colorScheme.surfaceVariant, 10.dp) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                tabs.forEach { tab ->
+                    val isSelected = tab.key == selected
+                    val tint by animateColorAsState(
+                        if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tween(WinZMotion.DurationSelectionTint), label = "steamTabTint"
+                    )
+                    Box(Modifier.slidingPillTarget(pill, tab.key).keepInViewWhen(isSelected)) {
+                        Surface(
+                            onClick = { onSelect(tab.key) }, shape = WinZShapes.Small, color = Color.Transparent,
+                            contentColor = tint, border = BorderStroke(1.dp, hairlineColor())
+                        ) {
+                            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                Icon(tab.icon, null, Modifier.size(18.dp))
+                                Text(tab.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
+}
+
+/**
+ * Exclusive switch with a sliding accent pill: the Steam counterpart of the Preset / Custom switch in
+ * Add environment variable. The pill glides between options and the label tint cross-fades.
+ */
+@Composable internal fun SteamSegmented(options: List<SteamTabItem>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val accent = controlAccentColor()
+    val index = options.indexOfFirst { it.key == selected }.coerceAtLeast(0)
+    Surface(modifier.fillMaxWidth(), shape = WinZShapes.Medium, color = MaterialTheme.colorScheme.surfaceVariant, border = BorderStroke(1.dp, hairlineColor())) {
+        val slide by animateFloatAsState(index.toFloat(), tween(260, easing = FastOutSlowInEasing), label = "steamSegmentSlide")
+        val radius = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.toPx() }
+        Row(Modifier.padding(3.dp).drawBehind {
+            val w = size.width / options.size
+            drawRoundRect(accent, topLeft = Offset(slide * w, 0f), size = Size(w, size.height), cornerRadius = CornerRadius(radius))
+        }) {
+            options.forEach { option ->
+                val on = option.key == selected
+                val tint by animateColorAsState(if (on) Color.White else MaterialTheme.colorScheme.onSurface, tween(220), label = "steamSegmentTint")
+                Surface(onClick = { onSelect(option.key) }, modifier = Modifier.weight(1f), shape = WinZShapes.Small, color = Color.Transparent, contentColor = tint) {
+                    Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(option.icon, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(option.label, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Progress bar that glides to its new value instead of stepping. */
+@Composable internal fun SteamProgress(progress: Float, modifier: Modifier = Modifier) {
+    val shown by animateFloatAsState(progress.coerceIn(0f, 1f), tween(WinZMotion.DurationM, easing = FastOutSlowInEasing), label = "steamProgress")
+    LinearProgressIndicator(progress = { shown }, modifier = modifier, color = controlAccentColor(), trackColor = MaterialTheme.colorScheme.surfaceVariant)
 }
 
 @Composable internal fun steamButtonColors() = ButtonDefaults.buttonColors(containerColor = controlAccentColor(), contentColor = Color.White)
