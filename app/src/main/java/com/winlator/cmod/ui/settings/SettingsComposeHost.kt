@@ -186,7 +186,7 @@ internal fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) 
                 NavigationRow(TablerIcons.Apps, uiStr(R.string.ui_components), uiStr(R.string.ui_wine_proton_dxvk_vkd3d_and_runtimes), callbacks::onOpenComponents)
             }
             item("file-manager") {
-                NavigationRow(TablerIcons.Folder, uiStr(R.string.ui_file_manager), null, callbacks::onOpenFileManager)
+                NavigationRow(TablerIcons.Folder, uiStr(R.string.ui_file_manager), uiStr(R.string.ui_file_manager_desc), callbacks::onOpenFileManager)
             }
 
             item("presets-title") { SectionTitle("PRESETS") }
@@ -410,7 +410,7 @@ private fun SpeedRow(title: String, value: Int, onChanged: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, modifier = Modifier.weight(1f))
-            Text("${draft.roundToInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant, style = LocalTextStyle.current.tabularNumbers())
+            Text("${draft.roundToInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleMedium.tabularNumbers())
         }
         Slider(
             value = draft,

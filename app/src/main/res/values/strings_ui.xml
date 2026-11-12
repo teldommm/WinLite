@@ -244,6 +244,7 @@
     <string name="ui_appearance">Appearance</string>
     <string name="ui_choose_the_winlator_theme_changes_are_app">Choose the Winlator theme. Changes are applied immediately.</string>
     <string name="ui_file_manager">File Manager</string>
+    <string name="ui_file_manager_desc">Browse containers, drives and game files</string>
     <string name="ui_up_directory">Up directory</string>
     <string name="ui_this_folder_is_empty">This folder is empty</string>
     <string name="ui_paste">Paste</string>
