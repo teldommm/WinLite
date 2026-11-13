@@ -74,8 +74,12 @@ public class WinHandler {
     private final Map<Integer, Integer> deviceToSlot = new java.util.concurrent.ConcurrentHashMap<>();
     private Set<Integer> usedSlots = new HashSet<>();
     private String fakeInputBasePath;
-    // Output is held back until prepareGamepadsForWine() has created the slots.
+    // Output is held back until prepareGamepadsForWine() has run.
     private volatile boolean gamepadsReady = false;
+    // The one fake pad created before Wine starts. It has no owner yet: the first device that
+    // really sends input (physical pad or on-screen pad) takes it over, so the game sees a single
+    // pad (pad A) that is the one actually being played, never an idle extra one.
+    private int pendingSlot = -1;
     private LocalServerSocket vibrationServer;
     private volatile boolean vibrationRunning = false;
     private boolean[] vibrationEnabledSlots = new boolean[MAX_CONTROLLERS];
@@ -556,6 +560,9 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
                 && activity.getInputControlsView().isShowTouchscreenControls();
 
         if (useVirtualGamepad) {
+            // Idle on-screen pad: don't create or claim a pad for it, or it would take pad A away
+            // from a physical controller that is the one being played.
+            if (!deviceToSlot.containsKey(OSC_DEVICE_ID) && gamepadState.isNeutral()) return;
             int slot = assignSlot(OSC_DEVICE_ID);
             if (slot >= 0 && writers[slot] != null) {
                 writers[slot].writeGamepadState(gamepadState);
@@ -575,36 +582,61 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         if (controller == null || !gamepadsReady)
             return;
 
+        GamepadState output = controller.buildOutputState();
+        // A pad that only reports idle state (a duplicate input node of the same hardware, stick
+        // noise) must not create or claim a pad of its own.
+        if (!deviceToSlot.containsKey(controller.getDeviceId()) && output.isNeutral()) return;
+
         int slot = assignSlot(controller.getDeviceId());
         if (slot >= 0 && writers[slot] != null) {
-            writers[slot].writeGamepadState(controller.buildOutputState());
+            writers[slot].writeGamepadState(output);
         }
     }
 
     /**
-     * UI thread, before the guest starts: creates the fake devices for every connected pad (and
-     * the on-screen pad) so Wine sees them when it enumerates /dev/input, then opens the gate.
+     * UI thread, before the guest starts: if a pad is connected (or the on-screen pad is shown),
+     * creates exactly ONE fake device so Wine finds a pad when it enumerates /dev/input, then
+     * opens the gate. The device is not bound to anyone: the first source that really sends input
+     * takes it (see assignSlot), so the game always gets one pad and the played source owns it.
      */
     public void prepareGamepadsForWine() {
         try {
-            if (gamepadEnabled) {
-                for (int id : android.view.InputDevice.getDeviceIds()) {
-                    android.view.InputDevice device = android.view.InputDevice.getDevice(id);
-                    if (device != null && ExternalController.isGameController(device)
-                            && getController(id) != null) {
-                        assignSlot(id);
-                    }
-                }
-                InputControlsView icv = activity.getInputControlsView();
-                ControlsProfile profile = icv != null ? icv.getProfile() : null;
-                if (profile != null) profile.prepareGamepad();
-            }
+            if (gamepadEnabled && hasGamepadSource()) reservePendingSlot();
         } finally {
             gamepadsReady = true;
         }
-        if (!gamepadEnabled) return;
-        sendGamepadState();
-        for (ExternalController controller : new ArrayList<>(controllers.values())) sendGamepadState(controller);
+    }
+
+    private boolean hasGamepadSource() {
+        for (int id : android.view.InputDevice.getDeviceIds()) {
+            android.view.InputDevice device = android.view.InputDevice.getDevice(id);
+            if (device != null && ExternalController.isGameController(device)) return true;
+        }
+        InputControlsView icv = activity.getInputControlsView();
+        ControlsProfile profile = icv != null ? icv.getProfile() : null;
+        if (profile == null) return false;
+        profile.prepareGamepad();
+        return profile.isVirtualGamepad() && icv.isShowTouchscreenControls();
+    }
+
+    private void reservePendingSlot() {
+        if (pendingSlot >= 0) return;
+        for (int slot = 0; slot < MAX_CONTROLLERS; slot++) {
+            if (!usedSlots.contains(slot)) {
+                usedSlots.add(slot);
+                pendingSlot = slot;
+                ensureWriter(slot);
+                Log.d("WinHandler", "Reserved slot " + slot + " for the first active pad");
+                return;
+            }
+        }
+    }
+
+    private void ensureWriter(int slot) {
+        if (fakeInputBasePath != null && writers[slot] == null) {
+            writers[slot] = new FakeInputWriter(fakeInputBasePath, slot);
+            writers[slot].open();
+        }
     }
 
     private int assignSlot(int deviceId) {
@@ -612,6 +644,16 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         Integer existing = deviceToSlot.get(deviceId);
         if (existing != null)
             return existing;
+
+        // The pad that was created before Wine started goes to the first device that is played.
+        if (pendingSlot >= 0) {
+            int slot = pendingSlot;
+            pendingSlot = -1;
+            deviceToSlot.put(deviceId, slot);
+            ensureWriter(slot);
+            Log.d("WinHandler", "Assigned device " + deviceId + " to reserved slot " + slot);
+            return slot;
+        }
 
         for (int slot = 0; slot < MAX_CONTROLLERS; slot++) {
             if (!usedSlots.contains(slot)) {
@@ -670,6 +712,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         }
         deviceToSlot.clear();
         usedSlots.clear();
+        pendingSlot = -1;
         controllers.clear();
         fallbackSlot = -1;
         com.winlator.cmod.widget.TouchHaptics.shared(activity).stopAllRumble();

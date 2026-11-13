@@ -36,6 +36,19 @@ public class GamepadState {
         buffer.put((byte)(triggerR * 255));
     }
 
+    /**
+     * True when nothing is pressed or deflected (sticks/triggers within a small dead band). Used to
+     * tell a device that is really being played from one that only reports idle state.
+     */
+    public boolean isNeutral() {
+        if (buttons != 0) return false;
+        for (boolean d : dpad) if (d) return false;
+        final float eps = 0.05f;
+        return Math.abs(thumbLX) < eps && Math.abs(thumbLY) < eps
+                && Math.abs(thumbRX) < eps && Math.abs(thumbRY) < eps
+                && triggerL < eps && triggerR < eps;
+    }
+
     public void setPressed(int buttonIdx, boolean pressed) {
         int flag = 1<<buttonIdx;
         if (pressed) {
