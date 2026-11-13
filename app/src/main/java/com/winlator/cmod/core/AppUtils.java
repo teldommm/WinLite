@@ -77,6 +77,14 @@ public abstract class AppUtils {
         restartApplication(context, 0);
     }
 
+    /** Restart the process straight into [target] (e.g. relaunching the same game) instead of the main screen. */
+    public static void restartApplication(Context context, Intent target) {
+        com.winlator.cmod.steam.SteamService.shutdown(context);
+        target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        context.startActivity(target);
+        Runtime.getRuntime().exit(0);
+    }
+
     public static void restartApplication(Context context, int selectedMenuItemId) {
         // A restart exits the process without service teardown callbacks: close the Steam session first.
         com.winlator.cmod.steam.SteamService.shutdown(context);

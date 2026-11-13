@@ -18,12 +18,22 @@ class SteamLibrarySync {
         private set
     var message = "Loading Steam library… 0%"
         private set
+    /** Licence fingerprint taken before any PICS request of this pass; stored with the finished snapshot. */
+    var fingerprint = ""
+        private set
+    /** True when this pass was satisfied by the cached snapshot instead of PICS requests. */
+    var fromCache = false
+        private set
+    /** Owner hook: does a finished, recent sync with this exact licence set exist in the cache? */
+    var cacheUsable: ((String) -> Boolean)? = null
+    private var fingerprinted = false
     private var started: Long? = null
     private val packagesDone = mutableSetOf<Int>()
     private val appsDone = mutableSetOf<Int>()
     fun reset() {
         loading = true; error = ""; progress = 0; message = "Loading Steam library… 0%"
         started = null; packagesDone.clear(); appsDone.clear()
+        fingerprint = ""; fromCache = false; fingerprinted = false
     }
     fun step(gateway: Gateway, licensesReceived: Boolean, now: Long) {
         if (!loading) return
@@ -35,6 +45,17 @@ class SteamLibrarySync {
                 check(now - since < 45_000) { "Steam did not return your licenses. Try loading the library again." }
                 message = "Loading Steam library… $progress%"
                 return
+            }
+            if (!fingerprinted) {
+                // Package ids and licence flags only: PICS responses later rewrite the change numbers.
+                fingerprint = (0 until (packages?.length() ?: 0)).map { packages!!.getJSONObject(it) }
+                    .map { "${it.getInt("id")}:${it.optInt("flags")}" }.sorted().joinToString(",")
+                fingerprinted = true
+                if (cacheUsable?.invoke(fingerprint) == true) {
+                    loading = false; progress = 100; fromCache = true
+                    message = "Steam library is up to date"
+                    return
+                }
             }
             val pendingPackages = (0 until (packages?.length() ?: 0)).map { packages!!.getJSONObject(it) }
                 .filter { it.getInt("id") !in packagesDone }.take(100)

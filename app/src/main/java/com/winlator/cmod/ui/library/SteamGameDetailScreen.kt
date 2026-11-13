@@ -61,7 +61,7 @@ interface SteamDetailCallbacks {
     fun onFavorite(favorite: Boolean)
     fun onRemove()
     fun onHome()
-    fun onSteamMode(mode: String)
+    fun onSteamMode(choice: String)
     fun onSteamExecutable()
     // The page has finished closing (after its exit animation): leave to the screen it was opened from.
     fun onClose()
@@ -350,6 +350,8 @@ private fun savesLabel(): String = if (LocalSteamDetail.current && LocalSteamMod
 private fun PlayButton(click: () -> Unit, chooseMode: (String) -> Unit, chooseExecutable: () -> Unit, onArtwork: Boolean, height: Dp) {
     val steam = LocalSteamDetail.current
     val mode = LocalSteamMode.current
+    val steamContext = LocalContext.current
+    val clientOffline = mode == "RealSteam" && LocalSteamInfoId.current?.let { com.winlator.cmod.steam.SteamSettings.clientOffline(steamContext, it) } == true
     val modeProgress = LocalSteamInfoId.current?.let { com.winlator.cmod.steam.SteamLaunch.modeStatus(it) }
     val modeBusy = modeProgress?.busy == true
     val accent = controlAccentColor()
@@ -367,15 +369,16 @@ private fun PlayButton(click: () -> Unit, chooseMode: (String) -> Unit, chooseEx
             ) {
                 Icon(TablerIcons.PlayerPlay, null, Modifier.size(if (height >= 58.dp) 30.dp else 24.dp)); Spacer(Modifier.width(8.dp))
                 Text(if (!LocalSteamReady.current) stringResource(R.string.steam_ui_configure_first)
-                    else if (steam) stringResource(if (mode == "RealSteam") R.string.steam_ui_client else R.string.steam_ui_offline)
+                    else if (steam) stringResource(if (clientOffline) R.string.steam_ui_client_offline else if (mode == "RealSteam") R.string.steam_ui_client else R.string.steam_ui_offline)
                     else stringResource(R.string.ui_play), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (steam) SteamSquareButton(TablerIcons.FolderOpen, stringResource(R.string.steam_ui_choose_exe), !modeBusy, onArtwork, chooseExecutable)
             if (steam) Box {
                 SteamSquareButton(TablerIcons.ChevronDown, stringResource(R.string.steam_ui_launch), !com.winlator.cmod.steam.SteamSession.gameActive && !modeBusy, onArtwork) { expanded = true }
                 SteamMenu(expanded, { expanded = false }) {
-                    listOf("RealSteam" to R.string.steam_ui_client, "Goldberg" to R.string.steam_ui_offline).forEach { (value, label) ->
-                        SteamChoiceItem(stringResource(label), mode == value) { expanded = false; chooseMode(value) }
+                    listOf("RealSteam" to R.string.steam_ui_client, "RealSteamOffline" to R.string.steam_ui_client_offline, "Goldberg" to R.string.steam_ui_offline).forEach { (value, label) ->
+                        val selected = when (value) { "RealSteam" -> mode == "RealSteam" && !clientOffline; "RealSteamOffline" -> clientOffline; else -> mode == value }
+                        SteamChoiceItem(stringResource(label), selected) { expanded = false; chooseMode(value) }
                     }
                 }
             }

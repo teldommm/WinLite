@@ -1945,21 +1945,39 @@ static bool marker_contains(const std::vector<std::string>& lines, const std::st
     return false;
 }
 
+// Silent-install switches by installer family. A wrong switch is not harmless: the installer opens a hidden
+// window nobody can answer and only the 90 s timeout ends it, so the families with their own syntax are listed.
 static std::string redist_silent_args(const std::filesystem::path& installer) {
     std::string name = installer.filename().string();
     std::string ext  = installer.extension().string();
     for (char& c : name) c = (char) std::tolower((unsigned char) c);
     for (char& c : ext)  c = (char) std::tolower((unsigned char) c);
-    if (ext == ".msi") return " /qn /norestart";
-    if (name.find("dxsetup") != std::string::npos) return " /silent";
-    if (name.find("ue4prereq") != std::string::npos) return " /quiet /norestart";
-    if (name.find("physx") != std::string::npos) return " /quiet /norestart";
+    auto has = [&](const char* needle) { return name.find(needle) != std::string::npos; };
+    if (ext == ".msi") return " /qn /norestart";                       // appended to "msiexec /i <file>"
+    if (has("dxsetup")) return " /silent";
+    if (has("oalinst") || has("openal")) return " /s";                  // OpenAL redistributable
+    if (has("physx")) return " /s";                                     // NVIDIA PhysX system software
+    if (has("ue4prereq")) return " /quiet /norestart";
+    if (has("vc_redist")) return " /install /quiet /norestart";         // Visual C++ 2015+ bootstrapper
+    if (has("vcredist")) return " /q /norestart";                       // Visual C++ 2005-2013
+    if (has("windowsdesktop-runtime") || has("dotnet-runtime") || has("aspnetcore-runtime") || has("dotnet-hosting"))
+        return " /install /quiet /norestart";                           // modern .NET runtimes
+    if (has("dotnet") || has("ndp")) return " /q /norestart";           // .NET Framework 3.5-4.x
     return " /quiet /norestart";
+}
+
+static bool redist_is_msi(const std::filesystem::path& installer) {
+    std::string ext = installer.extension().string();
+    for (char& c : ext) c = (char) std::tolower((unsigned char) c);
+    return ext == ".msi";
 }
 
 static RedistInstallResult run_redist_installer(const std::filesystem::path& installer,
                                                 DWORD* outExitCode) {
-    std::string cmd = "\"" + installer.string() + "\"" + redist_silent_args(installer);
+    // A .msi is not an executable: CreateProcess on it fails, so it goes through msiexec.
+    const bool isMsi = redist_is_msi(installer);
+    std::string cmd = isMsi ? "msiexec.exe /i \"" + installer.string() + "\"" + redist_silent_args(installer)
+                            : "\"" + installer.string() + "\"" + redist_silent_args(installer);
     std::vector<char> cmdVec(cmd.begin(), cmd.end());
     cmdVec.push_back('\0');
 
@@ -1970,7 +1988,7 @@ static RedistInstallResult run_redist_installer(const std::filesystem::path& ins
     PROCESS_INFORMATION pi = {};
     std::string cwdStr = installer.parent_path().string();
     if (!CreateProcessA(
-            installer.string().c_str(),
+            isMsi ? nullptr : installer.string().c_str(),
             cmdVec.data(),
             nullptr, nullptr, FALSE,
             CREATE_NO_WINDOW,
@@ -2003,7 +2021,8 @@ static RedistInstallResult run_redist_installer(const std::filesystem::path& ins
     CloseHandle(pi.hThread);
     if (outExitCode) *outExitCode = exitCode;
     if (timedOut) return RedistInstallResult::TIMED_OUT;
-    return (exitCode == 0 || exitCode == 3010) ? RedistInstallResult::INSTALLED
+    // 3010 / 1641: installed, reboot requested (there is nothing to reboot inside the prefix).
+    return (exitCode == 0 || exitCode == 3010 || exitCode == 1641) ? RedistInstallResult::INSTALLED
                                                : RedistInstallResult::FAILED;
 }
 

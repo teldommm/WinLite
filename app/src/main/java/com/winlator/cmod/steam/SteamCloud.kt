@@ -3,6 +3,8 @@ package com.winlator.cmod.steam
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import com.winlator.cmod.ui.theme.ThemedDialog
 import android.content.Context
@@ -104,13 +106,19 @@ object SteamCloud {
                         }
                         if (reportText != previous && parse(reportText)?.let { it.id == id && it.phase == "launch" && it.state !in listOf(0, 2, 3, 5, 7) } == true) {
                             panel(activity, "steam-cloud-error") { close ->
-                                val leave = { close(); (activity as? com.winlator.cmod.XServerDisplayActivity)?.exitSteamLaunchFailure(); Unit }
-                                SteamDialog(onDismissRequest = leave) {
+                                val host = activity as? com.winlator.cmod.XServerDisplayActivity
+                                // Cancel returns to the game page; Retry and Launch without syncing start the same launch again.
+                                val cancel = { close(); host?.exitSteamLaunchFailure(false); Unit }
+                                val retry = { close(); host?.exitSteamLaunchFailure(true); Unit }
+                                val unsynced = { close(); SteamSettings.skipCloudOnce(activity, id); host?.exitSteamLaunchFailure(true); Unit }
+                                SteamDialog(onDismissRequest = cancel) {
                                     ThemedDialogTitle(uiStr(R.string.steam_cloud_saves))
                                     Text(uiStr(R.string.steam_cloud_failed), style = MaterialTheme.typography.bodyMedium)
                                     androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(12.dp))
-                                    SteamDialogButtons {
-                                        SteamPrimaryButton(uiStr(R.string.ui_back), onClick = leave)
+                                    Column(androidx.compose.ui.Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        SteamPrimaryButton(uiStr(R.string.steam_cloud_retry), androidx.compose.ui.Modifier.fillMaxWidth(), onClick = retry)
+                                        SteamSecondaryButton(uiStr(R.string.steam_cloud_launch_unsynced), androidx.compose.ui.Modifier.fillMaxWidth(), onClick = unsynced)
+                                        SteamSecondaryButton(uiStr(R.string.cancel), androidx.compose.ui.Modifier.fillMaxWidth(), onClick = cancel)
                                     }
                                 }
                             }

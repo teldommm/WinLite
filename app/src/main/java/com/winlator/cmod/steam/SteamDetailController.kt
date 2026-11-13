@@ -60,8 +60,11 @@ internal class SteamDetailController(private val activity: SteamActivity, privat
             }
             override fun onSteamExecutable() { setupPlay(false) }
             override fun onClose() = close()
-            override fun onSteamMode(mode: String) {
+            override fun onSteamMode(choice: String) {
                 if (preparing || SteamSession.gameActive || SteamLaunch.modeStatus(appId)?.busy == true) return
+                // "RealSteamOffline" is the Steam client launched in Steam's own Offline Mode: same launch mode, one flag on top.
+                val mode = if (choice == "RealSteamOffline") "RealSteam" else choice
+                SteamSettings.setClientOffline(context, appId, choice == "RealSteamOffline")
                 val shortcut = SteamGames.shortcut(context, appId)
                 if (shortcut?.getExtra("steamConfigured") != "1") {
                     SteamSettings.setMode(context, appId, mode)

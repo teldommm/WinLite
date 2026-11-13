@@ -16,8 +16,9 @@
     <string name="steam_cloud_conflict_help">Local and Steam Cloud saves differ. Choose which copy to keep. Going back cancels synchronization and leaves both copies intact.</string>
     <string name="steam_cloud_date_unknown">Save date unavailable</string>
     <string name="steam_cloud_download_action">Download from Steam Cloud</string>
-    <string name="steam_cloud_failed">Steam Cloud could not finish syncing. The game was not started to protect your saves. Return to the game page to retry or choose Offline.</string>
+    <string name="steam_cloud_failed">Steam Cloud could not finish syncing, so the game was not started to protect your saves. Retry, or launch without syncing: progress from that session stays on this device and Steam Cloud keeps its older copy.</string>
     <string name="steam_cloud_files_found">%1$d cloud save files</string>
+    <string name="steam_cloud_launch_unsynced">Launch without syncing</string>
     <string name="steam_cloud_keep_local">Keep local</string>
     <string name="steam_cloud_last_saved">Last saved: %1$s</string>
     <string name="steam_cloud_local_label">Local save</string>

@@ -49,6 +49,8 @@ class SteamService : Service() {
 }
 
 object SteamSession {
+    /** How long a finished library sync keeps answering new sessions before PICS is asked again. */
+    private const val LIBRARY_CACHE_TTL_MS = 6L * 60 * 60 * 1000
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     @Volatile var session: WinLiteSteamSession? = null
@@ -120,7 +122,30 @@ object SteamSession {
     @Volatile var authError = ""
         private set
     @Volatile private var recoveryBlocked = false
-    private val librarySync = SteamLibrarySync()
+    private val librarySync = SteamLibrarySync().also { sync ->
+        // A signed-in session whose licence set matches the last finished sync keeps the cached library instead of
+        // re-requesting every package and app through PICS (the whole library again on each login and after every game).
+        sync.cacheUsable = { fingerprint -> app?.let { libraryCacheUsable(it, fingerprint) } == true }
+    }
+    @Volatile private var forceFullLibrary = false
+    @Volatile private var libraryMarkerWritten = false
+    private fun libraryCacheUsable(context: Context, fingerprint: String): Boolean {
+        if (forceFullLibrary) { forceFullLibrary = false; return false }
+        return runCatching {
+            val account = SteamCredentials.load(context)?.optLong("id") ?: return false
+            val marker = JSONObject(File(context.filesDir, "steam-library-sync.json").readText())
+            marker.optLong("account") == account && marker.optString("fingerprint") == fingerprint &&
+                System.currentTimeMillis() - marker.optLong("at") in 0 until LIBRARY_CACHE_TTL_MS &&
+                SteamLibrary.items(context, library).isNotEmpty()
+        }.getOrDefault(false)
+    }
+    private fun writeLibraryMarker(context: Context, fingerprint: String) {
+        val account = SteamCredentials.load(context)?.optLong("id") ?: return
+        runCatching {
+            File(context.filesDir, "steam-library-sync.json").writeText(
+                JSONObject().put("account", account).put("fingerprint", fingerprint).put("at", System.currentTimeMillis()).toString())
+        }.onFailure { android.util.Log.w("SteamService", "Cannot store library sync marker", it) }
+    }
     private val polling = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var licensesReceived = false
     @Volatile var libraryProgress = 0
@@ -168,10 +193,17 @@ object SteamSession {
                         }, licensesReceived, SystemClock.elapsedRealtime())
                         libraryProgress = librarySync.progress; libraryLoading = librarySync.loading; libraryError = librarySync.error
                         if (!downloading) status = librarySync.message
-                        val snapshot = active.getLibrarySnapshotJson()
-                        if (snapshot != library && (SteamLibrary.items(app ?: return@work, snapshot).isNotEmpty() || (!libraryLoading && libraryError.isEmpty()))) {
-                            library = snapshot
-                            app?.let { File(it.filesDir, "steam-library-cache.json").writeText(snapshot) }
+                        // A cached pass never touches the stored library: the live PICS store is empty on purpose.
+                        if (!librarySync.fromCache) {
+                            val snapshot = active.getLibrarySnapshotJson()
+                            if (snapshot != library && (SteamLibrary.items(app ?: return@work, snapshot).isNotEmpty() || (!libraryLoading && libraryError.isEmpty()))) {
+                                library = snapshot
+                                app?.let { File(it.filesDir, "steam-library-cache.json").writeText(snapshot) }
+                            }
+                            if (!libraryLoading && libraryError.isEmpty() && !libraryMarkerWritten && librarySync.fingerprint.isNotEmpty()) {
+                                libraryMarkerWritten = true
+                                app?.let { writeLibraryMarker(it, librarySync.fingerprint) }
+                            }
                         }
                     }
                 } finally { polling.set(false) }
@@ -206,7 +238,7 @@ object SteamSession {
         ++authAttempt; guard.cancel(); signingIn = false; qrUrl = ""; connected = false; signedIn = false
         previous?.let { it.cancelDownload(); it.cancelLogin(); it.disconnect(); it.close() }
         if (downloading) status = "Pausing download after session loss…"
-        librarySync.reset(); licensesReceived = false; libraryLoading = true; libraryProgress = 0; libraryError = ""
+        librarySync.reset(); licensesReceived = false; libraryLoading = true; libraryProgress = 0; libraryError = ""; libraryMarkerWritten = false
         restoreStage = "Finding a Steam server"
         if (saved != null && library == "{}") library = runCatching { File(context.filesDir, "steam-library-cache.json").readText() }.getOrDefault("{}")
         ca = CaBundleExtractor.ensureBundle(context)
@@ -335,6 +367,8 @@ object SteamSession {
     }
     fun retryLibrary() = work {
         check(!gameActive && app?.let { SteamSettings.enabled(it) } == true) { "Steam is disabled or paused for a running game" }
+        // A manual reload is a real refresh: skip the cached-library shortcut once.
+        forceFullLibrary = true; libraryMarkerWritten = false
         librarySync.reset(); libraryLoading = true; libraryProgress = 0; libraryError = ""
         status = "Reloading Steam library…"
     }
@@ -380,11 +414,15 @@ object SteamSession {
                         downloadMeter?.update(depotId, depotDone, depotTotal, depotsDone, verifying, SystemClock.elapsedRealtime())
                         val reading = downloadReading()
                         downloadDone = reading?.done ?: depotDone; downloadTotal = reading?.total ?: depotTotal
-                        status = "$name: depot ${depotsDone + 1}/$depotsTotal — ${if (depotTotal > 0) depotDone * 100 / depotTotal else 0}%" + if (verifying) " (verifying)" else ""
+                        // The last chunk of the last depot reports 100% while files are still being flushed to storage
+                        // (fsync on Android shared storage can take a long while). Say so instead of freezing on 100%.
+                        status = if (!verifying && depotsDone + 1 >= depotsTotal && depotTotal > 0 && depotDone >= depotTotal) "$name: finalizing files…"
+                        else "$name: depot ${depotsDone + 1}/$depotsTotal — ${if (depotTotal > 0) depotDone * 100 / depotTotal else 0}%" + if (verifying) " (verifying)" else ""
                     }
                     override fun onComplete(success: Boolean, error: String, bytesWritten: Long, depotsCompleted: Int, depotsSkipped: Int) {
                         work {
                             if (success) {
+                                status = "$name: finishing installation…"
                                 dir.walkTopDown().filter { it.isFile && it.name.endsWith(".winlite-original") }.forEach { it.delete() }
                                 File(context.filesDir, "steam-library/$id.json").writeText(SteamStorage.record(info, dir, branch, language).toString())
                                 main.post { SteamGames.changed() }

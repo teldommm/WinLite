@@ -290,7 +290,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean ownsPrefixLease;
     private volatile boolean ownsSteamSessionPause;
     public void markSteamSessionPaused() { ownsSteamSessionPause = true; }
-    public void exitSteamLaunchFailure() { exit(); }
+    public void exitSteamLaunchFailure() { exitSteamLaunchFailure(false); }
+    /** [relaunch] starts the same game again once Wine has been torn down (Steam Cloud "Retry" / "Launch without syncing"). */
+    public void exitSteamLaunchFailure(boolean relaunch) {
+        relaunchAfterExit = relaunch;
+        exit();
+    }
+    private volatile boolean relaunchAfterExit;
     private Runnable savePlaytimeRunnable;
     private static final long SAVE_INTERVAL_MS = 1000;
 
@@ -1065,6 +1071,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     finishAndRemoveTask();
                     android.os.Process.killProcess(android.os.Process.myPid());
                 });
+            } else if (relaunchAfterExit) {
+                // Same launch intent in a fresh process: Wine/native state of this one is not reusable.
+                runOnUiThread(() -> AppUtils.restartApplication(getApplicationContext(), new Intent(getIntent())));
             } else {
                 runOnUiThread(() -> AppUtils.restartApplication(getApplicationContext()));
             }

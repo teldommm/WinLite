@@ -177,7 +177,14 @@ object SteamLaunch {
         val info = JSONObject(File(context.filesDir, "steam-library/$id.json").readText())
         if (SteamSocial.enabled(context) || SteamAchievements.enabled(context)) SteamSocial.beginGuest(context, env, id)
         SteamCloud.begin(context, shortcut)
-        env.put("WINLITE_STEAM_AGENT_CLOUD", "1")
+        // Offline Mode: chosen per game, or forced when Android has no network at all, so the launcher signs in
+        // with the credentials cached in the prefix instead of waiting on a CM connection that cannot happen.
+        // It also skips every cloud sync, so the Steam Cloud dialog never blocks an offline launch.
+        if (SteamSettings.clientOffline(context, id)) env.put("WINLITE_STEAM_OFFLINE", "1")
+        if (SteamSettings.deviceOffline(context)) env.put("WINLITE_STEAM_NET_DOWN", "1")
+        // "Launch without syncing" (Steam Cloud failure dialog) is a one-shot: the next launch syncs again.
+        val skipCloud = SteamSettings.takeSkipCloud(context, id)
+        env.put("WINLITE_STEAM_AGENT_CLOUD", if (skipCloud) "0" else "1")
         env.put("WINLITE_STEAM_LANGUAGE", "english")
         env.put("WINLITE_STEAM_APP_NAME", info.optJSONObject("common")?.optString("name").orEmpty())
         env.put("WINLITE_STEAM_BUILD_ID", info.optJSONObject("depots")?.optJSONObject("branches")?.optJSONObject("public")?.optString("buildid", "0") ?: "0")

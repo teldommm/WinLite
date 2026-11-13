@@ -23,6 +23,34 @@ object SteamSettings {
         require(mode in listOf("RealSteam", "Goldberg", "Raw"))
         context.getSharedPreferences("steam-settings", 0).edit().putString("mode-$id", mode).apply()
     }
+    /** Steam Client launch with Steam's own Offline Mode: cached sign-in, no cloud sync. Per game. */
+    fun clientOffline(context: Context, id: Int): Boolean {
+        revision.intValue
+        return context.getSharedPreferences("steam-settings", 0).getBoolean("offline-$id", false)
+    }
+    fun setClientOffline(context: Context, id: Int, offline: Boolean) {
+        context.getSharedPreferences("steam-settings", 0).edit().putBoolean("offline-$id", offline).apply()
+        revision.intValue++
+    }
+    /** "Launch without syncing" from the Steam Cloud failure dialog: applies to the next launch only. */
+    fun skipCloudOnce(context: Context, id: Int) {
+        context.getSharedPreferences("steam-settings", 0).edit().putBoolean("cloud-skip-$id", true).commit()
+    }
+    fun takeSkipCloud(context: Context, id: Int): Boolean {
+        val preferences = context.getSharedPreferences("steam-settings", 0)
+        val skip = preferences.getBoolean("cloud-skip-$id", false)
+        if (skip) preferences.edit().remove("cloud-skip-$id").commit()
+        return skip
+    }
+    /**
+     * True when Android reports no usable link at all (airplane mode, Wi-Fi off, no SIM data). A network that is merely
+     * not "validated" (captive portal check, VPN, private DNS) still counts as online: Steam can often reach it.
+     */
+    fun deviceOffline(context: Context): Boolean = runCatching {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val capabilities = manager.getNetworkCapabilities(manager.activeNetwork)
+        capabilities == null || !capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }.getOrDefault(false)
 }
 
 /** Same adaptive network ceilings and CPU ratios as WinLite's DownloadSpeedConfig. */
