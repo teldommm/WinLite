@@ -45,10 +45,25 @@ object SteamCloud {
         val user = SteamCredentials.load(context)?.optLong("id") ?: 0L
         return File(context.filesDir, "steam-cloud/$user/${shortcut.container.id}-$id.txt")
     }
-    fun begin(context: Context, shortcut: Shortcut) {
+    /**
+     * Whether the app declares Steam Cloud support in its appinfo: the Steam Cloud category flag, or any UFS
+     * quota / file limit / save-file rule. Returns null when the appinfo is too sparse to tell, so callers
+     * keep the old behaviour (sync) rather than silently dropping saves.
+     */
+    internal fun supportsCloud(info: org.json.JSONObject): Boolean? {
+        val common = info.optJSONObject("common")
+        if (common?.optJSONObject("category")?.optString("category_23") == "1") return true
+        val ufs = info.optJSONObject("ufs")
+        if (ufs != null && (ufs.optLong("quota") > 0 || ufs.optLong("maxnumfiles") > 0 ||
+                (ufs.optJSONObject("savefiles")?.length() ?: 0) > 0)) return true
+        return if (common != null && info.has("depots")) false else null
+    }
+    fun begin(context: Context, shortcut: Shortcut, enabled: Boolean = true) {
         val root = drive(shortcut)
         listOf("winlite-steam-cloud-status.txt", "winlite-steam-cloud-conflict.txt", "winlite-steam-cloud-conflict-answer.txt", "winlite-steam-shutdown-complete.txt", "winlite-steam-launcher-ready.txt", "winlite-launcher.shutdown")
             .forEach { File(root, it).delete() }
+        // Stale markers are cleared above either way; a game without Cloud support gets no watcher or dialogs.
+        if (!enabled) return
         val activity = context as? ComponentActivity ?: return
         val id = shortcut.getExtra("steamAppId").toInt()
         val destination = cached(context, id, shortcut)

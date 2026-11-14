@@ -49,8 +49,16 @@ object SteamGoldberg {
         }
     }
     @JvmOverloads fun prepare(context: Context, game: File, id: Int, progress: ((String, Long, Long) -> Unit)? = null) {
+        // Rescan: the game may have been downloaded or updated since the DLL index was last built.
+        invalidate(game)
         val dlls = apiDlls(game).filter { it.isFile }
-        check(dlls.isNotEmpty()) { "No Steam API DLL found for regular Goldberg mode. Use SteamWinLite or Raw for this game." }
+        if (dlls.isEmpty()) {
+            // No Steamworks DLL means there is nothing for the emulator to replace: launch the executable
+            // directly, without extracting Goldberg or touching any game file.
+            android.util.Log.i("SteamOffline", "app=$id has no Steam API DLL; attempting direct offline launch")
+            progress?.invoke("prepare", 0L, 0L)
+            return
+        }
         ensureInstalled(context, progress)
         progress?.invoke("prepare", 0L, 0L)
         dlls.forEach { dll ->
