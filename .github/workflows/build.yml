@@ -3,7 +3,7 @@ name: Android CI Bionic
 on:
   push:
     branches:
-      - ludashi
+      - reincarnation
   workflow_dispatch:
     inputs:
       bundle_validation_layer:
