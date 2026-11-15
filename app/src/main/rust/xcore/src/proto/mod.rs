@@ -308,6 +308,7 @@ pub struct Server {
     pub(crate) import_jobs: HashMap<u64, hooks::ImportJob>,
     pub(crate) import_seq: u64,
     pub(crate) waker: Option<hooks::Wake>,
+    pub(crate) released: std::sync::Arc<hooks::ReleasedBuffers>,
 }
 
 impl Server {
@@ -367,6 +368,7 @@ impl Server {
             import_jobs: HashMap::new(),
             import_seq: 0,
             waker: None,
+            released: Default::default(),
         };
         s.create_root();
         s.input.keyboard = input::Keyboard::default_layout();

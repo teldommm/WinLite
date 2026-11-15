@@ -202,6 +202,13 @@ impl Runtime {
     pub fn set_output(&self, output: Option<Arc<dyn Output>>) {
         let old = {
             let mut st = lock_state(&self.shared.state);
+            let queue = st.server.released_buffers();
+            if let Some(r) = st.router.as_ref() {
+                r.output().attach_releases(&queue, false);
+            }
+            if let Some(o) = output.as_ref() {
+                o.attach_releases(&queue, true);
+            }
             std::mem::replace(&mut st.router, output.map(Router::new))
         };
         // Outside the server lock: dropping a router delivers what it still holds.

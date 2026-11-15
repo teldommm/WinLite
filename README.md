@@ -13,7 +13,8 @@ Fork of [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) 5.0 by
 | | Ludashi 5.0 | WinLite |
 |---|---|---|
 | X server | Java + C++ (`ludashix11`) | **Rust** (`xcore`) |
-| Frame generation | LSFG | **WFG** (optical flow, built into the renderer) |
+| Frame generation | LSFG | **WFG** (optical flow, built into the Vulkan wrapper) |
+| Output | X composite | X composite, or **Direct output** straight to SurfaceFlinger |
 | Renderers | Vulkan + OpenGL/EGL | Vulkan only |
 | Upscalers | SGSR, FSR, Lanczos 2, Color Boost | Same, plus **SGSR HQ** and **NIS** |
 | Audio | ALSA, PulseAudio, PulseAudio-GN | ALSA, PulseAudio-GN, **DirectAudio** |
@@ -37,14 +38,16 @@ The whole X11 server now lives in Rust (`app/src/main/rust/xcore`), linked into 
 - Smooth frames.
 - Present mode per container: `fifo` (default) or `mailbox`. Surface format RGBA (default) or BGRA, optional UBWC (Adreno, RGBA only).
 - Upscalers and effects: SGSR, SGSR HQ, FSR, NIS, Lanczos 2, Color Boost, DLS / CRT / HDR / Natural, ReShade-style presets.
-- FPS limiter in the sidebar: 5–120 FPS in 5 FPS steps or a custom value; works with Present and MIT-SHM clients.
+- FPS limiter in the sidebar: 5–120 FPS in 5 FPS steps or a custom value; works with Present and MIT-SHM clients. Vulkan games are limited in the wrapper's swapchain, when they acquire a frame, on the display's refresh grid.
+- **Direct output** (sidebar → Rendering): a Vulkan game alone on the screen goes straight to its own SurfaceFlinger layer instead of through the X composite — less copying and latency. **Auto** switches back to the composite the moment a window, dialog or menu is over it; **Always** ignores windows over the game; **Off** keeps the composite. Upscalers and post effects apply in both. Saved per container or shortcut.
 
 ### Frame generation (WFG)
-Vulkan compute optical-flow interpolation that runs inside the renderer: no layers, env variables or imported files.
+Vulkan compute optical-flow interpolation that runs in WinLite's Vulkan wrapper, in the game's own swapchain, on the game's clean frames at their own resolution (before any upscaler or effect): no layers, env variables or imported files. Works with both the X composite and Direct output.
 - Motion estimation: DIS optical flow with Farneback flow on coarse levels. **Motion Quality:** Fast or Balanced.
 - **Frame Multiplier:** x2 / x3 / x4, capped by what the display can show. **Target:** your own FPS (40 up to the panel's refresh), or `0` for the display's refresh rate.
-- Turns itself off below ~20 FPS and back on above ~24 FPS. Only the game area is analysed, letterboxes are not.
-- Toggle in the sidebar, saved per container or shortcut. Adds one display frame of latency.
+- In the Target mode it turns itself off below ~12 FPS and back on above ~15 FPS.
+- Toggle in the sidebar, saved per container or shortcut; a change applies to a running game (turning it on makes the game recreate its swapchain once). Adds one game frame of latency, as any interpolation does.
+- The HUD shows the game's and the output FPS from the swapchain's own counters, and where the frames go (Direct, or X and why).
 
 ### Steam
 Built-in Steam client: library sync, QR / credential login with Steam Guard, depot downloads, Steam Cloud, achievements, friends, and optional Goldberg mode. The native client is written in Rust (`winlite-steam-client`). Based on Ludashi 5.0, see [Credits](#credits).
@@ -102,9 +105,9 @@ chmod +x gradlew
 - [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) (StevenMXZ): the base of this fork. Inherited from it: presets and post effects, SGSR / FSR / Lanczos 2 / Color Boost, HUD, task manager, gamepad modes, Turnip driver set, and the **Steam integration** (library, login, downloads, cloud, achievements, friends, Goldberg mode, Rust Steam client and launcher), which WinLite rebranded and restyled.
 - [WinNative](https://github.com/WinNative-Emu/WinNative): Ludashi credits it for half of the Steam integration, so that credit carries over.
 - Goldberg Steam Emulator (optional Goldberg mode).
-- **Frame generation:** WFG by [qwertypower](https://github.com/qwertypower) (DEVAR Entertainment LLC), MIT. Built on Dense Inverse Search optical flow (Till Kroeger et al., OpenCV `DISOpticalFlow`) and Farneback optical flow (OpenCV, Apache-2.0). Full attribution in `app/src/main/cpp/wfg/LICENSE`.
+- **Frame generation:** WFG by [qwertypower](https://github.com/qwertypower) (DEVAR Entertainment LLC), MIT. Built on Dense Inverse Search optical flow (Till Kroeger et al., OpenCV `DISOpticalFlow`) and Farneback optical flow (OpenCV, Apache-2.0). It runs in WinLite's Vulkan wrapper ([teldommm/mesa](https://github.com/teldommm/mesa), branch `mesa26`), where the full attribution and its MIT license live.
 - [DirectAudio](https://github.com/The412Banner/directaudio) (The412Banner) · SGSR by Qualcomm · NIS by NVIDIA · force-SSBS approach by Sonicadvance1 (FEX-Emu) and Wine MR 12262
 - [Wine](https://www.winehq.org/) · [Box86/Box64](https://github.com/ptitSeb) · [FEX-Emu](https://github.com/FEX-Emu/FEX) · [Mesa](https://www.mesa3d.org) · [DXVK](https://github.com/doitsujin/dxvk) · [VKD3D](https://gitlab.winehq.org/wine/vkd3d) · [D8VK](https://github.com/AlpyneDreams/d8vk) · [CNC DDraw](https://github.com/FunkyFr3sh/cnc-ddraw)
 
 ## License
-See [LICENSE](LICENSE). The WFG code in `app/src/main/cpp/wfg/` carries its own MIT license (`app/src/main/cpp/wfg/LICENSE`).
+See [LICENSE](LICENSE).

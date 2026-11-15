@@ -139,10 +139,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private static native long nativeRendererApi();
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
-    private native void nativeSetWfg(long handle, boolean enabled, int flowSide, boolean fastInterp,
-                                     int targetFps, int multiplier, float refreshHz);
-    // The game's FPS limit (0 = none): WFG paces its presents to it while the game holds it.
-    @FastNative private native void nativeSetWfgFpsLimit(long handle, int fps);
+    // The panel's refresh rate, for the renderer's display clock.
+    @FastNative private native void nativeSetDisplayRefresh(long handle, float hz);
+    // Direct output: mode 0 Off / 1 Auto / 2 Always, and where WL Direct clients connect.
+    private native void nativeSetDirectOutput(long handle, int mode, String socketPath);
+    // {sink (0 composite, 1 Direct, 2 Direct + FX), reason (wl_proto.h WL_REASON_*), source
+    // (0 none, 1 X, 2 WL Direct)}
+    @FastNative private native boolean nativeGetDirectStatus(long handle, int[] out);
     @FastNative private native boolean nativeGetDisplayClock(long handle, long[] out);
     private native void nativeGetFrameCounts(long handle, long[] out);
 
@@ -165,12 +168,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         android.hardware.display.DisplayManager dm = (android.hardware.display.DisplayManager)
                 getContext().getSystemService(Context.DISPLAY_SERVICE);
         if (dm != null && displayListener == null) {
-            // WFG paces its generated frames to the panel's rate, which changes with the mode.
+            // The renderer's display clock follows the panel's rate, which changes with the mode.
             displayListener = new android.hardware.display.DisplayManager.DisplayListener() {
                 @Override public void onDisplayAdded(int displayId) {}
                 @Override public void onDisplayRemoved(int displayId) {}
                 @Override public void onDisplayChanged(int displayId) {
-                    synchronized (lock) { applyWfg(); }
+                    synchronized (lock) { applyDisplayRefresh(); }
                 }
             };
             dm.registerDisplayListener(displayListener, getHandler());
@@ -232,7 +235,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetStretchMode(nativeHandle, pendingStretchMode);
                         nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                         nativeSetSharpness(nativeHandle, pendingSharpness);
-                        applyWfg();
+                        applyDisplayRefresh();
                         updateTransform();
                         // The renderer kept its window tree and cursor with the surface away.
                         initComplete = true;
@@ -251,7 +254,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetStretchMode(nativeHandle, pendingStretchMode);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
-                    applyWfg();
+                    nativeSetDirectOutput(nativeHandle, pendingDirectMode, pendingDirectSocket);
+                    applyDisplayRefresh();
                     updateTransform();
 
                     // The server hands everything to this renderer from now on (and forgets what
@@ -486,7 +490,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     /**
-     * WFG (WinNative/Winlator Frame Generator) frame interpolation.
+     * Frame generation settings. Frame generation runs in the Vulkan wrapper (in the game's
+     * process), not in this renderer; the view keeps them for the panel mode it asks for
+     * (requestDisplayMode) and hands them on with the game's other settings.
      * @param flowSide  pixels on the shorter side of the frame the motion is analysed at
      * @param fastInterp the cheaper interpolation (bilinear warp, one source step) of the Fast
      *                  preset instead of the Catmull-Rom warp with two steps
@@ -503,7 +509,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         pendingWfgTargetFps = targetFps;
         pendingWfgMultiplier = multiplier;
         requestDisplayMode();
-        synchronized (lock) { applyWfg(); }
     }
 
     /**
@@ -653,14 +658,36 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @Override
     public long getGeneratedFrameCount() { return frameCount(1); }
 
-    private void applyWfg() {
+    public static final int DIRECT_OFF = 0, DIRECT_AUTO = 1, DIRECT_ALWAYS = 2;
+    private int    pendingDirectMode   = DIRECT_AUTO;
+    private String pendingDirectSocket = null;
+
+    /**
+     * Direct output: the game goes straight to SurfaceFlinger layers when it is alone on the
+     * screen (Auto), always when it is the top window (Always), or never (Off). socketPath is
+     * where the Vulkan wrapper's WL swapchain connects (the guest gets it as WL_DIRECT_SOCK).
+     */
+    public void setDirectOutput(int mode, String socketPath) {
+        synchronized (lock) {
+            pendingDirectMode = mode;
+            pendingDirectSocket = socketPath;
+            if (nativeHandle != 0) nativeSetDirectOutput(nativeHandle, mode, socketPath);
+        }
+    }
+
+    /** See nativeGetDirectStatus; false without a renderer. */
+    public boolean getDirectStatus(int[] out) {
+        synchronized (lock) {
+            return nativeHandle != 0 && out != null && out.length >= 3 && nativeGetDirectStatus(nativeHandle, out);
+        }
+    }
+
+    private void applyDisplayRefresh() {
         if (nativeHandle == 0) return;
-        float refreshHz = 60f;
+        float refreshHz = 0f;
         android.view.Display display = getDisplay();
         if (display != null && display.getRefreshRate() > 1f) refreshHz = display.getRefreshRate();
-        nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgFastInterp,
-                pendingWfgTargetFps, pendingWfgMultiplier, refreshHz);
-        nativeSetWfgFpsLimit(nativeHandle, fpsLimit);
+        nativeSetDisplayRefresh(nativeHandle, refreshHz);
     }
 
     public void setFilterMode(int mode) {
@@ -728,7 +755,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         this.fpsLimit = v;
         // Present releases the game's buffers at this rate.
         XCore.setFpsLimit(v);
-        synchronized (lock) { if (nativeHandle != 0) nativeSetWfgFpsLimit(nativeHandle, fpsLimit); }
         // The panel mode follows the limit (and the WFG output rate, which depends on it).
         if (changed) requestDisplayMode();
     }

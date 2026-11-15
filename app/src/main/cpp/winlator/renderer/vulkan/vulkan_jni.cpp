@@ -158,12 +158,19 @@ struct XcoreRendererApi {
     void    (*setCursorVisible)(void* ctx, int32_t visible);
     void    (*updateCursor)(void* ctx, const uint8_t* rgba, int32_t width, int32_t height,
                             int32_t stride, int32_t hotX, int32_t hotY);
+    // Version 3: xcore's own entry points (XcoreHostApi), through which the renderer reports
+    // that it is done with a buffer (Present then gives the pixmap back to the game).
+    void    (*setHost)(void* ctx, const XcoreHostApi* host);
 };
 
 // Mirrors the Rust side (xcore src/android/output.rs), which checks the same numbers.
-static_assert(sizeof(XcoreRendererApi) == 128, "XcoreRendererApi layout");
+static_assert(sizeof(XcoreRendererApi) == 136, "XcoreRendererApi layout");
 static_assert(offsetof(XcoreRendererApi, initRoot) == 32, "XcoreRendererApi layout");
 static_assert(offsetof(XcoreRendererApi, updateCursor) == 120, "XcoreRendererApi layout");
+static_assert(offsetof(XcoreRendererApi, setHost) == 128, "XcoreRendererApi layout");
+static_assert(sizeof(XcoreHostApi) == 24, "XcoreHostApi layout");
+static_assert(offsetof(XcoreHostApi, ctx) == 8, "XcoreHostApi layout");
+static_assert(offsetof(XcoreHostApi, bufferReleased) == 16, "XcoreHostApi layout");
 
 static void xcoreUpdateContent(void* ctx, int64_t id, AHardwareBuffer* ahb) noexcept {
     try {
@@ -242,14 +249,18 @@ static void xcoreUpdateCursor(void* ctx, const uint8_t* rgba, int32_t w, int32_t
         (short)hotX, (short)hotY, true));
 }
 
+static void xcoreSetHost(void* ctx, const XcoreHostApi* host) noexcept {
+    XCORE_GUARD("setHost", XCORE_CTX(ctx)->setHost(host));
+}
+
 #undef XCORE_GUARD
 #undef XCORE_CTX
 
 static const XcoreRendererApi kXcoreRendererApi = {
-    2, xcoreUpdateContent, xcoreReleaseBuffer, xcoreDisplayClock,
+    3, xcoreUpdateContent, xcoreReleaseBuffer, xcoreDisplayClock,
     xcoreInitRoot, xcoreCreateWindow, xcoreDestroyWindow, xcoreMapWindow, xcoreUnmapWindow,
     xcoreReparentWindow, xcoreUpdateGeometry, xcoreSyncChildren, xcoreSetViewable,
-    xcoreSetPointer, xcoreSetCursorVisible, xcoreUpdateCursor,
+    xcoreSetPointer, xcoreSetCursorVisible, xcoreUpdateCursor, xcoreSetHost,
 };
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -363,29 +374,43 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeReattachSurface(
 }
 
 
+// The panel's refresh rate (Display.getRefreshRate), on every display change: the check on the
+// swapchain's own refresh cycle for the display clock.
 extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfg(
-    JNIEnv*, jobject, jlong handle, jboolean enabled, jint flowSide, jboolean fastInterp,
-    jint targetFps, jint multiplier, jfloat refreshHz)
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetDisplayRefresh(
+    JNIEnv*, jobject, jlong handle, jfloat hz)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setDisplayRefreshHz((float)hz);
+}
+
+// Direct output: WL_OUTPUT_* and the WL Direct socket (null: no clients).
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetDirectOutput(
+    JNIEnv* env, jobject, jlong handle, jint mode, jstring socketPath)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (!r) return;
-    r->setWfgConfig((int)flowSide, fastInterp == JNI_TRUE, (int)targetFps, (int)multiplier,
-                    (float)refreshHz);
-    r->setWfgEnabled(enabled == JNI_TRUE);
+    const char* path = socketPath ? env->GetStringUTFChars(socketPath, nullptr) : nullptr;
+    r->setDirectOutput((int)mode, path);
+    if (path) env->ReleaseStringUTFChars(socketPath, path);
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfgFpsLimit(
-    JNIEnv*, jobject, jlong handle, jint fps)
+// {sink, reason, source} for the HUD (see DirectServer::Status).
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetDirectStatus(
+    JNIEnv* env, jobject, jlong handle, jintArray out)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r) return;
-    r->setWfgFpsLimit((int)fps);
+    if (!r || !out || env->GetArrayLength(out) < 3) return JNI_FALSE;
+    const DirectServer::Status st = r->directStatus();
+    const jint v[3] = { st.sink, st.reason, st.source };
+    env->SetIntArrayRegion(out, 0, 3, v);
+    return JNI_TRUE;
 }
 
-// The display clock for the FPS limiters: {refresh period ns, arrival phase error ns, its
-// sequence number}; false while the renderer has no fresh refresh grid.
+// The display clock: {refresh period ns, phase error ns (0), sequence number of the latest
+// anchor}; false while the renderer has no fresh refresh grid.
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetDisplayClock(
     JNIEnv* env, jobject, jlong handle, jlongArray out)
@@ -399,9 +424,9 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetDisplayClock(
     return JNI_TRUE;
 }
 
-// {presented frames (real and generated), WFG-generated frames, presented frames as of the
-// latest real frame's burst, that burst's time (ns, System.nanoTime() clock)}; a 2-long array
-// gets the first two only.
+// {presented frames, generated frames (frame generation runs in the Vulkan wrapper now: its
+// count comes from wl.control, 0 here), presented frames as of the latest present, that
+// present's time (ns, System.nanoTime() clock)}; a 2-long array gets the first two only.
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetFrameCounts(
     JNIEnv* env, jobject, jlong handle, jlongArray out)
@@ -411,7 +436,7 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetFrameCounts(
     const jsize n = env->GetArrayLength(out);
     if (n < 2) return;
     const auto stamp = r->getPresentStamp();
-    jlong vals[4] = { (jlong)r->getPresentedFrames(), (jlong)r->getWfgGeneratedFrames(),
+    jlong vals[4] = { (jlong)r->getPresentedFrames(), (jlong)0,
                       (jlong)stamp.frames, (jlong)stamp.ns };
     env->SetLongArrayRegion(out, 0, n >= 4 ? 4 : 2, vals);
 }

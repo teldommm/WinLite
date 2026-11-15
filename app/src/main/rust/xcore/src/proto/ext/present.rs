@@ -2,11 +2,22 @@
 //! and answers with CompleteNotify / IdleNotify. The Java version slept on a scheduler thread;
 //! here every wait is a server timer ([`Server::schedule`] + [`Extension::on_timer`]).
 //!
-//! * FPS limit set: CompleteNotify at once; the pixmap goes idle one display-clock-rounded
-//!   interval after the window's previous release (so the game cannot outrun the limit).
-//! * No limit: the pixmap is idle when the window presents the next one (the renderer no longer
-//!   shows it), with a one second safety timeout; a client that presents the same pixmap over
-//!   and over is single-buffered and gets the idle at once.
+//! When a pixmap goes idle (IdleNotify, and its idle fence triggered):
+//!
+//! * It must be **off the screen**: the window presented another pixmap since. The one a window
+//!   shows is never given back while it shows it (a slow game would draw into the frame on
+//!   screen). Exception: a window that has presented only this one pixmap so far gets it back
+//!   after [`FIRST_IDLE_TIMEOUT_NS`], so a single-buffered client is not stuck before it is
+//!   recognised as one; a client that presents the same pixmap over and over is single-buffered
+//!   and gets the idle at once.
+//! * And the **renderer is done with it** ([`Hook::BufferReleased`]): no frame in flight samples it
+//!   any more. Only while the renderer reports releases ([`Server::release_tracking`]); without
+//!   it, being off the screen is enough. A release that does not come within
+//!   [`RELEASE_TIMEOUT_NS`] is assumed.
+//! * With an FPS limit: and **not before its deadline**, one display-clock-rounded interval after
+//!   the window's previous one, so the game cannot outrun the limit. Windows with the
+//!   `_WL_SWAPCHAIN` property (the Vulkan wrapper's own swapchain, which paces itself in
+//!   vkAcquireNextImageKHR) are not limited here.
 //! * `wait_fence`: a present whose wait fence is not triggered yet is held (in order, per window)
 //!   until it triggers (TriggerFence, or another present's idle), with a one second safety timeout.
 //!
@@ -18,15 +29,20 @@ use crate::proto::consts::err;
 use crate::proto::hooks::Hook;
 use crate::proto::requests::Extension;
 use crate::proto::{bad, ClientId, Fail, Res, Server};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub const MAJOR: u8 = 153; // Java: (byte)-103
 const BAD_IMPLEMENTATION: u8 = 17;
-/// A client must not wait for a buffer's idle forever; long on purpose (an earlier release would
-/// hand the buffer on screen back to a client that presents slowly).
-const PENDING_IDLE_TIMEOUT_NS: i64 = 1_000_000_000;
+/// A window that has shown only one pixmap so far gets it back after this long (a client that
+/// has one buffer and waits for it before presenting again).
+const FIRST_IDLE_TIMEOUT_NS: i64 = 1_000_000_000;
+/// A buffer off the screen whose release the renderer does not report goes idle after this long.
+const RELEASE_TIMEOUT_NS: i64 = 1_000_000_000;
 /// A wait fence nobody triggers must not hold a frame for ever.
 const WAIT_FENCE_TIMEOUT_NS: i64 = 1_000_000_000;
+
+/// Set by the Vulkan wrapper's WL swapchain on its window (see `wl_proto.h`).
+const WL_SWAPCHAIN_PROPERTY: &str = "_WL_SWAPCHAIN";
 
 const QUERY_VERSION: u8 = 0;
 const PRESENT_PIXMAP: u8 = 1;
@@ -54,9 +70,26 @@ struct Idle {
     fence: u32,
 }
 
-struct Pending {
+/// The pixmap a window shows now.
+struct Shown {
     idle: Idle,
+    /// The buffer's native handle (what the renderer reports releases by), 0 if none.
+    handle: usize,
+    /// FPS limit: not idle before this (platform clock, ns); 0 = no limit.
+    deadline: i64,
+    /// Timer of the first-present timeout ([`FIRST_IDLE_TIMEOUT_NS`]), 0 if none.
     token: u64,
+}
+
+/// A pixmap whose idle is owed: off the screen (or single-buffered), waiting for its release
+/// and its deadline.
+struct Owed {
+    idle: Idle,
+    handle: usize,
+    released: bool,
+    deadline: i64,
+    /// When the release is assumed if it has not come (a timer fires then, and at the deadline).
+    give_up: i64,
 }
 
 /// A PresentPixmap that waits for its `wait_fence`.
@@ -71,21 +104,31 @@ struct Waiting {
 pub struct Present {
     /// event id -> selection
     events: HashMap<u32, Selection>,
-    /// FPS-limited releases waiting for their deadline: timer token -> release.
-    limited: HashMap<u64, Idle>,
-    /// window -> deadline of its last scheduled release
+    /// window -> deadline of its last scheduled release (FPS limit)
     deadlines: HashMap<u32, i64>,
-    /// window -> the buffer it shows now, whose idle is still owed (no FPS limit)
-    pending: HashMap<u32, Pending>,
+    /// window -> the pixmap it shows now, whose idle is not due yet
+    shown: HashMap<u32, Shown>,
+    /// Idles owed, oldest first.
+    owed: Vec<Owed>,
+    /// windows that have shown more than one pixmap (no first-present timeout for them)
+    multi: HashSet<u32>,
     /// windows whose client presents one and the same pixmap over and over
     single: HashMap<u32, u32>,
     /// Presents held for their wait fence, oldest first.
     waiting: Vec<Waiting>,
+    /// Releases assumed after RELEASE_TIMEOUT_NS (logged once in a while).
+    release_timeouts: u64,
     next_token: u64,
 }
 
 fn event_selected(mask: u32, evtype: u16) -> bool {
     mask & (1 << evtype) != 0
+}
+
+/// The window belongs to a swapchain that paces itself.
+fn self_paced(s: &Server, window: u32) -> bool {
+    let id = s.atom_id(WL_SWAPCHAIN_PROPERTY);
+    id >= 0 && s.windows.get(&window).is_some_and(|w| w.properties.contains_key(&(id as u32)))
 }
 
 impl Present {
@@ -140,66 +183,132 @@ impl Present {
         self.next_token
     }
 
-    /// The pixmap's release is due one frame interval after the window's previous one.
-    fn schedule_idle(&mut self, s: &mut Server, idle: Idle, fps: i32) {
+    /// FPS limit: the pixmap's idle is due one frame interval after the window's previous one.
+    fn limit_deadline(&mut self, s: &mut Server, window: u32, fps: i32) -> i64 {
         let frame = s.next_frame_interval(fps);
         let now = s.platform.now_ns();
-        let deadline = match self.deadlines.get(&idle.window) {
+        let deadline = match self.deadlines.get(&window) {
             Some(prev) if *prev >= now => prev + frame,
             _ => now + frame,
         };
-        self.deadlines.insert(idle.window, deadline);
-        let token = self.token();
-        self.limited.insert(token, idle);
-        s.schedule(MAJOR, deadline, token);
+        self.deadlines.insert(window, deadline);
+        deadline
     }
 
-    /// Records `pixmap` as the buffer `window` shows and releases the one it replaced.
-    fn present_unlimited(&mut self, s: &mut Server, idle: Idle) {
+    /// The idle of `idle` is owed from now on; sends it at once when nothing holds it.
+    fn owe(&mut self, s: &mut Server, idle: Idle, handle: usize, released: bool, deadline: i64) {
+        let now = s.platform.now_ns();
+        let released = released || handle == 0 || !s.release_tracking();
+        let token = self.token();
+        let give_up = now + RELEASE_TIMEOUT_NS;
+        if deadline > now {
+            s.schedule(MAJOR, deadline, token);
+        }
+        if !released {
+            s.schedule(MAJOR, give_up, token);
+        }
+        self.owed.push(Owed { idle, handle, released, deadline, give_up });
+        self.send_due(s);
+    }
+
+    /// Sends every owed idle whose release and deadline are both there, in order.
+    fn send_due(&mut self, s: &mut Server) {
+        let now = s.platform.now_ns();
+        let mut i = 0;
+        while i < self.owed.len() {
+            let o = &mut self.owed[i];
+            if !o.released && now >= o.give_up {
+                o.released = true;
+                self.release_timeouts += 1;
+                if self.release_timeouts == 1 || self.release_timeouts % 600 == 0 {
+                    crate::log::warn(&format!(
+                        "Present: the renderer did not release pixmap {:#x} in time ({} so far)",
+                        o.idle.pixmap, self.release_timeouts
+                    ));
+                }
+            }
+            if o.released && now >= o.deadline {
+                let o = self.owed.remove(i);
+                self.send_idle(s, o.idle);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Records `idle` as what its window shows; the pixmap it replaced is owed its idle.
+    fn show(&mut self, s: &mut Server, idle: Idle, deadline: i64) {
         let window = idle.window;
-        let mut immediate = false;
-        let mut previous = None;
+        let handle = s.drawables.get(&idle.pixmap).map(|d| d.store.native_handle() as usize).unwrap_or(0);
+
         let mut single = self.single.get(&window).copied();
         if single.is_some_and(|p| p != idle.pixmap) {
             self.single.remove(&window);
             single = None;
         }
-        let reused = self.pending.get(&window).is_some_and(|p| p.idle.pixmap == idle.pixmap);
+        let reused = self.shown.get(&window).is_some_and(|p| p.idle.pixmap == idle.pixmap);
         if single.is_none() && reused {
             // The client reused the buffer it presented last: it has only one.
             self.single.insert(window, idle.pixmap);
             single = Some(idle.pixmap);
         }
         if single.is_some() {
-            self.pending.remove(&window);
-            immediate = true;
-        } else {
-            let token = self.token();
-            previous = self.pending.insert(window, Pending { idle, token });
-            let deadline = s.platform.now_ns() + PENDING_IDLE_TIMEOUT_NS;
-            s.schedule(MAJOR, deadline, token);
+            // Nothing will ever replace it: the client draws over the frame on screen anyway.
+            self.shown.remove(&window);
+            self.owe(s, idle, handle, true, deadline);
+            return;
         }
-        if immediate {
-            self.send_idle(s, idle);
-        } else if let Some(p) = previous {
+
+        let token = if self.multi.contains(&window) {
+            0
+        } else {
+            let t = self.token();
+            let at = s.platform.now_ns() + FIRST_IDLE_TIMEOUT_NS;
+            s.schedule(MAJOR, at, t);
+            t
+        };
+        let previous = self.shown.insert(window, Shown { idle, handle, deadline, token });
+        if let Some(p) = previous {
             if p.idle.pixmap != idle.pixmap {
-                self.send_idle(s, p.idle);
+                self.multi.insert(window);
+                self.owe(s, p.idle, p.handle, false, p.deadline);
             }
         }
     }
 
-    /// The window stopped showing its buffer (unmapped or destroyed): nothing displaces it any more.
-    fn flush_pending(&mut self, s: &mut Server, window: u32) {
+    /// The window stopped showing anything (unmapped or destroyed): everything it owes goes now.
+    fn flush_window(&mut self, s: &mut Server, window: u32) {
         self.single.remove(&window);
-        if let Some(p) = self.pending.remove(&window) {
+        let (gone, keep): (Vec<Owed>, Vec<Owed>) = std::mem::take(&mut self.owed).into_iter().partition(|o| o.idle.window == window);
+        self.owed = keep;
+        for o in gone {
+            self.send_idle(s, o.idle);
+        }
+        if let Some(p) = self.shown.remove(&window) {
             self.send_idle(s, p.idle);
         }
+    }
+
+    /// The first-present timeout of a window's only pixmap so far.
+    fn first_idle_timeout(&mut self, s: &mut Server, token: u64) -> bool {
+        let Some(window) = self.shown.iter().find(|(_, p)| p.token == token && token != 0).map(|(w, _)| *w) else {
+            return false;
+        };
+        if self.multi.contains(&window) {
+            return true;
+        }
+        // Still on screen and the renderer keeps it: this is the single-buffer escape, the
+        // release is not waited for.
+        if let Some(p) = self.shown.remove(&window) {
+            self.owe(s, p.idle, p.handle, true, p.deadline);
+        }
+        true
     }
 }
 
 impl Present {
     /// Shows the pixmap: tells the renderer and answers with CompleteNotify (IdleNotify follows
-    /// as the mode says). The window or the pixmap may be gone if the present was held.
+    /// as described at the top). The window or the pixmap may be gone if the present was held.
     fn do_present(&mut self, s: &mut Server, idle: Idle) {
         let (window, pixmap, serial) = (idle.window, idle.pixmap, idle.serial);
         if !s.windows.contains_key(&window) || !s.pixmaps.contains(&pixmap) {
@@ -208,17 +317,14 @@ impl Present {
             }
             return;
         }
-        let fps = s.platform.fps_limit().min(1000);
+        let fps = if self_paced(s, window) { 0 } else { s.platform.fps_limit().min(1000) };
         let ust = s.platform.now_ns() / 1000;
         let msc = ust / (s.refresh_interval_ns() / 1000).max(1);
         s.content_changed(pixmap);
-        if fps <= 0 {
-            self.present_unlimited(s, idle);
-            self.send_complete(s, window, serial, ust, msc);
-        } else {
-            self.send_complete(s, window, serial, ust, msc);
-            self.schedule_idle(s, idle, fps);
-        }
+        let deadline = if fps > 0 { self.limit_deadline(s, window, fps) } else { 0 };
+        // The replaced pixmap's idle (if already due) goes out before this one's completion.
+        self.show(s, idle, deadline);
+        self.send_complete(s, window, serial, ust, msc);
     }
 
     /// Runs the held presents whose wait fence is triggered (or gone), in order; a window's
@@ -343,16 +449,9 @@ impl Extension for Present {
         if self.expire_waiting(s, token) {
             return;
         }
-        if let Some(idle) = self.limited.remove(&token) {
-            self.send_idle(s, idle);
-        } else {
-            // Safety timeout of a pending idle (a stale token matches nothing).
-            let window = self.pending.iter().find(|(_, p)| p.token == token).map(|(w, _)| *w);
-            if let Some(w) = window {
-                if let Some(p) = self.pending.remove(&w) {
-                    self.send_idle(s, p.idle);
-                }
-            }
+        if !self.first_idle_timeout(s, token) {
+            // An owed idle's deadline or release timeout (a stale token matches nothing).
+            self.send_due(s);
         }
         // `send_idle` triggers the idle fence through `SyncState::trigger`, which runs no hook:
         // a present held for that fence goes ahead now, not at the next PresentPixmap.
@@ -363,20 +462,45 @@ impl Extension for Present {
         match *hook {
             Hook::WindowGeometry { window, .. } => self.send_configure(s, window, 0),
             Hook::WindowUnmapped(w) => {
-                self.flush_pending(s, w);
-                self.release_waiting(s); // the flushed idle may trigger a held present's fence
+                self.flush_window(s, w);
+                self.release_waiting(s); // the flushed idles may trigger a held present's fence
             }
             Hook::FenceTriggered(_) => self.release_waiting(s),
+            Hook::BufferReleased(handle) => {
+                let mut any = false;
+                for o in self.owed.iter_mut() {
+                    if !o.released && handle.map_or(true, |h| h == o.handle) {
+                        o.released = true;
+                        any = true;
+                    }
+                }
+                if any {
+                    self.send_due(s);
+                    self.release_waiting(s);
+                }
+            }
             Hook::PixmapFreed(p) => {
                 self.drop_waiting(s, |w| w.idle.pixmap == p);
                 // Nobody to tell, but a waiting idle fence must not stay untriggered.
-                let gone: Vec<u32> = self.pending.iter().filter(|(_, v)| v.idle.pixmap == p).map(|(w, _)| *w).collect();
-                for w in gone {
-                    if let Some(v) = self.pending.remove(&w) {
-                        if v.idle.fence != 0 {
-                            s.sync.trigger(v.idle.fence);
-                        }
+                let mut fences: Vec<u32> = Vec::new();
+                self.owed.retain(|o| {
+                    if o.idle.pixmap == p {
+                        fences.push(o.idle.fence);
+                        false
+                    } else {
+                        true
                     }
+                });
+                self.shown.retain(|_, v| {
+                    if v.idle.pixmap == p {
+                        fences.push(v.idle.fence);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                for f in fences.into_iter().filter(|f| *f != 0) {
+                    s.sync.trigger(f);
                 }
                 self.single.retain(|_, v| *v != p);
                 // The idle fences triggered above may be what other held presents wait for.
@@ -384,8 +508,9 @@ impl Extension for Present {
             }
             Hook::WindowFreed(w) => {
                 self.drop_waiting(s, |q| q.idle.window == w);
-                self.flush_pending(s, w); // before the window's selections go away
+                self.flush_window(s, w); // before the window's selections go away
                 self.deadlines.remove(&w);
+                self.multi.remove(&w);
                 self.send_configure(s, w, PIXMAP_FLAG_WINDOW_DESTROYED);
                 self.events.retain(|_, e| e.window != w);
                 // Idle fences triggered by the drop and the flush: release what waited for them.

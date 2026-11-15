@@ -48,7 +48,9 @@ data class GraphicsPanelState(
     val wfgPanelHz: Int,
     // GPU Turbo row: shown only when the container/shortcut option is on and the GPU is an Adreno.
     val gpuTurboVisible: Boolean,
-    val gpuTurboEnabled: Boolean
+    val gpuTurboEnabled: Boolean,
+    // Direct output (WlControl.OUTPUT_*): 0 Off, 1 Auto, 2 Always.
+    val directOutputMode: Int
 )
 
 interface GraphicsPanelCallbacks {
@@ -62,6 +64,7 @@ interface GraphicsPanelCallbacks {
     fun onReshadeStrengthChanged(percent: Int)
     fun onWfgChanged(enabled: Boolean, qualityIndex: Int, modeIndex: Int, targetFps: Int)
     fun onGpuTurboChanged(enabled: Boolean)
+    fun onDirectOutputChanged(mode: Int)
 }
 
 object GraphicsSidebarPanelHost {
@@ -171,6 +174,7 @@ private fun GraphicsSidebarPanel(
     var reshadeStrength by remember { mutableStateOf(state.reshadeStrengthPercent) }
     var wfgEnabled by remember { mutableStateOf(state.wfgEnabled) }
     var gpuTurbo by remember { mutableStateOf(state.gpuTurboEnabled) }
+    var directOutput by remember { mutableStateOf(state.directOutputMode.coerceIn(0, 2)) }
     var wfgQualityIndex by remember { mutableStateOf(state.wfgQualityIndex) }
     var wfgModeIndex by remember { mutableStateOf(state.wfgModeIndex) }
     // The target FPS in effect (kept while a multiplier is selected, so switching back restores it)
@@ -219,6 +223,26 @@ private fun GraphicsSidebarPanel(
             initialFps = state.fpsLimit,
             onFpsChanged = callbacks::onFpsLimitChanged
         )
+
+        // Where the game's frames go: straight to the display (SurfaceFlinger) while the game is
+        // alone on the screen (Auto), whenever it is the top window (Always), or always through
+        // the X composite (Off). Applies at once, a running game included.
+        SidebarGap()
+        SidebarCard {
+            SidebarDropdownField(
+                caption = uiStr(R.string.ui_direct_output),
+                options = listOf(
+                    uiStr(R.string.ui_off),
+                    uiStr(R.string.ui_direct_output_auto),
+                    uiStr(R.string.ui_direct_output_always)
+                ),
+                selectedIndex = directOutput,
+                onSelect = {
+                    directOutput = it
+                    callbacks.onDirectOutputChanged(it)
+                }
+            )
+        }
 
         SidebarGap()
         SidebarCard {

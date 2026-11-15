@@ -11,6 +11,7 @@ use super::{ClientId, Server};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Wakes the thread that serves the sockets (a worker thread finished something).
@@ -53,6 +54,82 @@ impl ImportResults {
     }
 }
 
+/// Buffers the renderer is done with: it no longer shows them and no frame in flight reads them.
+/// Filled from any thread (the renderer's, through the output), emptied by the server in
+/// [`Server::service_wakes`], which turns each into [`Hook::BufferReleased`].
+///
+/// A leaf lock: nothing else is locked while it is held, so the renderer may call in with its own
+/// locks taken.
+///
+/// While it is not active (no renderer that reports releases), Present does not wait for one and
+/// gives a buffer back as soon as the next one replaces it.
+#[derive(Default)]
+pub struct ReleasedBuffers {
+    inner: Mutex<ReleasedInner>,
+    active: AtomicBool,
+}
+
+#[derive(Default)]
+struct ReleasedInner {
+    /// Native handles (AHardwareBuffer pointers), in the order they were released.
+    handles: Vec<usize>,
+    /// Tracking stopped: every buffer still owed counts as released.
+    flush_all: bool,
+    waker: Option<Wake>,
+}
+
+impl ReleasedBuffers {
+    fn lock(&self) -> std::sync::MutexGuard<'_, ReleasedInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether releases are reported. Switching it off releases everything still waiting.
+    pub fn set_active(&self, on: bool) {
+        let was = self.active.swap(on, Ordering::AcqRel);
+        if was && !on {
+            let waker = {
+                let mut g = self.lock();
+                g.handles.clear();
+                g.flush_all = true;
+                g.waker.clone()
+            };
+            if let Some(w) = waker {
+                w();
+            }
+        }
+    }
+
+    pub fn active(&self) -> bool {
+        self.active.load(Ordering::Acquire)
+    }
+
+    /// The buffer with this native handle is free (any thread).
+    pub fn push(&self, handle: usize) {
+        if handle == 0 || !self.active() {
+            return;
+        }
+        let waker = {
+            let mut g = self.lock();
+            g.handles.push(handle);
+            g.waker.clone()
+        };
+        if let Some(w) = waker {
+            w();
+        }
+    }
+
+    pub(crate) fn set_waker(&self, waker: Option<Wake>) {
+        self.lock().waker = waker;
+    }
+
+    /// What arrived since the last call: the handles, and whether everything was released.
+    pub(crate) fn take(&self) -> (Vec<usize>, bool) {
+        let mut g = self.lock();
+        let all = std::mem::replace(&mut g.flush_all, false);
+        (std::mem::take(&mut g.handles), all)
+    }
+}
+
 /// Things that happen in the core that extensions care about (the Java `OnResourceLifecycle`,
 /// `OnWindowModification` and `OnPointerMotion` listeners).
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +144,9 @@ pub enum Hook {
     PointerButton { button: u8, pressed: bool },
     /// Relative motion of the input device, before it moves the cursor.
     RawMotion { dx: f64, dy: f64 },
+    /// The renderer is done with the buffer of this native handle ([`ReleasedBuffers`]);
+    /// `None`: with every buffer (release tracking stopped).
+    BufferReleased(Option<usize>),
 }
 
 /// Why a client's requests are on hold.
@@ -164,7 +244,18 @@ impl Server {
 
     /// What worker threads call to wake the I/O thread (set by the runtime).
     pub fn set_waker(&mut self, waker: Option<Wake>) {
+        self.released.set_waker(waker.clone());
         self.waker = waker;
+    }
+
+    /// Where the renderer's buffer releases go (see [`ReleasedBuffers`]).
+    pub fn released_buffers(&self) -> Arc<ReleasedBuffers> {
+        self.released.clone()
+    }
+
+    /// The renderer reports when it is done with a buffer.
+    pub fn release_tracking(&self) -> bool {
+        self.released.active()
     }
 
     /// Receives the buffer on `fd` without holding the server up: the platform does the waiting
@@ -235,6 +326,14 @@ impl Server {
             return;
         }
         self.in_wakes = true;
+        // Buffers the renderer gave back: Present hands them on to their clients.
+        let (released, all) = self.released.take();
+        if all {
+            self.run_hook(Hook::BufferReleased(None));
+        }
+        for h in released {
+            self.run_hook(Hook::BufferReleased(Some(h)));
+        }
         // Results of clients that left meanwhile are of no use to anybody.
         self.import_results.retain(|t| self.import_jobs.contains_key(&t));
         loop {

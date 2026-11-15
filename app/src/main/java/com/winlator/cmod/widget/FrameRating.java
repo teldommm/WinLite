@@ -126,8 +126,33 @@ public class FrameRating extends FrameLayout implements Runnable {
     }
 
     private void refreshRendererText() {
-        tvRenderer.setText(lastKnownRenderer != null ? lastKnownRenderer : "Vulkan");
+        String name = lastKnownRenderer != null ? lastKnownRenderer : "Vulkan";
+        tvRenderer.setText(sinkLabel.isEmpty() ? name : name + " · " + sinkLabel);
     }
+
+    // The game's own frame counts (wl.control), polled: with WL Direct the X server reports none.
+    private final WlFrameStats wlStats = new WlFrameStats();
+    private String sinkLabel = "";
+    private boolean wlPolling = false;
+    private final Runnable wlPoll = new Runnable() {
+        @Override
+        public void run() {
+            if (userEnabled) {
+                WlFrameStats.Reading wl = wlStats.take(System.nanoTime(), 400_000_000L);
+                if (wl.live) {
+                    if (wl.gameFps >= 0) lastFPS = wl.gameFps;
+                    if (wl.outputFps >= 0) outputFPS = wl.outputFps;
+                }
+                String label = wl.live ? WlFrameStats.sinkLabel(wl) : "";
+                if (!label.equals(sinkLabel)) {
+                    sinkLabel = label;
+                    refreshRendererText();
+                }
+                if (wl.live) FrameRating.this.run();
+            }
+            postDelayed(this, 500);
+        }
+    };
 
     public void setRenderer(String renderer) {
         final String clean = renderer != null ? renderer.trim() : "";
@@ -225,6 +250,10 @@ public class FrameRating extends FrameLayout implements Runnable {
         outputSource = source;
         outputMeter.reset();
         outputFPS = 0;
+        if (!wlPolling) {
+            wlPolling = true;
+            post(wlPoll);
+        }
     }
 
     /** Shows the HUD (a rated window was picked); no frame of its own any more. */
@@ -249,10 +278,13 @@ public class FrameRating extends FrameLayout implements Runnable {
         long time = SystemClock.elapsedRealtime();
         if (time >= lastTime + 500) {
             float fps = fpsMeter.take(System.nanoTime(), 400_000_000L);
-            if (fps >= 0) lastFPS = fps;
             // From one burst of presents to another, see OutputRateMeter.
             float out = outputMeter.take(outputSource, System.nanoTime(), 400_000_000L);
-            if (out >= 0) outputFPS = out;
+            // A WL swapchain's own counts win (wlPoll): the X server's include generated frames.
+            if (sinkLabel.isEmpty()) {
+                if (fps >= 0) lastFPS = fps;
+                if (out >= 0) outputFPS = out;
+            }
             post(this);
             lastTime = time;
         }

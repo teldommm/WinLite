@@ -112,6 +112,7 @@ import com.winlator.cmod.ui.TaskManagerPanelHost;
 import com.winlator.cmod.ui.TaskManagerPanelState;
 import com.winlator.cmod.ui.ThemedAlertHost;
 import com.winlator.cmod.ui.WfgSettings;
+import com.winlator.cmod.core.WlControl;
 import com.winlator.cmod.widget.FrameRating;
 import com.winlator.cmod.widget.WinlatorHUD;
 import com.winlator.cmod.widget.InputControlsView;
@@ -208,6 +209,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Per quality index as well: Fast also takes the cheaper interpolation (bilinear warp, one
     // source step), Balanced the Catmull-Rom warp with two.
     private static final boolean[] WFG_FAST_INTERP = {true, false};
+    // Direct output (WlControl.OUTPUT_*), per shortcut or container ("directOutput", default Auto),
+    // and where the game's WL swapchain finds the renderer (null until the tmp dir is ready).
+    private int directOutputMode = WlControl.OUTPUT_AUTO;
+    private String wlDirectSocketPath = null;
     // Id of the bundled assets/graphics_driver/wrapper_wl.tzst; bump it with every new wrapper build.
     private static final String WRAPPER_BUILD_ID = "becf2a03";
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
@@ -258,7 +263,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private MidiHandler midiHandler;
     private String midiSoundFont = "";
     private String lc_all = "";
-    private String vkbasaltConfig = "";
     PreloaderDialog preloaderDialog = null;
     private Runnable configChangedCallback = null;
     // Manual pause from the sidebar. Outranks the background suspend: coming back to the app must
@@ -601,15 +605,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             screenSize = shortcut.getExtra("screenSize", container.getScreenSize());
             lc_all = shortcut.getExtra("lc_all", container.getLC_ALL());
             midiSoundFont = shortcut.getExtra("midiSoundFont", container.getMIDISoundFont());
-            String sharpnessEffect = shortcut.getExtra("sharpnessEffect", "None");
-            if (!sharpnessEffect.equals("None")) {
-                double sharpnessLevel = Double.parseDouble(shortcut.getExtra("sharpnessLevel", "100"));
-                double sharpnessDenoise = Double.parseDouble(shortcut.getExtra("sharpnessDenoise", "100"));
-                vkbasaltConfig = "effects=" + sharpnessEffect.toLowerCase() + ";" + "casSharpness="
-                        + sharpnessLevel / 100 + ";" + "dlsSharpness=" + sharpnessLevel / 100 + ";" + "dlsDenoise="
-                        + sharpnessDenoise / 100 + ";" + "enableOnLaunch=True";
-            }
-
             simulateTouchScreen = shortcut.getExtra("simTouchScreen").equals("1");
             isRelativeMouseMovement = shortcut.getExtra("enableRelativeMouse").equals("1");
             isMouseDisabled = shortcut.getExtra("disableMouse").equals("1");
@@ -1248,6 +1243,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String rootPath = imageFs.getRootDir().getPath();
         FileUtils.clear(imageFs.getTmpDir());
 
+        // After the tmp dir is cleared, before Wine starts: wl.control (the settings the game's WL
+        // swapchain reads, its status for the HUD) and the renderer's WL Direct socket.
+        File wlControl = new File(imageFs.getTmpDir(), ".wl-control");
+        if (WlControl.open(wlControl.getPath())) envVars.put("WL_CONTROL_PATH", wlControl.getPath());
+        wlDirectSocketPath = new File(imageFs.getTmpDir(), ".wl-direct").getPath();
+        envVars.put("WL_DIRECT_SOCK", wlDirectSocketPath);
+        applyDirectOutput();
+
         guestProgramLauncherComponent = new GuestProgramLauncherComponent(
                 contentsManager,
                 contentsManager.getProfileByEntryName(container.getWineVersion()),
@@ -1401,6 +1404,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServerView = view;
         view.setCursorVisible(false);
         configureVulkanRenderer(view);
+        // Direct output to SurfaceFlinger. The socket comes with setupXEnvironment, once the tmp
+        // dir it lives in has been cleared (a socket made before that would be deleted with it).
+        directOutputMode = loadDirectOutputMode();
+        view.setDirectOutput(directOutputMode, wlDirectSocketPath);
+        WlControl.setOutputMode(directOutputMode);
 
         if (shortcut != null) {
             view.setUnviewableWMClasses("explorer.exe");
@@ -2059,6 +2067,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         int initialFpsLimit = loadFpsLimit();
         if (vkRenderer != null) vkRenderer.setFpsLimit(initialFpsLimit);
+        WlControl.setFpsLimit(initialFpsLimit);
 
         // FSR/Upscaler/PostFX/Sharpness prefer the per-shortcut value over the container-wide
         // one, exactly like SidebarCleanupView's bolted-on autosave used to (it re-read these
@@ -2094,9 +2103,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final int wfgTargetFps = WfgSettings.clampTarget(
                 readWfgInt("wfgTargetFps", WfgSettings.TARGET_DEFAULT, Integer.MAX_VALUE), wfgPanelHz);
         if (vkRenderer != null) {
+            // The panel mode for the output rate; the frames are made in the Vulkan wrapper.
             vkRenderer.setWfg(wfgOn, WFG_FLOW_SIDES[wfgQuality], WFG_FAST_INTERP[wfgQuality],
                     wfgTargetFps, WfgSettings.multiplierOf(wfgMode));
         }
+        WlControl.setFrameGeneration(wfgOn, WFG_FLOW_SIDES[wfgQuality], WFG_FAST_INTERP[wfgQuality],
+                wfgTargetFps, WfgSettings.multiplierOf(wfgMode));
 
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
@@ -2112,14 +2124,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 wfgTargetFps,
                 wfgPanelHz,
                 gpuTurboMenuVisible,
-                gpuTurboWanted
+                gpuTurboWanted,
+                directOutputMode
         );
 
         GraphicsPanelCallbacks callbacks = new GraphicsPanelCallbacks() {
             @Override
             public void onFpsLimitChanged(int fps) {
                 saveFpsLimit(fps);
+                // xcore limits windows without a WL swapchain; the swapchain reads wl.control.
                 if (vkRenderer != null) vkRenderer.setFpsLimit(fps);
+                WlControl.setFpsLimit(fps);
             }
 
             @Override
@@ -2198,7 +2213,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     vkRenderer.setWfg(enabled, WFG_FLOW_SIDES[q], WFG_FAST_INTERP[q], t,
                             WfgSettings.multiplierOf(m));
                 }
+                WlControl.setFrameGeneration(enabled, WFG_FLOW_SIDES[q], WFG_FAST_INTERP[q], t,
+                        WfgSettings.multiplierOf(m));
                 saveWfgSettings(enabled, q, m, t);
+            }
+
+            @Override
+            public void onDirectOutputChanged(int mode) {
+                directOutputMode = Math.max(WlControl.OUTPUT_OFF, Math.min(WlControl.OUTPUT_ALWAYS, mode));
+                applyDirectOutput();
+                saveDirectOutputMode(directOutputMode);
             }
 
             @Override
@@ -2211,6 +2235,34 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
 
         GraphicsSidebarPanelHost.attach(ingameSidebar, R.id.LLSubGraphics, state, callbacks);
+    }
+
+    // Direct output to the renderer (its mode and socket) and to the game's WL swapchain.
+    private void applyDirectOutput() {
+        if (xServerView instanceof VulkanXServerView) {
+            ((VulkanXServerView) xServerView).setDirectOutput(directOutputMode, wlDirectSocketPath);
+        }
+        WlControl.setOutputMode(directOutputMode);
+    }
+
+    private int loadDirectOutputMode() {
+        String value = readGraphicsExtra("directOutput");
+        if (value.isEmpty()) return WlControl.OUTPUT_AUTO;
+        try {
+            return Math.max(WlControl.OUTPUT_OFF, Math.min(WlControl.OUTPUT_ALWAYS, Integer.parseInt(value)));
+        } catch (NumberFormatException e) {
+            return WlControl.OUTPUT_AUTO;
+        }
+    }
+
+    private void saveDirectOutputMode(int mode) {
+        if (shortcut != null) {
+            shortcut.putExtra("directOutput", String.valueOf(mode));
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra("directOutput", String.valueOf(mode));
+            container.saveData();
+        }
     }
 
     // Highest refresh rate the panel offers at its current resolution (what WFG switches to), or 0
@@ -2709,7 +2761,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // assets/graphics_driver/wrapper_wl.tzst's SHA-256) and of extra_libs: a new build changes
         // the name, so every ImageFS gets it once. There is a single wrapper (mesa26 based).
         File graphicsRuntimeMarker = new File(rootDir,
-                "usr/lib/.winlator-graphics-runtime-" + WRAPPER_BUILD_ID + "-25b50a11-v2");
+                "usr/lib/.winlator-graphics-runtime-" + WRAPPER_BUILD_ID + "-e15b264a-v2");
         // Left by the removed Wrapper Legacy option.
         File obsoleteVariantMarker = new File(rootDir, "usr/lib/.winlator-graphics-wrapper-variant");
         if (obsoleteVariantMarker.isFile()) obsoleteVariantMarker.delete();
@@ -2723,7 +2775,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             installed &= TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
                     "graphics_driver/extra_libs" + ".tzst", rootDir);
             if (installed) FileUtils.writeString(graphicsRuntimeMarker,
-                    "wrapper=" + WRAPPER_BUILD_ID + ";extra_libs=25b50a11;layers=9d57736d;opengl=split-v1");
+                    "wrapper=" + WRAPPER_BUILD_ID + ";extra_libs=e15b264a;layers=9d57736d;opengl=split-v1");
         }
 
         extractOpenGLDriver(rootDir);
@@ -2793,11 +2845,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         String bcnEmulationCache = graphicsDriverConfig.get("bcnEmulationCache");
         envVars.put("WRAPPER_USE_BCN_CACHE", bcnEmulationCache);
-
-        if (!vkbasaltConfig.isEmpty()) {
-            envVars.put("ENABLE_VKBASALT", "1");
-            envVars.put("VKBASALT_CONFIG", vkbasaltConfig);
-        }
     }
 
     @Override

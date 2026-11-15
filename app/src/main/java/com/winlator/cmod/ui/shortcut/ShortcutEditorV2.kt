@@ -2,7 +2,6 @@
 
 package com.winlator.cmod.ui.shortcut
 
-import com.winlator.cmod.ui.theme.accentSliderColors
 import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.ui.theme.RevealSection
 import com.winlator.cmod.contentdialog.DXVKConfig
@@ -49,7 +48,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -141,7 +139,6 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.io.File
 import java.util.Locale
-import kotlin.math.roundToInt
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.hairlineColor
 import androidx.compose.material3.TopAppBarDefaults
@@ -291,9 +288,6 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     }
 
     var startup by mutableIntStateOf(shortcut.getExtra("startupSelection", container.getStartupSelection().toString()).toIntOrNull()?.coerceIn(0, 2) ?: 0)
-    var sharpnessEffect by mutableStateOf(shortcut.getExtra("sharpnessEffect", "None"))
-    var sharpnessLevel by mutableStateOf(shortcut.getExtra("sharpnessLevel", "100"))
-    var sharpnessDenoise by mutableStateOf(shortcut.getExtra("sharpnessDenoise", "100"))
     var lcAll by mutableStateOf(shortcut.getExtra("lc_all", container.getLC_ALL()))
     var midiSoundFont by mutableStateOf(shortcut.getExtra("midiSoundFont", container.getMIDISoundFont()))
     var execArgs by mutableStateOf(shortcut.getExtra("execArgs"))
@@ -1174,21 +1168,6 @@ private fun ShortcutCategoryV2(
                 }
                 CpuSelectorRow(uiStr(R.string.processor_affinity), s.cpu) { index, checked -> s.cpu[index] = checked; s.saveCpu() }
             }
-            SettingsCard {
-                SettingChoice(uiStr(R.string.ui_sharpness_effect), s.sharpnessEffect, listOf("None", "CAS", "DLS")) {
-                    s.sharpnessEffect = it; s.extra("sharpnessEffect", it)
-                }
-                RevealSection(visible = s.sharpnessEffect != "None") {
-                    SettingsDivider()
-                    SharpnessSliderV2(uiStr(R.string.ui_sharpness_level), s.sharpnessLevel) {
-                        s.sharpnessLevel = it; s.extra("sharpnessLevel", it)
-                    }
-                    SettingsDivider()
-                    SharpnessSliderV2(uiStr(R.string.ui_sharpness_denoise), s.sharpnessDenoise) {
-                        s.sharpnessDenoise = it; s.extra("sharpnessDenoise", it)
-                    }
-                }
-            }
             ExecArgumentsEditorV2(s.execArgs) {
                 s.execArgs = it; s.extra("execArgs", it.ifBlank { null })
             }
@@ -1203,23 +1182,6 @@ private fun ShortcutCategoryV2(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SharpnessSliderV2(label: String, value: String, onChanged: (String) -> Unit) {
-    val numeric = value.toFloatOrNull()?.coerceIn(0f, 100f) ?: 100f
-    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth()) {
-            Text(label, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(numeric.roundToInt().toString(), fontWeight = FontWeight.SemiBold)
-        }
-        Slider(
-            value = numeric,
-            onValueChange = { onChanged(it.roundToInt().coerceIn(0, 100).toString()) },
-            valueRange = 0f..100f,
-            colors = accentSliderColors()
-        )
     }
 }
 

@@ -356,7 +356,7 @@ public class WinlatorHUD extends View {
     private void refreshBackendRenderer(boolean relayout) {
         if (mesaRendererActive) return;
         rendererLabel = resolveBackendRenderer();
-        strRend = rendererLabel;
+        strRend = sinkLabel.isEmpty() ? rendererLabel : rendererLabel + " · " + sinkLabel;
         wDynRend = pRend.measureText(strRend);
         if (relayout) requestRelayout();
     }
@@ -856,10 +856,20 @@ public class WinlatorHUD extends View {
         if (measuredFps >= 0) snapFps = measuredFps;
         lastFpsNs = now;
 
-        String value = String.format(Locale.US, "%.0f", snapFps);
         // From one burst of presents to another, not tick to tick: see OutputRateMeter.
         float outFps = outputMeter.take(outputSource, now, 250_000_000L);
         if (outFps >= 0) snapOutputFps = outFps;
+
+        // A game with a WL swapchain counts its own frames: in WL Direct none reach the X
+        // server, and with frame generation the X server sees the generated ones as well.
+        WlFrameStats.Reading wl = wlStats.take(now, 250_000_000L);
+        if (wl.live) {
+            if (wl.gameFps >= 0) snapFps = wl.gameFps;
+            if (wl.outputFps >= 0) snapOutputFps = wl.outputFps;
+        }
+        updateSinkLabel(wl.live ? WlFrameStats.sinkLabel(wl) : "");
+
+        String value = String.format(Locale.US, "%.0f", snapFps);
         if (snapOutputFps > 0) {
             value += FPS_ARROW + String.format(Locale.US, "%.0f", snapOutputFps);
         }
@@ -983,6 +993,21 @@ public class WinlatorHUD extends View {
             x += wLabelFps;
             drawFpsValue(canvas, x, baseline);
         }
+    }
+
+    private final WlFrameStats wlStats = new WlFrameStats();
+    private volatile String sinkLabel = "";
+
+    /** Where the game's frames go (WL Direct or X, and why), after the renderer's name. */
+    private void updateSinkLabel(String label) {
+        if (label.equals(sinkLabel)) return;
+        sinkLabel = label;
+        uiHandler.post(() -> {
+            String base = rendererLabel;
+            strRend = sinkLabel.isEmpty() ? base : base + " · " + sinkLabel;
+            wDynRend = pRend.measureText(strRend);
+            requestRelayout();
+        });
     }
 
     public void setOutputFrameSource(OutputFrameSource source) {

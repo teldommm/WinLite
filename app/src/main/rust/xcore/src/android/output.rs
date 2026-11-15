@@ -12,6 +12,11 @@
 //! the renderer's, and give it the cursor (`applyCursorLocked`: shown by the app and by the
 //! client, its image only when it is another one).
 //!
+//! The other way (version 3): the renderer gets [`HOST_API`] and reports through it when it is
+//! done with a buffer (it shows it no more and no frame in flight reads it); the report goes to
+//! the server the output is attached to ([`ReleasedBuffers`]), where Present gives the pixmap
+//! back to its client.
+//!
 //! One renderer per process (there is one X server view), so the output is a process-wide object
 //! that every server instance shares.
 
@@ -19,6 +24,7 @@ use super::ahb::{self, AHardwareBuffer};
 use super::platform;
 use crate::frames::{CursorImage, Item, Output};
 use crate::log;
+use crate::proto::hooks::ReleasedBuffers;
 use crate::proto::Server;
 use std::collections::HashMap;
 use std::os::raw::c_void;
@@ -52,16 +58,50 @@ pub struct RendererApi {
     pub set_cursor_visible: unsafe extern "C" fn(ctx: *mut c_void, visible: i32),
     /// R,G,B,A pixels, `stride` pixels per row.
     pub update_cursor: unsafe extern "C" fn(ctx: *mut c_void, rgba: *const u8, width: i32, height: i32, stride: i32, hot_x: i32, hot_y: i32),
+    // ---- version 3: buffer releases
+    /// Hands the renderer the server's entry points ([`HOST_API`]); called right after the
+    /// renderer is installed.
+    pub set_host: unsafe extern "C" fn(ctx: *mut c_void, host: *const HostApi),
 }
 
-pub const RENDERER_API_VERSION: u32 = 2;
+pub const RENDERER_API_VERSION: u32 = 3;
 
 // The C side checks the same layout (vulkan_jni.cpp builds the table): version, then pointers.
-const _: () = assert!(std::mem::size_of::<RendererApi>() == 128);
+const _: () = assert!(std::mem::size_of::<RendererApi>() == 136);
 const _: () = assert!(std::mem::offset_of!(RendererApi, update_content) == 8);
 const _: () = assert!(std::mem::offset_of!(RendererApi, display_clock) == 24);
 const _: () = assert!(std::mem::offset_of!(RendererApi, init_root) == 32);
 const _: () = assert!(std::mem::offset_of!(RendererApi, update_cursor) == 120);
+const _: () = assert!(std::mem::offset_of!(RendererApi, set_host) == 128);
+
+/// What the renderer may call (`XcoreHostApi` in vulkan_jni.cpp). Static: valid for as long as
+/// the process lives, whatever server or renderer comes and goes.
+#[repr(C)]
+pub struct HostApi {
+    pub version: u32,
+    pub ctx: *mut c_void,
+    /// The renderer is done with `ahb`: it shows it in no window and no frame it submitted
+    /// still reads it. Any thread, with any of the renderer's locks held (it only queues).
+    pub buffer_released: unsafe extern "C" fn(ctx: *mut c_void, ahb: *mut AHardwareBuffer),
+}
+
+pub const HOST_API_VERSION: u32 = 1;
+
+const _: () = assert!(std::mem::size_of::<HostApi>() == 24);
+const _: () = assert!(std::mem::offset_of!(HostApi, ctx) == 8);
+const _: () = assert!(std::mem::offset_of!(HostApi, buffer_released) == 16);
+
+struct HostTable(HostApi);
+// SAFETY: immutable, and the context is null (the entry point finds the output itself).
+unsafe impl Sync for HostTable {}
+
+static HOST_API: HostTable =
+    HostTable(HostApi { version: HOST_API_VERSION, ctx: std::ptr::null_mut(), buffer_released: host_buffer_released });
+
+unsafe extern "C" fn host_buffer_released(_ctx: *mut c_void, ahb: *mut AHardwareBuffer) {
+    // Never unwinds into C: a poisoned lock is still usable, nothing else can panic here.
+    let _ = std::panic::catch_unwind(|| output().buffer_released(ahb as usize));
+}
 
 struct Renderer {
     api: &'static RendererApi,
@@ -88,13 +128,35 @@ struct Inner {
 pub struct AndroidOutput {
     active: AtomicBool,
     inner: Mutex<Inner>,
+    /// The attached server's release queue (a leaf lock: never held while calling out), and
+    /// whether the installed renderer reports releases.
+    releases: Mutex<Releases>,
     /// The app shows a cursor at all (touch modes hide it).
     cursor_shown: AtomicBool,
     /// The arrow where no window has an X cursor of its own (from the app's resources).
     default_cursor: Mutex<Option<Arc<CursorImage>>>,
 }
 
+#[derive(Default)]
+struct Releases {
+    queue: Option<Arc<ReleasedBuffers>>,
+    renderer_reports: bool,
+}
+
+impl Releases {
+    /// Present waits for releases only while someone will report them.
+    fn apply(&self) {
+        if let Some(q) = self.queue.as_ref() {
+            q.set_active(self.renderer_reports);
+        }
+    }
+}
+
 fn lock(m: &Mutex<Inner>) -> MutexGuard<'_, Inner> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn lock_releases(m: &Mutex<Releases>) -> MutexGuard<'_, Releases> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -105,6 +167,7 @@ pub fn output() -> Arc<AndroidOutput> {
         Arc::new(AndroidOutput {
             active: AtomicBool::new(false),
             inner: Mutex::new(Inner { renderer: None, shown: HashMap::new(), clock_seq: -1, x_cursor: None, sent_serial: -1 }),
+            releases: Mutex::new(Releases::default()),
             cursor_shown: AtomicBool::new(false),
             default_cursor: Mutex::new(None),
         })
@@ -138,7 +201,24 @@ impl AndroidOutput {
             platform::set_display_clock(0, 0, 0);
         }
         self.active.store(renderer.is_some(), Ordering::Release);
+        if let Some(r) = renderer.as_ref() {
+            // SAFETY: a live renderer context; the table is static.
+            unsafe { (r.api.set_host)(r.ctx, &HOST_API.0) };
+        }
+        {
+            let mut rel = lock_releases(&self.releases);
+            rel.renderer_reports = renderer.is_some();
+            rel.apply();
+        }
         g.renderer = renderer;
+    }
+
+    /// The renderer's report (see [`HostApi::buffer_released`]).
+    fn buffer_released(&self, handle: usize) {
+        let rel = lock_releases(&self.releases);
+        if let Some(q) = rel.queue.as_ref() {
+            q.push(handle);
+        }
     }
 
     /// A new server, or none: its drawables are not the ones `shown` knows about.
@@ -190,6 +270,22 @@ impl AndroidOutput {
 impl Output for AndroidOutput {
     fn active(&self) -> bool {
         self.active.load(Ordering::Acquire)
+    }
+
+    fn attach_releases(&self, queue: &Arc<ReleasedBuffers>, attach: bool) {
+        let mut rel = lock_releases(&self.releases);
+        if attach {
+            if let Some(old) = rel.queue.replace(queue.clone()) {
+                if !Arc::ptr_eq(&old, queue) {
+                    old.set_active(false);
+                }
+            }
+            rel.apply();
+        } else if rel.queue.as_ref().is_some_and(|q| Arc::ptr_eq(q, queue)) {
+            // Only the server being detached: a newer one may already be attached.
+            queue.set_active(false);
+            rel.queue = None;
+        }
     }
 
     fn acquire(&self, server: &Server, drawable: u32) -> usize {

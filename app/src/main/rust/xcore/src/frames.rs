@@ -30,6 +30,7 @@
 //! its ordering rules do not depend on the platform.
 
 use crate::bridge;
+use crate::proto::hooks::ReleasedBuffers;
 use crate::proto::{Notify, Server};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -123,6 +124,9 @@ pub trait Output: Send + Sync {
     /// Outside the server lock, in server order, never two calls at a time. Must give back the
     /// reference of every [`Item::Show`], renderer or not.
     fn deliver(&self, items: Vec<Item>);
+    /// The server whose frames this output takes from now on (`attach`), or no longer: where
+    /// to report that the renderer is done with a buffer. May be called under the server lock.
+    fn attach_releases(&self, _queue: &Arc<ReleasedBuffers>, _attach: bool) {}
 }
 
 #[derive(Default)]
