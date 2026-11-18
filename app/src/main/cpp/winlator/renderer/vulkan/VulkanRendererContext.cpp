@@ -84,7 +84,12 @@ void boostRenderThread() {
 VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
                                              void* aHandle, bool enableValidation,
                                              const char* cacheDir)
-    : window(win), surfaceWidth(cW), surfaceHeight(cH),
+    // cW/cH describe the X screen (the scene container), not necessarily the Android surface.
+    // Direct output places SurfaceControl layers in real surface pixels; using cW/cH here makes
+    // the first direct frame smaller whenever those sizes differ. surfaceChanged() may already
+    // have happened while nativeInit() was still running, so it cannot be relied on to correct
+    // these fields. Read the native window just as reattachSurface() does after an app resume.
+    : window(win), surfaceWidth(ANativeWindow_getWidth(win)), surfaceHeight(ANativeWindow_getHeight(win)),
       containerWidth(cW), containerHeight(cH),
       adrenotoolsHandle(aHandle), validationRequested(enableValidation),
       cacheDirPath(cacheDir ? cacheDir : "")
