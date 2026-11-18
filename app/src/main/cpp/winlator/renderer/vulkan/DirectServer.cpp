@@ -320,17 +320,20 @@ void DirectServer::sendLocked(Client& c, wl_direct_hdr* h, int fd) {
 }
 
 void DirectServer::setGrantLocked(Client& c, bool granted, int reason) {
-    if (c.granted == granted && c.reason == reason) return;
+    const uint64_t refreshNs = ctx_.refreshPeriodNs();
+    if (c.granted == granted && c.reason == reason && c.refreshNs == refreshNs) return;
     c.granted = granted;
     c.reason = reason;
+    c.refreshNs = refreshNs;
     wl_direct_grant m{};
     wl_direct_hdr_init(&m.hdr, WL_DIRECT_GRANT, 0);
     m.granted = granted ? 1 : 0;
     m.reason = (uint32_t)reason;
     m.panel_x = dst_.x; m.panel_y = dst_.y; m.panel_w = dst_.w; m.panel_h = dst_.h;
-    m.refresh_ns = ctx_.refreshPeriodNs();
+    m.refresh_ns = refreshNs;
     sendLocked(c, &m.hdr, -1);
-    if (granted) DLOG("client %d (window 0x%x, pid %u): grant", c.id, c.xWindow, c.pid);
+    if (granted) DLOG("client %d (window 0x%x, pid %u): grant, refresh %.3f ms",
+                      c.id, c.xWindow, c.pid, (double)refreshNs / 1.0e6);
 }
 
 DirectServer::Plan DirectServer::plan(const Candidate& c, uint64_t now) {
@@ -408,11 +411,17 @@ DirectServer::Plan DirectServer::plan(const Candidate& c, uint64_t now) {
                 watchWindow_ = 0;
             } else {
                 fx_ = c.needsFx;
+                if (Client* g = clientLocked(client_)) setGrantLocked(*g, true, WL_REASON_OK);
             }
             break;
         case Phase::Direct:
             if (!ready || src != route_ || c.window != window_id_) leaveLocked(now, d);
-            else fx_ = c.needsFx;
+            else {
+                fx_ = c.needsFx;
+                // A mode switch (60 -> 120 Hz for x3/x4 FG) does not change the grant itself,
+                // but the swapchain still needs its new period when no fresh grid is available.
+                if (Client* g = clientLocked(client_)) setGrantLocked(*g, true, WL_REASON_OK);
+            }
             break;
         case Phase::Leaving:
             break;

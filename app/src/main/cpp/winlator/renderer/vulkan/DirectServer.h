@@ -185,6 +185,7 @@ private:
         std::vector<AHardwareBuffer*> images;
         bool     granted = false;
         int      reason = WL_REASON_SETTLING;
+        uint64_t refreshNs = 0;    // the refresh period sent in the last GRANT
         Frame    fxFrame;         // waiting for the Fx pass
     };
     struct FenceWatch {
