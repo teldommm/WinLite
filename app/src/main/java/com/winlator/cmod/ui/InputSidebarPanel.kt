@@ -42,7 +42,8 @@ data class InputPanelState(
     val relativeMouse: Boolean,
     val touchMode: Int,          // TouchpadView.MODE_TRACKPAD (0) / MODE_TOUCHSCREEN (1) / MODE_OFF (2)
     val cursorSpeedPercent: Int, // global Cursor Speed, 10..200 (Settings > Cursor speed); also drives stick mouse
-    val tapToClick: Boolean
+    val tapToClick: Boolean,
+    val hideCursor: Boolean   // per-game: mouse input stays, the drawn cursor overlay is hidden
 )
 
 interface InputPanelCallbacks {
@@ -69,6 +70,8 @@ interface InputPanelCallbacks {
     fun onCursorSpeed(percent: Int, commit: Boolean)
     fun onTapToClick(enabled: Boolean)
     fun onRelativeMouse(enabled: Boolean)
+    /** Per-game; persisted to the shortcut's "hideCursor" extra (session-only without one). */
+    fun onHideCursor(enabled: Boolean)
 }
 
 object InputSidebarPanelHost {
@@ -90,6 +93,7 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
     var relativeMouse by remember { mutableStateOf(state.relativeMouse) }
     var touchMode by remember { mutableStateOf(state.touchMode) }
     var tapToClick by remember { mutableStateOf(state.tapToClick) }
+    var hideCursor by remember { mutableStateOf(state.hideCursor) }
 
     fun pushControlsSettings() {
         callbacks.onControlsSettingsChanged(profileId, showControls, haptics)
@@ -216,6 +220,17 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
                 onCheckedChange = {
                     tapToClick = it
                     callbacks.onTapToClick(it)
+                }
+            )
+            // No-op in Touchscreen mode (the cursor is already hidden there); the switch stays
+            // visible so the value carries over when the user switches back to Trackpad.
+            SidebarGap()
+            SidebarToggleRow(
+                label = uiStr(R.string.ui_hide_cursor),
+                checked = hideCursor,
+                onCheckedChange = {
+                    hideCursor = it
+                    callbacks.onHideCursor(it)
                 }
             )
         }

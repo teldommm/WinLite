@@ -272,6 +272,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Like Relative/Disable Mouse: starts from the shortcut ("tapToClick", on unless "0"),
     // the sidebar changes it for the session only.
     private boolean isTapToClickEnabled = true;
+    // Per-game "hideCursor" extra: keep the mouse input but draw no cursor at all (games with
+    // their own software cursor, titles that never hide the Windows one). Composes with the
+    // touch-mode rules in isDrawnCursorVisible().
+    private boolean hideCursor = false;
     // Touchscreen Timeout: controls fade out after 5 s idle, the next touch only brings them
     // back. Global pref like its Controls-card neighbours (show controls, haptics): the sidebar
     // switch saves it.
@@ -614,6 +618,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             isRelativeMouseMovement = shortcut.getExtra("enableRelativeMouse").equals("1");
             isMouseDisabled = shortcut.getExtra("disableMouse").equals("1");
             isTapToClickEnabled = !shortcut.getExtra("tapToClick").equals("0");
+            hideCursor = shortcut.getExtra("hideCursor").equals("1");
         }
 
         this.graphicsDriverConfig = GraphicsDriverConfig.parseGraphicsDriverConfig(graphicsDriverConfig);
@@ -815,8 +820,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // input is disabled altogether (XServer.setMouseDisabled), so there is no cursor to show.
     // isMouseDisabled wins over simulateTouchScreen: Off keeps the last Touchscreen/Trackpad
     // choice in simulateTouchScreen, and a shortcut can store both disableMouse and simTouchScreen.
+    // hideCursor (per-game opt-in) wins over everything: input stays, the drawn cursor goes.
     private boolean isDrawnCursorVisible() {
-        return !isMouseDisabled && !simulateTouchScreen;
+        return !isMouseDisabled && !simulateTouchScreen && !hideCursor;
     }
 
     private void handleCapturedPointer(MotionEvent event) {
@@ -2498,6 +2504,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onHideCursor(boolean enabled) {
+                hideCursor = enabled;
+                // Input is untouched; only the renderer's cursor overlay goes away/comes back.
+                if (xServerView != null) xServerView.setCursorVisible(isDrawnCursorVisible());
+                // Per-game setting: persist back to the shortcut like the in-game HUD choice.
+                if (shortcut != null) {
+                    shortcut.putExtra("hideCursor", enabled ? "1" : null);
+                    shortcut.saveData();
+                }
+            }
+
+            @Override
             public void onRelativeMouse(boolean enabled) {
                 isRelativeMouseMovement = enabled;
                 if (xServer != null)
@@ -2525,7 +2543,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     isRelativeMouseMovement,
                     isMouseDisabled ? TouchpadView.MODE_OFF : touchMode,
                     Math.round(globalCursorSpeed * 100f),
-                    isTapToClickEnabled
+                    isTapToClickEnabled,
+                    hideCursor
             );
             InputSidebarPanelHost.attach(ingameSidebar, R.id.LLSubInput, state, callbacks);
         };

@@ -505,6 +505,7 @@
     <string name="ui_touch_mode">Touch Mode</string>
     <string name="ui_relative_mouse">Relative Mouse</string>
     <string name="ui_tap_to_click">Tap to Click</string>
+    <string name="ui_hide_cursor">Hide cursor</string>
     <string name="ui_reset_to_container_variables">Reset to container variables</string>
     <string name="ui_sharpness_effect">Sharpness Effect</string>
     <string name="ui_sharpness_level">Sharpness Level</string>

@@ -282,6 +282,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     )
     // On by default; stored only when turned off, like the other mouse toggles.
     var tapToClick by mutableStateOf(shortcut.getExtra("tapToClick", "1") != "0")
+    var hideCursor by mutableStateOf(shortcut.getExtra("hideCursor", "0") == "1")
     var syncCpu by mutableStateOf(shortcut.getExtra("syncCpuTopology", if (container.isSyncCpuTopology()) "1" else "0") == "1")
     // Follows the container until the shortcut saves its own choice.
     var threadPlacement by mutableStateOf(shortcut.getExtra("threadPlacement", container.getExtra("threadPlacement", "0")) == "1")
@@ -1145,6 +1146,10 @@ private fun ShortcutCategoryV2(
                 RevealSection(visible = s.touchMode != 2) {
                     SettingsDivider()
                     SettingToggle(uiStr(R.string.ui_tap_to_click), s.tapToClick) { s.tapToClick = it; s.extra("tapToClick", if (it) null else "0") }
+                    SettingsDivider()
+                    // Mouse input keeps working; only the drawn cursor overlay is hidden
+                    // (games with their own software cursor, titles that never hide the Windows one).
+                    SettingToggle(uiStr(R.string.ui_hide_cursor), s.hideCursor) { s.hideCursor = it; s.extra("hideCursor", if (it) "1" else null) }
                 }
             }
         }
