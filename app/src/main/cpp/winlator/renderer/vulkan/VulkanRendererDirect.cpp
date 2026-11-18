@@ -77,7 +77,6 @@ DirectServer::Candidate VulkanRendererContext::directCandidateLocked() {
         c.watchGen = it != contentInfo.end() ? it->second.gen : 0;
     }
     if (surfaceDetached.load(std::memory_order_acquire) || !window) { c.reason = WL_REASON_DETACHED; return c; }
-    if (hasCustomScissor) { c.reason = WL_REASON_SCISSOR; return c; }
 
     struct Shown { int64_t id; int x, y, w, h; const WinTex* t; };
     std::vector<Shown> shown;
@@ -137,6 +136,19 @@ DirectServer::Candidate VulkanRendererContext::directCandidateLocked() {
     c.dst.w = roundPx(x1) - c.dst.x;
     c.dst.h = roundPx(y1) - c.dst.y;
     if (c.dst.w <= 0 || c.dst.h <= 0) { c.reason = WL_REASON_WINDOWED; return c; }
+    // The view's scissor (letterboxed, not stretched) only matters when the game would be drawn
+    // outside of it (zoomed, shifted by the keyboard): the layer is placed by dst, so a window
+    // that lies inside the view needs no clipping. 2 px of slack for the rounding.
+    if (hasCustomScissor) {
+        const VkRect2D sc = customScissor;   // logical, like dst
+        const int32_t sx0 = sc.offset.x, sy0 = sc.offset.y;
+        const int32_t sx1 = sx0 + (int32_t)sc.extent.width, sy1 = sy0 + (int32_t)sc.extent.height;
+        if (c.dst.x < sx0 - 2 || c.dst.y < sy0 - 2 ||
+            c.dst.x + c.dst.w > sx1 + 2 || c.dst.y + c.dst.h > sy1 + 2) {
+            c.reason = WL_REASON_SCISSOR;
+            return c;
+        }
+    }
 
     c.window = g.id;
     c.reason = WL_REASON_OK;

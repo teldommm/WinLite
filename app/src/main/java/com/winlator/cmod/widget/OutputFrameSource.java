@@ -24,11 +24,4 @@ public interface OutputFrameSource {
         out[3] = System.nanoTime();
         return true;
     }
-
-    /**
-     * The renderer's authoritative output route into {@code out} (3 ints):
-     * {sink (0 composite, 1 Direct, 2 Direct + FX), reason, source}. False: unavailable.
-     * Unlike wl.control, this cannot be overwritten by another swapchain.
-     */
-    default boolean readDirectStatus(int[] out) { return false; }
 }

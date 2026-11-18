@@ -138,7 +138,7 @@ public class FrameRating extends FrameLayout implements Runnable {
         @Override
         public void run() {
             if (userEnabled) {
-                WlFrameStats.Reading wl = wlStats.take(System.nanoTime(), 400_000_000L, outputSource);
+                WlFrameStats.Reading wl = wlStats.take(System.nanoTime(), 400_000_000L);
                 if (wl.live) {
                     if (wl.gameFps >= 0) lastFPS = wl.gameFps;
                     if (wl.outputFps >= 0) outputFPS = wl.outputFps;
