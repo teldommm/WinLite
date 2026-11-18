@@ -345,6 +345,16 @@ DirectServer::Plan DirectServer::plan(const Candidate& c, uint64_t now) {
         else if (!sc_.ok) reason = WL_REASON_API;
         else if (!container_) reason = WL_REASON_DETACHED;
 
+        if (debugCandidate_ != c.window || debugReason_ != reason || debugMode_ != mode) {
+            DLOG("candidate 0x%llx, reason %d, mode %d, clients %zu",
+                 (unsigned long long)c.window, reason, mode, clients_.size());
+            for (const auto& [id, cl] : clients_)
+                DLOG("  client %d: window 0x%x, pid %u", id, cl.xWindow, cl.pid);
+            debugCandidate_ = c.window;
+            debugReason_ = reason;
+            debugMode_ = mode;
+        }
+
         Client* wl = nullptr;
         if (reason == WL_REASON_OK)
             for (auto& [id, cl] : clients_) if ((int64_t)cl.xWindow == c.window) { wl = &cl; break; }

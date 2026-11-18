@@ -301,4 +301,8 @@ private:
     std::vector<TxDone> cbQueue_;
 
     std::atomic<int> statusSink_{0}, statusReason_{WL_REASON_OFF}, statusSource_{0};
+
+    // Last logged admission state (under mu_): makes a persistent NOT_TOP diagnosable.
+    int64_t debugCandidate_ = -1;
+    int debugReason_ = -1, debugMode_ = -1;
 };

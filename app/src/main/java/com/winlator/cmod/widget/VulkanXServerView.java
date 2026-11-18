@@ -676,7 +676,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     /** See nativeGetDirectStatus; false without a renderer. */
-    public boolean getDirectStatus(int[] out) {
+    @Override
+    public boolean readDirectStatus(int[] out) {
         synchronized (lock) {
             return nativeHandle != 0 && out != null && out.length >= 3 && nativeGetDirectStatus(nativeHandle, out);
         }

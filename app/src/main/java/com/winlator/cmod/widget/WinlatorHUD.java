@@ -862,7 +862,7 @@ public class WinlatorHUD extends View {
 
         // A game with a WL swapchain counts its own frames: in WL Direct none reach the X
         // server, and with frame generation the X server sees the generated ones as well.
-        WlFrameStats.Reading wl = wlStats.take(now, 250_000_000L);
+        WlFrameStats.Reading wl = wlStats.take(now, 250_000_000L, outputSource);
         if (wl.live) {
             if (wl.gameFps >= 0) snapFps = wl.gameFps;
             if (wl.outputFps >= 0) snapOutputFps = wl.outputFps;

@@ -23,11 +23,12 @@ final class WlFrameStats {
 
     private final WlControl.Status status = new WlControl.Status();
     private final Reading reading = new Reading();
+    private final int[] directStatus = new int[3];
     private long lastReal = -1, lastGenerated, lastNs, lastChangeNs;
     private int lastPid;
 
     /** At {@code nowNs} ({@link System#nanoTime()}), over at least {@code minSpanNs}. */
-    synchronized Reading take(long nowNs, long minSpanNs) {
+    synchronized Reading take(long nowNs, long minSpanNs, OutputFrameSource outputSource) {
         reading.gameFps = -1;
         reading.outputFps = -1;
         if (!WlControl.readStatus(status)) {
@@ -35,8 +36,15 @@ final class WlFrameStats {
             lastReal = -1;
             return reading;
         }
-        reading.sink = status.sink;
-        reading.reason = status.reason;
+        // DirectServer alone decides where the game's frames go. wl.control is shared by every
+        // swapchain that inherited its path, so its sink/reason may belong to another client.
+        if (outputSource != null && outputSource.readDirectStatus(directStatus)) {
+            reading.sink = directStatus[0] == 0 ? WlControl.SINK_X : WlControl.SINK_DIRECT;
+            reading.reason = directStatus[1];
+        } else {
+            reading.sink = status.sink;
+            reading.reason = status.reason;
+        }
         reading.fgState = status.fgState;
         final long real = status.realFrames, generated = status.generatedFrames;
         if (lastReal < 0 || status.pid != lastPid || real < lastReal || generated < lastGenerated) {
