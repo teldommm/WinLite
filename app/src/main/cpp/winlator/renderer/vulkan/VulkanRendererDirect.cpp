@@ -67,8 +67,8 @@ void VulkanRendererContext::directClientGone(const std::vector<AHardwareBuffer*>
 
 // The admission rule, from the composite's own view of the screen: the top-most window with
 // content that covers the X screen (1 px of slack at the edges, as GameScope's), with nothing
-// drawn over it bigger than a pixel (Always: the top-most window with content, whatever covers
-// it or how big it is).
+// drawn over it bigger than a pixel. Always ignores those overlapping windows and prefers the
+// full-screen window that has a WL swapchain; without one it falls back to the top-most content.
 DirectServer::Candidate VulkanRendererContext::directCandidateLocked() {
     DirectServer::Candidate c;
     const int64_t watch = direct_->watchWindow();
@@ -94,9 +94,24 @@ DirectServer::Candidate VulkanRendererContext::directCandidateLocked() {
         return s.x <= 1 && s.y <= 1 && s.x + s.w >= W - 1 && s.y + s.h >= H - 1;
     };
     int cand = -1;
-    for (int i = (int)shown.size() - 1; i >= 0; i--) {
-        if (always || covers(shown[i])) { cand = i; break; }
+    // Always ignores windows over the game; it must not let an overlay or helper window above
+    // the game become the Direct candidate and leave the game's swapchain at NOT_TOP.
+    if (always) {
+        for (int i = (int)shown.size() - 1; i >= 0; i--) {
+            if (covers(shown[i]) && direct_->hasClient(shown[i].id)) { cand = i; break; }
+        }
+        if (cand < 0) {
+            for (int i = (int)shown.size() - 1; i >= 0; i--) {
+                if (direct_->hasClient(shown[i].id)) { cand = i; break; }
+            }
+        }
     }
+    if (cand < 0) {
+        for (int i = (int)shown.size() - 1; i >= 0; i--) {
+            if (covers(shown[i])) { cand = i; break; }
+        }
+    }
+    if (cand < 0 && always) cand = (int)shown.size() - 1;
     if (cand < 0) { c.reason = WL_REASON_WINDOWED; return c; }
     const Shown& g = shown[cand];
     if (!always) {

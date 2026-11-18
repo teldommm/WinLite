@@ -306,6 +306,13 @@ DirectServer::Client* DirectServer::clientLocked(int id) {
     return it == clients_.end() ? nullptr : &it->second;
 }
 
+bool DirectServer::hasClient(int64_t xWindow) const {
+    std::lock_guard<std::mutex> lk(mu_);
+    for (const auto& entry : clients_)
+        if ((int64_t)entry.second.xWindow == xWindow) return true;
+    return false;
+}
+
 void DirectServer::sendLocked(Client& c, wl_direct_hdr* h, int fd) {
     h->seq = ++c.seq;
     const int r = wl_direct_send(c.fd, h, fd);

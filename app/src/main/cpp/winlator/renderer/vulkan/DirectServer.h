@@ -112,6 +112,7 @@ public:
 
     // ---- render thread
     int64_t watchWindow() const { return watchWindow_.load(); }
+    bool hasClient(int64_t xWindow) const;
     Plan plan(const Candidate& c, uint64_t nowNs);
     // Direct zero-copy from X: the game window's buffer (call when it changed).
     void pushX(AHardwareBuffer* ahb, int32_t w, int32_t h);
