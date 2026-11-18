@@ -2752,6 +2752,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (maxDeviceMemory != null && Integer.parseInt(maxDeviceMemory) > 0)
             envVars.put("WRAPPER_VMEM_MAX_SIZE", maxDeviceMemory);
 
+        String memoryBudgetMode = graphicsDriverConfig.get("memoryBudgetMode");
+        envVars.put("WRAPPER_MEMORY_BUDGET_MODE",
+                memoryBudgetMode != null ? memoryBudgetMode : "off");
+
         // No swapchain length pinning for any mode: the X server (PresentExtension) keeps the
         // newest presented pixmap until the next present, so with two images the guest's next
         // buffer only comes back once its previous frame has finished on the GPU and reached the

@@ -218,6 +218,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var driverVersion by mutableStateOf(readConfig(graphicsConfig, "version", ';').ifBlank { defaultDriverVersion })
     var vulkanVersion by mutableStateOf(readConfig(graphicsConfig, "vulkanVersion", ';').ifBlank { "1.3" })
     var maxMemory by mutableStateOf(readConfig(graphicsConfig, "maxDeviceMemory", ';').ifBlank { "0" })
+    var memoryBudgetMode by mutableStateOf(readConfig(graphicsConfig, "memoryBudgetMode", ';').ifBlank { "off" })
     var graphicsPresentMode by mutableStateOf(readConfig(graphicsConfig, "presentMode", ';').ifBlank { "mailbox" })
     var disablePresentWait by mutableStateOf(readConfig(graphicsConfig, "disablePresentWait", ';') == "1")
     var resourceType by mutableStateOf(readConfig(graphicsConfig, "resourceType", ';').ifBlank { "auto" })
@@ -989,6 +990,10 @@ private fun ShortcutCategoryV2(
                 SettingsDivider()
                 SettingChoice(uiStr(R.string.ui_max_device_memory), s.maxMemory, listOf("0", "512", "1024", "2048", "4096", "8192", "12288", "16384")) {
                     s.maxMemory = it; s.graphics("maxDeviceMemory", it)
+                }
+                SettingsDivider()
+                SettingChoice(uiStr(R.string.ui_memory_budget_mode), s.memoryBudgetMode, listOf("off", "proportional", "emulated")) {
+                    s.memoryBudgetMode = it; s.graphics("memoryBudgetMode", it)
                 }
                 SettingsDivider()
                 SettingChoice(uiStr(R.string.ui_driver_present_mode), s.graphicsPresentMode, listOf("mailbox", "fifo", "immediate", "relaxed")) {

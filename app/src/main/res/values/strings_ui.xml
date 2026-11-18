@@ -412,6 +412,7 @@
     <string name="ui_screen_size">Screen Size</string>
     <string name="ui_vulkan_version">Vulkan Version</string>
     <string name="ui_max_device_memory">Max Device Memory</string>
+    <string name="ui_memory_budget_mode">Memory Budget Mode</string>
     <string name="ui_driver_present_mode">Driver Present Mode</string>
     <string name="ui_disable_present_wait">Disable Present Wait</string>
     <string name="ui_resource_type">Resource Type</string>
