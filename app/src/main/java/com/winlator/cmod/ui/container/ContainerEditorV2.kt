@@ -127,6 +127,7 @@ import com.winlator.cmod.ui.settings.normalizeLocaleValue
 import com.winlator.cmod.ui.settings.normalizeResolution
 import com.winlator.cmod.ui.settings.readConfig
 import com.winlator.cmod.ui.settings.writeConfig
+import com.winlator.cmod.ui.components.WindowsComponentsRow
 import com.winlator.cmod.ui.theme.ThemedDialog
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.winhandler.WinHandler
@@ -1146,6 +1147,9 @@ private fun ContainerCategoryV2(
                     SettingChoice(label, selected, entries) { s.components[key] = entries.indexOf(it).coerceAtLeast(0) }
                     if (index != containerComponentRowsV2.lastIndex) SettingsDivider()
                 }
+            }
+            SettingsCard {
+                com.winlator.cmod.ui.components.WindowsComponentsRow(s.editing)
             }
         }
     }

@@ -118,8 +118,8 @@
     <string name="ui_remove_container">Remove container?</string>
     <string name="ui_and_its_container_files_will_be_deleted">%1$s and its container files will be deleted.</string>
     <string name="ui_container_removed">Container removed</string>
-    <string name="ui_container_has_games">%1$s has shortcuts</string>
-    <string name="ui_move_games_before_removal">%1$d shortcut(s) will be deleted with it.</string>
+    <string name="ui_container_has_games">%1$s has games</string>
+    <string name="ui_move_games_before_removal">This container has %1$d game shortcut(s). Move them to another container, or they will be deleted with it. Games installed inside the container (drive C:) cannot be saved.</string>
     <string name="ui_delete_games_with_container">Delete them with the container</string>
     <string name="ui_games_moved_to">%1$d game(s) moved to %2$s</string>
     <string name="ui_games_moved_some_skipped">%1$d game(s) moved to %3$s, %2$d skipped (same name already exists there)</string>
@@ -597,4 +597,21 @@
     <string name="ui_no_control_element_selected">No control element selected</string>
     <string name="ui_profile_not_found">Profile not found</string>
     <string name="ui_unable_to_set_icon">Unable to set icon</string>
+
+    <string name="ui_windows_components">Windows components</string>
+    <string name="ui_windows_components_manage">Manage</string>
+    <string name="ui_save_first">Save first</string>
+    <string name="ui_components_installed_count">%1$d installed</string>
+    <string name="ui_components_search">Search components</string>
+    <string name="ui_components_status_installed">Installed</string>
+    <string name="ui_components_install">Install</string>
+    <string name="ui_components_reinstall">Reinstall</string>
+    <string name="ui_components_remove">Remove</string>
+    <string name="ui_components_installed">%1$s installed</string>
+    <string name="ui_components_removed">%1$s removed</string>
+    <string name="ui_components_applies">%1$s · shared by every game in this container</string>
+    <string name="ui_components_close_session">Close this container\'s Wine session before changing components.</string>
+    <string name="ui_components_launch_first">Launch this container once before installing components.</string>
+    <string name="ui_components_bundle_error">The component bundle could not be prepared.</string>
+    <string name="ui_components_no_journal">No restore history for this component.</string>
 </resources>
