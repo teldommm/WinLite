@@ -192,7 +192,8 @@ private fun removeContainer(activity: AppCompatActivity, id: Int, refresh: () ->
                     })
                 } + ThemedAlertHost.Option(uiStr(R.string.ui_delete_games_with_container), Runnable {
                     doRemove()
-                }, destructive = true)
+                }, destructive = true),
+                accentCancel = true
             )
         },
         destructive = true

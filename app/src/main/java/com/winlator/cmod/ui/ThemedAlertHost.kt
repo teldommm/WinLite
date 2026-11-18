@@ -224,7 +224,8 @@ object ThemedAlertHost {
         title: String,
         message: String,
         options: List<Option>,
-        cancelLabel: String = activity.getString(R.string.cancel)
+        cancelLabel: String = activity.getString(R.string.cancel),
+        accentCancel: Boolean = false
     ) {
         showOverlay(activity) { dismiss ->
             ThemedDialogTitle(title)
@@ -248,7 +249,10 @@ object ThemedAlertHost {
             Row(Modifier.align(Alignment.End)) {
                 OutlinedButton(
                     onClick = dismiss,
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (accentCancel) controlAccentColor() else MaterialTheme.colorScheme.onSurface
+                    ),
                     border = BorderStroke(1.dp, hairlineColor())
                 ) { Text(cancelLabel) }
             }
