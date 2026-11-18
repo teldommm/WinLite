@@ -169,6 +169,7 @@ add_library(vulkan_renderer SHARED
         winlator/renderer/vulkan/VulkanRendererContext.cpp
         winlator/renderer/vulkan/VulkanRendererFilters.cpp
         winlator/renderer/vulkan/VulkanRendererWfg.cpp
+        winlator/renderer/perf_hint.cpp
 
         ${VULKAN_SHADER_HEADERS}
 )

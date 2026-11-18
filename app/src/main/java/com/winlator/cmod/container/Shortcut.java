@@ -312,6 +312,16 @@ public class Shortcut {
         putExtra("surfaceUbwc", enabled ? "1" : "0");
     }
 
+    /** PerformanceHint boost (the container's setting when the shortcut has none). */
+    public boolean isPerfHintEnabled() {
+        String v = getExtra("perfHint", null);
+        if (v == null || v.isEmpty()) return container.isPerfHintEnabled();
+        return "1".equals(v);
+    }
+    public void setPerfHintEnabled(boolean enabled) {
+        putExtra("perfHint", enabled ? "1" : "0");
+    }
+
     public String getRendererPresentMode() {
         String v = getExtra("rendererPresentMode", null);
         return v != null && !v.isEmpty() ? v : container.getRendererPresentMode();

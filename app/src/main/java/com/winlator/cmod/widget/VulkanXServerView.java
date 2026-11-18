@@ -68,6 +68,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private int     pendingPostFXMode     = 0;
     private float   pendingSharpness      = 0.5f;
     private boolean pendingWfgEnabled     = false;
+    private boolean pendingPerfHint       = false;
     private int     pendingWfgFlowSide    = 180;
     private boolean pendingWfgFastInterp  = true;
     private int     pendingWfgTargetFps   = 0;
@@ -151,6 +152,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetStretchMode(long handle, int mode);
     private native void nativeSetPostFXMode(long handle, int mode);
     private native void nativeSetPresentMode(long handle, int mode);
+    private native void nativeSetPerfHint(long handle, boolean enabled);
     private native int[] nativeGetSupportedPresentModes(long handle);
 
     @Override
@@ -232,6 +234,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetStretchMode(nativeHandle, pendingStretchMode);
                         nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                         nativeSetSharpness(nativeHandle, pendingSharpness);
+                        nativeSetPerfHint(nativeHandle, pendingPerfHint);
                         applyWfg();
                         updateTransform();
                         // The renderer kept its window tree and cursor with the surface away.
@@ -251,6 +254,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetStretchMode(nativeHandle, pendingStretchMode);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
+                    nativeSetPerfHint(nativeHandle, pendingPerfHint);
                     applyWfg();
                     updateTransform();
 
@@ -671,6 +675,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void setVkPresentMode(int mode) {
         pendingPresentMode = mode;
         synchronized (lock) { if (nativeHandle != 0) nativeSetPresentMode(nativeHandle, mode); }
+    }
+
+    /** Android PerformanceHint session on the native render thread (power-HAL frame boost). */
+    public void setPerfHintEnabled(boolean enabled) {
+        pendingPerfHint = enabled;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetPerfHint(nativeHandle, enabled); }
     }
 
     public int[] getSupportedPresentModes() {

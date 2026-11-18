@@ -1501,6 +1501,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         vkRenderer.setVkPresentMode(com.winlator.cmod.contentdialog.RendererOptions.toVkPresentMode(presentMode));
         vkRenderer.setFilterMode(shortcut != null ? shortcut.getRendererFilterMode()
                 : (container != null ? container.getRendererFilterMode() : 0));
+        vkRenderer.setPerfHintEnabled(shortcut != null ? shortcut.isPerfHintEnabled()
+                : (container != null && container.isPerfHintEnabled()));
     }
 
     private void setupUI() {

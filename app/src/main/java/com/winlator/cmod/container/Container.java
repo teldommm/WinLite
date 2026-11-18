@@ -187,6 +187,14 @@ public class Container {
         putExtra("surfaceUbwc", enabled ? "1" : "0");
     }
 
+    /** Android PerformanceHint session on the renderer thread (power-HAL boost per frame). */
+    public boolean isPerfHintEnabled() {
+        return "1".equals(getExtra("perfHint", "0"));
+    }
+    public void setPerfHintEnabled(boolean enabled) {
+        putExtra("perfHint", enabled ? "1" : "0");
+    }
+
     public String getDXWrapper() {
         return dxwrapper;
     }

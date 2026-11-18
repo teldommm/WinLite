@@ -196,12 +196,15 @@ private class ContainerEditorStateV2(
     var mouseWarp by mutableStateOf(editing?.getExtra("mouseWarpOverride", "disable") ?: "disable")
     var drives by mutableStateOf(editing?.drives ?: Container.DEFAULT_DRIVES)
 
-    var renderer by mutableStateOf("Vulkan")
+    // "Vulkan perf" is the Vulkan renderer plus the PerformanceHint session on the render
+    // thread; the choice persists as the perfHint extra (renderer itself is always Vulkan).
+    var renderer by mutableStateOf(if (editing?.isPerfHintEnabled() == true) "Vulkan perf" else "Vulkan")
     var rendererPresentMode by mutableStateOf(editing?.rendererPresentMode ?: "fifo")
     var rendererDriver by mutableStateOf(editing?.rendererDriverId ?: "system")
     var filterMode by mutableIntStateOf(editing?.rendererFilterMode ?: 0)
     var surfaceFormat by mutableStateOf(editing?.getSurfaceFormat() ?: SurfaceFormat.DEFAULT)
     var surfaceUbwc by mutableStateOf(editing?.isSurfaceUbwc() ?: false)
+    var perfHint by mutableStateOf(editing?.isPerfHintEnabled() ?: false)
 
     var graphicsDriver by mutableStateOf(
         editing?.graphicsDriver ?: if (preferredDriver == DefaultVersion.WRAPPER_ADRENO) {
@@ -335,7 +338,7 @@ private class ContainerEditorStateV2(
     fun fingerprint(): String = listOf(
         name, screen, audio, oboeProfile, oboeApi, oboeAdaptive, oboeExclusive, directAudioMic, hudMode, locale, soundFont,
         fullscreen, desktopTheme, desktopBackground, wallpaperStamp, mouseWarp, drives,
-        renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat, surfaceUbwc,
+        renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat, surfaceUbwc, perfHint,
         graphicsDriver, graphicsConfig,
         wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, forceSsbs, boxPreset, exclusive, xinput, dinput,
         syncCpu, threadPlacement, gpuTurboMenu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
@@ -491,6 +494,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.setRendererFilterMode(state.filterMode)
         container.setSurfaceFormat(state.surfaceFormat)
         container.setSurfaceUbwc(state.surfaceUbwc)
+        container.putExtra("perfHint", if (state.perfHint) "1" else "0")
         container.setDXWrapper(state.wrapper)
         container.setDXWrapperConfig(state.wrapperConfig)
         container.setAudioDriver(state.audio)
@@ -579,6 +583,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     .put("mouseWarpOverride", state.mouseWarp)
                     .put("surfaceFormat", state.surfaceFormat.id)
                     .put("surfaceUbwc", if (state.surfaceUbwc) "1" else "0")
+                    .put("perfHint", if (state.perfHint) "1" else "0")
                     .put("oboeProfile", state.oboeProfile)
                     .put("oboeApi", state.oboeApi)
                     .put("oboeAdaptive", if (state.oboeAdaptive) "1" else "0")
@@ -887,8 +892,9 @@ private fun ContainerCategoryV2(
                     ResolutionField(s.screen) { s.screen = it }
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan")) {
+                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan", "Vulkan perf")) {
                     s.renderer = it
+                    s.perfHint = it == "Vulkan perf"
                 }
                 SettingsDivider()
                 SettingChoice(

@@ -103,6 +103,7 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
 VulkanRendererContext::~VulkanRendererContext() {
     isRunning = false; wakeRender(true);
     if (renderThread.joinable()) renderThread.join();
+    perfHint.close();
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
     texMap.clear();   // aliases of the imported buffers freed below
@@ -920,6 +921,25 @@ void VulkanRendererContext::ensureCursorStaging(uint32_t slot, VkDeviceSize sz) 
     vk_.MapMemory(device,cursorStgM[slot],0,sz,0,&cursorStgP[slot]); cursorStgC[slot]=sz;
 }
 
+void VulkanRendererContext::setPerfHintEnabled(bool enabled) {
+    const bool was = perfHintEnabled.exchange(enabled, std::memory_order_relaxed);
+    if (was && !enabled) {
+        // The render thread recreates/closes by the flag too; this closes promptly even when
+        // no frame is being produced. PerfHint::close is safe from any thread.
+        perfHint.close();
+    }
+}
+
+// Target for the session: the measured refresh period (what the pacing/limiters publish), with
+// the same 24..1000 Hz clamp the donor used, 60 Hz while the grid is not known yet.
+void VulkanRendererContext::perfHintEnsure() {
+    if (!perfHintEnabled.load(std::memory_order_relaxed) || !perfHint.available()) return;
+    int64_t periodNs = static_cast<int64_t>(clockPeriodNs.load(std::memory_order_relaxed));
+    if (periodNs <= 0) periodNs = 1000000000LL / 60;
+    periodNs = std::clamp<int64_t>(periodNs, 1000000LL, 41666667LL);
+    perfHint.ensureSession(periodNs);
+}
+
 void VulkanRendererContext::renderLoop() {
     boostRenderThread();
     while (isRunning) {
@@ -935,6 +955,22 @@ void VulkanRendererContext::renderLoop() {
         if (!woken) { reapRetiredIdle(); continue; }
         // No swapchain guard here: renderFrame returns at once while the surface is detached
         // (clearing the wake flags) and is what retries a swapchain rebuild that failed.
+
+        // PerformanceHint: arm the work measurement only when there is something to present, so
+        // iterations that renderFrame early-outs on (skipped, rebuild, detached) report nothing.
+        uint64_t perfHintFramesBefore = 0;
+        std::chrono::steady_clock::time_point perfHintWorkStart;
+        bool perfHintArmed = false;
+        if (perfHintEnabled.load(std::memory_order_relaxed) &&
+            !surfaceDetached.load(std::memory_order_acquire)) {
+            perfHintEnsure();
+            if (perfHint.hasSession()) {
+                perfHintFramesBefore = presentedFrames.load(std::memory_order_relaxed);
+                perfHintWorkStart = std::chrono::steady_clock::now();
+                perfHintArmed = true;
+            }
+        }
+
         bool frameFailed = false;
         try { renderFrame(); }
         catch(...) {
@@ -944,6 +980,15 @@ void VulkanRendererContext::renderLoop() {
             // (renderFrame's fbResized path) releases them.
             fbResized.store(true);
             frameFailed = true;
+        }
+
+        // Only a presented frame counts as work: the duration is the CPU side of producing it
+        // (compose + submit), not the frame interval and not GPU time.
+        if (perfHintArmed &&
+            presentedFrames.load(std::memory_order_relaxed) > perfHintFramesBefore) {
+            const int64_t workNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - perfHintWorkStart).count();
+            perfHint.reportWork(std::max<int64_t>(1, workNs));
         }
         if (frameFailed || (swapchainRebuildFailed && fbResized.load())) {
             // A failure that repeats must not rebuild, or retry, in a tight loop. The flag alone
@@ -1266,6 +1311,9 @@ void VulkanRendererContext::detachSurface() {
     surfaceDetached.store(true, std::memory_order_release);
     wakeRender(true);
     { std::unique_lock<std::shared_mutex> frameLock(frameMutex); }
+    // No frames are produced while the surface is away: drop the hint session instead of
+    // keeping a stale one (recreated on the next frame after a reattach).
+    perfHint.close();
     vk_.DeviceWaitIdle(device);
     cleanupSwapchain();
     if (surface != VK_NULL_HANDLE) {

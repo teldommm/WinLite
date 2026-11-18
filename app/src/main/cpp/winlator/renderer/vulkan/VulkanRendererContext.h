@@ -6,6 +6,8 @@
 
 #include "vkr_dis.h"
 
+#include "../perf_hint.h"
+
 struct VkTable {
 
     PFN_vkCreateInstance CreateInstance;
@@ -219,6 +221,11 @@ public:
         std::lock_guard<std::mutex> g(presentStampMutex);
         return presentStamp;
     }
+
+    // Android PerformanceHint session for this renderer's render thread (see perf_hint.h).
+    // The toggle may come from any thread; the session itself lives and dies on the render
+    // thread (apart from an immediate close() when it is switched off).
+    void setPerfHintEnabled(bool enabled);
 
     void setCustomScissor(int x, int y, int w, int h);
     void clearCustomScissor();
@@ -508,6 +515,14 @@ public:
     // Published for the limiters (any thread): the refresh period, and how far the latest paced
     // game frame arrived from the phase that lands it on a refresh with the least latency.
     std::atomic<uint64_t> clockPeriodNs{0};
+
+    // ---- PerformanceHint (perf_hint.h) ----
+    // Render thread only, except setPerfHintEnabled() from any thread.
+    PerfHint perfHint;
+    std::atomic<bool> perfHintEnabled{false};
+    // Creates the session on the render thread's tid if enabled and none exists; keeps the
+    // target at the display's refresh period (clamped 24..1000 Hz), 60 Hz while unknown.
+    void perfHintEnsure();
     // The arrival error (int32 ns, high half) and its sequence number (low half) in one word,
     // so a reader never pairs a new sequence number with the previous error.
     std::atomic<uint64_t> clockErr{0};

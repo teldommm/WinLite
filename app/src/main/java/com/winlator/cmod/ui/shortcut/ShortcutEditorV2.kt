@@ -200,12 +200,16 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var name by mutableStateOf(com.winlator.cmod.steam.SteamGames.displayName(shortcut))
     var saveProfileMode by mutableStateOf(SaveProfiles.getMode(shortcut))
     var screen by mutableStateOf(normalizeResolution(shortcut.getExtra("screenSize", container.getScreenSize())))
-    var renderer by mutableStateOf("Vulkan")
+    // "Vulkan perf" is the Vulkan renderer plus the PerformanceHint session on the render
+    // thread; the choice persists as the perfHint extra (renderer itself is always Vulkan).
+    var renderer by mutableStateOf(if (shortcut.isPerfHintEnabled()) "Vulkan perf" else "Vulkan")
     var presentMode by mutableStateOf(shortcut.getRendererPresentMode())
     var rendererDriver by mutableStateOf(shortcut.getRendererDriverId())
     var filterMode by mutableIntStateOf(shortcut.getRendererFilterMode())
     var surfaceFormat by mutableStateOf(shortcut.getSurfaceFormat())
     var surfaceUbwc by mutableStateOf(shortcut.isSurfaceUbwc())
+    // Android PerformanceHint (power-HAL boost of the render thread); falls back to the container.
+    var perfHint by mutableStateOf(shortcut.isPerfHintEnabled())
     var graphicsDriver by mutableStateOf(StringUtils.parseIdentifier(shortcut.getExtra("graphicsDriver", container.getGraphicsDriver())))
     private val defaultDriverVersion = runCatching {
         val context = container.manager.context
@@ -483,6 +487,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
         shortcut.setRendererFilterMode(filterMode)
         shortcut.setSurfaceFormat(surfaceFormat)
         shortcut.setSurfaceUbwc(surfaceUbwc)
+        shortcut.setPerfHintEnabled(perfHint)
         save()
     }
 
@@ -927,8 +932,9 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan")) {
+                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan", "Vulkan perf")) {
                     s.renderer = it
+                    s.perfHint = it == "Vulkan perf"
                     s.saveRenderer()
                 }
                 SettingsDivider()
