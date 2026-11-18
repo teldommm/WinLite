@@ -1145,11 +1145,11 @@ private fun ShortcutCategoryV2(
                 // Touch-surface only, so hidden while Touch Mode is Off (value kept).
                 RevealSection(visible = s.touchMode != 2) {
                     SettingsDivider()
-                    SettingToggle(uiStr(R.string.ui_tap_to_click), s.tapToClick) { s.tapToClick = it; s.extra("tapToClick", if (it) null else "0") }
-                    SettingsDivider()
                     // Mouse input keeps working; only the drawn cursor overlay is hidden
                     // (games with their own software cursor, titles that never hide the Windows one).
                     SettingToggle(uiStr(R.string.ui_hide_cursor), s.hideCursor) { s.hideCursor = it; s.extra("hideCursor", if (it) "1" else null) }
+                    SettingsDivider()
+                    SettingToggle(uiStr(R.string.ui_tap_to_click), s.tapToClick) { s.tapToClick = it; s.extra("tapToClick", if (it) null else "0") }
                 }
             }
         }

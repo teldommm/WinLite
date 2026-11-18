@@ -213,15 +213,6 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
         // applies again when a mode is picked. Relative Mouse stays: it also drives Trackpad
         // elements, stick/button mouse and a physical mouse.
         RevealSection(visible = touchMode != 2) {
-            SidebarGap()
-            SidebarToggleRow(
-                label = uiStr(R.string.ui_tap_to_click),
-                checked = tapToClick,
-                onCheckedChange = {
-                    tapToClick = it
-                    callbacks.onTapToClick(it)
-                }
-            )
             // No-op in Touchscreen mode (the cursor is already hidden there); the switch stays
             // visible so the value carries over when the user switches back to Trackpad.
             SidebarGap()
@@ -231,6 +222,15 @@ private fun InputSidebarPanel(state: InputPanelState, callbacks: InputPanelCallb
                 onCheckedChange = {
                     hideCursor = it
                     callbacks.onHideCursor(it)
+                }
+            )
+            SidebarGap()
+            SidebarToggleRow(
+                label = uiStr(R.string.ui_tap_to_click),
+                checked = tapToClick,
+                onCheckedChange = {
+                    tapToClick = it
+                    callbacks.onTapToClick(it)
                 }
             )
         }
