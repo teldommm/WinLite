@@ -611,6 +611,8 @@
     <string name="ui_components_removed">%1$s removed</string>
     <string name="ui_components_applies">%1$s · shared by every game in this container</string>
     <string name="ui_components_close_session">Close this container\'s Wine session before changing components.</string>
+    <string name="ui_components_shown">%1$d of %2$d</string>
+    <string name="ui_components_no_match">No components match \"%1$s\"</string>
     <string name="ui_components_launch_first">Launch this container once before installing components.</string>
     <string name="ui_components_bundle_error">The component bundle could not be prepared.</string>
     <string name="ui_components_no_journal">No restore history for this component.</string>
