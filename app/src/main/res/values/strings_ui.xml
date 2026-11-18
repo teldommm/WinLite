@@ -118,6 +118,11 @@
     <string name="ui_remove_container">Remove container?</string>
     <string name="ui_and_its_container_files_will_be_deleted">%1$s and its container files will be deleted.</string>
     <string name="ui_container_removed">Container removed</string>
+    <string name="ui_container_has_games">%1$s has games</string>
+    <string name="ui_move_games_before_removal">This container has %1$d game shortcut(s). Move them to another container, or they will be deleted with it. Games installed inside the container (drive C:) cannot be saved.</string>
+    <string name="ui_delete_games_with_container">Delete them with the container</string>
+    <string name="ui_games_moved_to">%1$d game(s) moved to %2$s</string>
+    <string name="ui_games_moved_some_skipped">%1$d game(s) moved to %3$s, %2$d skipped (same name already exists there)</string>
     <string name="ui_containers">Containers</string>
     <string name="ui_new_container">New container</string>
     <string name="ui_no_containers">No containers</string>

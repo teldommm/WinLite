@@ -145,16 +145,55 @@ private fun duplicateContainer(activity: AppCompatActivity, id: Int, refresh: ()
 private fun removeContainer(activity: AppCompatActivity, id: Int, refresh: () -> Unit) {
     val manager = ContainerManager(activity)
     val container = manager.getContainerById(id) ?: return
+    val shortcuts = manager.loadShortcuts().filter { it.container.id == id }
+    val others = manager.containers.filter { it.id != id }
+
+    fun doRemove() {
+        manager.removeContainerAsync(container) {
+            refresh()
+            WinToast.show(activity, uiStr(R.string.ui_container_removed), Toast.LENGTH_SHORT)
+        }
+    }
+
     ThemedAlertHost.confirm(
         activity,
         uiStr(R.string.ui_remove_container),
         uiStr(R.string.ui_and_its_container_files_will_be_deleted, container.name),
         uiStr(R.string.remove),
         onConfirm = {
-            manager.removeContainerAsync(container) {
-                refresh()
-                WinToast.show(activity, uiStr(R.string.ui_container_removed), Toast.LENGTH_SHORT)
+            // Games installed on shared drives (D:/Downloads, F:/...) survive the container;
+            // only their shortcuts live in it. Offer to salvage them into another container
+            // instead of silently deleting the library entries with it.
+            if (shortcuts.isEmpty() || others.isEmpty()) {
+                doRemove()
+                return@confirm
             }
+            ThemedAlertHost.choice(
+                activity,
+                uiStr(R.string.ui_container_has_games, container.name),
+                uiStr(R.string.ui_move_games_before_removal, shortcuts.size),
+                others.map { target ->
+                    ThemedAlertHost.Option(target.name, Runnable {
+                        val (moved, skipped) = com.winlator.cmod.container.ShortcutRelocation
+                            .moveAll(container, target, activity)
+                        when {
+                            skipped == 0 -> WinToast.show(
+                                activity,
+                                uiStr(R.string.ui_games_moved_to, moved, target.name),
+                                Toast.LENGTH_SHORT
+                            )
+                            else -> WinToast.show(
+                                activity,
+                                uiStr(R.string.ui_games_moved_some_skipped, moved, skipped, target.name),
+                                Toast.LENGTH_LONG
+                            )
+                        }
+                        doRemove()
+                    })
+                } + ThemedAlertHost.Option(uiStr(R.string.ui_delete_games_with_container), Runnable {
+                    doRemove()
+                }, destructive = true)
+            )
         },
         destructive = true
     )

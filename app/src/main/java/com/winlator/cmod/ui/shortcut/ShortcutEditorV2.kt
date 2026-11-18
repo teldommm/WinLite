@@ -84,6 +84,7 @@ import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.container.SaveProfiles
 import com.winlator.cmod.container.Shortcut
+import com.winlator.cmod.container.ShortcutRelocation
 import com.winlator.cmod.xserver.SurfaceFormat
 import com.winlator.cmod.ui.library.HomeShortcuts
 import com.winlator.cmod.core.GameSaveManager
@@ -647,6 +648,9 @@ internal fun ShortcutEditorV2(
             return
         }
         HomeShortcuts.updatePinned(context, Shortcut(target, moved))
+        // Architecture guard (arm64ec DXVK/VKD3D, DirectAudio) for the moved shortcut; the
+        // container-deletion salvage path (ShortcutRelocation.moveAll) uses the same helper.
+        ShortcutRelocation.sanitizeForContainer(Shortcut(target, moved), target)
         // A Steam game keeps its Steam files inside the prefix, so it must be set up again in the new container.
         shortcut.getExtra("steamAppId").toIntOrNull()?.let { steamId ->
             Shortcut(target, moved).apply { putExtra("steamConfigured", "0"); saveData() }

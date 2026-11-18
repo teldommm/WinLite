@@ -619,6 +619,34 @@ public class XServerDisplayActivity extends AppCompatActivity {
         this.graphicsDriverConfig = GraphicsDriverConfig.parseGraphicsDriverConfig(graphicsDriverConfig);
         this.dxwrapperConfig = DXVKConfig.parseConfig(dxwrapperConfig);
 
+        // Architecture guard: DXVK/VKD3D builds with "arm64ec" in the name only run on
+        // arm64 (WoW) Wine. A shortcut moved from an arm64 container keeps its own
+        // dxwrapperConfig extra, so on an x86 container it would name an arm build that
+        // cannot work there. Fall back to the container's own choice, then to the default.
+        boolean arm64Wine = container.getWineVersion().toLowerCase().contains("arm64ec");
+        if (!arm64Wine) {
+            KeyValueSet containerWrapperConfig = DXVKConfig.parseConfig(container.getDXWrapperConfig());
+            String[] versionKeys = {"version", "vkd3dVersion"};
+            for (String key : versionKeys) {
+                if (this.dxwrapperConfig.get(key).toLowerCase().contains("arm64ec")) {
+                    String fallback = containerWrapperConfig.get(key);
+                    if (fallback.toLowerCase().contains("arm64ec") || fallback.isEmpty())
+                        fallback = key.equals("version") ? DefaultVersion.DXVK : DefaultVersion.VKD3D;
+                    this.dxwrapperConfig.put(key, fallback);
+                }
+            }
+        }
+
+        // Same carryover guard for the audio driver: DirectAudio ships arm64ec-only builds
+        // (proton-9/11-*-arm64ec). A shortcut moved from an arm64 container keeps its own
+        // audioDriver extra, which on any other Wine cannot load — and the registry would
+        // still name it, leaving the game silent.
+        if (DirectAudioDriver.INSTANCE.isSelected(audioDriver)
+                && DirectAudioDriver.INSTANCE.flavorOf(wineInfo.identifier()) == null) {
+            audioDriver = container.getAudioDriver();
+            if (DirectAudioDriver.INSTANCE.isSelected(audioDriver)) audioDriver = Container.DEFAULT_AUDIO_DRIVER;
+        }
+
         if (!wineInfo.isWin64()) {
             onExtractFileListener = (file, size) -> {
                 String path = file.getPath();
