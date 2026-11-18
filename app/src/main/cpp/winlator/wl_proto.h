@@ -50,7 +50,7 @@ WL_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "wl_proto is little 
 #define WL_SWAPCHAIN_PROPERTY    "_WL_SWAPCHAIN"
 
 /* ------------------------------------------------------------------------------------------- */
-/* WL Direct protocol, version 1                                                               */
+/* WL Direct protocol, version 2                                                               */
 /* ------------------------------------------------------------------------------------------- */
 /*
  * Transport: AF_UNIX SOCK_SEQPACKET (one message per packet), one connection per swapchain; a new
@@ -71,7 +71,9 @@ WL_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "wl_proto is little 
  *   The client does not touch an image sent with FRAME until RELEASE gives it back. RELEASE may
  *   carry a release fence (sync_fd): the image is free once it signals (import it into the
  *   acquire semaphore of the image, or wait for it). No fence: free now.
- *   S->C TIMING per shown frame (latch / present time) for pacing.
+ *   S->C TIMING exactly once per FRAME, when its presentation lifecycle is over. RELEASE only
+ *   returns the image for reuse; it does not complete the frame. TIMING distinguishes shown,
+ *   dropped and unknown outcomes, so a missing present timestamp is never itself called a drop.
  *
  * Revoke (GRANT granted=0): the client presents its latest image through X right away. The
  * server keeps the Direct layer up until the X composite shows a frame of this window, then
@@ -84,7 +86,7 @@ WL_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "wl_proto is little 
  */
 
 #define WL_DIRECT_MAGIC          0x52444c57u   /* 'W','L','D','R' in memory order */
-#define WL_DIRECT_VERSION        1u
+#define WL_DIRECT_VERSION        2u
 #define WL_DIRECT_MAX_IMAGES     16u
 #define WL_DIRECT_MAX_PACKET     64u
 #define WL_DIRECT_RECONNECT_MS   2000u
@@ -127,6 +129,17 @@ enum wl_direct_reason {
 /* wl_direct_release.flags */
 #define WL_RELEASE_HAS_FENCE     (1u << 0)   /* a release sync_fd is attached */
 
+/* wl_direct_grant.capabilities */
+#define WL_GRANT_DESIRED_PRESENT_TIME (1u << 0) /* FRAME.desired_present_ns is honoured */
+
+/* wl_direct_timing.flags: exactly one outcome. SHOWN may have present_ns == 0 when the present
+ * fence signalled but the platform did not provide its timestamp. UNKNOWN means that the server
+ * finished the lifecycle (for example, latch-only feedback or a lost surface), not that it dropped
+ * the frame. */
+#define WL_TIMING_SHOWN          (1u << 0)
+#define WL_TIMING_DROPPED        (1u << 1)
+#define WL_TIMING_UNKNOWN        (1u << 2)
+
 struct wl_direct_hdr {
    uint16_t type;
    uint16_t size;          /* whole packet */
@@ -162,6 +175,8 @@ struct wl_direct_grant {
    /* Where the game lands on the panel (physical pixels), for information and FG timing. */
    int32_t  panel_x, panel_y, panel_w, panel_h;
    uint64_t refresh_ns;    /* display refresh period, 0 = unknown */
+   uint32_t capabilities;  /* WL_GRANT_* */
+   uint32_t reserved;
 };
 
 struct wl_direct_frame {
@@ -182,7 +197,9 @@ struct wl_direct_timing {
    struct wl_direct_hdr hdr;
    uint64_t frame_id;
    uint64_t latch_ns;      /* SurfaceFlinger latched it, 0 = unknown */
-   uint64_t present_ns;    /* it reached the display, 0 = unknown / dropped */
+   uint64_t present_ns;    /* it reached the display, 0 = unknown */
+   uint32_t flags;         /* WL_TIMING_* */
+   uint32_t reserved;
 };
 
 struct wl_direct_bye {
@@ -193,11 +210,13 @@ WL_STATIC_ASSERT(sizeof(struct wl_direct_hdr)     == 8,  "wl_direct_hdr");
 WL_STATIC_ASSERT(sizeof(struct wl_direct_hello)   == 48, "wl_direct_hello");
 WL_STATIC_ASSERT(offsetof(struct wl_direct_hello, ahb_usage) == 40, "wl_direct_hello");
 WL_STATIC_ASSERT(sizeof(struct wl_direct_welcome) == 24, "wl_direct_welcome");
-WL_STATIC_ASSERT(sizeof(struct wl_direct_grant)   == 40, "wl_direct_grant");
+WL_STATIC_ASSERT(sizeof(struct wl_direct_grant)   == 48, "wl_direct_grant");
 WL_STATIC_ASSERT(offsetof(struct wl_direct_grant, refresh_ns) == 32, "wl_direct_grant");
+WL_STATIC_ASSERT(offsetof(struct wl_direct_grant, capabilities) == 40, "wl_direct_grant");
 WL_STATIC_ASSERT(sizeof(struct wl_direct_frame)   == 32, "wl_direct_frame");
 WL_STATIC_ASSERT(sizeof(struct wl_direct_release) == 16, "wl_direct_release");
-WL_STATIC_ASSERT(sizeof(struct wl_direct_timing)  == 32, "wl_direct_timing");
+WL_STATIC_ASSERT(sizeof(struct wl_direct_timing)  == 40, "wl_direct_timing");
+WL_STATIC_ASSERT(offsetof(struct wl_direct_timing, flags) == 32, "wl_direct_timing");
 WL_STATIC_ASSERT(sizeof(struct wl_direct_bye)     == 8,  "wl_direct_bye");
 
 /* Exact packet size of a message type, 0 for an unknown type. */

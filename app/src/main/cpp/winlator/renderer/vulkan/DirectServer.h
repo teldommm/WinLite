@@ -118,11 +118,14 @@ public:
     void pushX(AHardwareBuffer* ahb, int32_t w, int32_t h);
     // Direct + FX: ring buffer `slot` of generation `gen` holds the frame, `fenceFd` (owned)
     // signals when Fx is done with it.
-    void pushFx(uint32_t gen, uint32_t slot, AHardwareBuffer* ahb, int32_t w, int32_t h, int fenceFd);
+    void pushFx(uint32_t gen, uint32_t slot, AHardwareBuffer* ahb, int32_t w, int32_t h, int fenceFd,
+                int timingClient, uint64_t frameId, uint64_t desiredNs);
     // The next WL Direct frame for the Fx pass; false if none is waiting.
     bool takeWlFrame(WlFrame& out);
     // The Fx pass is done with a WL frame's image once `fenceFd` (owned, -1 = now) signals.
     void releaseWlFrame(int client, uint32_t image, int fenceFd);
+    // The Fx pass could not submit this WL frame: return its image and complete it as dropped.
+    void dropWlFrame(int client, uint32_t image, uint64_t frameId, int fenceFd);
     // The cursor layer: shown or not, where (surface px), and its image when `serial` is new
     // (R,G,B,A straight alpha, w x h). Only while the composite does not present.
     void updateCursor(bool visible, const Rect& dst, const uint32_t* rgba, int32_t w, int32_t h, uint64_t serial);
@@ -152,8 +155,9 @@ private:
         Buf      buf;
         int      fence = -1;      // acquire, owned
         int32_t  w = 0, h = 0;
-        uint64_t frameId = 0;     // Wl
+        uint64_t frameId = 0;     // Wl, also carried through Fx / Ring
         uint64_t desiredNs = 0;
+        int      timingClient = -1; // Wl source, independent of the final buffer kind
         bool     valid = false;
     };
     struct Layer {
@@ -171,8 +175,13 @@ private:
         Buf      prev;            // what the transaction's buffer replaced
         bool     prevLive = false;
         bool     hide = false;    // the container goes: everything attached comes back
+        bool     detached = false;// its layer was destroyed: never touch the current Layer
+        bool     teardown = false;// hide + reparent on detach, with the attached buffers below
+        Buf      cleanup[2];      // teardown: game and cursor attachments
+        bool     cleanupLive[2] = {};
         int      client = -1;     // TIMING goes to
         uint64_t frameId = 0;
+        uint64_t refreshNs = 0;   // display mode this frame was submitted in
     };
     struct Client {
         int      fd = -1;
@@ -189,12 +198,18 @@ private:
         Frame    fxFrame;         // waiting for the Fx pass
     };
     struct FenceWatch {
-        enum Kind { ReleaseX, ReleaseCursor, Present } kind;
+        enum Kind { ReleaseX, ReleaseCursor, Present, Cleanup } kind;
         AHardwareBuffer* ahb = nullptr;   // ReleaseX
         uint32_t slot = 0;                // ReleaseCursor
         int      client = -1;             // Present: TIMING
         uint64_t frameId = 0;
         int64_t  latchNs = 0;
+        uint64_t refreshNs = 0;           // Present: mode of the submitted frame
+        bool     useForClock = false;      // Present: not a callback from a destroyed layer
+        Buf      release;                 // Present: previous buffer without a release fence
+        bool     releaseLive = false;     // Cleanup: first attached buffer
+        Buf      extra;                   // Cleanup: second attached buffer
+        bool     extraLive = false;
     };
     enum class Phase { X, Wait, Direct, Leaving };
 
@@ -218,6 +233,8 @@ private:
     void dropClientLocked(int id, Deferred& d);
     void watchFenceLocked(int fd, const FenceWatch& w);
     void sendLocked(Client& c, struct wl_direct_hdr* h, int fd);
+    void sendTimingLocked(int client, uint64_t frameId, int64_t latchNs,
+                          uint64_t presentNs, uint32_t flags);
     uint64_t newTxLocked(const Tx& tx, ASurfaceControl* sc, ASurfaceTransaction* t);
     void createLayersLocked();
     void destroyLayersLocked(Deferred& d);

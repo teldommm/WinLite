@@ -381,10 +381,11 @@ void VulkanRendererContext::runDirectFx(const DirectServer::Plan& plan, const Di
     if (wl && !direct_->takeWlFrame(wf)) return;
     // A WL frame that is not drawn goes back once the client's own rendering into it is done.
     auto giveBackWl = [&](int fd) { if (wl) direct_->releaseWlFrame(wf.client, wf.image, fd); };
-    if (!externalSemaphoreFd_ || !ensureDirectSync()) { giveBackWl(wf.acquireFd); return; }
+    auto dropWl = [&](int fd) { if (wl) direct_->dropWlFrame(wf.client, wf.image, wf.frameId, fd); };
+    if (!externalSemaphoreFd_ || !ensureDirectSync()) { dropWl(wf.acquireFd); return; }
 
     const DirectServer::Rect dst = cand.dst;
-    if (dst.w <= 0 || dst.h <= 0) { giveBackWl(wf.acquireFd); return; }
+    if (dst.w <= 0 || dst.h <= 0) { dropWl(wf.acquireFd); return; }
 
     WinTex input{};
     uint64_t inputGen = 0;
@@ -413,7 +414,7 @@ void VulkanRendererContext::runDirectFx(const DirectServer::Plan& plan, const Di
                 WinTex t{};
                 if (!importAHBToWinTex(t, wf.ahb)) {
                     RLOG_E("Direct + FX: cannot import a client image");
-                    giveBackWl(wf.acquireFd);
+                    dropWl(wf.acquireFd);
                     return;
                 }
                 t.ahb = wf.ahb;
@@ -422,13 +423,13 @@ void VulkanRendererContext::runDirectFx(const DirectServer::Plan& plan, const Di
             input = it->second;
         }
         if (!ensureRingLocked(dst.w, dst.h, (input.usage & AHARDWAREBUFFER_USAGE_VENDOR_0) != 0)) {
-            giveBackWl(wf.acquireFd);
+            dropWl(wf.acquireFd);
             return;
         }
         int free = -1;
         for (uint32_t i = 0; i < ring.size(); i++) if (!ring[i].inSf) { free = (int)i; break; }
         if (free < 0) {   // SurfaceFlinger has them all: the next release brings this round again
-            giveBackWl(wf.acquireFd);
+            dropWl(wf.acquireFd);
             return;
         }
         slotIdx = (uint32_t)free;
@@ -558,7 +559,7 @@ void VulkanRendererContext::runDirectFx(const DirectServer::Plan& plan, const Di
             std::lock_guard<std::mutex> lk(renderMutex);
             if (gen == ringGen && slotIdx < ring.size()) ring[slotIdx].inSf = false;
         }
-        giveBackWl(-1);
+        dropWl(-1);
         return;
     }
     {
@@ -589,7 +590,8 @@ void VulkanRendererContext::runDirectFx(const DirectServer::Plan& plan, const Di
         fxLastSerial = fxSerial.load();
         fxLastDst = dst;
     }
-    direct_->pushFx(gen, slotIdx, ringAhb, dst.w, dst.h, fd);
+    direct_->pushFx(gen, slotIdx, ringAhb, dst.w, dst.h, fd,
+                    wl ? wf.client : -1, wl ? wf.frameId : 0, wl ? wf.desiredNs : 0);
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 

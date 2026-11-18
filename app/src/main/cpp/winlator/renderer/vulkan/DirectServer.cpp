@@ -146,7 +146,32 @@ DirectServer::~DirectServer() {
         std::vector<int> ids;
         for (auto& [id, c] : clients_) ids.push_back(id);
         for (int id : ids) dropClientLocked(id, d);
-        for (auto& [fd, w] : fences_) close(fd);
+        // Callbacks cannot arrive after the server thread joined. Retire anything they still
+        // owned rather than leaking a buffer or leaving Mesa's frame lifecycle incomplete.
+        for (auto& [id, tx] : txs_) {
+            if (tx.teardown) {
+                for (int i = 0; i < 2; i++)
+                    if (tx.cleanupLive[i]) giveBackLocked(tx.cleanup[i], -1, d);
+            } else {
+                if (tx.prevLive) giveBackLocked(tx.prev, -1, d);
+                sendTimingLocked(tx.client, tx.frameId, 0, 0, WL_TIMING_UNKNOWN);
+            }
+        }
+        txs_.clear();
+        for (auto& [fd, w] : fences_) {
+            if (w.kind == FenceWatch::ReleaseX) {
+                AHardwareBuffer* ahb = w.ahb;
+                held_.erase(ahb);
+                d.push_back([this, ahb] { ctx_.directBufferReleased(ahb); AHardwareBuffer_release(ahb); });
+            }
+            if ((w.kind == FenceWatch::Cleanup || w.kind == FenceWatch::Present) && w.releaseLive)
+                giveBackLocked(w.release, -1, d);
+            if (w.kind == FenceWatch::Cleanup && w.extraLive)
+                giveBackLocked(w.extra, -1, d);
+            if (w.kind == FenceWatch::Present)
+                sendTimingLocked(w.client, w.frameId, w.latchNs, 0, WL_TIMING_UNKNOWN);
+            close(fd);
+        }
         fences_.clear();
         for (auto& s : cursorSlots_) if (s.ahb) { AHardwareBuffer_release(s.ahb); s = CursorSlot{}; }
     }
@@ -216,45 +241,81 @@ void DirectServer::createLayersLocked() {
 
 void DirectServer::destroyLayersLocked(Deferred& d) {
     if (container_) {
+        // Keep the last attachments alive until the hide + reparent transaction has reached the
+        // display. Releasing the ASurfaceControl handles does not cancel its completion callback.
         ASurfaceTransaction* t = sc_.txCreate();
         sc_.setVisibility(t, container_, DirectSc::kVisibilityHide);
         sc_.reparent(t, container_, nullptr);
+        Tx tx;
+        tx.layer = -1;
+        tx.teardown = true;
+        Layer* layers[2] = {&game_, &cursor_};
+        for (int i = 0; i < 2; i++) {
+            tx.cleanup[i] = layers[i]->attached;
+            tx.cleanupLive[i] = layers[i]->attachedLive;
+            layers[i]->attachedLive = false;
+        }
+        newTxLocked(tx, nullptr, t);
         sc_.txApply(t);
         sc_.txDelete(t);
     }
     for (ASurfaceControl** s : {&cursor_.sc, &game_.sc, &backdrop_, &container_})
         if (*s) { sc_.release(*s); *s = nullptr; }
-    // Everything the layers had or were about to get goes back now: the surface is gone.
+
+    // Existing transactions still own their previous-buffer and timing completion. Their layer
+    // pointers must not be used after this point, and their timing completes exactly once here.
     {
         std::lock_guard<std::mutex> g(gCbMu);
-        for (auto& [id, tx] : txs_) gTxLayer.erase(id);
+        for (auto& [id, tx] : txs_) gTxLayer[id] = nullptr;
     }
-    txs_.clear();
+    for (auto& [id, tx] : txs_) {
+        if (tx.teardown) continue;
+        tx.detached = true;
+        sendTimingLocked(tx.client, tx.frameId, 0, 0, WL_TIMING_UNKNOWN);
+        tx.client = -1;
+    }
     for (Layer* L : {&game_, &cursor_}) {
         if (L->pending.valid) dropFrameLocked(L->pending, d);
+        // Without a container there is no teardown transaction to pace the attachment.
         if (L->attachedLive) giveBackLocked(L->attached, -1, d);
         *L = Layer{};
     }
-    for (auto& s : cursorSlots_) s.busy = false;
+    // A release fence is still a buffer lifetime boundary after the layers are gone. Keep every
+    // watch which still owns a buffer or cursor slot: closing it here would allow reuse while SF
+    // may read the old attachment. Present watches without such a buffer only own TIMING and can
+    // complete immediately as UNKNOWN.
+    std::unordered_set<AHardwareBuffer*> fenceHeld;
     for (auto it = fences_.begin(); it != fences_.end();) {
-        if (it->second.kind == FenceWatch::ReleaseX) {
-            AHardwareBuffer* ahb = it->second.ahb;
-            epoll_ctl(epollFd_, EPOLL_CTL_DEL, it->first, nullptr);
-            close(it->first);
-            it = fences_.erase(it);
-            held_.erase(ahb);
-            d.push_back([this, ahb] { ctx_.directBufferReleased(ahb); AHardwareBuffer_release(ahb); });
-        } else if (it->second.kind == FenceWatch::ReleaseCursor) {
-            epoll_ctl(epollFd_, EPOLL_CTL_DEL, it->first, nullptr);
-            close(it->first);
-            it = fences_.erase(it);
-        } else {
+        FenceWatch& w = it->second;
+        const bool keep = w.kind == FenceWatch::Cleanup || w.kind == FenceWatch::ReleaseX ||
+                          w.kind == FenceWatch::ReleaseCursor ||
+                          (w.kind == FenceWatch::Present && w.releaseLive);
+        if (keep) {
+            if (w.kind == FenceWatch::ReleaseX) fenceHeld.insert(w.ahb);
+            if (w.releaseLive && w.release.kind == BufKind::X) fenceHeld.insert(w.release.ahb);
+            if (w.kind == FenceWatch::Cleanup && w.extraLive && w.extra.kind == BufKind::X)
+                fenceHeld.insert(w.extra.ahb);
+            if (w.kind == FenceWatch::Present) {
+                sendTimingLocked(w.client, w.frameId, w.latchNs, 0, WL_TIMING_UNKNOWN);
+                w.client = -1;
+                w.frameId = 0;
+                w.useForClock = false;
+            }
             ++it;
+            continue;
         }
+        epoll_ctl(epollFd_, EPOLL_CTL_DEL, it->first, nullptr);
+        close(it->first);
+        if (w.kind == FenceWatch::Present)
+            sendTimingLocked(w.client, w.frameId, w.latchNs, 0, WL_TIMING_UNKNOWN);
+        it = fences_.erase(it);
     }
-    for (AHardwareBuffer* ahb : held_)
+    for (AHardwareBuffer* ahb : held_) {
+        if (fenceHeld.count(ahb)) continue;
         d.push_back([this, ahb] { ctx_.directBufferReleased(ahb); AHardwareBuffer_release(ahb); });
+    }
     held_.clear();
+    held_.insert(fenceHeld.begin(), fenceHeld.end());
     shown_ = false;
     hiding_ = false;
     if (Client* c = clientLocked(client_)) {
@@ -314,9 +375,29 @@ bool DirectServer::hasClient(int64_t xWindow) const {
 }
 
 void DirectServer::sendLocked(Client& c, wl_direct_hdr* h, int fd) {
+    if (c.fd < 0) return;
     h->seq = ++c.seq;
     const int r = wl_direct_send(c.fd, h, fd);
-    if (r < 0 && r != -EAGAIN) DLOG_E("client %d: send failed (%d)", c.id, -r);
+    if (r < 0) {
+        // A lost RELEASE, GRANT or TIMING desynchronizes the swapchain. Do not continue with a
+        // silently skipped packet: the reader drops the client and Mesa reconnects through X.
+        DLOG_E("client %d: send failed (%d), closing the link", c.id, -r);
+        shutdown(c.fd, SHUT_RDWR);
+    }
+}
+
+void DirectServer::sendTimingLocked(int client, uint64_t frameId, int64_t latchNs,
+                                    uint64_t presentNs, uint32_t flags) {
+    if (client < 0 || !frameId) return;
+    Client* c = clientLocked(client);
+    if (!c) return;
+    wl_direct_timing m{};
+    wl_direct_hdr_init(&m.hdr, WL_DIRECT_TIMING, 0);
+    m.frame_id = frameId;
+    m.latch_ns = latchNs > 0 ? (uint64_t)latchNs : 0;
+    m.present_ns = presentNs;
+    m.flags = flags;
+    sendLocked(*c, &m.hdr, -1);
 }
 
 void DirectServer::setGrantLocked(Client& c, bool granted, int reason) {
@@ -331,6 +412,7 @@ void DirectServer::setGrantLocked(Client& c, bool granted, int reason) {
     m.reason = (uint32_t)reason;
     m.panel_x = dst_.x; m.panel_y = dst_.y; m.panel_w = dst_.w; m.panel_h = dst_.h;
     m.refresh_ns = refreshNs;
+    m.capabilities = sc_.setDesiredPresentTime ? WL_GRANT_DESIRED_PRESENT_TIME : 0;
     sendLocked(c, &m.hdr, -1);
     if (granted) DLOG("client %d (window 0x%x, pid %u): grant, refresh %.3f ms",
                       c.id, c.xWindow, c.pid, (double)refreshNs / 1.0e6);
@@ -586,8 +668,9 @@ void DirectServer::submitFrameLocked(int layer, Frame f, Deferred&) {
     tx.layer = layer;
     tx.prev = L.attached;
     tx.prevLive = L.attachedLive;
-    tx.client = f.buf.kind == BufKind::Wl ? f.buf.client : -1;
+    tx.client = f.timingClient;
     tx.frameId = f.frameId;
+    tx.refreshNs = ctx_.refreshPeriodNs();
     newTxLocked(tx, L.sc, t);
     sc_.txApply(t);
     sc_.txDelete(t);
@@ -601,8 +684,12 @@ void DirectServer::submitFrameLocked(int layer, Frame f, Deferred&) {
 
 void DirectServer::dropFrameLocked(Frame& f, Deferred& d) {
     if (!f.valid) return;
-    closeFd(f.fence);
-    giveBackLocked(f.buf, -1, d);
+    // No consumer will use the buffer. Its acquire fence is also the safe release fence: the
+    // client may reuse it as soon as the rendering which produced it has finished.
+    const int releaseFd = f.fence;
+    f.fence = -1;
+    giveBackLocked(f.buf, releaseFd, d);
+    sendTimingLocked(f.timingClient, f.frameId, 0, 0, WL_TIMING_DROPPED);
     f = Frame{};
 }
 
@@ -612,7 +699,8 @@ void DirectServer::giveBackLocked(const Buf& b, int fenceFd, Deferred& d) {
     switch (b.kind) {
     case BufKind::X:
         if (fenceFd >= 0) {
-            FenceWatch w{FenceWatch::ReleaseX};
+            FenceWatch w{};
+            w.kind = FenceWatch::ReleaseX;
             w.ahb = b.ahb;
             watchFenceLocked(fenceFd, w);
         } else {
@@ -638,7 +726,8 @@ void DirectServer::giveBackLocked(const Buf& b, int fenceFd, Deferred& d) {
     }
     case BufKind::Cursor:
         if (fenceFd >= 0) {
-            FenceWatch w{FenceWatch::ReleaseCursor};
+            FenceWatch w{};
+            w.kind = FenceWatch::ReleaseCursor;
             w.slot = b.index;
             watchFenceLocked(fenceFd, w);
         } else if (b.index < kCursorSlots) {
@@ -702,7 +791,8 @@ void DirectServer::pushX(AHardwareBuffer* ahb, int32_t w, int32_t h) {
     runDeferred(d);
 }
 
-void DirectServer::pushFx(uint32_t gen, uint32_t slot, AHardwareBuffer* ahb, int32_t w, int32_t h, int fenceFd) {
+void DirectServer::pushFx(uint32_t gen, uint32_t slot, AHardwareBuffer* ahb, int32_t w, int32_t h, int fenceFd,
+                          int timingClient, uint64_t frameId, uint64_t desiredNs) {
     Deferred d;
     {
         std::lock_guard<std::mutex> lk(mu_);
@@ -713,6 +803,9 @@ void DirectServer::pushFx(uint32_t gen, uint32_t slot, AHardwareBuffer* ahb, int
         f.buf.gen = gen;
         f.fence = fenceFd;
         f.w = w; f.h = h;
+        f.timingClient = timingClient;
+        f.frameId = frameId;
+        f.desiredNs = desiredNs;
         f.valid = true;
         if (!(phase_ == Phase::Direct || phase_ == Phase::Wait) || !fx_) {
             dropFrameLocked(f, d);
@@ -752,6 +845,20 @@ void DirectServer::releaseWlFrame(int client, uint32_t image, int fenceFd) {
         b.client = client;
         b.index = image;
         giveBackLocked(b, fenceFd, d);
+    }
+    runDeferred(d);
+}
+
+void DirectServer::dropWlFrame(int client, uint32_t image, uint64_t frameId, int fenceFd) {
+    Deferred d;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        Buf b;
+        b.kind = BufKind::Wl;
+        b.client = client;
+        b.index = image;
+        giveBackLocked(b, fenceFd, d);
+        sendTimingLocked(client, frameId, 0, 0, WL_TIMING_DROPPED);
     }
     runDeferred(d);
 }
@@ -924,9 +1031,10 @@ void DirectServer::onTxDone(const TxDone& done) {
             return;
         }
         if (done.committed) {
-            // Latched: the next buffer may follow.
+            // Latched: the next buffer may follow, unless this transaction belongs to an old layer.
+            if (it->second.detached || it->second.layer < 0) return;
             Layer& L = it->second.layer == 1 ? cursor_ : game_;
-            if (it->second.layer >= 0 && L.busy) {
+            if (L.busy) {
                 L.busy = false;
                 if (L.pending.valid) { Frame f = L.pending; L.pending = Frame{}; submitFrameLocked(it->second.layer, f, d); }
                 else if (it->second.layer == 1 && cursorDirty_) applyCursorLocked(d);
@@ -935,39 +1043,89 @@ void DirectServer::onTxDone(const TxDone& done) {
         }
         const Tx tx = it->second;
         txs_.erase(it);
-        if (tx.hide) {
+        bool prevWithPresent = false;
+
+        if (tx.teardown) {
             closeFd(prevFd);
+            prevFd = -1;
+            if (presentFd >= 0) {
+                FenceWatch w{};
+                w.kind = FenceWatch::Cleanup;
+                for (int i = 0; i < 2; i++) {
+                    if (i == 0) { w.release = tx.cleanup[i]; w.releaseLive = tx.cleanupLive[i]; }
+                    else { w.extra = tx.cleanup[i]; w.extraLive = tx.cleanupLive[i]; }
+                }
+                watchFenceLocked(presentFd, w);
+                presentFd = -1;
+            } else {
+                for (int i = 0; i < 2; i++)
+                    if (tx.cleanupLive[i]) giveBackLocked(tx.cleanup[i], -1, d);
+            }
+        } else if (tx.hide && !tx.detached) {
+            closeFd(prevFd);
+            prevFd = -1;
+            if (presentFd >= 0) {
+                // Hiding does not replace the attached buffers. Keep them until the frame in
+                // which the container disappeared has actually been presented.
+                FenceWatch w{};
+                w.kind = FenceWatch::Cleanup;
+                Layer* layers[2] = {&game_, &cursor_};
+                for (int i = 0; i < 2; i++) {
+                    Buf& dst = i == 0 ? w.release : w.extra;
+                    bool& live = i == 0 ? w.releaseLive : w.extraLive;
+                    dst = layers[i]->attached;
+                    live = layers[i]->attachedLive;
+                    layers[i]->attachedLive = false;
+                }
+                watchFenceLocked(presentFd, w);
+                presentFd = -1;
+            }
             finishLeavingLocked(d);
         } else if (tx.layer >= 0) {
             Layer& L = tx.layer == 1 ? cursor_ : game_;
-            if (tx.prevLive) giveBackLocked(tx.prev, prevFd, d);
-            else closeFd(prevFd);
-            prevFd = -1;
+            if (prevFd >= 0) {
+                if (tx.prevLive) giveBackLocked(tx.prev, prevFd, d);
+                else close(prevFd);
+                prevFd = -1;
+            } else if (!tx.prevLive) {
+                closeFd(prevFd);
+            } else if (presentFd < 0) {
+                // No fence at all: completion is the best lifetime boundary the platform gives.
+                giveBackLocked(tx.prev, -1, d);
+            } else {
+                prevWithPresent = true;
+            }
             // Without commit callbacks (API 29, 30) the completion paces the layer.
-            if (L.busy && !sc_.setOnCommit) {
+            if (!tx.detached && L.busy && !sc_.setOnCommit) {
                 L.busy = false;
                 if (L.pending.valid) { Frame f = L.pending; L.pending = Frame{}; submitFrameLocked(tx.layer, f, d); }
                 else if (tx.layer == 1 && cursorDirty_) applyCursorLocked(d);
             }
         } else {
             closeFd(prevFd);
+            prevFd = -1;
         }
+
         if (presentFd >= 0) {
-            FenceWatch w{FenceWatch::Present};
+            FenceWatch w{};
+            w.kind = FenceWatch::Present;
             w.client = tx.client;
             w.frameId = tx.frameId;
             w.latchNs = done.latchNs;
+            w.refreshNs = tx.refreshNs;
+            w.useForClock = !tx.detached && tx.layer >= 0;
+            // A missing previous-release fence must not make the old buffer reusable at latch
+            // time. The current frame's present fence is a conservative substitute.
+            if (prevWithPresent) {
+                w.release = tx.prev;
+                w.releaseLive = true;
+            }
             watchFenceLocked(presentFd, w);
             presentFd = -1;
         } else if (tx.client >= 0) {
-            if (Client* c = clientLocked(tx.client)) {
-                wl_direct_timing m{};
-                wl_direct_hdr_init(&m.hdr, WL_DIRECT_TIMING, 0);
-                m.frame_id = tx.frameId;
-                m.latch_ns = done.latchNs > 0 ? (uint64_t)done.latchNs : 0;
-                sendLocked(*c, &m.hdr, -1);
-            }
+            sendTimingLocked(tx.client, tx.frameId, done.latchNs, 0, WL_TIMING_UNKNOWN);
         }
+        closeFd(prevFd);
     }
     runDeferred(d);
 }
@@ -975,6 +1133,8 @@ void DirectServer::onTxDone(const TxDone& done) {
 void DirectServer::onFence(int fd) {
     Deferred d;
     uint64_t shownNs = 0;
+    uint64_t submittedRefreshNs = 0;
+    bool useForClock = false;
     {
         std::lock_guard<std::mutex> lk(mu_);
         auto it = fences_.find(fd);
@@ -995,25 +1155,29 @@ void DirectServer::onFence(int fd) {
             break;
         case FenceWatch::Present:
             shownNs = syncFileSignalTime(fd);
-            if (w.client >= 0) {
-                if (Client* c = clientLocked(w.client)) {
-                    wl_direct_timing m{};
-                    wl_direct_hdr_init(&m.hdr, WL_DIRECT_TIMING, 0);
-                    m.frame_id = w.frameId;
-                    m.latch_ns = w.latchNs > 0 ? (uint64_t)w.latchNs : 0;
-                    m.present_ns = shownNs;
-                    sendLocked(*c, &m.hdr, -1);
-                }
-            }
+            submittedRefreshNs = w.refreshNs;
+            useForClock = w.useForClock;
+            sendTimingLocked(w.client, w.frameId, w.latchNs, shownNs, WL_TIMING_SHOWN);
+            if (w.releaseLive) giveBackLocked(w.release, -1, d);
+            break;
+        case FenceWatch::Cleanup:
+            if (w.releaseLive) giveBackLocked(w.release, -1, d);
+            if (w.extraLive) giveBackLocked(w.extra, -1, d);
             break;
         }
         close(fd);
     }
-    if (shownNs) {
+    if (shownNs && useForClock) {
         // Direct puts the frames on the display now: its present fences are the display clock.
-        DisplayClock& clock = ctx_.displayClock();
-        clock.setPeriod(ctx_.refreshPeriodNs());
-        clock.noteShown(shownNs);
+        // A fence from before a mode switch must not anchor the new mode's grid.
+        const uint64_t period = ctx_.refreshPeriodNs();
+        const bool sameMode = !submittedRefreshNs || !period ||
+            (submittedRefreshNs * 100 >= period * 99 && submittedRefreshNs * 100 <= period * 101);
+        if (sameMode) {
+            DisplayClock& clock = ctx_.displayClock();
+            clock.setPeriod(period);
+            clock.noteShown(shownNs);
+        }
     }
     runDeferred(d);
 }
@@ -1141,6 +1305,7 @@ void DirectServer::readClient(int id) {
             f.w = c->w; f.h = c->h;
             f.frameId = m->frame_id;
             f.desiredNs = m->desired_present_ns;
+            f.timingClient = id;
             f.valid = true;
             const bool ours = c->granted && client_ == id && route_ == Route::DirectWl &&
                               (phase_ == Phase::Wait || phase_ == Phase::Direct);

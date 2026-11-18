@@ -336,7 +336,7 @@ public:
     PFN_vkGetPastPresentationTimingGOOGLE getPastPresentTimingGOOGLE_ = nullptr;
     DisplayClock          clock_;
     // Presents issued so far; a presentID is the low 30 bits of the sequence number.
-    uint64_t              presentSeq       = 0;
+    std::atomic<uint64_t> presentSeq{0};
     static constexpr uint32_t kPresentSeqMask  = 0x3fffffffu;
     // Every present carries a desiredPresentTime: the Android swapchain sets the window's
     // timestamp only when it is non-zero, and the window keeps the last one. kAutoPresentTime
@@ -346,7 +346,7 @@ public:
     static constexpr uint64_t kAutoPresentTime = 0x8000000000000000ull;
     uint64_t seqOfPresentId(uint32_t id) const;
     // Feedback for presents up to this sequence number belongs to the previous display mode.
-    uint64_t              modeSeq          = 0;
+    std::atomic<uint64_t> modeSeq{0};
     std::atomic<uint64_t> swapchainRefreshNs{0};   // vkGetRefreshCycleDurationGOOGLE, 0 = unknown
     uint64_t              lastShownSeq     = 0;    // newest present the display reported shown
     std::atomic<uint32_t> refreshHintMhz{0};       // setDisplayRefreshHz

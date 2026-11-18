@@ -1980,7 +1980,12 @@ uint64_t monotonicNowNs() {
 
 void VulkanRendererContext::setDisplayRefreshHz(float hz) {
     const uint32_t mhz = hz > 0.f ? (uint32_t)std::lround(hz * 1000.f) : 0u;
-    if (refreshHintMhz.exchange(mhz) != mhz) RLOG("display refresh %.2f Hz", hz);
+    if (refreshHintMhz.exchange(mhz) != mhz) {
+        // Publish the new period immediately, even while Direct produces no present timestamps.
+        // Its old grid and old X feedback belong to the previous display mode.
+        if (clock_.setPeriod(refreshPeriodNs())) modeSeq.store(presentSeq.load());
+        RLOG("display refresh %.2f Hz", hz);
+    }
 }
 
 uint64_t VulkanRendererContext::refreshPeriodNs() const {
@@ -2020,7 +2025,7 @@ void VulkanRendererContext::pollPresentTiming() {
     // images presented before the switch must not anchor the new one.
     const uint64_t oldPeriod = clock_.period();
     if (clock_.setPeriod(refreshPeriodNs())) {
-        modeSeq = presentSeq;
+        modeSeq.store(presentSeq.load());
         __android_log_print(ANDROID_LOG_INFO, WLOG_TAG, "Display clock: refresh %.3f -> %.3f ms, grid dropped",
                             (double)oldPeriod / 1.0e6, (double)clock_.period() / 1.0e6);
     }
