@@ -2,10 +2,19 @@
 
 package com.winlator.cmod.ui.components
 
+import android.widget.Toast
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,23 +45,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.winlator.cmod.R
 import com.winlator.cmod.components.ComponentInstaller
 import com.winlator.cmod.components.LocalComponent
 import com.winlator.cmod.components.LocalComponents
 import com.winlator.cmod.container.Container
+import com.winlator.cmod.ui.theme.DialogScrimColor
 import com.winlator.cmod.ui.theme.TablerIcons
-import com.winlator.cmod.ui.theme.ThemedDialog
+import com.winlator.cmod.ui.theme.ThemedDialogSurface
 import com.winlator.cmod.ui.theme.ThemedDialogTitle
+import com.winlator.cmod.ui.theme.WinZMotion
 import com.winlator.cmod.ui.theme.WinZProgressBar
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.controlAccentColor
 import com.winlator.cmod.ui.theme.hairlineColor
+import com.winlator.cmod.ui.toast.WinToast
 import com.winlator.cmod.ui.uiStr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -108,19 +124,80 @@ fun WindowsComponentsRow(container: Container?) {
     }
 }
 
-/** Uses the same dialog shell and immediate dismissal path as Vulkan Extensions. */
+/**
+ * Shared WinZ dialog motion with one transition owner: the scrim fades for 180/150 ms and the
+ * card fades and scales for 200/150 ms. A single transition avoids the delayed exit caused by
+ * nesting two AnimatedVisibility instances with the same MutableTransitionState.
+ */
 @Composable
 private fun WindowsComponentsDialog(container: Container, onChanged: (Int) -> Unit, onClose: () -> Unit) {
     var operationRunning by remember { mutableStateOf(false) }
-    val dismiss = { if (!operationRunning) onClose() }
+    var dismissRequested by remember { mutableStateOf(false) }
+    val visibleState = remember { MutableTransitionState(false) }
+    val transition = updateTransition(visibleState, label = "windowsComponentsDialog")
 
-    ThemedDialog(onDismissRequest = dismiss) {
-        WindowsComponentsContent(
-            container = container,
-            onChanged = onChanged,
-            onClose = dismiss,
-            onOperationRunningChanged = { operationRunning = it }
-        )
+    LaunchedEffect(Unit) { visibleState.targetState = true }
+    LaunchedEffect(visibleState.currentState) {
+        if (dismissRequested && !visibleState.currentState) onClose()
+    }
+    val dismiss: () -> Unit = {
+        if (!operationRunning && !dismissRequested) {
+            dismissRequested = true
+            visibleState.targetState = false
+        }
+    }
+
+    val scrimAlpha by transition.animateFloat(
+        transitionSpec = {
+            if (targetState) WinZMotion.standard(WinZMotion.DurationScrim) else WinZMotion.exit()
+        },
+        label = "windowsComponentsScrim"
+    ) { visible -> if (visible) 1f else 0f }
+    val cardAlpha by transition.animateFloat(
+        transitionSpec = { if (targetState) WinZMotion.enter() else WinZMotion.exit() },
+        label = "windowsComponentsCardAlpha"
+    ) { visible -> if (visible) 1f else 0f }
+    val cardScale by transition.animateFloat(
+        transitionSpec = { if (targetState) WinZMotion.enter() else WinZMotion.exit() },
+        label = "windowsComponentsCardScale"
+    ) { visible -> if (visible) 1f else 0.9f }
+
+    Dialog(
+        onDismissRequest = dismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(DialogScrimColor.copy(alpha = DialogScrimColor.alpha * scrimAlpha))
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = dismiss
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            ThemedDialogSurface(
+                modifier = Modifier
+                    .graphicsLayer {
+                        alpha = cardAlpha
+                        scaleX = cardScale
+                        scaleY = cardScale
+                    }
+                    // Swallow taps inside the card so they don't reach the dismiss scrim.
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    ) { }
+            ) {
+                WindowsComponentsContent(
+                    container = container,
+                    onChanged = onChanged,
+                    onClose = dismiss,
+                    onOperationRunningChanged = { operationRunning = it }
+                )
+            }
+        }
     }
 }
 
@@ -143,6 +220,7 @@ private fun ColumnScope.WindowsComponentsContent(
     val context = LocalContext.current
     val accent = controlAccentColor()
     val focusManager = LocalFocusManager.current
+    val dialogView = LocalView.current
     val scope = rememberCoroutineScope()
     var components by remember { mutableStateOf<List<LocalComponent>>(emptyList()) }
     var installed by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -150,7 +228,6 @@ private fun ColumnScope.WindowsComponentsContent(
     var busy by remember { mutableStateOf<String?>(null) }
     var progress by remember { mutableFloatStateOf(0f) }
     var query by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf<String?>(null) }
 
     suspend fun refresh() {
         installed = withContext(Dispatchers.IO) { ComponentInstaller.installedIds(context, container) }
@@ -175,7 +252,7 @@ private fun ColumnScope.WindowsComponentsContent(
                     } else ComponentInstaller.install(context, container, component,
                         onProgress = { p -> progress = p.coerceIn(0f, 1f) })
                 }
-                message = when (error) {
+                val message = when (error) {
                     null -> if (remove) uiStr(R.string.ui_components_removed, component.title)
                             else uiStr(R.string.ui_components_installed, component.title)
                     "noprefix" -> uiStr(R.string.ui_components_launch_first)
@@ -186,6 +263,12 @@ private fun ColumnScope.WindowsComponentsContent(
                 }
                 refresh()
                 onChanged(installed.size)
+                WinToast.show(
+                    context,
+                    message,
+                    if (error == null) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
+                    dialogView
+                )
             } finally {
                 busy = null
                 onOperationRunningChanged(false)
@@ -294,27 +377,5 @@ private fun ColumnScope.WindowsComponentsContent(
             ),
             border = BorderStroke(1.dp, hairlineColor())
         ) { Text(uiStr(R.string.ui_close)) }
-    }
-
-    message?.let { text ->
-        MessageDialog(text) { message = null }
-    }
-}
-
-/** One-line result notice (installed/removed/error) in the shared WinLite dialog shell. */
-@Composable
-private fun MessageDialog(text: String, onDismiss: () -> Unit) {
-    ThemedDialog(onDismissRequest = onDismiss) {
-        ThemedDialogTitle(uiStr(R.string.ui_windows_components))
-        Text(text, style = MaterialTheme.typography.bodyMedium)
-        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.End) {
-            Button(
-                onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = controlAccentColor(),
-                    contentColor = Color.White
-                )
-            ) { Text(uiStr(R.string.ok)) }
-        }
     }
 }
