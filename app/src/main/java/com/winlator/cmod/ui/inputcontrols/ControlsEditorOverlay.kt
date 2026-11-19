@@ -97,8 +97,8 @@ class ControlsEditorOverlay(
     schemeColor: Int,
     private val actions: ControlsEditorActions,
     private val settingsCallbacks: ControlElementSettingsCallbacks,
-    // In-game editor only: shows a Done button at the end of the toolbar (the Activity version
-    // exits with the system Back). Null = no button.
+    // Shows a Done button at the end of the toolbar when the host supplies an exit action.
+    // Both the in-game editor and the full-screen Activity provide one. Null = no button.
     private val onExit: Runnable? = null
 ) {
     private val density = container.resources.displayMetrics.density

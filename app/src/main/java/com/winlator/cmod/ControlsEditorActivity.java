@@ -39,8 +39,8 @@ public class ControlsEditorActivity extends AppCompatActivity {
         }
 
         FrameLayout container = findViewById(R.id.FLContainer);
-        // No Done button: this screen exits with the system Back, as it always did.
-        controller = new ControlsEditorController(this, container, profile, false, null);
+        // Same Done button as the in-game editor: flush pending edits and close this screen.
+        controller = new ControlsEditorController(this, container, profile, false, this::finish);
     }
 
     @Override
