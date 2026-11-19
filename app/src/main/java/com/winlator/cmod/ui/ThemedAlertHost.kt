@@ -225,7 +225,8 @@ object ThemedAlertHost {
         message: String,
         options: List<Option>,
         cancelLabel: String = activity.getString(R.string.cancel),
-        accentCancel: Boolean = false
+        accentCancel: Boolean = false,
+        filledOptions: Boolean = false
     ) {
         showOverlay(activity) { dismiss ->
             ThemedDialogTitle(title)
@@ -236,8 +237,16 @@ object ThemedAlertHost {
                         onClick = { dismiss(); option.onClick.run() },
                         modifier = Modifier.fillMaxWidth(),
                         shape = WinZShapes.Medium,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (option.destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                        color = when {
+                            !filledOptions -> MaterialTheme.colorScheme.surfaceVariant
+                            option.destructive -> destructiveColor()
+                            else -> controlAccentColor()
+                        },
+                        contentColor = when {
+                            filledOptions -> Color.White
+                            option.destructive -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
                     ) {
                         Box(Modifier.padding(vertical = 12.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             Text(option.label, fontWeight = FontWeight.Medium)
