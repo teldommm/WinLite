@@ -2,17 +2,10 @@
 
 package com.winlator.cmod.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -48,18 +41,14 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.winlator.cmod.R
 import com.winlator.cmod.components.ComponentInstaller
 import com.winlator.cmod.components.LocalComponent
 import com.winlator.cmod.components.LocalComponents
 import com.winlator.cmod.container.Container
-import com.winlator.cmod.ui.theme.DialogScrimColor
-import com.winlator.cmod.ui.theme.ThemedDialogSurface
-import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import com.winlator.cmod.ui.theme.TablerIcons
-import com.winlator.cmod.ui.theme.WinZMotion
+import com.winlator.cmod.ui.theme.ThemedDialog
+import com.winlator.cmod.ui.theme.ThemedDialogTitle
 import com.winlator.cmod.ui.theme.WinZProgressBar
 import com.winlator.cmod.ui.theme.WinZShapes
 import com.winlator.cmod.ui.theme.controlAccentColor
@@ -81,7 +70,9 @@ fun WindowsComponentsRow(container: Container?) {
     var showDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(container?.id) {
-        installedCount = container?.let { ComponentInstaller.installedIds(context, it).size }
+        installedCount = container?.let {
+            withContext(Dispatchers.IO) { ComponentInstaller.installedIds(context, it).size }
+        }
     }
 
     Surface(
@@ -111,62 +102,25 @@ fun WindowsComponentsRow(container: Container?) {
     if (showDialog && container != null) {
         WindowsComponentsDialog(
             container = container,
-            onChanged = { installedCount = ComponentInstaller.installedIds(context, container).size },
+            onChanged = { installedCount = it },
             onClose = { showDialog = false }
         )
     }
 }
 
-/**
- * The manager dialog with the shared WinZ pop: the scrim fades in, the card grows from 90% —
- * same motion tokens as every other WinLite dialog (WinZMotion.dialogScrimEnter/dialogCardEnter).
- */
+/** Uses the same dialog shell and immediate dismissal path as Vulkan Extensions. */
 @Composable
-private fun WindowsComponentsDialog(container: Container, onChanged: () -> Unit, onClose: () -> Unit) {
-    val visibleState = remember { MutableTransitionState(false) }
-    LaunchedEffect(Unit) { visibleState.targetState = true }
-    // The caller drops the dialog from composition once the exit animation has run out.
-    LaunchedEffect(visibleState.currentState, visibleState.targetState) {
-        if (!visibleState.currentState && !visibleState.targetState) onClose()
-    }
-    val dismiss = { visibleState.targetState = false }
+private fun WindowsComponentsDialog(container: Container, onChanged: (Int) -> Unit, onClose: () -> Unit) {
+    var operationRunning by remember { mutableStateOf(false) }
+    val dismiss = { if (!operationRunning) onClose() }
 
-    Dialog(
-        onDismissRequest = dismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        AnimatedVisibility(
-            visibleState = visibleState,
-            enter = WinZMotion.dialogScrimEnter(),
-            exit = WinZMotion.dialogScrimExit()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(DialogScrimColor)
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) { dismiss() },
-                contentAlignment = Alignment.Center
-            ) {
-                AnimatedVisibility(
-                    visibleState = visibleState,
-                    enter = WinZMotion.dialogCardEnter(),
-                    exit = WinZMotion.dialogCardExit()
-                ) {
-                    // Swallow taps inside the card so they don't reach the dismiss scrim.
-                    ThemedDialogSurface(
-                        modifier = Modifier.clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() }
-                        ) { }
-                    ) {
-                        WindowsComponentsContent(container, onChanged, dismiss)
-                    }
-                }
-            }
-        }
+    ThemedDialog(onDismissRequest = dismiss) {
+        WindowsComponentsContent(
+            container = container,
+            onChanged = onChanged,
+            onClose = dismiss,
+            onOperationRunningChanged = { operationRunning = it }
+        )
     }
 }
 
@@ -180,7 +134,12 @@ private fun matchesComponentQuery(component: LocalComponent, query: String): Boo
 }
 
 @Composable
-private fun ColumnScope.WindowsComponentsContent(container: Container, onChanged: () -> Unit, onClose: () -> Unit) {
+private fun ColumnScope.WindowsComponentsContent(
+    container: Container,
+    onChanged: (Int) -> Unit,
+    onClose: () -> Unit,
+    onOperationRunningChanged: (Boolean) -> Unit,
+) {
     val context = LocalContext.current
     val accent = controlAccentColor()
     val focusManager = LocalFocusManager.current
@@ -193,8 +152,8 @@ private fun ColumnScope.WindowsComponentsContent(container: Container, onChanged
     var query by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
 
-    fun refresh() {
-        installed = ComponentInstaller.installedIds(context, container)
+    suspend fun refresh() {
+        installed = withContext(Dispatchers.IO) { ComponentInstaller.installedIds(context, container) }
     }
 
     LaunchedEffect(Unit) {
@@ -207,38 +166,38 @@ private fun ColumnScope.WindowsComponentsContent(container: Container, onChanged
         if (busy != null) return
         busy = component.id
         progress = 0f
+        onOperationRunningChanged(true)
         scope.launch {
-            val error = withContext(Dispatchers.IO) {
-                if (remove) ComponentInstaller.remove(context, container, component.id) { p ->
-                    scope.launch { progress = p.coerceIn(0f, 1f) }
-                } else ComponentInstaller.install(context, container, component,
-                    onProgress = { p -> scope.launch { progress = p.coerceIn(0f, 1f) } })
+            try {
+                val error = withContext(Dispatchers.IO) {
+                    if (remove) ComponentInstaller.remove(context, container, component.id) { p ->
+                        progress = p.coerceIn(0f, 1f)
+                    } else ComponentInstaller.install(context, container, component,
+                        onProgress = { p -> progress = p.coerceIn(0f, 1f) })
+                }
+                message = when (error) {
+                    null -> if (remove) uiStr(R.string.ui_components_removed, component.title)
+                            else uiStr(R.string.ui_components_installed, component.title)
+                    "noprefix" -> uiStr(R.string.ui_components_launch_first)
+                    "session" -> uiStr(R.string.ui_components_close_session)
+                    "bundle" -> uiStr(R.string.ui_components_bundle_error)
+                    "nojournal" -> uiStr(R.string.ui_components_no_journal)
+                    else -> error.removePrefix("missing:")
+                }
+                refresh()
+                onChanged(installed.size)
+            } finally {
+                busy = null
+                onOperationRunningChanged(false)
             }
-            message = when (error) {
-                null -> if (remove) uiStr(R.string.ui_components_removed, component.title)
-                        else uiStr(R.string.ui_components_installed, component.title)
-                "noprefix" -> uiStr(R.string.ui_components_launch_first)
-                "session" -> uiStr(R.string.ui_components_close_session)
-                "bundle" -> uiStr(R.string.ui_components_bundle_error)
-                "nojournal" -> uiStr(R.string.ui_components_no_journal)
-                else -> error.removePrefix("missing:")
-            }
-            refresh()
-            onChanged()
-            busy = null
         }
     }
 
     ThemedDialogTitle(uiStr(R.string.ui_windows_components))
-    Text(
-        uiStr(R.string.ui_components_applies, container.name),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
     OutlinedTextField(
         value = query,
         onValueChange = { query = it },
-        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        modifier = Modifier.fillMaxWidth(),
         // Floating label (moves to the top border on focus), same as the Vulkan extensions search.
         label = { Text(uiStr(R.string.ui_components_search)) },
         trailingIcon = {
@@ -260,8 +219,10 @@ private fun ColumnScope.WindowsComponentsContent(container: Container, onChanged
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    // Glides to the new value on the WinZMotion curve; indeterminate while the stage has no fraction.
-    WinZProgressBar(progress.takeIf { busy != null })
+    // No empty track at rest: indeterminate while the catalog loads, determinate during file work.
+    if (loading || busy != null) {
+        WinZProgressBar(if (busy != null) progress else null)
+    }
     LazyColumn(
         Modifier
             .fillMaxWidth()
@@ -269,15 +230,6 @@ private fun ColumnScope.WindowsComponentsContent(container: Container, onChanged
             .heightIn(max = 320.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        if (shown.isEmpty()) {
-            item(key = "no-match") {
-                Text(
-                    uiStr(R.string.ui_components_no_match, query.trim()),
-                    modifier = Modifier.animateItem().padding(vertical = 16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
         items(shown, key = { it.id }) { component ->
             val have = component.id in installed
             Surface(
@@ -349,57 +301,20 @@ private fun ColumnScope.WindowsComponentsContent(container: Container, onChanged
     }
 }
 
-/** One-line result notice (installed/removed/error), same pop as the manager itself. */
+/** One-line result notice (installed/removed/error) in the shared WinLite dialog shell. */
 @Composable
 private fun MessageDialog(text: String, onDismiss: () -> Unit) {
-    val visibleState = remember { MutableTransitionState(false) }
-    LaunchedEffect(Unit) { visibleState.targetState = true }
-    LaunchedEffect(visibleState.currentState, visibleState.targetState) {
-        if (!visibleState.currentState && !visibleState.targetState) onDismiss()
-    }
-    val dismiss = { visibleState.targetState = false }
-
-    Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        AnimatedVisibility(
-            visibleState = visibleState,
-            enter = WinZMotion.dialogScrimEnter(),
-            exit = WinZMotion.dialogScrimExit()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(DialogScrimColor)
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) { dismiss() },
-                contentAlignment = Alignment.Center
-            ) {
-                AnimatedVisibility(
-                    visibleState = visibleState,
-                    enter = WinZMotion.dialogCardEnter(),
-                    exit = WinZMotion.dialogCardExit()
-                ) {
-                    ThemedDialogSurface(
-                        modifier = Modifier.clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() }
-                        ) { }
-                    ) {
-                        ThemedDialogTitle(uiStr(R.string.ui_windows_components))
-                        Text(text, style = MaterialTheme.typography.bodyMedium)
-                        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.End) {
-                            Button(
-                                onClick = dismiss,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = controlAccentColor(),
-                                    contentColor = Color.White
-                                )
-                            ) { Text(uiStr(R.string.ok)) }
-                        }
-                    }
-                }
-            }
+    ThemedDialog(onDismissRequest = onDismiss) {
+        ThemedDialogTitle(uiStr(R.string.ui_windows_components))
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.End) {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = controlAccentColor(),
+                    contentColor = Color.White
+                )
+            ) { Text(uiStr(R.string.ok)) }
         }
     }
 }
