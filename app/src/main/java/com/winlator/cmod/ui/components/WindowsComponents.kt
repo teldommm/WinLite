@@ -5,6 +5,7 @@ package com.winlator.cmod.ui.components
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -159,9 +160,15 @@ private fun ColumnScope.WindowsComponentsContent(
         installed = withContext(Dispatchers.IO) { ComponentInstaller.installedIds(context, container) }
     }
 
+    // Catalog and installed set are read together and published in the same frame. Before, the
+    // list appeared first (sorted by title) and the installed ids arrived a moment later, which
+    // re-sorted it and animateItem() slid the rows over each other right after the dialog opened.
     LaunchedEffect(Unit) {
-        components = withContext(Dispatchers.IO) { LocalComponents.list(context) }
-        refresh()
+        val (list, ids) = withContext(Dispatchers.IO) {
+            LocalComponents.list(context) to ComponentInstaller.installedIds(context, container)
+        }
+        components = list
+        installed = ids
         loading = false
     }
 
@@ -219,8 +226,10 @@ private fun ColumnScope.WindowsComponentsContent(
         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
     )
-    val shown = components.filter { matchesComponentQuery(it, query) }
-        .sortedWith(compareBy<LocalComponent> { it.id !in installed }.thenBy { it.title })
+    val shown = remember(components, installed, query) {
+        components.filter { matchesComponentQuery(it, query) }
+            .sortedWith(compareBy<LocalComponent> { it.id !in installed }.thenBy { it.title })
+    }
     Text(
         if (query.isBlank()) uiStr(R.string.ui_components_shown, installed.size, components.size)
         else uiStr(R.string.ui_found, shown.size.toString()),
@@ -228,23 +237,37 @@ private fun ColumnScope.WindowsComponentsContent(
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    // Fixed-height slot: the bar appearing/disappearing must not shift the list below it.
     // No empty track at rest: indeterminate while the catalog loads, determinate during file work.
-    if (loading || busy != null) {
-        WinZProgressBar(if (busy != null) progress else null)
+    Box(Modifier.fillMaxWidth().height(4.dp)) {
+        if (loading || busy != null) WinZProgressBar(if (busy != null) progress else null)
+    }
+    if (loading) {
+        // Reserve the list's height so the dialog does not grow from empty to full on open.
+        Spacer(Modifier.fillMaxWidth().height(160.dp))
     }
     LazyColumn(
         Modifier
             .fillMaxWidth()
             .weight(1f, fill = false)
-            .heightIn(max = 320.dp),
+            .heightIn(max = if (loading) 0.dp else 320.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        if (!loading && shown.isEmpty()) {
+            item(key = "no-match") {
+                Text(
+                    uiStr(R.string.ui_no_components_match, query.trim()),
+                    modifier = Modifier.padding(vertical = 16.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
         items(shown, key = { it.id }) { component ->
             val have = component.id in installed
             Surface(
                 shape = MaterialTheme.shapes.medium,
                 tonalElevation = 1.dp,
-                modifier = Modifier.animateItem()
+                modifier = Modifier.fillMaxWidth().animateItem()
             ) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
                     Text(component.title, style = MaterialTheme.typography.titleSmall)
