@@ -840,8 +840,11 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
         // designed lead and drops frames the schedule has room for. One generated frame is
         // dropped only once the chain is more than a refresh and a half behind: a refresh of
         // jitter is left for the next frame to absorb.
-        int64_t lag = (int64_t)wfgPace.lastRealDisp - (int64_t)wfgPace.lastNs;
-        if (wfgShowLagNs > 0) lag += wfgShowLagNs;
+        // Grid rounding and display feedback are two estimates of the same chain's lateness,
+        // not two queueing delays. Adding them turns a steady one-refresh show lag into false
+        // queue growth (25 fps x2 at 60 Hz drops two of every five generated frames).
+        const int64_t gridLag = (int64_t)wfgPace.lastRealDisp - (int64_t)wfgPace.lastNs;
+        const int64_t lag = std::max(gridLag, wfgShowLagNs);
         wfgLagSum += lag;
         if (lag > (int64_t)(period + period / 2) && planned > 0) {
             planned--;
