@@ -38,7 +38,7 @@ public class DXVKConfig {
 
     /**
      * Mip LOD bias for a game rendered at gameW x gameH and aspect-fitted onto a panelW x panelH
-     * screen by a spatial upscaler: log2(render / output) (AMD FSR 1 guidance; 720p on a 1080p
+     * screen by a spatial upscaler: log2(render / output) (the spatial upscalers' guidance; 720p on a 1080p
      * screen gives -0.58). 0 when the game is not upscaled.
      */
     public static float autoLodBias(int gameW, int gameH, int panelW, int panelH) {

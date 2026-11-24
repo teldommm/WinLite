@@ -1,10 +1,11 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// WinZ FSR mode: single-pass edge-aware spatial reconstruction.
+// SGSR+ (filter mode 3, formerly "FSR"): single-pass edge-aware spatial reconstruction.
 // It deliberately follows the proven SGSR sampling/reconstruction path, but
-// uses a lower edge threshold and stronger reconstruction limits so mode 3 is
-// the sharper/aggressive alternative without an intermediate image or RCAS.
+// uses a lower edge threshold and stronger reconstruction limits, so it sits
+// between SGSR and SGSR HQ as the sharper/aggressive alternative without an
+// intermediate image or RCAS. The maths is unchanged from the former FSR mode.
 
 precision mediump float;
 precision highp int;

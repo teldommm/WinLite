@@ -196,7 +196,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // True when the editor froze a game that was running, so closing it thaws exactly that.
     private boolean controlsEditorFroze = false;
     private Shortcut shortcut;
-    private boolean graphicsFsrEnabled;
+    private boolean graphicsUpscalerEnabled;
     private int graphicsUpscalerModeIndex;
     private int graphicsPostFxModeIndex;
     private int graphicsSharpnessPercent = 50;
@@ -2102,9 +2102,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // container-based read had already shown). Doing the shortcut-aware read here up
         // front avoids that startup flicker instead of reproducing it.
         String savedFilter = readGraphicsExtra("graphicsFilterMode");
-        boolean fsrOn = !savedFilter.isEmpty() && Integer.parseInt(savedFilter) > 0;
-        int upscalerModeIndex = !savedFilter.isEmpty() ? Math.max(0, Integer.parseInt(savedFilter) - 2) : 0;
-        graphicsFsrEnabled = fsrOn;
+        int savedFilterMode = savedFilter.isEmpty() ? 0 : Integer.parseInt(savedFilter);
+        // Mode 7 was NIS, removed; saved settings with it fall back to SGSR, like the renderer
+        // does when the container-level value still carries it. Anything else out of range too.
+        if (savedFilterMode == 7 || savedFilterMode < 0 || savedFilterMode > 6) savedFilterMode = 2;
+        boolean upscalerOn = savedFilterMode > 0;
+        int upscalerModeIndex = Math.max(0, savedFilterMode - 2);
+        graphicsUpscalerEnabled = upscalerOn;
         graphicsUpscalerModeIndex = upscalerModeIndex;
 
         String savedSharp = readGraphicsExtra("graphicsSharpness");
@@ -2117,7 +2121,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         graphicsPostFxModeIndex = initPFX;
 
         if (vkRenderer != null) {
-            if (fsrOn) vkRenderer.setFilterMode(upscalerModeIndex + 2);
+            if (upscalerOn) vkRenderer.setFilterMode(upscalerModeIndex + 2);
             vkRenderer.setSharpness(initSharp / 100f);
             if (initPFX > 0) vkRenderer.setPostFXMode(initPFX);
         }
@@ -2136,7 +2140,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         GraphicsPanelState state = new GraphicsPanelState(
                 initialFpsLimit,
-                fsrOn,
+                upscalerOn,
                 upscalerModeIndex,
                 initSharp,
                 initPFX,
@@ -2159,8 +2163,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onFsrToggled(boolean enabled) {
-                graphicsFsrEnabled = enabled;
+            public void onUpscalerToggled(boolean enabled) {
+                graphicsUpscalerEnabled = enabled;
                 if (vkRenderer != null) {
                     vkRenderer.setFilterMode(enabled
                             ? graphicsUpscalerModeIndex + 2
@@ -2172,7 +2176,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onUpscalerModeChanged(int index) {
                 graphicsUpscalerModeIndex = index;
-                if (vkRenderer != null && graphicsFsrEnabled) vkRenderer.setFilterMode(index + 2);
+                if (vkRenderer != null && graphicsUpscalerEnabled) vkRenderer.setFilterMode(index + 2);
                 autosaveGraphicsSettings();
             }
 
@@ -2299,7 +2303,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // together, to the Shortcut when one exists so each shortcut keeps its own graphics
     // preset, falling back to Container otherwise.
     private void autosaveGraphicsSettings() {
-        String filter = String.valueOf(graphicsFsrEnabled ? graphicsUpscalerModeIndex + 2 : 0);
+        String filter = String.valueOf(graphicsUpscalerEnabled ? graphicsUpscalerModeIndex + 2 : 0);
         String sharp = String.valueOf(graphicsSharpnessPercent);
         String post = String.valueOf(graphicsPostFxModeIndex);
 
@@ -2706,7 +2710,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     // Texture sharpness "Auto" (dxwrapperConfig lodBias=auto): the mip LOD bias matching the spatial
-    // upscaler this game starts with (2 SGSR, 3 FSR, 4 Lanczos 2, 6 SGSR HQ, 7 NIS); other filters give 0.
+    // upscaler this game starts with (2 SGSR, 3 SGSR+, 4 Lanczos 2, 6 SGSR HQ); other filters give 0.
+    // Mode 7 (NIS) was removed and remaps to SGSR like everywhere else.
     // DXVK reads it once at device creation, so a filter changed later in the sidebar applies next launch.
     private float autoTextureLodBias() {
         try {
@@ -2718,7 +2723,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 mode = shortcut != null ? shortcut.getRendererFilterMode()
                         : (container != null ? container.getRendererFilterMode() : 0);
             }
-            boolean spatial = mode == 2 || mode == 3 || mode == 4 || mode == 6 || mode == 7;
+            if (mode == 7) mode = 2;   // old saved NIS -> SGSR, same as the renderer's remap
+            boolean spatial = mode == 2 || mode == 3 || mode == 4 || mode == 6;
             if (!spatial || xServer == null || xServer.screenInfo == null) return 0f;
             android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
             getWindowManager().getDefaultDisplay().getRealMetrics(dm);

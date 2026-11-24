@@ -121,7 +121,7 @@ VulkanRendererContext::~VulkanRendererContext() {
 
     vk_.DestroySampler(device, sampler, nullptr);
     vk_.DestroyDescriptorPool(device, winTexPool, nullptr);
-    for (VkPipeline p : {sgsrPipeline, fsr1Pipeline, lanczosPipeline, sgsrHqPipeline, nisPipeline,
+    for (VkPipeline p : {sgsrPipeline, sgsrPlusPipeline, lanczosPipeline, sgsrHqPipeline,
                          stretchPipeline, postfxPipeline, opaquePipeline})
         if (p != VK_NULL_HANDLE) vk_.DestroyPipeline(device, p, nullptr);
     if (pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, pipeline, nullptr);
@@ -567,10 +567,9 @@ VkShaderModule VulkanRendererContext::makeShader(const uint32_t* code, size_t sz
 bool VulkanRendererContext::upscalerActive() const {
     switch (filterMode) {
     case 2: return sgsrPipeline != VK_NULL_HANDLE;
-    case 3: return fsr1Pipeline != VK_NULL_HANDLE;
+    case 3: return sgsrPlusPipeline != VK_NULL_HANDLE;
     case 4: return lanczosPipeline != VK_NULL_HANDLE;
     case 6: return sgsrHqPipeline != VK_NULL_HANDLE;
-    case 7: return nisPipeline != VK_NULL_HANDLE;
     default: return false;
     }
 }
@@ -1690,7 +1689,7 @@ void VulkanRendererContext::dumpRendererInfo() {
         "SupportedPresentModes: [%s] current=%d",pmList.c_str(),(int)requestedPresentMode);
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Filter: mode=%d (%s)",
-        filterMode, filterMode==7?"NIS":filterMode==6?"SGSR_HQ":filterMode==5?"COLOR_BOOST":filterMode==4?"LANCZOS2":filterMode==3?"FSR":filterMode==2?"SGSR":filterMode==1?"NEAREST":"LINEAR");
+        filterMode, filterMode==6?"SGSR_HQ":filterMode==5?"COLOR_BOOST":filterMode==4?"LANCZOS2":filterMode==3?"SGSR_PLUS":filterMode==2?"SGSR":filterMode==1?"NEAREST":"LINEAR");
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Surface: %dx%d container: %dx%d",surfaceWidth,surfaceHeight,containerWidth,containerHeight);
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,"=== END RENDERER INFO ===");
@@ -1701,11 +1700,10 @@ namespace {
 bool upscalerKindFor(int mode, VulkanRendererContext::PipelineKind& kind) {
     using K = VulkanRendererContext::PipelineKind;
     switch (mode) {
-    case 2: kind = K::Sgsr;    return true;
-    case 3: kind = K::Fsr1;    return true;
-    case 4: kind = K::Lanczos; return true;
-    case 6: kind = K::SgsrHq;  return true;
-    case 7: kind = K::Nis;     return true;
+    case 2: kind = K::Sgsr;     return true;
+    case 3: kind = K::SgsrPlus; return true;
+    case 4: kind = K::Lanczos;  return true;
+    case 6: kind = K::SgsrHq;   return true;
     default: return false;
     }
 }
@@ -1715,7 +1713,13 @@ void VulkanRendererContext::setFilterMode(int mode) {
     // One setter at a time. The shader compiles run before the frame lock is taken, so the render
     // thread keeps drawing while the driver works; under the lock there are only pointer swaps.
     std::lock_guard<std::mutex> setterLock(setterMutex);
-    auto modeName=[](int m){ return m==1?"NEAREST":m==2?"SGSR":m==3?"FSR":m==4?"LANCZOS2":m==5?"COLOR_BOOST":m==6?"SGSR_HQ":m==7?"NIS":"LINEAR"; };
+    // Mode 7 was NIS, removed since this build. Remap it (and any out-of-range value) to SGSR
+    // instead of silently blitting plain, so settings saved with the old build keep upscaling.
+    if (mode == 7 || mode < 0 || mode > 6) {
+        RLOG("setFilterMode: mode %d not available (removed/invalid), remapping to SGSR", mode);
+        mode = 2;
+    }
+    auto modeName=[](int m){ return m==1?"NEAREST":m==2?"SGSR":m==3?"SGSR_PLUS":m==4?"LANCZOS2":m==5?"COLOR_BOOST":m==6?"SGSR_HQ":"LINEAR"; };
     RLOG("setFilterMode: %d -> %d (%s->%s)", filterMode, mode, modeName(filterMode), modeName(mode));
     if (filterMode==mode) { RLOG("setFilterMode: already set, skipping"); return; }
 

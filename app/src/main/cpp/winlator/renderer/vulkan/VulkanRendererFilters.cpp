@@ -11,10 +11,9 @@
 #include "window_vert.h"
 #include "window_frag.h"
 #include "window_sgsr_frag.h"
-#include "window_fsr1_frag.h"
+#include "window_sgsr_plus_frag.h"
 #include "window_lanczos_frag.h"
 #include "window_sgsr_hq_frag.h"
-#include "window_nis_frag.h"
 #include "window_stretch_frag.h"
 #include "window_postfx_frag.h"
 
@@ -31,15 +30,14 @@ struct PipelineSource {
 
 // Indexed by VulkanRendererContext::PipelineKind.
 const PipelineSource kPipelineSources[] = {
-    { window_sgsr_frag_code,    sizeof(window_sgsr_frag_code),    "SGSR"    },
-    { window_fsr1_frag_code,    sizeof(window_fsr1_frag_code),    "FSR"     },
-    { window_lanczos_frag_code, sizeof(window_lanczos_frag_code), "Lanczos" },
-    { window_sgsr_hq_frag_code, sizeof(window_sgsr_hq_frag_code), "SGSR HQ" },
-    { window_nis_frag_code,     sizeof(window_nis_frag_code),     "NIS"     },
-    { window_stretch_frag_code, sizeof(window_stretch_frag_code), "stretch" },
-    { window_postfx_frag_code,  sizeof(window_postfx_frag_code),  "postfx"  },
+    { window_sgsr_frag_code,       sizeof(window_sgsr_frag_code),       "SGSR"    },
+    { window_sgsr_plus_frag_code,  sizeof(window_sgsr_plus_frag_code),  "SGSR+"   },
+    { window_lanczos_frag_code,    sizeof(window_lanczos_frag_code),    "Lanczos" },
+    { window_sgsr_hq_frag_code,    sizeof(window_sgsr_hq_frag_code),    "SGSR HQ" },
+    { window_stretch_frag_code,    sizeof(window_stretch_frag_code),    "stretch" },
+    { window_postfx_frag_code,     sizeof(window_postfx_frag_code),     "postfx"  },
 };
-static_assert(sizeof(kPipelineSources) / sizeof(kPipelineSources[0]) == 7,
+static_assert(sizeof(kPipelineSources) / sizeof(kPipelineSources[0]) == 6,
               "one source per VulkanRendererContext::PipelineKind");
 
 // A cache this large was not written by us (or is corrupt); the driver never sees it.
@@ -261,13 +259,12 @@ VkPipeline VulkanRendererContext::buildPipeline(const uint32_t* fragCode, size_t
 
 VkPipeline& VulkanRendererContext::pipelineSlot(PipelineKind kind) {
     switch (kind) {
-    case PipelineKind::Sgsr:    return sgsrPipeline;
-    case PipelineKind::Fsr1:    return fsr1Pipeline;
-    case PipelineKind::Lanczos: return lanczosPipeline;
-    case PipelineKind::SgsrHq:  return sgsrHqPipeline;
-    case PipelineKind::Nis:     return nisPipeline;
-    case PipelineKind::Stretch: return stretchPipeline;
-    case PipelineKind::PostFx:  return postfxPipeline;
+    case PipelineKind::Sgsr:     return sgsrPipeline;
+    case PipelineKind::SgsrPlus: return sgsrPlusPipeline;
+    case PipelineKind::Lanczos:  return lanczosPipeline;
+    case PipelineKind::SgsrHq:   return sgsrHqPipeline;
+    case PipelineKind::Stretch:  return stretchPipeline;
+    case PipelineKind::PostFx:   return postfxPipeline;
     }
     return postfxPipeline;   // not reached
 }
@@ -429,18 +426,16 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     getPreRotationCosSin(rotCosR, rotSinR);
 
     const bool useSgsr = filterMode == 2 && sgsrPipeline != VK_NULL_HANDLE;
-    const bool useFsr = filterMode == 3 && fsr1Pipeline != VK_NULL_HANDLE;
+    const bool useSgsrPlus = filterMode == 3 && sgsrPlusPipeline != VK_NULL_HANDLE;
     const bool useLanczos = filterMode == 4 && lanczosPipeline != VK_NULL_HANDLE;
     const bool useSgsrHq = filterMode == 6 && sgsrHqPipeline != VK_NULL_HANDLE;
-    const bool useNis = filterMode == 7 && nisPipeline != VK_NULL_HANDLE;
     const bool useColorBoost = filterMode == 5 && postfxPipeline != VK_NULL_HANDLE;
     const bool usePostFX = postFXMode > 0 && postfxPipeline != VK_NULL_HANDLE;
     const bool useStretch = stretchMode == 1 && stretchPipeline != VK_NULL_HANDLE;
 
-    VkPipeline activePipeline = useNis ? nisPipeline
+    VkPipeline activePipeline = useSgsrPlus ? sgsrPlusPipeline
                               : useSgsrHq ? sgsrHqPipeline
                               : useSgsr ? sgsrPipeline
-                              : useFsr ? fsr1Pipeline
                               : useLanczos ? lanczosPipeline
                               : useColorBoost ? postfxPipeline
                               : usePostFX ? postfxPipeline
@@ -453,7 +448,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         vk_.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout,
                                   0, 1, &d.ds, 0, nullptr);
 
-        if (useSgsr || useSgsrHq || useNis) {
+        if (useSgsr || useSgsrHq) {
             WindowPushConstantsSGSR pc{};
             if (useStretch) { pc.ndcX0 = -1.0f; pc.ndcX1 = 1.0f; }
             else {
@@ -477,8 +472,8 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             vk_.CmdPushConstants(cb, pipeLayout,
                 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                 0, sizeof(pc), &pc);
-        } else if (useFsr || useLanczos) {
-            WindowPushConstantsFSR1 pc{};
+        } else if (useSgsrPlus || useLanczos) {
+            WindowPushConstantsSgsrPlus pc{};
             if (useStretch) { pc.ndcX0 = -1.0f; pc.ndcX1 = 1.0f; }
             else {
                 pc.ndcX0 = (ox + (float)d.x * sx) / cw * 2.0f - 1.0f;

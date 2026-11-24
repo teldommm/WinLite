@@ -29,12 +29,12 @@ import kotlin.math.roundToInt
 
 // ---------- Graphics panel ----------
 
-// Indices match the original Spinners' positions exactly (upscalerModeIndex: SGSR/FSR/
+// Indices match the original Spinners' positions exactly (upscalerModeIndex: SGSR/SGSR+/
 // Lanczos2/ColorBoost, postFxModeIndex: None/DLS/CRT/HDR/Natural, reshadeEffectIndex: the
 // 12-entry ReShade list) so Java's existing mapping tables can be reused unchanged.
 data class GraphicsPanelState(
     val fpsLimit: Int,
-    val fsrEnabled: Boolean,
+    val upscalerEnabled: Boolean,
     val upscalerModeIndex: Int,
     val sharpnessPercent: Int,
     val postFxModeIndex: Int,
@@ -53,7 +53,7 @@ data class GraphicsPanelState(
 
 interface GraphicsPanelCallbacks {
     fun onFpsLimitChanged(fps: Int)
-    fun onFsrToggled(enabled: Boolean)
+    fun onUpscalerToggled(enabled: Boolean)
     fun onUpscalerModeChanged(index: Int)
     fun onSharpnessChanged(percent: Int)
     fun onSharpnessCommitted(percent: Int)
@@ -76,10 +76,11 @@ object GraphicsSidebarPanelHost {
     }
 }
 
-// Index = filterMode - 2 (saved/native numbering, never reorder). NIS (mode 7) is appended here but
-// shown right after SGSR (HQ) and after FSR (NIS) in the dropdown through UPSCALER_DISPLAY_ORDER.
-private val UPSCALER_LABELS = listOf("SGSR", "FSR", "Lanczos 2", "Color Boost", "SGSR HQ", "NIS")
-private val UPSCALER_DISPLAY_ORDER = listOf(0, 4, 1, 5, 2, 3)
+// Index = filterMode - 2 (saved/native numbering, never reorder). The former FSR mode (mode 3)
+// is now labelled SGSR+; NIS (mode 7) was removed. UPSCALER_DISPLAY_ORDER shows SGSR+ between
+// SGSR and SGSR HQ.
+private val UPSCALER_LABELS = listOf("SGSR", "SGSR+", "Lanczos 2", "Color Boost", "SGSR HQ")
+private val UPSCALER_DISPLAY_ORDER = listOf(0, 1, 4, 2, 3)
 private val POSTFX_LABELS = listOf("None", "DLS", "CRT", "HDR", "Natural")
 // First 12 entries (indices 0-11) map 1:1 to window_postfx.frag effectId 0,10..20 via
 // XServerDisplayActivity's effectModes[] table. The last 5 (indices 12-16) were previously
@@ -163,7 +164,7 @@ private fun GraphicsSidebarPanel(
     state: GraphicsPanelState,
     callbacks: GraphicsPanelCallbacks
 ) {
-    var fsrEnabled by remember { mutableStateOf(state.fsrEnabled) }
+    var upscalerEnabled by remember { mutableStateOf(state.upscalerEnabled) }
     var upscalerIndex by remember { mutableStateOf(state.upscalerModeIndex) }
     var sharpness by remember { mutableStateOf(state.sharpnessPercent) }
     var postFxIndex by remember { mutableStateOf(state.postFxModeIndex) }
@@ -202,11 +203,11 @@ private fun GraphicsSidebarPanel(
     }
 
     // Same visibility rule as the original updateSharpnessVis(): shown while Super Resolution
-    // is on (any upscaler mode — SGSR/SGSR HQ/FSR/NIS/Lanczos2/Color Boost all read pc.sharpness
+    // is on (any upscaler mode — SGSR/SGSR+/SGSR HQ/Lanczos2/Color Boost all read pc.sharpness
     // in their own shader) OR the Post Effect picker is set to DLS (index 1), since DLS also
     // reads it. Under an upscaler DLS no longer sharpens (contrast/saturation only), so the
     // slider drives a single sharpening stage.
-    val sharpnessVisible = fsrEnabled || postFxIndex == 1
+    val sharpnessVisible = upscalerEnabled || postFxIndex == 1
 
     Column(
         modifier = Modifier
@@ -224,17 +225,17 @@ private fun GraphicsSidebarPanel(
         SidebarCard {
             SidebarInlineToggle(
                 label = uiStr(R.string.ui_super_resolution),
-                checked = fsrEnabled,
+                checked = upscalerEnabled,
                 onCheckedChange = {
-                    fsrEnabled = it
+                    upscalerEnabled = it
                     if (it && reshadeIndex > 0) {
                         reshadeIndex = 0
                         callbacks.onReshadeEffectChanged(0)
                     }
-                    callbacks.onFsrToggled(it)
+                    callbacks.onUpscalerToggled(it)
                 }
             )
-            RevealSection(visible = fsrEnabled) {
+            RevealSection(visible = upscalerEnabled) {
                 Spacer(Modifier.height(8.dp))
                 SidebarDropdownField(
                     caption = uiStr(R.string.ui_upscaler_mode),
@@ -294,9 +295,9 @@ private fun GraphicsSidebarPanel(
                     // resets Post Effect to None, since all three drive the same renderer
                     // filter/post-fx state and only one can be active at a time.
                     if (index > 0) {
-                        if (fsrEnabled) {
-                            fsrEnabled = false
-                            callbacks.onFsrToggled(false)
+                        if (upscalerEnabled) {
+                            upscalerEnabled = false
+                            callbacks.onUpscalerToggled(false)
                         }
                         if (postFxIndex != 0) {
                             postFxIndex = 0

@@ -135,12 +135,12 @@ struct WindowPushConstantsStretch { float ndcX0, ndcY0, ndcX1, ndcY1; int useTex
                                   float _pad[5];
                                   float cosR = 1.f, sinR = 0.f; };
 
-struct WindowPushConstantsFSR1  { float ndcX0, ndcY0, ndcX1, ndcY1; int useTexAlpha;
-                                  float srcW, srcH, outW, outH;
-                                  int   effectId;
-                                  float sharpness;
-                                  float _pad0;
-                                  float cosR = 1.f, sinR = 0.f; };
+struct WindowPushConstantsSgsrPlus  { float ndcX0, ndcY0, ndcX1, ndcY1; int useTexAlpha;
+                                      float srcW, srcH, outW, outH;
+                                      int   effectId;
+                                      float sharpness;
+                                      float _pad0;
+                                      float cosR = 1.f, sinR = 0.f; };
 
 struct WindowPushConstantsPostFX  { float ndcX0, ndcY0, ndcX1, ndcY1;
                                     int   effectId;
@@ -153,8 +153,8 @@ struct WindowPushConstantsPostFX  { float ndcX0, ndcY0, ndcX1, ndcY1;
 static_assert(offsetof(WindowPushConstants,       cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
 static_assert(offsetof(WindowPushConstantsSGSR,   cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
 static_assert(offsetof(WindowPushConstantsStretch,cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
-static_assert(offsetof(WindowPushConstantsFSR1,   cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
-static_assert(sizeof(WindowPushConstantsFSR1) == sizeof(WindowPushConstantsSGSR), "FSR1 push constants must fit the shared pipeline layout range");
+static_assert(offsetof(WindowPushConstantsSgsrPlus,cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
+static_assert(sizeof(WindowPushConstantsSgsrPlus) == sizeof(WindowPushConstantsSGSR), "SGSR+ push constants must fit the shared pipeline layout range");
 static_assert(offsetof(WindowPushConstantsPostFX, cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
 static_assert(offsetof(WindowPushConstantsPostFX, postFxId) == 32, "postFxId offset must match window_postfx.frag");
 
@@ -168,7 +168,7 @@ public:
     ~VulkanRendererContext();
 
     // The pipelines built on demand for the effect setters (the base window pipelines are not here).
-    enum class PipelineKind { Sgsr, Fsr1, Lanczos, SgsrHq, Nis, Stretch, PostFx };
+    enum class PipelineKind { Sgsr, SgsrPlus, Lanczos, SgsrHq, Stretch, PostFx };
 
     void onSurfaceResized(int width, int height);
     void setTransform(float ox, float oy, float sx, float sy);
@@ -386,11 +386,10 @@ public:
 
     VkPipeline            pipeline        = VK_NULL_HANDLE;
     VkPipeline            sgsrPipeline    = VK_NULL_HANDLE;
-    VkPipeline            fsr1Pipeline    = VK_NULL_HANDLE;
-    VkPipeline            lanczosPipeline = VK_NULL_HANDLE;
-    VkPipeline            sgsrHqPipeline  = VK_NULL_HANDLE;
-    VkPipeline            nisPipeline     = VK_NULL_HANDLE;
-    VkPipeline            stretchPipeline = VK_NULL_HANDLE;
+    VkPipeline            sgsrPlusPipeline = VK_NULL_HANDLE;
+    VkPipeline            lanczosPipeline  = VK_NULL_HANDLE;
+    VkPipeline            sgsrHqPipeline   = VK_NULL_HANDLE;
+    VkPipeline            stretchPipeline  = VK_NULL_HANDLE;
     VkPipeline            postfxPipeline  = VK_NULL_HANDLE;
     // The window pipeline without blending: guest buffers are drawn opaque, only the cursor blends.
     VkPipeline            opaquePipeline  = VK_NULL_HANDLE;

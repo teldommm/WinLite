@@ -435,7 +435,7 @@ void main() {
     else if (pc.effectId == 21) rgb = applyColorBoost            (uv, pc.sharpness);
     else                        rgb = texture(texSampler, uv).rgb;
     // ColorBoost is picked as an upscaler, so the panel's PostFX effect rides on top of it the
-    // way it does on SGSR, FSR, Lanczos and NIS.
+    // way it does on SGSR, SGSR+ and Lanczos.
     if (pc.effectId == 21) rgb = applyPostFXEffect(pc.postFxId, rgb, uv, texel, pc.sharpness, false);
     outColor = vec4(rgb, 1.0);
 }

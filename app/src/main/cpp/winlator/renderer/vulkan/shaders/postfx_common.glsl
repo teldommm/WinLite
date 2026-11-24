@@ -1,5 +1,5 @@
 // PostFX effects 1..4 (DLS, CRT, HDR, Natural), shared by every shader that applies the graphics
-// panel's effect: the single-pass upscalers (SGSR, SGSR HQ, NIS, FSR, Lanczos) run it on their
+// panel's effect: the single-pass upscalers (SGSR, SGSR+, SGSR HQ, Lanczos) run it on their
 // output, window_postfx on the plain blit and on top of ColorBoost. Each function takes the
 // colour to work on; the neighbourhood taps read the source texture. Include after texSampler is
 // declared (needs GL_GOOGLE_include_directive). texel = one source pixel in UV.

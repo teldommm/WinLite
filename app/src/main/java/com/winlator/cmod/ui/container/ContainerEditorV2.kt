@@ -919,16 +919,17 @@ private fun ContainerCategoryV2(
                     }
                 }
                 SettingsDivider()
-                // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
-                // Display order: SGSR HQ right after SGSR, NIS right after FSR.
-                val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
+                // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 SGSR+ (the former FSR mode),
+                // 4 Lanczos2, 5 Color Boost, 6 SGSR HQ. Mode 7 (NIS) was removed; the renderer
+                // remaps it to SGSR when it loads from old saved settings.
+                // Display order: SGSR+ between SGSR and SGSR HQ.
+                val filterIds = listOf(0, 1, 2, 3, 6, 4, 5)
                 val filters = listOf(
                     uiStr(R.string.ui_bilinear),
                     uiStr(R.string.ui_nearest_neighbor),
                     uiStr(R.string.ui_snapdragon_super_resolution),
+                    uiStr(R.string.ui_snapdragon_super_resolution_plus),
                     uiStr(R.string.ui_snapdragon_super_resolution_hq),
-                    uiStr(R.string.ui_amd_fidelityfx_super_resolution),
-                    uiStr(R.string.ui_nvidia_image_scaling_nis),
                     uiStr(R.string.ui_lanczos_2_16_tap),
                     uiStr(R.string.ui_color_boost)
                 )

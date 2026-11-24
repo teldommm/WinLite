@@ -145,7 +145,7 @@ private fun IngameSidebar(
             // to be an AnimatedContent, which disposed a panel when you switched away — and since
             // panels seed their UI from the snapshot taken when they were attached (Graphics,
             // HUD, Screen), coming back showed stale values: e.g. Super Resolution "off" while it
-            // was on, so picking a ReShade effect skipped turning FSR off and both ran at once.
+            // was on, so picking a ReShade effect skipped turning Super Resolution off and both ran at once.
             // The old per-panel ComposeViews were only hidden, never disposed; this restores that.
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 controller.panels.forEach { (panelId, entry) ->

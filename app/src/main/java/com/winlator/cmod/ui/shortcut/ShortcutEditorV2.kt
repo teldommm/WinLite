@@ -967,10 +967,12 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 FSR, 4 Lanczos2, 5 Color Boost, 6 SGSR HQ, 7 NIS.
-                // Display order: SGSR HQ right after SGSR, NIS right after FSR.
-                val filterIds = listOf(0, 1, 2, 6, 3, 7, 4, 5)
-                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "Snapdragon Super Resolution HQ", "AMD FidelityFX Super Resolution", "NVIDIA Image Scaling (NIS)", "Lanczos 2 (16-tap)", "Color Boost")
+                // Saved filterMode ids: 0 Bilinear, 1 Nearest, 2 SGSR, 3 SGSR+ (the former FSR mode),
+                // 4 Lanczos2, 5 Color Boost, 6 SGSR HQ. Mode 7 (NIS) was removed; the renderer
+                // remaps it to SGSR when it loads from old saved settings.
+                // Display order: SGSR+ between SGSR and SGSR HQ.
+                val filterIds = listOf(0, 1, 2, 3, 6, 4, 5)
+                val filters = listOf("Bilinear", "Nearest neighbor", "Snapdragon Super Resolution", "Snapdragon Super Resolution+", "Snapdragon Super Resolution HQ", "Lanczos 2 (16-tap)", "Color Boost")
                 SettingChoice(uiStr(R.string.ui_texture_filter), filters[filterIds.indexOf(s.filterMode).coerceAtLeast(0)], filters) {
                     s.filterMode = filterIds[filters.indexOf(it).coerceAtLeast(0)]
                     s.saveRenderer()
