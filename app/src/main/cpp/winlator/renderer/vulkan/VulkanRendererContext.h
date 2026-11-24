@@ -698,6 +698,9 @@ public:
     // (logged - the frame then falls back to the plain blit). No locks needed; callers hold
     // setterMutex.
     VkPipeline prebuildPipeline(PipelineKind kind);
+    // True on Qualcomm Adreno: SGSR HQ then builds from the mediump (fp16) blob. No locks
+    // needed; reads the physical device, which is fixed after init.
+    bool prefersHalfPrecisionUpscaler() const;
     // Frame lock held exclusively: installs a prebuilt pipeline (or drops it if one got there first).
     void adoptPipeline(PipelineKind kind, VkPipeline built);
     bool upscalerActive() const;   // the selected upscaler is built and applies PostFX inline

@@ -14,6 +14,7 @@
 #include "window_sgsr_plus_frag.h"
 #include "window_lanczos_frag.h"
 #include "window_sgsr_hq_frag.h"
+#include "window_sgsr_hq_half_frag.h"
 #include "window_stretch_frag.h"
 #include "window_postfx_frag.h"
 
@@ -269,18 +270,54 @@ VkPipeline& VulkanRendererContext::pipelineSlot(PipelineKind kind) {
     return postfxPipeline;   // not reached
 }
 
+bool VulkanRendererContext::prefersHalfPrecisionUpscaler() const {
+    // Adreno only (vendorID 0x5143): Qualcomm GPUs double fp16 ALU throughput, and
+    // Qualcomm's own SGSR reference ships a mediump mobile build. Mali runs fp16 at
+    // the same rate as fp32, and the remaining vendors were never validated with
+    // relaxed precision in this renderer, so they stay on the fp32 shader.
+    if (physicalDevice == VK_NULL_HANDLE || !vk_.GetPhysicalDeviceProperties) return false;
+    VkPhysicalDeviceProperties props{};
+    vk_.GetPhysicalDeviceProperties(physicalDevice, &props);
+    return props.vendorID == 0x5143u;   // VK_VENDOR_ID_QUALCOMM
+}
+
 VkPipeline VulkanRendererContext::prebuildPipeline(PipelineKind kind) {
     if (pipelineSlot(kind) != VK_NULL_HANDLE) return VK_NULL_HANDLE;
-    const PipelineSource& src = kPipelineSources[(size_t)kind];
+    // SGSR HQ ships in two precisions built from one source: the fp32 reference blob and a
+    // mediump (fp16 RelaxedPrecision) blob compiled with -DBL_HALF. Qualcomm Adreno executes
+    // fp16 fragment maths at roughly twice the fp32 rate, so on Adreno the fp16 blob is
+    // preferred; Mali/PowerVR/desktop GPUs keep the fp32 original (fp16 gains nothing there
+    // and the fp32 path is the one every other vendor was validated with). A failed fp16
+    // build falls back to fp32, then to the plain blit, as before.
+    const PipelineSource* preferred = &kPipelineSources[(size_t)kind];
+    const PipelineSource* fallback  = nullptr;
+    static const PipelineSource sgsrHqHalf = {
+        window_sgsr_hq_half_frag_code, sizeof(window_sgsr_hq_half_frag_code), "SGSR HQ (fp16)"
+    };
+    if (kind == PipelineKind::SgsrHq && prefersHalfPrecisionUpscaler()) {
+        preferred = &sgsrHqHalf;
+        fallback  = &kPipelineSources[(size_t)kind];
+    }
     // The effect setters are called straight from JNI: an exception escaping there aborts the
     // process. A failed build leaves the pipeline unset, and recordCmdBuf falls back to the plain
     // blit; the next switch to that mode tries again.
     try {
-        VkPipeline p = buildPipeline(src.code, src.size, false, src.name);
-        RLOG("%s pipeline built", src.name);
+        VkPipeline p = buildPipeline(preferred->code, preferred->size, false, preferred->name);
+        RLOG("%s pipeline built", preferred->name);
         return p;
     } catch (const std::exception& e) {
-        RLOG_E("%s pipeline build failed (%s): drawing with the plain blit", src.name, e.what());
+        if (fallback != nullptr) {
+            RLOG_E("%s pipeline build failed (%s): retrying with %s", preferred->name, e.what(), fallback->name);
+            try {
+                VkPipeline p = buildPipeline(fallback->code, fallback->size, false, fallback->name);
+                RLOG("%s pipeline built", fallback->name);
+                return p;
+            } catch (const std::exception& e2) {
+                RLOG_E("%s pipeline build failed (%s): drawing with the plain blit", fallback->name, e2.what());
+                return VK_NULL_HANDLE;
+            }
+        }
+        RLOG_E("%s pipeline build failed (%s): drawing with the plain blit", preferred->name, e.what());
         return VK_NULL_HANDLE;
     }
 }

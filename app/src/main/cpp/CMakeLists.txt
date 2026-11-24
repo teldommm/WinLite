@@ -115,11 +115,13 @@ set(VULKAN_RENDERER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/winlator/renderer/vulkan)
 set(VULKAN_SHADER_DIR ${VULKAN_RENDERER_DIR}/shaders)
 set(VULKAN_SHADER_HEADERS "")
 
-# vulkan_shader(<source in shaders/> <base name> [USES_POSTFX])
+# vulkan_shader(<source in shaders/> <base name> [USES_POSTFX] [EXTRA_ARGS <flags...>])
 #   -> ${CMAKE_CURRENT_BINARY_DIR}/<base>.h defining the array <base>_code.
 # USES_POSTFX: the shader #includes postfx_common.glsl, so it is rebuilt when that changes.
+# EXTRA_ARGS: extra glslangValidator flags, e.g. -DBL_HALF to build the mediump
+#   (fp16 RelaxedPrecision) variant of the same source next to the fp32 one.
 function(vulkan_shader SOURCE BASE)
-    cmake_parse_arguments(ARG "USES_POSTFX" "" "" ${ARGN})
+    cmake_parse_arguments(ARG "USES_POSTFX" "" "EXTRA_ARGS" ${ARGN})
     set(_src ${VULKAN_SHADER_DIR}/${SOURCE})
     set(_out ${CMAKE_CURRENT_BINARY_DIR}/${BASE}.h)
     set(_deps ${_src})
@@ -128,7 +130,7 @@ function(vulkan_shader SOURCE BASE)
     endif()
     add_custom_command(
         OUTPUT ${_out}
-        COMMAND glslangValidator -V --vn ${BASE}_code -x -o ${_out} ${_src}
+        COMMAND glslangValidator -V ${ARG_EXTRA_ARGS} --vn ${BASE}_code -x -o ${_out} ${_src}
         DEPENDS ${_deps}
         COMMENT "Compiling ${SOURCE} -> ${BASE}.h"
         VERBATIM
@@ -154,6 +156,10 @@ vulkan_shader(window.frag         window_frag)
 vulkan_shader(window_stretch.frag window_stretch_frag)
 vulkan_shader(window_sgsr.frag    window_sgsr_frag    USES_POSTFX)
 vulkan_shader(window_sgsr_hq.frag window_sgsr_hq_frag USES_POSTFX)
+# SGSR HQ fp16 variant: the same source with BL_HALF (colour/weight maths in
+# mediump, positions and push constants stay highp). Selected at runtime on
+# Qualcomm Adreno in VulkanRendererFilters.cpp; other GPUs keep the fp32 blob.
+vulkan_shader(window_sgsr_hq.frag window_sgsr_hq_half_frag USES_POSTFX EXTRA_ARGS -DBL_HALF)
 vulkan_shader(window_sgsr_plus.frag window_sgsr_plus_frag USES_POSTFX)
 vulkan_shader(window_lanczos.frag window_lanczos_frag USES_POSTFX)
 vulkan_shader(window_postfx.frag  window_postfx_frag  USES_POSTFX)
