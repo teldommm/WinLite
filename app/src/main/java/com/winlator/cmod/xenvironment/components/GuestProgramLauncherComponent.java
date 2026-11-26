@@ -387,6 +387,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         execEnvVars.put("VK_LAYER_PATH", rootDir.getPath() + "/usr/share/vulkan/implicit_layer.d" + ":" + rootDir.getPath() + "/usr/share/vulkan/explicit_layer.d");
         execEnvVars.put("WRAPPER_LAYER_PATH", rootDir.getPath() + "/usr/lib");
         execEnvVars.put("WRAPPER_CACHE_PATH", rootDir.getPath() + "/usr/var/cache");
+        // The wrapper's persistent pipeline cache (WRAPPER_PIPELINE_CACHE) is asked to save here
+        // before Wine is stopped, see ProcessHelper.requestPipelineCacheSave().
+        final String pipelineCacheRequest = rootDir.getPath() + "/usr/var/cache/pipeline_cache.request";
+        ProcessHelper.clearPipelineCacheRequest(pipelineCacheRequest);
+        ProcessHelper.pipelineCacheRequestPath = pipelineCacheRequest;
+        execEnvVars.put("WRAPPER_PIPELINE_CACHE_REQUEST", pipelineCacheRequest);
         execEnvVars.put("WINE_NO_DUPLICATE_EXPLORER", "1");
         execEnvVars.put("PREFIX", rootDir.getPath() + "/usr");
         execEnvVars.put("DISPLAY", ":0");

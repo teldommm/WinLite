@@ -44,7 +44,87 @@ public abstract class ProcessHelper {
         Log.d("ProcessHelper", "Process killed with pid: " + pid);
     }
 
+    /** File the Vulkan wrapper watches (WRAPPER_PIPELINE_CACHE_REQUEST); set when Wine is launched. */
+    public static volatile String pipelineCacheRequestPath;
+    private static final long PIPELINE_CACHE_SAVE_TIMEOUT_MS = 30000;
+
+    /**
+     * Asks the Vulkan wrapper of every running Wine process to write its pipeline cache to disk and
+     * waits for the answer. Wine is stopped with SIGTERM and killed 1.5 s later, which is far too
+     * little to serialize a big cache, so without this a game that is closed from the menu never
+     * keeps what it compiled. Does nothing when no wrapper is listening (cache off, stale markers).
+     * Must be called with the Wine processes running (not stopped) and off the main thread.
+     */
+    public static void requestPipelineCacheSave() {
+        final String request = pipelineCacheRequestPath;
+        if (request == null) return;
+        final File requestFile = new File(request);
+        final File dir = requestFile.getParentFile();
+        if (dir == null) return;
+        try {
+            if (listLiveCacheListeners(dir, requestFile.getName()).isEmpty()) return;
+
+            final String token = Long.toString(System.nanoTime());
+            final File doneFile = new File(request + ".done");
+            // Written in one piece; the wrapper compares the whole content with the last token.
+            java.nio.file.Files.write(requestFile.toPath(), token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            Log.i("ProcessHelper", "Asked the wrapper to save the pipeline cache");
+
+            final long deadline = System.currentTimeMillis() + PIPELINE_CACHE_SAVE_TIMEOUT_MS;
+            while (System.currentTimeMillis() < deadline) {
+                if (doneFile.isFile() && token.equals(new String(
+                        java.nio.file.Files.readAllBytes(doneFile.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8))) {
+                    Log.i("ProcessHelper", "Pipeline cache saved");
+                    return;
+                }
+                // Every process that listened is gone: nobody is going to answer
+                if (listLiveCacheListeners(dir, requestFile.getName()).isEmpty()) return;
+                Thread.sleep(100);
+            }
+            Log.w("ProcessHelper", "Pipeline cache save timed out");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            Log.w("ProcessHelper", "Pipeline cache save request failed: " + e);
+        }
+    }
+
+    /** Processes that have a wrapper pipeline cache open: "<request>.alive.<pid>" with a live pid. */
+    private static List<Integer> listLiveCacheListeners(File dir, String requestName) {
+        final ArrayList<Integer> result = new ArrayList<>();
+        final String prefix = requestName + ".alive.";
+        final String[] names = dir.list();
+        if (names == null) return result;
+        for (String name : names) {
+            if (!name.startsWith(prefix)) continue;
+            try {
+                int pid = Integer.parseInt(name.substring(prefix.length()));
+                if (new File("/proc/" + pid).exists()) result.add(pid);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return result;
+    }
+
+    /** Forgets what an earlier session left behind. */
+    public static void clearPipelineCacheRequest(String request) {
+        if (request == null) return;
+        final File requestFile = new File(request);
+        final File dir = requestFile.getParentFile();
+        if (dir == null) return;
+        final String[] names = dir.list();
+        if (names == null) return;
+        for (String name : names) {
+            if (name.equals(requestFile.getName()) || name.startsWith(requestFile.getName() + ".")) {
+                //noinspection ResultOfMethodCallIgnored
+                new File(dir, name).delete();
+            }
+        }
+    }
+
     public static void terminateAllWineProcesses() {
+        requestPipelineCacheSave();
         for (String process : listRunningWineProcesses()) {
             terminateProcess(Integer.parseInt(process));
         }
