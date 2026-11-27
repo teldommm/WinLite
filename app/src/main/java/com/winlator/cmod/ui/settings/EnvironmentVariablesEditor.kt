@@ -85,7 +85,7 @@ val knownEnvironmentVariables = listOf(
     EnvVariableSpec("MESA_SHADER_CACHE_DISABLE", EnvValueKind.CHECKBOX, listOf("false", "true")),
     EnvVariableSpec("MESA_SHADER_CACHE_MAX_SIZE", EnvValueKind.TEXT),
     EnvVariableSpec("WRAPPER_PIPELINE_CACHE", EnvValueKind.CHECKBOX, listOf("0", "1")),
-    EnvVariableSpec("WRAPPER_PIPELINE_CACHE_MAX_SIZE", EnvValueKind.NUMBER),
+    EnvVariableSpec("WRAPPER_PIPELINE_CACHE_MAX_SIZE", EnvValueKind.TEXT),
     EnvVariableSpec("mesa_glthread", EnvValueKind.CHECKBOX, listOf("false", "true")),
     EnvVariableSpec("WINEESYNC", EnvValueKind.CHECKBOX, listOf("0", "1")),
     EnvVariableSpec("TU_DEBUG", EnvValueKind.MULTI, listOf("forcecb", "nocb", "deck_emu", "startup", "nir", "nobin", "sysmem", "gmem", "forcebin", "layout", "noubwc", "nomultipos", "nolrz", "nolrzfc", "perf", "perfc", "flushall", "syncdraw", "push_consts_per_stage", "rast_order", "unaligned_store", "log_skip_gmem_ops", "dynamic", "bos", "3d_load", "fdm", "noconform", "rd")),
