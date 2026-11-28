@@ -14,7 +14,7 @@ use crate::version;
 use crate::wine_bridge::{WineBridge, WineBridgeConfig};
 use crate::ws_connection::WsConnection;
 use jni::objects::{
-    GlobalRef, JByteArray, JClass, JIntArray, JLongArray, JObject, JString, JValue,
+    GlobalRef, JByteArray, JClass, JIntArray, JLongArray, JObject, JObjectArray, JString, JValue,
 };
 use jni::sys::{
     jboolean, jbyteArray, jint, jlong, jlongArray, jstring, JNI_FALSE, JNI_TRUE, JNI_VERSION_1_6,
@@ -3602,7 +3602,8 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
     app_id: jint,
     depot_ids: JIntArray,
     manifest_ids: JLongArray,
-    branch: JString,
+    manifest_app_ids: JIntArray,
+    manifest_branches: JObjectArray,
     install_dir: JString,
     fresh: jboolean,
     ca_bundle_path: JString,
@@ -3623,9 +3624,33 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
     };
     let depot_ids = int_array_to_u32_vec(&env, &depot_ids);
     let manifest_ids = long_array_to_u64_vec(&env, &manifest_ids);
-    if depot_ids.len() != manifest_ids.len() {
-        call_download_complete(&mut env, &listener, "depot/manifest array length mismatch");
+    let manifest_app_ids = int_array_to_u32_vec(&env, &manifest_app_ids);
+    if depot_ids.len() != manifest_ids.len()
+        || depot_ids.len() != manifest_app_ids.len()
+        || env.get_array_length(&manifest_branches).ok() != Some(depot_ids.len() as jint)
+    {
+        call_download_complete(&mut env, &listener, "mismatched depot metadata arrays");
         return;
+    }
+    let mut manifest_sources = std::collections::HashMap::with_capacity(depot_ids.len());
+    for (index, (&depot_id, manifest_app_id)) in depot_ids.iter().zip(manifest_app_ids).enumerate() {
+        let branch = env
+            .get_object_array_element(&manifest_branches, index as jint)
+            .ok()
+            .and_then(|branch| {
+                let branch = env.auto_local(JString::from(branch));
+                jstring_to_string(&mut env, &branch)
+            });
+        let Some(branch) = branch.filter(|branch| !branch.is_empty()) else {
+            call_download_complete(&mut env, &listener, "invalid manifest branch");
+            return;
+        };
+        if manifest_app_id == 0
+            || manifest_sources.insert(depot_id, (manifest_app_id, branch)).is_some()
+        {
+            call_download_complete(&mut env, &listener, "invalid manifest source");
+            return;
+        }
     }
     let specs = depot_ids
         .into_iter()
@@ -3642,7 +3667,6 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
         call_download_complete(&mut env, &listener, "invalid download request");
         return;
     }
-    let branch = jstring_to_string(&mut env, &branch).unwrap_or_else(|| "public".to_string());
     let ca_bundle_path = jstring_to_string(&mut env, &ca_bundle_path).unwrap_or_default();
     let Ok(listener) = env.new_global_ref(&listener) else {
         call_download_complete(&mut env, &listener, "listener ref failed");
@@ -3679,6 +3703,7 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
         let installed_cfg = crate::depot_config::DepotConfigStore::load(&config_dir);
         let mut resolved = Vec::with_capacity(specs.len());
         let mut denied: Vec<u32> = Vec::new();
+        let mut already_installed = 0;
         for spec in specs {
             if download_cancel.load(Ordering::Relaxed) {
                 dispatch_download_complete(
@@ -3687,14 +3712,9 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
                 );
                 return;
             }
-            // Already-installed depots need no key/code; the downloader's resume-skip handles them.
+            // Limit the transfer meter to depots that still need work.
             if !fresh && installed_cfg.is_installed(spec.depot_id, spec.manifest_id) {
-                resolved.push(crate::depot_downloader::ResolvedDepotSpec {
-                    depot_id: spec.depot_id,
-                    manifest_id: spec.manifest_id,
-                    depot_key: Vec::new(),
-                    manifest_request_code: 0,
-                });
+                already_installed += 1;
                 continue;
             }
             let depot_key = match resolve_depot_key_with_retry(
@@ -3728,12 +3748,13 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
                     return;
                 }
             };
+            let (manifest_app_id, manifest_branch) = &manifest_sources[&spec.depot_id];
             let manifest_request_code = match resolve_manifest_code_with_retry(
                 &runtime,
-                app_id,
+                *manifest_app_id,
                 spec.depot_id,
                 spec.manifest_id,
-                &branch,
+                manifest_branch,
                 timeout,
                 download_cancel.as_ref(),
             ) {
@@ -3768,6 +3789,17 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
             });
         }
         write_denied_depots_marker(&config_dir, &denied);
+        if resolved.is_empty() && already_installed > 0 {
+            dispatch_download_complete(
+                listener,
+                crate::depot_downloader::DepotDownloadResult {
+                    success: true,
+                    depots_skipped: already_installed,
+                    ..Default::default()
+                },
+            );
+            return;
+        }
         if resolved.is_empty() {
             dispatch_download_complete(
                 listener,
@@ -3779,6 +3811,7 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
             );
             return;
         }
+        dispatch_resolved_depots(&listener, &resolved);
         let progress_listener = listener.clone();
         let progress = |progress: &crate::depot_downloader::DepotDownloadProgress| {
             dispatch_download_progress(&progress_listener, progress);
@@ -3786,12 +3819,13 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
         let progress_cb: crate::depot_downloader::DepotProgressCallback = &progress;
         // Re-resolve manifest request codes right before each depot's manifest fetch.
         let code_refresher = |depot_id: u32, manifest_id: u64| -> Option<u64> {
+            let (manifest_app_id, manifest_branch) = manifest_sources.get(&depot_id)?;
             match resolve_manifest_code_with_retry(
                 &runtime,
-                app_id,
+                *manifest_app_id,
                 depot_id,
                 manifest_id,
-                &branch,
+                manifest_branch,
                 timeout,
                 download_cancel.as_ref(),
             ) {
@@ -3803,7 +3837,7 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
         // Engine-side download diagnostics (throughput lines, fallocate fallback) → logcat.
         let download_log = |msg: &str| android_log("WINLITE_STEAM_DL", msg);
         let download_log_cb: crate::depot_writer::DepotLogCallback = &download_log;
-        let result =
+        let mut result =
             crate::depot_downloader::download_resolved_depots_with_cancel_progress(
                 &install_dir,
                 &resolved,
@@ -3817,8 +3851,28 @@ pub extern "system" fn Java_com_winlator_cmod_feature_stores_steam_winlitesteam_
                 Some(code_refresher_cb),
                 Some(download_log_cb),
             );
+        result.depots_skipped += already_installed;
         dispatch_download_complete(listener, result);
     });
+}
+
+fn dispatch_resolved_depots(
+    listener: &GlobalRef,
+    depots: &[crate::depot_downloader::ResolvedDepotSpec],
+) {
+    let Some(vm) = JVM.get() else { return; };
+    let Ok(mut env) = vm.attach_current_thread_as_daemon() else { return; };
+    let ids: Vec<jint> = depots.iter().map(|depot| depot.depot_id as jint).collect();
+    let Ok(array) = env.new_int_array(ids.len() as jint) else {
+        clear_pending_exception(&mut env);
+        return;
+    };
+    if env.set_int_array_region(&array, 0, &ids).is_ok() {
+        let object = JObject::from(array);
+        let _ = env.call_method(listener.as_obj(), "onDepotsResolved", "([I)V",
+            &[JValue::Object(&object)]);
+    }
+    clear_pending_exception(&mut env);
 }
 
 fn dispatch_download_progress(

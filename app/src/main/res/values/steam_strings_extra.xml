@@ -71,4 +71,17 @@
     <string name="steam_mode_preparing">Preparing offline mode…</string>
     <string name="steam_mode_client">Preparing Steam Client…</string>
     <string name="ui_saves">Saves</string>
+    <string name="steam_dlc_wait_licenses">Waiting for Steam licenses. Try again after your library finishes loading.</string>
+    <string name="steam_dlc_sign_in">Sign in to select owned DLC.</string>
+    <string name="steam_dlc_select_all">Select all</string>
+    <string name="steam_dlc_select_none">Deselect all</string>
+    <string name="steam_dlc_install_selected">Install selected DLC</string>
+    <string name="steam_dlc_installed">Installed</string>
+    <string name="steam_dlc_not_owned">Not owned</string>
+    <string name="steam_dlc_no_content">No installable content for this configuration</string>
+    <string name="steam_dlc_incomplete">Some selected DLC could not be installed. Check your Steam licenses and try again.</string>
+    <string name="steam_download_finalizing">Finishing installation…</string>
+    <string name="steam_download_preparing">Preparing download…</string>
+    <string name="steam_demo_no_access">Steam did not grant download access for this demo.</string>
+    <string name="steam_skip_prerequisites">Skip Steam dependency installers</string>
 </resources>

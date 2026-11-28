@@ -48,7 +48,7 @@ object SteamSheets {
             })
         }
     }
-    fun game(context: Context, id: Int) {
+    fun game(context: Context, id: Int, fromInstalledPage: Boolean = false) {
         if (!SteamSettings.enabled(context)) return
         context.startForegroundService(Intent(context, SteamService::class.java))
         show(context) { dismiss ->
@@ -68,11 +68,11 @@ object SteamSheets {
             }
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), color = dividerColor())
             val installed = java.io.File(context.filesDir, "steam-library/$id.json").isFile
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!fromInstalledPage) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SteamAccentButton(
                     if (installed) uiStr(R.string.steam_ui_view_game) else uiStr(R.string.steam_ui_download),
                     Modifier.weight(1f),
-                    enabled = installed || (state.signedIn && !state.downloading && !state.gameActive),
+                    enabled = installed || (state.signedIn && !state.downloading && !state.gameActive && state.installRequestId == 0),
                     icon = if (installed) TablerIcons.DeviceGamepad2 else TablerIcons.Download
                 ) {
                     if (installed) { dismiss(); SteamLibrary.open(context, "steam://$id") } else SteamSession.install(id)
@@ -87,9 +87,14 @@ object SteamSheets {
                 }
             }
             Spacer(Modifier.height(4.dp))
-            SteamStoreDetails(id, installed, state)
+            SteamStoreDetails(id, installed, state, initialTab = if (fromInstalledPage) 2 else 0)
             if (state.downloading && state.id == id) SteamDownloadPanel(state)
-            else if (!state.signedIn) {
+            else if (state.installRequestId == id) {
+                com.winlator.cmod.ui.theme.WinZProgressBar(null, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
+            } else if (state.installErrorAppId == id && state.installError.isNotBlank() && state.signedIn) {
+                Text(state.installError, Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            } else if (!state.signedIn) {
                 Text(steamStatusText(state.status), Modifier.padding(horizontal = 16.dp, vertical = 8.dp).heightIn(max = 48.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!state.restoring && !state.gameActive) SteamSecondaryButton(
                     if (state.savedAccount) uiStr(R.string.steam_ui_retry_connection) else uiStr(R.string.steam_ui_connect),

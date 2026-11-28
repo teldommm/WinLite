@@ -221,19 +221,24 @@ import java.io.File
                 SteamArt("https://shared.steamstatic.com/store_item_assets/steam/apps/${state.id}/header.jpg", Modifier.fillMaxWidth().aspectRatio(460f / 215f))
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(state.name, style = MaterialTheme.typography.titleLarge)
-                    Text(if (state.downloading) uiStr(R.string.steam_ui_downloading) else if (installed) uiStr(R.string.steam_ui_installed_game) else uiStr(R.string.steam_ui_paused), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (state.downloading && state.total > 0)
-                        SteamProgress(state.done.toFloat() / state.total, Modifier.fillMaxWidth())
+                    Text(if (state.downloading) uiStr(R.string.steam_ui_downloading) else if (state.downloadPending) uiStr(R.string.steam_ui_paused) else uiStr(R.string.steam_ui_installed_game), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (state.downloading) {
+                        if (state.total > 0 && !state.downloadFinalizing) {
+                            SteamProgress(state.done.toFloat() / state.total, Modifier.fillMaxWidth())
+                        } else com.winlator.cmod.ui.theme.WinZProgressBar(null, Modifier.fillMaxWidth())
+                    }
                     if (state.downloading) Text(downloadTimingText(state), style = MaterialTheme.typography.bodySmall)
                     Text("${state.done / 1048576} / ${state.total / 1048576} MB", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (state.downloading) {
-                            SteamOutlineButton(uiStr(R.string.steam_ui_pause), icon = TablerIcons.PlayerPause) { SteamSession.cancel() }
+                            SteamOutlineButton(uiStr(R.string.steam_ui_pause), enabled = !state.downloadFinalizing, icon = TablerIcons.PlayerPause) { SteamSession.cancel() }
+                        } else if (state.downloadPending) {
+                            SteamAccentButton(uiStr(R.string.steam_ui_resume), enabled = state.signedIn && !state.gameActive && state.installRequestId == 0, icon = TablerIcons.Download) { SteamSession.resumeDownload(state.id) }
+                            if (!installed) {
+                                SteamOutlineButton(uiStr(R.string.steam_download_cancel_delete), enabled = !state.gameActive && state.installRequestId == 0, icon = TablerIcons.Trash) { confirmRemove = true }
+                            }
                         } else if (installed) {
                             SteamAccentButton(uiStr(R.string.steam_ui_view_game), icon = TablerIcons.DeviceGamepad2) { openGame(state.id) }
-                        } else {
-                            SteamAccentButton(uiStr(R.string.steam_ui_resume), enabled = state.signedIn && !state.gameActive, icon = TablerIcons.Download) { SteamSession.install(state.id) }
-                            SteamOutlineButton(uiStr(R.string.steam_download_cancel_delete), enabled = !state.gameActive, icon = TablerIcons.Trash) { confirmRemove = true }
                         }
                     }
                     if (state.status.startsWith("Download failed"))

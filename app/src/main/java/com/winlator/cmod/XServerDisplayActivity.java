@@ -67,6 +67,8 @@ import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.GameSaveManager;
 import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.OnExtractFileListener;
+import com.winlator.cmod.core.OpenGLDriverDefaults;
+import com.winlator.cmod.core.OpenGLDriverLoader;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.core.ProcessHelper;
 import com.winlator.cmod.core.StringUtils;
@@ -783,6 +785,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 applyGameRefreshRateUnlock();
                 try {
                     setupXEnvironment();
+                } catch (IOException e) {
+                    Log.e("XServerDisplayActivity", "Cannot load OpenGL driver " + getSelectedOpenGLDriver(), e);
+                    runOnUiThread(() -> new androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setMessage(getString(R.string.opengl_driver_launch_failed, getSelectedOpenGLDriver()))
+                            .setCancelable(false)
+                            .setPositiveButton(R.string.ok, (dialog, which) -> exit())
+                            .show());
                 } catch (PackageManager.NameNotFoundException e) {
                     throw new RuntimeException(e);
                 }
@@ -1266,7 +1275,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             container.saveData();
     }
 
-    private void setupXEnvironment() throws PackageManager.NameNotFoundException {
+    private void setupXEnvironment() throws PackageManager.NameNotFoundException, IOException {
 
         envVars.put("LC_ALL", lc_all);
         envVars.put("WINEPREFIX", imageFs.wineprefix);
@@ -1296,7 +1305,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             guestProgramLauncherComponent.setGuestExecutable(guestExecutable);
 
             // A shortcut's own list replaces the container's one.
-            envVars.putAll(shortcut != null ? shortcut.getEffectiveEnvVars(container) : container.getEnvVars());
+            envVars.putAll(OpenGLDriverDefaults.effectiveEnvironment(container, shortcut));
 
             applyOpenGLDriverEnvVars();
 
@@ -2634,62 +2643,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return parts.length >= 3 && parts[2].matches("\\d+") ? parts[2] : null;
     }
 
-    private void extractOpenGLDriver(File rootDir) {
-        String selectedDriver = getSelectedOpenGLDriver();
-        String installedDriver = container.getExtra("installedOpenGLDriver", "");
-
-        if (!firstTimeBoot && selectedDriver.equals(installedDriver))
-            return;
-
-        Log.d("XServerDisplayActivity", "Installing OpenGL driver " + selectedDriver
-                + " (installed: '" + installedDriver + "')");
-
-        boolean extracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
-                "graphics_driver/opengl_" + selectedDriver + ".tzst", rootDir);
-        if (!extracted) {
-            Log.e("XServerDisplayActivity", "Failed to extract OpenGL driver " + selectedDriver);
-            return;
-        }
-
-        container.putExtra("installedOpenGLDriver", selectedDriver);
-        container.saveData();
-    }
-
-    private boolean isMesaGlVersionOverrideManual() {
-        if (shortcut != null) {
-            String shortcutEnvironment = shortcut.getExtra("envVars", "");
-            EnvVars shortcutEnvVars = new EnvVars(shortcutEnvironment);
-            if (shortcutEnvVars.has("MESA_GL_VERSION_OVERRIDE")) {
-                return !"1".equals(shortcut.getExtra("autoMesaGlVersionOverride", "0"));
-            }
-            // Own list without the variable: the container's value isn't applied at all.
-            if (shortcut.hasOwnEnvVars()) return false;
-        }
-
-        if (container == null) return false;
-        EnvVars containerEnvVars = new EnvVars(container.getEnvVars());
-        return containerEnvVars.has("MESA_GL_VERSION_OVERRIDE")
-                && !"1".equals(container.getExtra("autoMesaGlVersionOverride", "0"));
-    }
-
-    private void applyOpenGLDriverEnvVars() {
+    private void applyOpenGLDriverEnvVars() throws IOException {
         boolean freedreno = "freedreno".equals(getSelectedOpenGLDriver());
+        File driverPath = OpenGLDriverLoader.resolve(this, freedreno);
+        String libraryPath = envVars.get("LD_LIBRARY_PATH");
+        if (libraryPath.isEmpty()) libraryPath = imageFs.getLibDir() + ":/system/lib64";
+        envVars.put("LD_LIBRARY_PATH", driverPath.getAbsolutePath() + ":" + libraryPath);
+        Log.d("XServerDisplayActivity", "OpenGL driver directory: " + driverPath);
 
-        envVars.put("GALLIUM_DRIVER", freedreno ? "freedreno" : "zink");
+        if (freedreno) envVars.remove("GALLIUM_DRIVER");
+        else envVars.put("GALLIUM_DRIVER", "zink");
         envVars.put("MESA_LOADER_DRIVER_OVERRIDE", freedreno ? "kgsl" : "zink");
 
         if (freedreno) {
-            if (!envVars.has("MESA_GL_VERSION_OVERRIDE")) envVars.put("MESA_GL_VERSION_OVERRIDE", "3.3");
             envVars.remove("ZINK_DESCRIPTORS");
             envVars.remove("ZINK_DEBUG");
             envVars.remove("ZINK_INLINE_UNIFORMS");
             if (!envVars.has("FD_MESA_DEBUG")) envVars.put("FD_MESA_DEBUG", "hiprio");
             if (!envVars.has("vblank_mode")) envVars.put("vblank_mode", "0");
         } else {
-            if (!isMesaGlVersionOverrideManual()
-                    && "3.3".equals(envVars.get("MESA_GL_VERSION_OVERRIDE"))) {
-                envVars.remove("MESA_GL_VERSION_OVERRIDE");
-            }
             if (!envVars.has("ZINK_DESCRIPTORS")) envVars.put("ZINK_DESCRIPTORS", "lazy");
             if (!envVars.has("ZINK_DEBUG")) envVars.put("ZINK_DEBUG", "compact");
         }
@@ -2779,8 +2751,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (installed) FileUtils.writeString(graphicsRuntimeMarker,
                     "wrapper=" + WRAPPER_BUILD_ID + ";extra_libs=25b50a11;layers=9d57736d;opengl=split-v1");
         }
-
-        extractOpenGLDriver(rootDir);
 
         if (!"System".equals(adrenoToolsDriverId)) {
             AdrenotoolsManager adrenotoolsManager = new AdrenotoolsManager(this);

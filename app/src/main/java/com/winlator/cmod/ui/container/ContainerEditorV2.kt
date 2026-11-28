@@ -77,6 +77,7 @@ import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.core.DefaultVersion
 import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.GPUInformation
+import com.winlator.cmod.core.OpenGLDriverDefaults
 import com.winlator.cmod.core.GpuTurbo
 import com.winlator.cmod.core.ImageUtils
 import com.winlator.cmod.core.StringUtils
@@ -108,8 +109,6 @@ import com.winlator.cmod.ui.settings.WineRuntimeOption
 import com.winlator.cmod.ui.settings.VulkanExtensionsDialog
 import com.winlator.cmod.ui.settings.parseExtensionBlacklist
 import com.winlator.cmod.ui.settings.dxvkAsyncMode
-import com.winlator.cmod.ui.settings.envPut
-import com.winlator.cmod.ui.settings.envValue
 import com.winlator.cmod.ui.settings.filterDxvkForVkd3d
 import com.winlator.cmod.ui.settings.installAdrenoDriver
 import com.winlator.cmod.ui.settings.installRuntimeComponent
@@ -267,14 +266,8 @@ private class ContainerEditorStateV2(
 
     var startup by mutableIntStateOf(editing?.startupSelection?.toInt() ?: Container.STARTUP_SELECTION_ESSENTIAL.toInt())
     var openGlDefaultInitialized by mutableStateOf((editing?.getExtra("openGlDefaultInitialized", "0") ?: "0") == "1")
-    private val initialEnvVars = editing?.envVars ?: Container.DEFAULT_ENV_VARS
-    private val shouldAddMesaGlOverride = graphicsDriver.equals("freedreno", true) &&
-        envValue(initialEnvVars, "MESA_GL_VERSION_OVERRIDE").isNullOrBlank()
-    var autoMesaGlVersionOverride by mutableStateOf(
-        (editing?.getExtra("autoMesaGlVersionOverride", "0") ?: "0") == "1" || shouldAddMesaGlOverride
-    )
     var envVars by mutableStateOf(
-        if (shouldAddMesaGlOverride) envPut(initialEnvVars, "MESA_GL_VERSION_OVERRIDE", "3.3") else initialEnvVars
+        editing?.let { OpenGLDriverDefaults.effectiveEnvironment(it, null) } ?: Container.DEFAULT_ENV_VARS
     )
     val components = mutableStateMapOf<String, Int>().apply {
         putAll(parseContainerComponentsV2(editing?.winComponents ?: Container.DEFAULT_WINCOMPONENTS))
@@ -283,28 +276,6 @@ private class ContainerEditorStateV2(
     fun graphics(key: String, value: String) {
         graphicsConfig = writeConfig(graphicsConfig, key, value, ';')
         if (key == "blacklistedExtensions") blacklistedExtensions = value
-    }
-
-    fun selectGraphicsDriver(value: String) {
-        graphicsDriver = value
-        if (value.equals("freedreno", true)) {
-            if (envValue(envVars, "MESA_GL_VERSION_OVERRIDE").isNullOrBlank()) {
-                envVars = envPut(envVars, "MESA_GL_VERSION_OVERRIDE", "3.3")
-                autoMesaGlVersionOverride = true
-            }
-        } else if (autoMesaGlVersionOverride) {
-            if (envValue(envVars, "MESA_GL_VERSION_OVERRIDE") == "3.3") {
-                envVars = envPut(envVars, "MESA_GL_VERSION_OVERRIDE", null)
-            }
-            autoMesaGlVersionOverride = false
-        }
-    }
-
-    fun setEnvironment(value: String) {
-        if (autoMesaGlVersionOverride && envValue(value, "MESA_GL_VERSION_OVERRIDE") != "3.3") {
-            autoMesaGlVersionOverride = false
-        }
-        envVars = value
     }
 
     fun wrapperValue(key: String, value: String) {
@@ -342,7 +313,7 @@ private class ContainerEditorStateV2(
         renderer, rendererPresentMode, rendererDriver, filterMode, surfaceFormat, surfaceUbwc, perfHint,
         graphicsDriver, graphicsConfig,
         wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, forceSsbs, boxPreset, exclusive, xinput, dinput,
-        syncCpu, threadPlacement, gpuTurboMenu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
+        syncCpu, threadPlacement, gpuTurboMenu, startup, openGlDefaultInitialized, envVars,
         cpu64.joinToString(), cpu32.joinToString(), components.entries.sortedBy { it.key }.joinToString()
     ).joinToString("|")
 }
@@ -371,7 +342,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
     }
     LaunchedEffect(editing?.id, state.driverVersion) {
         if (!state.openGlDefaultInitialized) {
-            if (isTurnipDriver(state.driverVersion)) state.selectGraphicsDriver("freedreno")
+            if (isTurnipDriver(state.driverVersion)) state.graphicsDriver = "freedreno"
             state.openGlDefaultInitialized = true
         }
     }
@@ -525,7 +496,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.putExtra("hudMode", state.hudMode.toString())
         container.putExtra("mouseWarpOverride", state.mouseWarp)
         container.putExtra("openGlDefaultInitialized", if (state.openGlDefaultInitialized) "1" else "0")
-        container.putExtra("autoMesaGlVersionOverride", if (state.autoMesaGlVersionOverride) "1" else "0")
+        container.putExtra("autoMesaGlVersionOverride", null)
         container.saveData()
         applyMouseWarp(container)
     }
@@ -592,8 +563,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     .put(DirectAudioDriver.EXTRA_MIC, if (state.directAudioMic) "1" else "0")
                     .put("openGlDefaultInitialized", if (state.openGlDefaultInitialized) "1" else "0")
                     .put("threadPlacement", if (state.threadPlacement) "1" else "0")
-                    .put("gpuTurboMenu", if (state.gpuTurboMenu) "1" else "0")
-                    .put("autoMesaGlVersionOverride", if (state.autoMesaGlVersionOverride) "1" else "0"))
+                    .put("gpuTurboMenu", if (state.gpuTurboMenu) "1" else "0"))
             }
             manager.createContainerAsync(data, contents) { created ->
                 creating = false
@@ -942,7 +912,7 @@ private fun ContainerCategoryV2(
                     "Graphics Driver",
                     graphicsEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.graphicsDriver, true) } ?: s.graphicsDriver,
                     graphicsEntries
-                ) { s.selectGraphicsDriver(StringUtils.parseIdentifier(it)) }
+                ) { s.graphicsDriver = StringUtils.parseIdentifier(it) }
                 catalog?.let { c ->
                     SettingsDivider()
                     SettingDriverChoice("Driver Version", s.driverVersion, c.drivers, installing, installDriver) {
@@ -1114,7 +1084,7 @@ private fun ContainerCategoryV2(
         }
 
         "Environment" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            EnvironmentVariablesEditor(s.envVars, onChanged = { s.setEnvironment(it) })
+            EnvironmentVariablesEditor(s.envVars, onChanged = { s.envVars = it })
         }
 
         else -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

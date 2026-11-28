@@ -4,6 +4,7 @@ import android.app.*
 import android.content.*
 import android.os.*
 import com.winlator.cmod.R
+import com.winlator.cmod.ui.uiStr
 import com.winlator.cmod.feature.stores.steam.winlitesteam.*
 import org.json.JSONObject
 import java.io.File
@@ -74,6 +75,20 @@ object SteamSession {
         private set
     @Volatile var downloadName = ""
         private set
+    @Volatile private var activeDownload: Any? = null
+    @Volatile internal var downloadFinalizing = false
+        private set
+    @Volatile internal var downloadPending = false
+        private set
+    private var requireDlcOnResume = false
+    @Volatile var installRequestId = 0
+        private set
+    @Volatile var installError = ""
+        private set
+    @Volatile var installErrorAppId = 0
+        private set
+    @Volatile internal var entitlementLibrary = "{}"
+        private set
     @Volatile private var downloadMeter: SteamDownloadMeter? = null
     internal fun downloadReading() = downloadMeter?.read(SystemClock.elapsedRealtime())
     @Volatile var downloadDone = 0L
@@ -136,6 +151,7 @@ object SteamSession {
             val marker = JSONObject(File(context.filesDir, "steam-library-sync.json").readText())
             marker.optLong("account") == account && marker.optString("fingerprint") == fingerprint &&
                 System.currentTimeMillis() - marker.optLong("at") in 0 until LIBRARY_CACHE_TTL_MS &&
+                SteamCatalog.packageMetadataReady(JSONObject(library)) &&
                 SteamLibrary.items(context, library).isNotEmpty()
         }.getOrDefault(false)
     }
@@ -193,9 +209,10 @@ object SteamSession {
                         }, licensesReceived, SystemClock.elapsedRealtime())
                         libraryProgress = librarySync.progress; libraryLoading = librarySync.loading; libraryError = librarySync.error
                         if (!downloading) status = librarySync.message
+                        val snapshot = active.getLibrarySnapshotJson()
+                        entitlementLibrary = validatedEntitlements(snapshot)
                         // A cached pass never touches the stored library: the live PICS store is empty on purpose.
                         if (!librarySync.fromCache) {
-                            val snapshot = active.getLibrarySnapshotJson()
                             if (snapshot != library && (SteamLibrary.items(app ?: return@work, snapshot).isNotEmpty() || (!libraryLoading && libraryError.isEmpty()))) {
                                 library = snapshot
                                 app?.let { File(it.filesDir, "steam-library-cache.json").writeText(snapshot) }
@@ -238,6 +255,7 @@ object SteamSession {
         ++authAttempt; guard.cancel(); signingIn = false; qrUrl = ""; connected = false; signedIn = false
         previous?.let { it.cancelDownload(); it.cancelLogin(); it.disconnect(); it.close() }
         if (downloading) status = "Pausing download after session loss…"
+        entitlementLibrary = "{}"
         librarySync.reset(); licensesReceived = false; libraryLoading = true; libraryProgress = 0; libraryError = ""; libraryMarkerWritten = false
         restoreStage = "Finding a Steam server"
         if (saved != null && library == "{}") library = runCatching { File(context.filesDir, "steam-library-cache.json").readText() }.getOrDefault("{}")
@@ -268,7 +286,17 @@ object SteamSession {
                 if (session !== s || closing) return
                 if (emsg in listOf(766, 767, 146, 147, 152)) SteamSocial.appEvent(context)
                 if (emsg == 766) work { if (session === s && !gameActive) SteamUserData.capturePersona(context, s.getSelfPersona()) }
-                if (emsg == 780) licensesReceived = true
+                if (emsg == 780) {
+                    entitlementLibrary = "{}"
+                    val repeated = licensesReceived
+                    licensesReceived = true
+                    if (repeated) work {
+                        if (session === s && librarySync.fingerprint.isNotEmpty() &&
+                            SteamLibrarySync.licenseFingerprint(JSONObject(s.getLibrarySnapshotJson())) != librarySync.fingerprint) {
+                            refreshLibrary()
+                        }
+                    }
+                }
                 if (emsg == 751 || emsg == 757 || emsg == 5500) {
                     val code = SteamLogonResult.code(body, eresult)
                     if (code != null && code != 1) {
@@ -367,7 +395,10 @@ object SteamSession {
     }
     fun retryLibrary() = work {
         check(!gameActive && app?.let { SteamSettings.enabled(it) } == true) { "Steam is disabled or paused for a running game" }
-        // A manual reload is a real refresh: skip the cached-library shortcut once.
+        refreshLibrary()
+    }
+    private fun refreshLibrary() {
+        entitlementLibrary = "{}"
         forceFullLibrary = true; libraryMarkerWritten = false
         librarySync.reset(); libraryLoading = true; libraryProgress = 0; libraryError = ""
         status = "Reloading Steam library…"
@@ -388,59 +419,167 @@ object SteamSession {
         val raw = session?.getPicsAppInfo(id) ?: error("No Steam metadata for $id")
         return JSONObject(raw).getJSONObject("appinfo")
     }
-    fun install(id: Int) = work {
-        check(app?.let { SteamSettings.enabled(it) } == true && !gameActive) { "Steam is disabled or paused for a game" }
-        check(!downloading) { "A Steam download is already active" }
+    private fun validatedEntitlements(snapshot: String): String {
+        if (!licensesReceived) return "{}"
+        val live = JSONObject(snapshot)
+        if (SteamCatalog.packageMetadataReady(live)) return snapshot
+        if (librarySync.fromCache && SteamLibrarySync.licenseFingerprint(live) == librarySync.fingerprint) {
+            return library
+        }
+        return "{}"
+    }
+
+    fun resumeDownload(id: Int) {
+        if (downloadPending && downloadId == id) install(id, requireDlcOnResume)
+    }
+
+    @Synchronized fun install(id: Int, requireDlc: Boolean = false) {
+        if (installRequestId != 0 || downloading || gameActive) return
+        installRequestId = id
+        installError = ""
+        installErrorAppId = id
+        work {
+            try {
+                installNow(id, requireDlc)
+            } catch (error: Exception) {
+                installError = error.message ?: "Steam download could not start"
+                status = installError
+            } catch (_: LinkageError) {
+                installError = "Steam native library unavailable"
+                status = installError
+            } finally {
+                installRequestId = 0
+            }
+        }
+    }
+
+    private fun installNow(id: Int, requireDlc: Boolean) {
+        check(app?.let { SteamSettings.enabled(it) } == true && !gameActive && !closing) { "Steam is disabled or paused for a game" }
         val context = app ?: error("Steam is starting")
         val s = session ?: error("Steam is starting")
         check(s.state() == 3) { "Sign in first" }
+        val recordFile = File(context.filesDir, "steam-library/$id.json")
+        val previous = if (recordFile.isFile) SteamGames.info(context, id) else JSONObject()
         val info = info(id)
+        val isDemo = info.optJSONObject("common")?.optString("type").equals("demo", true)
+        if (isDemo && !recordFile.isFile) {
+            val license = s.requestFreeLicense(id)?.let(::JSONObject)
+            if (license?.optBoolean("granted") == true) refreshLibrary()
+            // A demo can already be licensed. Depot access remains authoritative.
+        }
+        val inventory = JSONObject(validatedEntitlements(s.getLibrarySnapshotJson()))
+        if (requireDlc) {
+            check(SteamCatalog.packageMetadataReady(inventory)) { uiStr(R.string.steam_dlc_wait_licenses) }
+        }
         val name = SteamCatalog.installName(info)
         val branch = SteamInstallOptions.branch(context, id)
         val language = SteamInstallOptions.language(context, id)
-        val depots = SteamCatalog.depots(info, branch, language)
+        val selectedDlc = SteamCatalog.selectedDlc(info, inventory, SteamInstallOptions.excludedDlc(context, id))
+        val depots = SteamCatalog.depots(info, branch, language, selectedDlc, ::info)
+        val freeToDownload = info.optJSONObject("common")?.let {
+            it.optString("freetodownload", it.optString("FreeToDownload")) in listOf("1", "true")
+        } == true
+        if (requireDlc) check(depots.any { it.dlcAppId > 0 }) { uiStr(R.string.steam_dlc_no_content) }
+        check(session === s && signedIn && !gameActive && !closing) { "Steam session changed while preparing the download" }
         val dir = SteamStorage.download(context, id, name)
         SteamGoldberg.restore(dir)
         SteamGoldberg.invalidate(dir)
-        downloadMeter = SteamDownloadMeter(depots.map { it.id }, depots.associate { it.id to it.size })
+        val token = Any()
+        activeDownload = token
+        downloadMeter = null
+        downloadFinalizing = false
+        requireDlcOnResume = requireDlc
+        downloadPending = true
         downloading = true
-        downloadId = id; downloadName = name; downloadDone = 0; downloadTotal = 0
+        downloadId = id
+        downloadName = name
+        downloadDone = 0
+        downloadTotal = 0
         status = "Downloading $name…"
+        val tier = SteamDownloadSettings.tier(context)
         try {
             s.downloadApp(id, depots.map { it.id }.toIntArray(), depots.map { it.manifest }.toLongArray(),
-                branch, dir.absolutePath, false, ca, SteamDownloadSettings.network(SteamDownloadSettings.tier(context)), object : WinLiteDownloadListener {
+                depots.map { if (freeToDownload || it.manifestAppId == 0) id else it.manifestAppId }.toIntArray(),
+                depots.map { it.manifestBranch }.toTypedArray(), dir.absolutePath, false, ca,
+                SteamDownloadSettings.network(tier), object : WinLiteDownloadListener {
+                    @androidx.annotation.Keep
+                    override fun onDepotsResolved(depotIds: IntArray) {
+                        if (activeDownload !== token || session !== s) return
+                        downloadMeter = SteamDownloadMeter(depotIds.toList(), depots.associate { it.id to it.size })
+                    }
+
                     override fun onProgress(depotId: Int, depotDone: Long, depotTotal: Long, depotsDone: Int, depotsTotal: Int, verifying: Boolean) {
-                        if (session !== s || !signedIn) return
+                        if (activeDownload !== token || session !== s || !signedIn) return
                         downloadMeter?.update(depotId, depotDone, depotTotal, depotsDone, verifying, SystemClock.elapsedRealtime())
                         val reading = downloadReading()
-                        downloadDone = reading?.done ?: depotDone; downloadTotal = reading?.total ?: depotTotal
-                        // The last chunk of the last depot reports 100% while files are still being flushed to storage
-                        // (fsync on Android shared storage can take a long while). Say so instead of freezing on 100%.
-                        status = if (!verifying && depotsDone + 1 >= depotsTotal && depotTotal > 0 && depotDone >= depotTotal) "$name: finalizing files…"
-                        else "$name: depot ${depotsDone + 1}/$depotsTotal — ${if (depotTotal > 0) depotDone * 100 / depotTotal else 0}%" + if (verifying) " (verifying)" else ""
-                    }
-                    override fun onComplete(success: Boolean, error: String, bytesWritten: Long, depotsCompleted: Int, depotsSkipped: Int) {
-                        work {
-                            if (success) {
-                                status = "$name: finishing installation…"
-                                dir.walkTopDown().filter { it.isFile && it.name.endsWith(".winlite-original") }.forEach { it.delete() }
-                                File(context.filesDir, "steam-library/$id.json").writeText(SteamStorage.record(info, dir, branch, language).toString())
-                                main.post { SteamGames.changed() }
-                            }
-                            downloading = false
-                            status = if (success) "$name installed" else if (gameActive) "Download paused while the container runs" else "Download failed: $error"
+                        downloadDone = reading?.done ?: depotDone
+                        downloadTotal = reading?.total ?: depotTotal
+                        downloadFinalizing = !verifying && depotsDone + 1 >= depotsTotal &&
+                            depotTotal > 0 && depotDone >= depotTotal
+                        status = if (downloadFinalizing) {
+                            "$name: finalizing files…"
+                        } else {
+                            val percent = if (depotTotal > 0) depotDone * 100 / depotTotal else 0
+                            "$name: depot ${depotsDone + 1}/$depotsTotal — $percent%" + if (verifying) " (verifying)" else ""
                         }
                     }
-                }, SteamDownloadSettings.processing(SteamDownloadSettings.tier(context)))
-        } catch (e: Exception) { downloading = false; throw e }
+
+                    override fun onComplete(success: Boolean, error: String, bytesWritten: Long, depotsCompleted: Int, depotsSkipped: Int) {
+                        work {
+                            if (activeDownload !== token) return@work
+                            try {
+                                if (session !== s || gameActive || closing) {
+                                    status = "Download paused"
+                                } else if (success) {
+                                    downloadFinalizing = true
+                                    status = "$name: finishing installation…"
+                                    val actual = installedSteamManifests(dir)
+                                    val denied = File(dir, ".winlite_depot/denied.depots").takeIf { it.isFile }
+                                        ?.readLines()?.mapNotNull { it.toIntOrNull() }.orEmpty().toSet()
+                                    val installed = depots.filter { it.id !in denied && actual[it.id] == it.manifest }
+                                    check(installed.any { it.dlcAppId == 0 }) { "No base game depots were installed" }
+                                    val record = SteamStorage.record(info, dir, branch, language)
+                                    record.put("winliteInstalledDepots", SteamCatalog.installedManifestList(previous, depots, installed, actual))
+                                    SteamInstallRecord.write(context.filesDir, id, record)
+                                    dir.walkTopDown().filter { it.isFile && it.name.endsWith(".winlite-original") }.forEach { it.delete() }
+                                    if (depots.any { it.dlcAppId != 0 && it !in installed }) {
+                                        installError = uiStr(R.string.steam_dlc_incomplete)
+                                    }
+                                    downloadPending = false
+                                    status = "$name installed"
+                                    main.post { SteamGames.changed() }
+                                } else {
+                                    installError = if (isDemo && error.contains("entitled", ignoreCase = true)) {
+                                        uiStr(R.string.steam_demo_no_access)
+                                    } else error
+                                    status = "Download failed: $installError"
+                                }
+                            } catch (failure: Exception) {
+                                installError = failure.message ?: "Steam could not finalize the installation"
+                                status = installError
+                            } finally {
+                                activeDownload = null
+                                downloadFinalizing = false
+                                downloading = false
+                            }
+                        }
+                    }
+                }, SteamDownloadSettings.processing(tier))
+        } catch (failure: Throwable) {
+            activeDownload = null
+            downloading = false
+            throw failure
+        }
     }
+
     fun cancel() = work { session?.cancelDownload() }
     fun discardPaused(id: Int) = work {
-        check(!downloading && !gameActive) { "Pause the download and close the game first" }
+        check(!downloading && installRequestId == 0 && !gameActive) { "Pause the download and close the game first" }
         check(downloadId == id && downloadName.isNotBlank()) { "No paused download to remove" }
         val context = app ?: error("Steam is not connected")
         SteamStorage.removePending(context, id, downloadName)
         downloadId = 0
+        downloadPending = false
         downloadName = ""
         downloadDone = 0
         downloadTotal = 0
@@ -475,7 +614,7 @@ object SteamSession {
     @JvmStatic fun beginGame(context: Context) {
         check(SteamSettings.enabled(context)) { "Steam is disabled in Steam / Stores settings" }
         check(!SteamNativeCloud.busy) { "Wait for Steam Cloud sync to finish" }
-        check(!downloading && !gameActive) { "Pause the download and close any running Steam game first" }
+        check(!downloading && installRequestId == 0 && !gameActive) { "Pause the download and close any running Steam game first" }
         gameActive = true
         val ready = java.util.concurrent.CountDownLatch(1)
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
@@ -519,7 +658,8 @@ object SteamSession {
             session?.let { it.cancelDownload(); it.cancelLogin(); it.logOffAndDisconnect(); it.close() }
             session = null
             librarySync.reset(); licensesReceived = false; libraryLoading = true; libraryProgress = 0; libraryError = ""
-            library = "{}"; qrUrl = ""; downloading = false; status = "Disconnected"
+            library = "{}"; entitlementLibrary = "{}"; qrUrl = ""
+            activeDownload = null; downloading = false; downloadFinalizing = false; status = "Disconnected"
         }
     }
 }

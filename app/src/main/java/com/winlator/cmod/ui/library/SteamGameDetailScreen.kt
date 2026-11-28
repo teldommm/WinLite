@@ -201,27 +201,33 @@ private fun SteamDetailScreen(title: String, subtitle: String, artworkPath: Stri
     val toggle = { favorite = !favorite; callbacks.onFavorite(favorite) }
     val configured = true
     val executable = shortcut?.getExtra("steamExecutable").orEmpty()
-    val items = steamDetailItems(callbacks, steamId != null)
+    val items = steamDetailItems(callbacks, steamId)
     androidx.compose.runtime.CompositionLocalProvider(LocalSteamExecutable provides executable, LocalSteamInfoId provides steamId, LocalSteamDetail provides (steamId != null), LocalSteamReady provides configured, LocalSteamMode provides (steamId?.let { com.winlator.cmod.steam.SteamSettings.mode(context, it) } ?: "RealSteam")) {
     if (landscape) LandscapeDetail(title, subtitle, art, favorite, stats, items, callbacks, toggle)
     else PortraitDetail(title, subtitle, art, favorite, stats, items, callbacks, toggle)
     }
 }
 
-// The same five actions as WinLite's game page (caption under the icon in landscape / row text in portrait).
 @Composable
-private fun steamDetailItems(callbacks: SteamDetailCallbacks, steam: Boolean): List<DetailActionItem> {
+private fun steamDetailItems(callbacks: SteamDetailCallbacks, steamId: Int?): List<DetailActionItem> {
+    val context = LocalContext.current
     val configure = stringResource(R.string.ui_configure)
     val container = stringResource(R.string.ui_container)
     val enterContainer = stringResource(R.string.ui_enter_container)
     val home = stringResource(R.string.ui_home)
     val addToHome = stringResource(R.string.ui_add_to_home)
     val saves = savesLabel()
-    val remove = if (steam) stringResource(R.string.steam_ui_uninstall) else stringResource(R.string.remove)
-    return listOf(
+    val remove = if (steamId != null) stringResource(R.string.steam_ui_uninstall) else stringResource(R.string.remove)
+    val dlc = stringResource(R.string.steam_store_dlc)
+    return listOfNotNull(
         DetailActionItem(TablerIcons.Settings, configure, configure, callbacks::onConfigure),
         DetailActionItem(TablerIcons.Server, container, enterContainer, callbacks::onArguments),
         DetailActionItem(TablerIcons.CloudUpload, saves, saves, callbacks::onSaves),
+        steamId?.let { id ->
+            DetailActionItem(TablerIcons.Apps, dlc, dlc, {
+                com.winlator.cmod.steam.SteamSheets.game(context, id, fromInstalledPage = true)
+            })
+        },
         DetailActionItem(TablerIcons.Home, home, addToHome, callbacks::onHome),
         DetailActionItem(TablerIcons.Trash, remove, remove, callbacks::onRemove, destructive = true)
     )

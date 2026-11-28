@@ -59,7 +59,7 @@ object SteamGames {
         return Shortcut(container, file)
     }
     fun uninstall(context: Context, id: Int) {
-        check(!SteamSession.gameActive && !SteamSession.downloading) { "Close Steam games and pause downloads before uninstalling" }
+        check(!SteamSession.gameActive && !SteamSession.downloading && SteamSession.installRequestId == 0) { "Close Steam games and pause downloads before uninstalling" }
         val shortcuts = ContainerManager(context).loadShortcuts().filter { it.getExtra("steamAppId") == id.toString() }
         val locked = mutableListOf<Int>()
         try {

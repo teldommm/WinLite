@@ -14,7 +14,9 @@ import kotlinx.coroutines.delay
 import androidx.lifecycle.repeatOnLifecycle
 
 data class SteamUiSnapshot(val signedIn: Boolean, val gameActive: Boolean, val savedAccount: Boolean, val restoring: Boolean, val authError: String, val ready: Boolean, val busy: Boolean, val status: String, val guard: String,
-    val library: String, val libraryLoading: Boolean, val libraryError: String, val downloading: Boolean, val id: Int, val name: String, val done: Long, val total: Long, val tick: Int, val libraryProgress: Int, val rate: Long = 0, val etaSeconds: Long? = null, val verifying: Boolean = false)
+    val library: String, val libraryLoading: Boolean, val libraryError: String, val downloading: Boolean, val id: Int, val name: String, val done: Long, val total: Long, val tick: Int, val libraryProgress: Int, val rate: Long = 0, val etaSeconds: Long? = null, val verifying: Boolean = false,
+    val installRequestId: Int = 0, val installErrorAppId: Int = 0, val installError: String = "",
+    val entitlementLibrary: String = "{}", val downloadFinalizing: Boolean = false, val downloadPending: Boolean = false)
 
 @Composable fun observeSteam(): SteamUiSnapshot {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -29,7 +31,9 @@ data class SteamUiSnapshot(val signedIn: Boolean, val gameActive: Boolean, val s
     val transfer = SteamSession.downloadReading()
     return SteamUiSnapshot(SteamSession.signedIn, SteamSession.gameActive, SteamSession.savedAccount, SteamSession.restoring, SteamSession.authError, SteamSession.connected, SteamSession.signingIn, SteamSession.status,
         SteamSession.guard.label, SteamSession.library, SteamSession.libraryLoading, SteamSession.libraryError, SteamSession.downloading,
-        SteamSession.downloadId, SteamSession.downloadName, SteamSession.downloadDone, SteamSession.downloadTotal, tick, SteamSession.libraryProgress, transfer?.bytesPerSecond ?: 0, transfer?.etaSeconds, transfer?.verifying ?: false)
+        SteamSession.downloadId, SteamSession.downloadName, SteamSession.downloadDone, SteamSession.downloadTotal, tick, SteamSession.libraryProgress, transfer?.bytesPerSecond ?: 0, transfer?.etaSeconds, transfer?.verifying ?: false,
+        SteamSession.installRequestId, SteamSession.installErrorAppId, SteamSession.installError, SteamSession.entitlementLibrary,
+        SteamSession.downloadFinalizing, SteamSession.downloadPending)
 }
 
 @Composable fun SteamDownloadPanel(state: SteamUiSnapshot) {
@@ -42,9 +46,9 @@ data class SteamUiSnapshot(val signedIn: Boolean, val gameActive: Boolean, val s
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(state.name, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    if (state.total > 0) SteamProgress(state.done.toFloat() / state.total, Modifier.weight(1f))
+                    if (state.total > 0 && !state.downloadFinalizing) SteamProgress(state.done.toFloat() / state.total, Modifier.weight(1f))
                     else com.winlator.cmod.ui.theme.WinZProgressBar(null, Modifier.weight(1f))
-                    IconButton(onClick = { SteamSession.cancel() }, modifier = Modifier.size(36.dp)) {
+                    IconButton(onClick = { SteamSession.cancel() }, modifier = Modifier.size(36.dp), enabled = !state.downloadFinalizing) {
                         Icon(TablerIcons.PlayerPause, uiStr(R.string.steam_ui_pause_download))
                     }
                 }
@@ -56,6 +60,8 @@ data class SteamUiSnapshot(val signedIn: Boolean, val gameActive: Boolean, val s
 }
 
 internal fun downloadTimingText(state: SteamUiSnapshot): String {
+    if (state.downloadFinalizing) return uiStr(R.string.steam_download_finalizing)
+    if (state.total <= 0L) return uiStr(R.string.steam_download_preparing)
     if (state.verifying) return uiStr(R.string.steam_download_verifying)
     val rate = "%.1f".format(state.rate / 1048576.0)
     val eta = state.etaSeconds?.let { seconds -> if (seconds >= 3600) "%d:%02d:%02d".format(seconds/3600, seconds/60%60, seconds%60) else "%d:%02d".format(seconds/60, seconds%60) }

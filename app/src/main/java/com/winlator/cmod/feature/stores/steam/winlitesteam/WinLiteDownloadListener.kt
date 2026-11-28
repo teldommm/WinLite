@@ -2,6 +2,8 @@ package com.winlator.cmod.feature.stores.steam.winlitesteam
 
 // Native depot download callbacks; methods run on a worker thread.
 interface WinLiteDownloadListener {
+    fun onDepotsResolved(depotIds: IntArray) {}
+
 
     // Per-chunk progress for the current depot.
     fun onProgress(

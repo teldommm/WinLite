@@ -57,7 +57,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -301,15 +300,9 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var lcAll by mutableStateOf(shortcut.getExtra("lc_all", container.getLC_ALL()))
     var midiSoundFont by mutableStateOf(shortcut.getExtra("midiSoundFont", container.getMIDISoundFont()))
     var execArgs by mutableStateOf(shortcut.getExtra("execArgs"))
-    var autoMesaGlVersionOverride by mutableStateOf(
-        shortcut.getExtra(
-            "autoMesaGlVersionOverride",
-            container.getExtra("autoMesaGlVersionOverride", "0")
-        ) == "1"
-    )
     // What the game actually gets: the shortcut's own list, or the container's one until the
     // shortcut is edited (then it is saved as the shortcut's own list).
-    var envVars by mutableStateOf(shortcut.getEffectiveEnvVars(container))
+    var envVars by mutableStateOf(OpenGLDriverDefaults.effectiveEnvironment(container, shortcut))
     var hasOwnEnvironment by mutableStateOf(shortcut.hasOwnEnvVars())
     var winlatorHudMode by mutableIntStateOf(
         shortcut.getExtra("hudMode", container.getExtra("hudMode", if (container.isShowFPS) "1" else "0")).toIntOrNull() ?: 0
@@ -335,19 +328,6 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
         save()
     }
 
-    private fun persistEnvironment(debounced: Boolean) {
-        shortcut.setOwnEnvVars(envVars)
-        hasOwnEnvironment = true
-        envSaveHandler.removeCallbacks(envSaveRunnable)
-        if (debounced) {
-            envSavePending = true
-            envSaveHandler.postDelayed(envSaveRunnable, 500)
-        } else {
-            envSavePending = false
-            save()
-        }
-    }
-
     fun flushEnvironmentSave() {
         envSaveHandler.removeCallbacks(envSaveRunnable)
         if (envSavePending) {
@@ -360,9 +340,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
         envSaveHandler.removeCallbacks(envSaveRunnable)
         envSavePending = false
         shortcut.resetEnvVarsToContainer()
-        shortcut.putExtra("autoMesaGlVersionOverride", null)
-        autoMesaGlVersionOverride = container.getExtra("autoMesaGlVersionOverride", "0") == "1"
-        envVars = container.getEnvVars()
+        envVars = OpenGLDriverDefaults.effectiveEnvironment(container, null)
         dxvkHud = !envValue(envVars, "DXVK_HUD").isNullOrBlank()
         renderingMode = renderingModeOf(envVars)
         hasOwnEnvironment = false
@@ -417,43 +395,20 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
         // Environment tab (removing DXVK_HUD there used to leave the "DXVK HUD" switch on).
         dxvkHud = !envValue(raw, "DXVK_HUD").isNullOrBlank()
         renderingMode = renderingModeOf(raw)
-        if (autoMesaGlVersionOverride && envValue(raw, "MESA_GL_VERSION_OVERRIDE") != "3.3") {
-            autoMesaGlVersionOverride = false
-            shortcut.putExtra("autoMesaGlVersionOverride", "0")
-        }
         envVars = raw
         // Stored even when empty: "no variables" is a valid choice and must not fall back to the
         // container's list (putExtra(null) used to bring the deleted variables back).
-        persistEnvironment(debounced = true)
+        shortcut.setOwnEnvVars(envVars)
+        hasOwnEnvironment = true
+        envSaveHandler.removeCallbacks(envSaveRunnable)
+        envSavePending = true
+        envSaveHandler.postDelayed(envSaveRunnable, 500)
     }
 
     fun selectGraphicsDriver(value: String) {
         graphicsDriver = value
         shortcut.putExtra("graphicsDriver", value)
-        if (value.equals("freedreno", true)) {
-            if (envValue(envVars, "MESA_GL_VERSION_OVERRIDE").isNullOrBlank()) {
-                envVars = envPut(envVars, "MESA_GL_VERSION_OVERRIDE", "3.3")
-                autoMesaGlVersionOverride = true
-            }
-        } else if (autoMesaGlVersionOverride) {
-            if (envValue(envVars, "MESA_GL_VERSION_OVERRIDE") == "3.3") {
-                envVars = envPut(envVars, "MESA_GL_VERSION_OVERRIDE", null)
-            }
-            autoMesaGlVersionOverride = false
-        }
-        shortcut.putExtra("autoMesaGlVersionOverride", if (autoMesaGlVersionOverride) "1" else "0")
-        persistEnvironment(debounced = false)
-    }
-
-    fun syncOpenGlEnvironment() {
-        if (graphicsDriver.equals("freedreno", true) &&
-            envValue(envVars, "MESA_GL_VERSION_OVERRIDE").isNullOrBlank()
-        ) {
-            envVars = envPut(envVars, "MESA_GL_VERSION_OVERRIDE", "3.3")
-            autoMesaGlVersionOverride = true
-            shortcut.putExtra("autoMesaGlVersionOverride", "1")
-            persistEnvironment(debounced = false)
-        }
+        save()
     }
 
     fun updateDxvkHud(enabled: Boolean) {
@@ -528,12 +483,10 @@ internal fun ShortcutEditorV2(
     val dialogView = LocalView.current
     val state = remember(shortcut.file.path) {
         OpenGLDriverDefaults.initialize(context, shortcut.container)
+        OpenGLDriverDefaults.migrateShortcutEnvironment(shortcut)
         ShortcutEditorStateV2(shortcut)
     }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(shortcut.file.path) {
-        state.syncOpenGlEnvironment()
-    }
     DisposableEffect(state) {
         onDispose { state.flushEnvironmentSave() }
     }

@@ -3,6 +3,7 @@ package com.winlator.cmod.core;
 import android.content.Context;
 
 import com.winlator.cmod.container.Container;
+import com.winlator.cmod.container.Shortcut;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -27,19 +28,9 @@ public final class OpenGLDriverDefaults {
             String config = data.optString("graphicsDriverConfig", Container.DEFAULT_GRAPHICSDRIVERCONFIG);
             String selectedVersion = resolveDriverVersion(context, configValue(config, "version"));
             boolean freedreno = isTurnipDriver(selectedVersion);
-            EnvVars environment = new EnvVars(data.optString("envVars", Container.DEFAULT_ENV_VARS));
-            boolean automaticOverride = false;
-
-            if (freedreno && !environment.has(MESA_OVERRIDE)) {
-                environment.put(MESA_OVERRIDE, "3.3");
-                automaticOverride = true;
-            }
-
             data.put("graphicsDriver", freedreno ? "freedreno" : Container.DEFAULT_GRAPHICS_DRIVER);
             data.put("graphicsDriverConfig", putConfigValue(config, "version", selectedVersion));
-            data.put("envVars", environment.toString());
             extraData.put(INITIALIZED, "1");
-            extraData.put(AUTO_MESA_OVERRIDE, automaticOverride ? "1" : "0");
             data.put("extraData", extraData);
             return true;
         } catch (JSONException error) {
@@ -53,21 +44,36 @@ public final class OpenGLDriverDefaults {
         String config = container.getGraphicsDriverConfig();
         String selectedVersion = resolveDriverVersion(context, configValue(config, "version"));
         boolean freedreno = isTurnipDriver(selectedVersion);
-        EnvVars environment = new EnvVars(container.getEnvVars());
-        boolean automaticOverride = false;
-
-        if (freedreno && !environment.has(MESA_OVERRIDE)) {
-            environment.put(MESA_OVERRIDE, "3.3");
-            automaticOverride = true;
-        }
-
         container.setGraphicsDriver(freedreno ? "freedreno" : Container.DEFAULT_GRAPHICS_DRIVER);
         container.setGraphicsDriverConfig(putConfigValue(config, "version", selectedVersion));
-        container.setEnvVars(environment.toString());
         container.putExtra(INITIALIZED, "1");
-        container.putExtra(AUTO_MESA_OVERRIDE, automaticOverride ? "1" : "0");
         container.saveData();
         return true;
+    }
+
+    public static String effectiveEnvironment(Container container, Shortcut shortcut) {
+        if (shortcut != null && shortcut.hasOwnEnvVars()) {
+            return withoutAutomaticOverride(shortcut.getEffectiveEnvVars(container),
+                    shortcut.getExtra(AUTO_MESA_OVERRIDE, "0"));
+        }
+        return withoutAutomaticOverride(container.getEnvVars(), container.getExtra(AUTO_MESA_OVERRIDE, "0"));
+    }
+
+    public static void migrateShortcutEnvironment(Shortcut shortcut) {
+        if (!"1".equals(shortcut.getExtra(AUTO_MESA_OVERRIDE, "0"))) return;
+        if (shortcut.hasOwnEnvVars()) {
+            shortcut.setOwnEnvVars(effectiveEnvironment(shortcut.container, shortcut));
+        }
+        shortcut.putExtra(AUTO_MESA_OVERRIDE, null);
+        shortcut.saveData();
+    }
+
+    private static String withoutAutomaticOverride(String raw, String automatic) {
+        if (!"1".equals(automatic)) return raw;
+        EnvVars environment = new EnvVars(raw);
+        if (!"3.3".equals(environment.get(MESA_OVERRIDE))) return raw;
+        environment.remove(MESA_OVERRIDE);
+        return environment.toString();
     }
 
     public static boolean isTurnipDriver(String version) {

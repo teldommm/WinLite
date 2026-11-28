@@ -9,7 +9,7 @@ object SteamStorage {
     fun root(context: Context): File = context.getSharedPreferences("steam-settings", 0).getString("download-root", null)
         ?.let(::File) ?: File(context.filesDir, "steam-library/common")
     fun setRoot(context: Context, directory: File?) {
-        check(!SteamSession.downloading && !SteamSession.gameActive) { "Pause downloads and close games first" }
+        check(!SteamSession.downloading && !SteamSession.gameActive && SteamSession.installRequestId == 0) { "Pause downloads and close games first" }
         if (directory == null) { context.getSharedPreferences("steam-settings", 0).edit().remove("download-root").apply(); return }
         require(directory.isAbsolute) { "Choose an absolute filesystem path" }
         val root = File(directory.canonicalFile, "WinLiteSteam").apply { check(mkdirs() || isDirectory) { "Cannot create Steam library" } }

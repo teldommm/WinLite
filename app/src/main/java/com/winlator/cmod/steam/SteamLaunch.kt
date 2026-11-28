@@ -20,6 +20,41 @@ import kotlinx.coroutines.launch
 /** Adapts WinLite's resident Steam launcher to WinLite's existing Wine launch path. */
 object SteamLaunch {
     private const val ROOT = "C:\\Program Files (x86)\\Steam"
+
+    internal const val SKIP_PREREQUISITES = "steamSkipPrerequisites"
+
+    private fun specArgument(appId: Int): String = "\"$ROOT\\winlite-game-$appId.txt\""
+
+    internal fun gameArguments(appId: Int?, stored: String): String =
+        if (appId == null) stored else stored.removePrefix(specArgument(appId)).trimStart()
+
+    @JvmStatic fun gameArguments(shortcut: Shortcut): String =
+        gameArguments(shortcut.getExtra("steamAppId").toIntOrNull(), shortcut.getExtra("execArgs"))
+
+    @JvmStatic fun launcherArguments(shortcut: Shortcut): String {
+        val appId = shortcut.getExtra("steamAppId").toIntOrNull()
+        return if (appId != null && shortcut.getExtra("steamLaunchMode", "RealSteam") == "RealSteam") {
+            specArgument(appId)
+        } else gameArguments(shortcut)
+    }
+
+    private fun ensureLauncher(context: Context, steam: File) {
+        val version = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime.toString()
+        val stamp = File(steam, ".winlite-launcher")
+        val launcher = File(steam, "steam.exe")
+        if (launcher.isFile && stamp.isFile && stamp.readText() == version) return
+        val file = android.util.AtomicFile(launcher)
+        val stream = file.startWrite()
+        try {
+            context.assets.open("winlitesteam/bionic/steam.exe").use { it.copyTo(stream) }
+            file.finishWrite(stream)
+        } catch (error: Exception) {
+            file.failWrite(stream)
+            throw error
+        }
+        stamp.writeText(version)
+    }
+
     data class ModeProgress(val stage: String = "prepare", val done: Long = 0, val total: Long = 0, val busy: Boolean = true, val error: String = "")
     private val modeProgress = mutableStateMapOf<Int, ModeProgress>()
     private val modeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -66,7 +101,7 @@ object SteamLaunch {
             link.parentFile?.mkdirs()
             if (!Files.exists(link.toPath())) Files.createSymbolicLink(link.toPath(), game.toPath())
             check(link.canonicalFile == game) { "Game path differs from the configured installation" }
-            return writeShortcut(container, id, "C:\\WinLiteGames\\$id\\${exe.replace('/', '\\')}", "", mode)
+            return writeShortcut(container, id, "C:\\WinLiteGames\\$id\\${exe.replace('/', '\\')}", mode)
         }
         val prefix = File(container.rootDir, ".wine")
         val steam = File(prefix, "drive_c/Program Files (x86)/Steam")
@@ -79,8 +114,8 @@ object SteamLaunch {
             progress?.invoke("client", 0L, 0L)
             check(TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context,
                 "winlitesteam/bionic/valve-steam-x86_64.tzst", steam)) { "Steam client extraction failed" }
-            for (name in listOf("steam.exe", "steamservice.exe", "steamservice.dll", "service_current_versions.vdf", "service_minimum_versions.vdf")) {
-                val dest = if (name == "steam.exe") File(steam, name) else File(steam, "bin/$name")
+            for (name in listOf("steamservice.exe", "steamservice.dll", "service_current_versions.vdf", "service_minimum_versions.vdf")) {
+                val dest = File(steam, "bin/$name")
                 dest.parentFile?.mkdirs()
                 context.assets.open("winlitesteam/bionic/$name").use { input -> dest.outputStream().use { input.copyTo(it) } }
             }
@@ -89,6 +124,9 @@ object SteamLaunch {
             for ((folder, deps) in listOf("system32" to listOf("tier0_s64.dll", "vstdlib_s64.dll"), "syswow64" to listOf("tier0_s.dll", "vstdlib_s.dll"))) {
                 for (dep in deps) File(steam, dep).takeIf { it.isFile }?.copyTo(File(prefix, "drive_c/windows/$folder/$dep").apply { parentFile?.mkdirs() }, true)
             }
+            // The bundled client archive can replace steam.exe.
+            File(steam, ".winlite-launcher").delete()
+            ensureLauncher(context, steam)
             stamp.writeText(version)
         }
         val link = File(steam, "steamapps/common/$installName")
@@ -104,20 +142,20 @@ object SteamLaunch {
             registry.setStringValue("Software\\Valve\\Steam", "SteamPath", ROOT)
             registry.setStringValue("Software\\Valve\\Steam", "SteamExe", "$ROOT\\steam.exe")
         }
-        return writeShortcut(container, id, "$ROOT\\steam.exe", "\"$ROOT\\${spec.name}\"", mode)
+        return writeShortcut(container, id, "$ROOT\\steam.exe", mode)
     }
-    private fun writeShortcut(container: Container, id: Int, target: String, args: String, mode: String): File {
+    private fun writeShortcut(container: Container, id: Int, target: String, mode: String): File {
         container.desktopDir.mkdirs()
         val file = container.desktopDir.listFiles()?.firstOrNull {
             it.extension == "desktop" && Shortcut(container, it).getExtra("steamAppId") == id.toString()
         } ?: File(container.desktopDir, "Steam-$id.desktop")
         val previous = if (file.isFile) Shortcut(container, file) else null
-        val effectiveArgs = if (mode != "RealSteam" && previous?.getExtra("steamLaunchMode") == mode) previous.getExtra("execArgs") else args
+        val args = previous?.let(::gameArguments).orEmpty()
         val exec = "Exec=wine ${SteamCatalog.desktopExecPath(target)}"
         if (file.isFile) file.writeText(file.readLines().joinToString("\n") { if (it.startsWith("Exec=")) exec else it } + "\n")
         else file.writeText("[Desktop Entry]\nName=Steam $id\n$exec\nType=Application\n\n[Extra Data]\n")
         Shortcut(container, file).apply {
-            putExtra("steamAppId", id.toString()); putExtra("steamLaunchMode", mode); putExtra("execArgs", effectiveArgs); saveData()
+            putExtra("steamAppId", id.toString()); putExtra("steamLaunchMode", mode); putExtra("execArgs", args.takeIf { it.isNotBlank() }); saveData()
         }
         return file
     }
@@ -169,6 +207,10 @@ object SteamLaunch {
         SteamGoldberg.restore(game)
         if (shortcut!!.getExtra("steamLaunchMode") == "Goldberg") SteamGoldberg.prepare(context, game, id)
         if (shortcut.getExtra("steamLaunchMode", "RealSteam") != "RealSteam") { SteamSocial.status.value = com.winlator.cmod.ui.uiStr(com.winlator.cmod.R.string.steam_friends_empty); return }
+        val steam = File(shortcut.container.rootDir, ".wine/drive_c/Program Files (x86)/Steam")
+        if (File(steam, ".winlite-steam").isFile) ensureLauncher(context, steam)
+        gameArguments(shortcut).takeIf { it.isNotBlank() }?.let { env.put("WINLITE_STEAM_USER_ARGS", it) }
+        if (shortcut.getExtra(SKIP_PREREQUISITES) == "1") env.put("WINLITE_STEAM_SKIP_PREREQUISITES", "1")
         val saved = SteamCredentials.load(context) ?: error("Sign in to Steam before launching this game")
         env.put("WINLITE_STEAM_TOKEN", saved.getString("token"))
         env.put("WINLITE_STEAM_USERNAME", saved.getString("account"))
@@ -188,10 +230,18 @@ object SteamLaunch {
         // "Launch without syncing" (Steam Cloud failure dialog) is a one-shot: the next launch syncs again.
         val skipCloud = SteamSettings.takeSkipCloud(context, id)
         env.put("WINLITE_STEAM_AGENT_CLOUD", if (skipCloud || !cloudSupported) "0" else "1")
-        env.put("WINLITE_STEAM_LANGUAGE", "english")
+        val branch = info.optString("winliteInstallBranch", "public")
+        val language = info.optString("winliteInstallLanguage", "english")
+        env.put("WINLITE_STEAM_LANGUAGE", language)
         env.put("WINLITE_STEAM_APP_NAME", info.optJSONObject("common")?.optString("name").orEmpty())
-        env.put("WINLITE_STEAM_BUILD_ID", info.optJSONObject("depots")?.optJSONObject("branches")?.optJSONObject("public")?.optString("buildid", "0") ?: "0")
-        env.put("WINLITE_STEAM_DEPOTS", SteamCatalog.depots(info).joinToString(",") { "${it.id}:${it.manifest.toULong()}:0" })
+        env.put("WINLITE_STEAM_BUILD_ID", info.optJSONObject("depots")?.optJSONObject("branches")?.optJSONObject(branch)?.optString("buildid", "0") ?: "0")
+        val manifests = info.optString("winliteInstalledDepots").ifEmpty {
+            val actual = runCatching { installedSteamManifests(game) }.getOrDefault(emptyMap())
+            if (actual.isNotEmpty()) {
+                actual.entries.joinToString(",") { (depot, manifest) -> "$depot:${manifest.toULong()}:0" }
+            } else runCatching { SteamCatalog.manifestList(SteamCatalog.depots(info, branch, language)) }.getOrDefault("")
+        }
+        env.put("WINLITE_STEAM_DEPOTS", manifests)
         env.put("SteamAppId", id)
         env.put("SteamGameId", id)
         env.put("PROTON_DISABLE_LSTEAMCLIENT", "1")

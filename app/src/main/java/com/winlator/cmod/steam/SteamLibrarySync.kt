@@ -35,6 +35,14 @@ class SteamLibrarySync {
         started = null; packagesDone.clear(); appsDone.clear()
         fingerprint = ""; fromCache = false; fingerprinted = false
     }
+    companion object {
+        fun licenseFingerprint(snapshot: JSONObject): String {
+            val packages = snapshot.optJSONArray("packages")
+            return (0 until (packages?.length() ?: 0)).map { packages!!.getJSONObject(it) }
+                .map { "${it.getInt("id")}:${it.optInt("flags")}" }.sorted().joinToString(",")
+        }
+    }
+
     fun step(gateway: Gateway, licensesReceived: Boolean, now: Long) {
         if (!loading) return
         val since = started ?: now.also { started = it }
@@ -48,8 +56,7 @@ class SteamLibrarySync {
             }
             if (!fingerprinted) {
                 // Package ids and licence flags only: PICS responses later rewrite the change numbers.
-                fingerprint = (0 until (packages?.length() ?: 0)).map { packages!!.getJSONObject(it) }
-                    .map { "${it.getInt("id")}:${it.optInt("flags")}" }.sorted().joinToString(",")
+                fingerprint = licenseFingerprint(snapshot)
                 fingerprinted = true
                 if (cacheUsable?.invoke(fingerprint) == true) {
                     loading = false; progress = 100; fromCache = true

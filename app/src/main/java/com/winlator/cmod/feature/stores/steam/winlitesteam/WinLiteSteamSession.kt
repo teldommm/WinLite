@@ -107,7 +107,8 @@ class WinLiteSteamSession : AutoCloseable {
         appId: Int,
         depotIds: IntArray,
         manifestIds: LongArray,
-        branch: String,
+        manifestAppIds: IntArray,
+        manifestBranches: Array<String>,
         installDir: String,
         fresh: Boolean,
         caBundlePath: String,
@@ -115,16 +116,20 @@ class WinLiteSteamSession : AutoCloseable {
         listener: WinLiteDownloadListener,
         decompressWorkers: Int = 2,
     ) {
-        require(depotIds.size == manifestIds.size) {
-            "winlitesteam: depotIds/manifestIds size mismatch"
-        }
+        require(depotIds.size == manifestIds.size && depotIds.size == manifestAppIds.size &&
+            depotIds.size == manifestBranches.size) { "winlitesteam: mismatched depot metadata arrays" }
         val h = nativeHandle.get()
         if (h == 0L) {
             listener.onComplete(false, "session closed", 0L, 0, 0)
             return
         }
-        nativeDownloadApp(h, appId, depotIds, manifestIds, branch, installDir,
+        nativeDownloadApp(h, appId, depotIds, manifestIds, manifestAppIds, manifestBranches, installDir,
                           fresh, caBundlePath, maxWorkers, decompressWorkers, listener)
+    }
+
+    fun requestFreeLicense(appId: Int): String? {
+        val h = nativeHandle.get()
+        return if (h == 0L) null else nativeRequestFreeLicense(h, intArrayOf(appId))
     }
 
     // Abort the current depot download.
@@ -723,7 +728,8 @@ class WinLiteSteamSession : AutoCloseable {
             appId: Int,
             depotIds: IntArray,
             manifestIds: LongArray,
-            branch: String,
+            manifestAppIds: IntArray,
+            manifestBranches: Array<String>,
             installDir: String,
             fresh: Boolean,
             caBundlePath: String,
@@ -786,6 +792,7 @@ class WinLiteSteamSession : AutoCloseable {
         @JvmStatic private external fun nativeGetSelfPersona(handle: Long): String?
         @JvmStatic private external fun nativeGetFamilyGroup(
             handle: Long, familyGroupId: Long): String?
+        @JvmStatic private external fun nativeRequestFreeLicense(handle: Long, appIds: IntArray): String?
         @JvmStatic private external fun nativeGetLicenseList(handle: Long): String?
         @JvmStatic private external fun nativeGetFriendsList(handle: Long): LongArray
         @JvmStatic private external fun nativeGetFriendPersonas(handle: Long): String?

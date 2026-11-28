@@ -318,6 +318,8 @@ impl WinLiteLibraryStore {
             "packages": packages.iter().map(|p| json!({
                 "id": p.package_id,
                 "flags": p.license_flags,
+                "pics_fetched": p.pics_fetched,
+                "depot_ids": p.depot_ids,
                 "license_type": p.license_type,
                 "change_number": p.change_number,
                 "access_token": p.access_token.to_string(),
