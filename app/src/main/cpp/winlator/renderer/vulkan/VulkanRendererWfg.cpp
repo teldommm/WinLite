@@ -38,9 +38,9 @@ uint64_t nowNs() {
 uint64_t VulkanRendererContext::wfgPeriodNs() const {
     const uint32_t mhz = wfgRefreshMhz.load();
     const uint64_t java = mhz > 1000 ? (uint64_t)(1.0e12 / (double)mhz) : 16666667ull;
-    // The swapchain's own refresh cycle is exact (Display.getRefreshRate is rounded), but it is
-    // taken only while it agrees with the mode Java reports: some drivers keep the value the
-    // swapchain was created with after a mode switch.
+    // Android can report an app-specific frame rate even when the surface presents on a
+    // faster refresh cycle. WFG needs the current surface cycle for both budget and pacing.
+    if (wfgRefreshNs && wfgRequested.load(std::memory_order_relaxed)) return wfgRefreshNs;
     if (wfgRefreshNs && wfgRefreshNs * 100 >= java * 97 && wfgRefreshNs * 100 <= java * 103)
         return wfgRefreshNs;
     return java;
@@ -93,8 +93,12 @@ void VulkanRendererContext::wfgPollDisplayTiming() {
         refreshPollMhz = mhz;
         refreshPollNs = now;
         VkRefreshCycleDurationGOOGLE rc{};
-        if (getRefreshCycleGOOGLE_(device, swapchain, &rc) == VK_SUCCESS && rc.refreshDuration > 0)
+        if (getRefreshCycleGOOGLE_(device, swapchain, &rc) == VK_SUCCESS &&
+            rc.refreshDuration >= 1000000ull && rc.refreshDuration <= 1000000000ull) {
             wfgRefreshNs = rc.refreshDuration;
+        } else {
+            wfgRefreshNs = 0;
+        }
     }
     // A new period (the panel switched modes; wfgPeriodNs follows the swapchain's cycle and
     // Java's mode): the grid belongs to the old mode. It is dropped, and feedback for images
@@ -103,8 +107,16 @@ void VulkanRendererContext::wfgPollDisplayTiming() {
     if (wfgGridPeriodNs && (period * 100 < wfgGridPeriodNs * 99 || period * 100 > wfgGridPeriodNs * 101)) {
         wfgVsyncAnchorNs = 0;
         wfgModeSeq = presentSeq;
+        wfgQueueEndNs = 0;
+        wfgPace.restart();
+        lpPace.restart();
         WLOG_I("Display clock: refresh %.3f -> %.3f ms, grid dropped",
                (double)wfgGridPeriodNs / 1.0e6, (double)period / 1.0e6);
+    }
+    if (!wfgGridPeriodNs && wfgRequested.load(std::memory_order_relaxed)) {
+        WLOG_I("WFG display clock: Android %.2f Hz, Vulkan %.2f Hz, using %.2f Hz",
+               (double)mhz / 1000.0, wfgRefreshNs ? 1.0e9 / (double)wfgRefreshNs : 0.0,
+               1.0e9 / (double)period);
     }
     wfgGridPeriodNs = period;
     uint64_t shownFrames = 0, shownGenerated = 0, newestShownNs = 0;
@@ -213,10 +225,13 @@ void VulkanRendererContext::setWfgConfig(int flowSide, bool fastInterp, int targ
     if (wfgFastInterp.exchange(fastInterp) != fastInterp)
         WLOG_I("WFG interpolation: %s", fastInterp ? "fast (bilinear warp, one source step)"
                                                    : "balanced (Catmull-Rom warp, two source steps)");
-    wfgTargetFps.store((uint32_t)std::max(0, targetFps));
-    wfgMultiplier.store((uint32_t)std::clamp(multiplier, 0, (int)VKR_DIS_MAX_GENERATIONS + 1));
+    const uint32_t target = (uint32_t)std::max(0, targetFps);
+    const uint32_t mult = (uint32_t)std::clamp(multiplier, 0, (int)VKR_DIS_MAX_GENERATIONS + 1);
+    const bool targetChanged = wfgTargetFps.exchange(target) != target;
+    const bool multChanged = wfgMultiplier.exchange(mult) != mult;
     const uint32_t mhz = refreshHz > 0.f ? (uint32_t)std::lround(refreshHz * 1000.f) : 0u;
-    if (wfgRefreshMhz.exchange(mhz) != mhz)
+    const bool refreshChanged = wfgRefreshMhz.exchange(mhz) != mhz;
+    if (targetChanged || multChanged || refreshChanged)
         WLOG_I("WFG display refresh %.1f Hz, flow side %d, target %d fps, multiplier x%d",
                refreshHz, flowSide, targetFps, multiplier);
 }
@@ -800,7 +815,8 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
     if (!wfgEnsureComposite()) return wf;
 
     const VkrDisContentRect content = wfgContentRect(draws, ox, oy, sx, sy, cw, ch);
-    const float refresh = (float)wfgRefreshMhz.load() / 1000.f;
+    const uint64_t period = wfgPeriodNs();
+    const float refresh = (float)(1.0e9 / (double)period);
     const uint32_t targetFps = wfgTargetFps.load();
     const uint32_t multiplier = wfgMultiplier.load();
     vkr_dis_configure(wfg, wfgFlowSide.load(), wfgFastInterp.load(), targetFps, multiplier, refresh);
@@ -821,7 +837,9 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
     }
 
     const uint32_t images = (uint32_t)swapchainImages.size();
-    uint32_t capacity = images > swapchainMinImages + 1 ? images - swapchainMinImages - 1 : 0;
+    // The acquire guarantee counts the images already held before the next acquire.
+    // With the real image held, S - M more images can still be acquired.
+    uint32_t capacity = images > swapchainMinImages ? images - swapchainMinImages : 0;
     capacity = std::min(capacity, VKR_DIS_MAX_GENERATIONS);
     uint32_t planned = vkr_dis_plan(wfg, capacity, frames, arrival);
 
@@ -846,7 +864,6 @@ VulkanRendererContext::WfgFrame VulkanRendererContext::wfgBeginFrame(
 
     // Shed one generated frame at a time when the preceding batches still occupy the display
     // queue. The unpaced path estimates queue depth in refreshes.
-    const uint64_t period = wfgPeriodNs();
     const uint64_t now = nowNs();
     const uint64_t ahead = wfgQueueEndNs > now + period ? (wfgQueueEndNs - now - period) / period : 0;
     wfgAheadSum += ahead;

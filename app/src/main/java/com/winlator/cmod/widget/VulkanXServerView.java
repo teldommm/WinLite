@@ -661,7 +661,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         if (nativeHandle == 0) return;
         float refreshHz = 60f;
         android.view.Display display = getDisplay();
-        if (display != null && display.getRefreshRate() > 1f) refreshHz = display.getRefreshRate();
+        if (display != null) {
+            float rate = pendingWfgEnabled ? display.getMode().getRefreshRate() : display.getRefreshRate();
+            if (rate > 1f) refreshHz = rate;
+        }
         nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgFastInterp,
                 pendingWfgTargetFps, pendingWfgMultiplier, refreshHz);
         nativeSetWfgFpsLimit(nativeHandle, fpsLimit);

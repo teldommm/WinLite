@@ -513,6 +513,10 @@ void VulkanRendererContext::createSwapchain() {
     if (oldSwapchain!=VK_NULL_HANDLE) vk_.DestroySwapchainKHR(device,oldSwapchain,nullptr);
     vk_.GetSwapchainImagesKHR(device,swapchain,&imgCount,nullptr);
     swapchainImages.resize(imgCount); vk_.GetSwapchainImagesKHR(device,swapchain,&imgCount,swapchainImages.data());
+    if (wantWfg)
+        __android_log_print(ANDROID_LOG_INFO, WLOG_TAG,
+                            "WFG swapchain: %u images, surface minimum %u, display timing %d",
+                            imgCount, swapchainMinImages, displayTiming_);
     swapchainViews.resize(imgCount);
     for (size_t i=0;i<imgCount;i++) {
         VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -695,6 +699,12 @@ void VulkanRendererContext::cleanupSwapchain() {
     if (swapchain!=VK_NULL_HANDLE) {
         vk_.DestroySwapchainKHR(device,swapchain,nullptr);
         swapchain=VK_NULL_HANDLE;
+        wfgRefreshNs = refreshPollNs = 0;
+        wfgVsyncAnchorNs = wfgGridPeriodNs = 0;
+        wfgModeSeq = presentSeq;
+        wfgQueueEndNs = 0;
+        wfgPace.restart();
+        lpPace.restart();
         std::lock_guard<std::mutex> lock(presentStampMutex);
         queuedOutput.ns = displayedOutput.ns = 0;
     }

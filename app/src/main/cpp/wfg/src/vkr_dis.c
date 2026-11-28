@@ -2189,7 +2189,7 @@ static uint32_t dis_plan_target(VkrDis* d, uint64_t now, float source_rate, doub
     return generated;
 }
 
-static uint32_t dis_plan_fixed(VkrDis* d, uint64_t now, float source_rate, double elapsed,
+static uint32_t dis_plan_fixed(VkrDis* d, uint64_t now, float source_rate,
                                uint32_t capacity) {
     const uint32_t requested = d->multiplier <= capacity + 1u ? d->multiplier : capacity + 1u;
     d->plan_idle = d->refresh_rate > 0.0f && source_rate >= d->refresh_rate;
@@ -2197,9 +2197,9 @@ static uint32_t dis_plan_fixed(VkrDis* d, uint64_t now, float source_rate, doubl
 
     uint32_t outputs = requested;
     if (d->refresh_rate > 0.0f) {
-        // Allow short bursts to borrow from two spare refresh slots. Sustained excess uses
-        // the display's fractional budget, while each batch still contains its real frame.
-        const double available = d->fixed_credit + (double)d->refresh_rate * elapsed;
+        // Fixed modes budget the sustained source rate. A burst of arrivals must not spend
+        // the display budget twice: pacing already handles short-lived queue pressure.
+        const double available = d->fixed_credit + (double)d->refresh_rate * d->src_interval;
         // A rounded nanosecond timestamp must not turn an integral budget into a short batch.
         outputs = (uint32_t)fmin(requested, fmax(1.0, floor(available + 1.0e-6)));
         d->fixed_credit = fmin(DIS_FIXED_BURST_CREDIT, fmax(0.0, available - outputs));
@@ -2237,7 +2237,7 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames, uint
     const float source_rate = 1.0f / d->src_interval;
     const double elapsed = previous && arrival_ns >= previous
         ? (double)(arrival_ns - previous) * 1.0e-9 : d->src_interval;
-    if (d->multiplier >= 2u) return dis_plan_fixed(d, now, source_rate, elapsed, capacity);
+    if (d->multiplier >= 2u) return dis_plan_fixed(d, now, source_rate, capacity);
     return dis_plan_target(d, now, source_rate, elapsed, capacity);
 }
 
