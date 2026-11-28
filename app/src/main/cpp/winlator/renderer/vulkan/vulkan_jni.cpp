@@ -374,11 +374,11 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeReattachSurface(
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfg(
     JNIEnv*, jobject, jlong handle, jboolean enabled, jint flowSide, jboolean fastInterp,
-    jint targetFps, jint multiplier, jfloat refreshHz)
+    jint targetFps, jboolean doubleFrames, jfloat refreshHz)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (!r) return;
-    r->setWfgConfig((int)flowSide, fastInterp == JNI_TRUE, (int)targetFps, (int)multiplier,
+    r->setWfgConfig((int)flowSide, fastInterp == JNI_TRUE, (int)targetFps, doubleFrames == JNI_TRUE,
                     (float)refreshHz);
     r->setWfgEnabled(enabled == JNI_TRUE);
 }
@@ -392,34 +392,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetWfgFpsLimit(
     r->setWfgFpsLimit((int)fps);
 }
 
-// The display clock for the FPS limiters: {refresh period ns, arrival phase error ns, its
-// sequence number}; false while the renderer has no fresh refresh grid.
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetDisplayClock(
-    JNIEnv* env, jobject, jlong handle, jlongArray out)
-{
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || !out || env->GetArrayLength(out) < 3) return JNI_FALSE;
-    int64_t v[3];
-    if (!r->getDisplayClock(v)) return JNI_FALSE;
-    const jlong j[3] = {(jlong)v[0], (jlong)v[1], (jlong)v[2]};
-    env->SetLongArrayRegion(out, 0, 3, j);
-    return JNI_TRUE;
-}
-
-// {presented frames (real and generated), WFG-generated frames, presented frames as of the
-// latest real frame's burst, that burst's time (ns, System.nanoTime() clock)}; a 2-long array
-// gets the first two only.
-extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetFrameCounts(
     JNIEnv* env, jobject, jlong handle, jlongArray out)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (!r || !out) return;
-    const jsize n = env->GetArrayLength(out);
-    if (n < 2) return;
+    if (!r || !out || env->GetArrayLength(out) < 3) return JNI_FALSE;
     const auto stamp = r->getPresentStamp();
-    jlong vals[4] = { (jlong)r->getPresentedFrames(), (jlong)r->getWfgGeneratedFrames(),
-                      (jlong)stamp.frames, (jlong)stamp.ns };
-    env->SetLongArrayRegion(out, 0, n >= 4 ? 4 : 2, vals);
+    const jlong vals[3] = {(jlong)stamp.frames, (jlong)stamp.generated, (jlong)stamp.ns};
+    env->SetLongArrayRegion(out, 0, 3, vals);
+    return JNI_TRUE;
 }

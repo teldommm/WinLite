@@ -233,10 +233,6 @@ public class FrameRating extends FrameLayout implements Runnable {
         post(this);
     }
 
-    public void update(int frames) {
-        update(frames, System.nanoTime(), false);
-    }
-
     /**
      * {@code frames} frames of the rated window (the X server reports them in batches), the latest
      * at {@code timeNs} ({@link System#nanoTime()} clock); {@code direct}: DRI3 presents. The fps

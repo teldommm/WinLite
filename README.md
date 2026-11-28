@@ -42,8 +42,8 @@ The whole X11 server now lives in Rust (`app/src/main/rust/xcore`), linked into 
 ### Frame generation (WFG)
 Vulkan compute optical-flow interpolation that runs inside the renderer: no layers, env variables or imported files.
 - Motion estimation: DIS optical flow with Farneback flow on coarse levels. **Motion Quality:** Fast or Balanced.
-- **Frame Multiplier:** x2 / x3 / x4, capped by what the display can show. **Target:** your own FPS (40 up to the panel's refresh), or `0` for the display's refresh rate.
-- Turns itself off below ~20 FPS and back on above ~24 FPS. Only the game area is analysed, letterboxes are not.
+- **x2:** generates one frame per game frame when the display refresh rate allows it. **Target:** varies the number of generated frames per pair to reach the chosen average FPS (40 up to the panel's refresh), or `0` for the display's refresh rate.
+- Target can generate at low game frame rates. The display refresh rate and the available swapchain images limit what it can reach. Only the game area is analysed, letterboxes are not.
 - Toggle in the sidebar, saved per container or shortcut. Adds one display frame of latency.
 
 ### Steam
@@ -81,7 +81,7 @@ One catalog for Proton/Wine, GPU drivers, FEXCore/Box64, DXVK/VKD3D with verifie
 Package `com.winlite.bionic` · Arm64 only · Android 9+ (`minSdk 28`)
 
 ## Tips
-- **WFG:** sidebar → Rendering → Frame Generation. Works best with a steady 30–60 FPS (x2 for 45–60, x3/x4 for 30), or use **Target** with a clearly higher FPS. Pair it with the FPS limiter for even pacing.
+- **WFG:** sidebar → Rendering → Frame Generation. Use **x2** for a steady game rate the display can show at twice the FPS, or **Target** to set an output rate. Pair it with the FPS limiter for even pacing.
 - DirectAudio and Force SSBS need a Proton 9 or 11 Arm64EC container.
 - Slow `x86_64` container: set the Box86/Box64 preset to **Performance** (Container → Advanced); use **Intermediate** for installers.
 - `Arm64EC` container: try other FEXCore versions.

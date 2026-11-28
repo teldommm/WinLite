@@ -96,42 +96,32 @@ private val RESHADE_EFFECTS = listOf(
 // index, never reorder): quality = pixels analysed on the frame's shorter side.
 private val WFG_QUALITY_LABELS = listOf("Fast", "Balanced")
 
-/**
- * What the Frame Generation card offers for the frame multiplier and the target FPS, and how it is
- * saved. XServerDisplayActivity takes the native values from here instead of keeping copies, so
- * the list, the saved indices and the multipliers handed to the renderer cannot drift apart.
- */
+/** The WFG mode picker, saved mode values and target FPS range. */
 object WfgSettings {
-    private class Mode(val label: String, val multiplier: Int)
-
-    // Saved as the index (never reorder). x2/x3/x4 fix the output at that many frames per game
-    // frame; multiplier 0 means none is fixed and the target FPS decides (the "Target" entry,
-    // which shows a numeric field).
-    private val MODES = listOf(Mode("x2", 2), Mode("x3", 3), Mode("x4", 4), Mode("Target", 0))
+    private const val X2_INDEX = 0
+    private const val TARGET_INDEX = 1
+    private const val SAVED_X2 = 0
+    private const val SAVED_TARGET = 3
 
     @JvmField
-    val MODE_LABELS: List<String> = MODES.map { it.label }
-
-    @JvmField
-    val MODE_COUNT: Int = MODES.size
+    val MODE_LABELS: List<String> = listOf("x2", "Target")
 
     @JvmStatic
-    fun clampMode(index: Int): Int = index.coerceIn(0, MODES.lastIndex)
+    fun isTarget(index: Int): Boolean = index == TARGET_INDEX
 
-    /** Frames per game frame for a saved mode index; 0 when the target FPS decides instead. */
+    // Keep the existing Target value. Removed modes and invalid values fall back to x2.
     @JvmStatic
-    fun multiplierOf(index: Int): Int = MODES[clampMode(index)].multiplier
+    fun modeIndexFromSavedValue(value: Int): Int =
+        if (value == SAVED_TARGET) TARGET_INDEX else X2_INDEX
 
     @JvmStatic
-    fun isTarget(index: Int): Boolean = multiplierOf(index) == 0
+    fun savedModeValue(index: Int): Int = if (isTarget(index)) SAVED_TARGET else SAVED_X2
 
     // 0 follows the panel's refresh rate (the former "Max refresh"): the renderer aims at whatever
     // the display runs at, which WFG raises to the panel's fastest mode when it is on.
     const val TARGET_PANEL = 0
 
-    // WFG only generates from a source of at least 24 FPS (DIS_MIN_SOURCE_FPS_ON) and a target at
-    // least 1.45x the source (DIS_MIN_GEN_RATIO): 24 * 1.45 = ~35. A lower target could never
-    // produce a frame, so it is not offered.
+    // Minimum custom target offered by the picker, in FPS.
     const val TARGET_MIN = 40
     const val TARGET_DEFAULT = 60
 
@@ -174,7 +164,7 @@ private fun GraphicsSidebarPanel(
     var gpuTurbo by remember { mutableStateOf(state.gpuTurboEnabled) }
     var wfgQualityIndex by remember { mutableStateOf(state.wfgQualityIndex) }
     var wfgModeIndex by remember { mutableStateOf(state.wfgModeIndex) }
-    // The target FPS in effect (kept while a multiplier is selected, so switching back restores it)
+    // The target FPS in effect (kept in x2 mode, so switching back restores it)
     // and the text being typed, which is only applied once editing ends.
     var wfgTargetFps by remember { mutableStateOf(WfgSettings.clampTarget(state.wfgTargetFps, state.wfgPanelHz)) }
     var wfgTargetText by remember { mutableStateOf(wfgTargetFps.toString()) }
@@ -347,9 +337,9 @@ private fun GraphicsSidebarPanel(
                 )
                 Spacer(Modifier.height(12.dp))
                 SidebarDropdownField(
-                    caption = uiStr(R.string.ui_wfg_multiplier),
+                    caption = uiStr(R.string.ui_wfg_mode),
                     options = WfgSettings.MODE_LABELS,
-                    selectedIndex = WfgSettings.clampMode(wfgModeIndex),
+                    selectedIndex = wfgModeIndex,
                     onSelect = {
                         wfgModeIndex = it
                         pushWfg()
@@ -359,7 +349,6 @@ private fun GraphicsSidebarPanel(
                     Spacer(Modifier.height(10.dp))
                     WfgTargetField(
                         text = wfgTargetText,
-                        range = WfgSettings.TARGET_MIN..WfgSettings.targetMax(state.wfgPanelHz),
                         onTextChange = { wfgTargetText = it },
                         // Done, tap elsewhere or drawer closed: apply once, not per keystroke
                         // (typing "144" would otherwise pass through 1 and 14 and save each).
@@ -484,13 +473,10 @@ private fun FpsLimiterCard(
     }
 }
 
-// Numeric field for WFG's custom target FPS, shown while the multiplier list is on "Target"; the
-// allowed range (and that 0 means the panel's rate) is shown under it and enforced when editing
-// ends. Same focus handling as the FPS limiter's custom field: onCommit fires when focus is lost.
+// Numeric field for WFG's custom target FPS. The value is committed when focus is lost.
 @Composable
 private fun WfgTargetField(
     text: String,
-    range: IntRange,
     onTextChange: (String) -> Unit,
     onCommit: () -> Unit
 ) {
@@ -508,7 +494,6 @@ private fun WfgTargetField(
         singleLine = true,
         label = { Text(uiStr(R.string.ui_wfg_target_fps)) },
         suffix = { Text("FPS") },
-        supportingText = { Text(uiStr(R.string.ui_wfg_target_hint, range.first, range.last)) },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
         modifier = Modifier

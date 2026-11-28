@@ -202,8 +202,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private int graphicsSharpnessPercent = 50;
     private int graphicsReshadeStrength = 65;
     // WFG frame generation: the quality index is what gets saved (never reorder);
-    // GraphicsSidebarPanel lists the same positions. The frame multiplier modes and the target FPS
-    // range live in WfgSettings.
+    // GraphicsSidebarPanel lists the same positions. Mode and target FPS settings live in WfgSettings.
     private static final int[] WFG_FLOW_SIDES = {180, 220};
     // Per quality index as well: Fast also takes the cheaper interpolation (bilinear warp, one
     // source step), Balanced the Catmull-Rom warp with two.
@@ -2128,14 +2127,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         final boolean wfgOn = readWfgInt("wfgEnabled", 0, 1) == 1;
         final int wfgQuality = readWfgInt("wfgQuality", 0, WFG_FLOW_SIDES.length - 1);
-        final int wfgMode = readWfgInt("wfgMode", 0, WfgSettings.MODE_COUNT - 1);
+        final int wfgModeIndex = WfgSettings.modeIndexFromSavedValue(
+                readWfgInt("wfgMode", 0, Integer.MAX_VALUE));
         // The target can't usefully exceed what the panel runs at, so it is limited to that.
         final int wfgPanelHz = fastestPanelRefreshHz();
         final int wfgTargetFps = WfgSettings.clampTarget(
                 readWfgInt("wfgTargetFps", WfgSettings.TARGET_DEFAULT, Integer.MAX_VALUE), wfgPanelHz);
         if (vkRenderer != null) {
             vkRenderer.setWfg(wfgOn, WFG_FLOW_SIDES[wfgQuality], WFG_FAST_INTERP[wfgQuality],
-                    wfgTargetFps, WfgSettings.multiplierOf(wfgMode));
+                    wfgTargetFps, !WfgSettings.isTarget(wfgModeIndex));
         }
 
         GraphicsPanelState state = new GraphicsPanelState(
@@ -2148,7 +2148,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 graphicsReshadeStrength,
                 wfgOn,
                 wfgQuality,
-                wfgMode,
+                wfgModeIndex,
                 wfgTargetFps,
                 wfgPanelHz,
                 gpuTurboMenuVisible,
@@ -2232,13 +2232,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onWfgChanged(boolean enabled, int qualityIndex, int modeIndex, int targetFps) {
                 int q = Math.max(0, Math.min(WFG_FLOW_SIDES.length - 1, qualityIndex));
-                int m = WfgSettings.clampMode(modeIndex);
                 int t = WfgSettings.clampTarget(targetFps, wfgPanelHz);
                 if (vkRenderer != null) {
                     vkRenderer.setWfg(enabled, WFG_FLOW_SIDES[q], WFG_FAST_INTERP[q], t,
-                            WfgSettings.multiplierOf(m));
+                            !WfgSettings.isTarget(modeIndex));
                 }
-                saveWfgSettings(enabled, q, m, t);
+                saveWfgSettings(enabled, q, WfgSettings.savedModeValue(modeIndex), t);
             }
 
             @Override

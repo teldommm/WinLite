@@ -415,14 +415,6 @@ public class WinlatorHUD extends View {
         return false;
     }
 
-    public void onFrame() {
-        onFrames(1, System.nanoTime(), false);
-    }
-
-    public void onFrames(int frames) {
-        onFrames(frames, System.nanoTime(), false);
-    }
-
     /**
      * {@code frames} frames of the rated window (the X server reports them in batches), the latest
      * at {@code timeNs} ({@link System#nanoTime()} clock); {@code direct}: DRI3 presents.

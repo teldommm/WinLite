@@ -1,12 +1,11 @@
 package com.winlator.cmod.widget;
 
 /**
- * The output fps (real and WFG-generated frames shown) for the HUDs.
+ * The rate of real and WFG-generated frames queued for presentation, for the HUDs.
  *
- * <p>The renderer sends a real frame and its generated ones as one burst of presents, so the
- * presented count grows in steps of the WFG multiplier. Taken per HUD tick, a 400 ms tick over
- * 30 game fps holds 12 or 13 bursts and x2 read 58..65, x3 87..97. Here the span runs from the
- * time of one burst to another's (both stamped by the renderer), so it always holds whole bursts.
+ * <p>The renderer sends a real frame and its generated ones as one burst of presents.
+ * A HUD tick can count 12 or 13 bursts at 30 game FPS and show 58..65 FPS in x2 mode.
+ * Using timestamps from the renderer measures the interval between complete bursts.
  *
  * <p>Thread-safe: the source may be swapped from another thread than the one reading.
  */
@@ -14,7 +13,7 @@ final class OutputRateMeter {
     /** No burst for this long: the output stalled, the reading drops to 0. */
     private static final long STALL_NS = 1_000_000_000L;
 
-    private final long[] counts = new long[4];
+    private final long[] counts = new long[3];
     private long lastFrames = -1;
     private long lastNs = 0;
     private long lastGenerated = -1;
@@ -29,7 +28,7 @@ final class OutputRateMeter {
             reset();
             return 0f;
         }
-        final long generated = counts[1], frames = counts[2], ns = counts[3];
+        final long frames = counts[0], generated = counts[1], ns = counts[2];
         if (lastFrames < 0 || ns <= 0 || frames < lastFrames || ns < lastNs) {
             // First read, or a new renderer: start from here.
             lastFrames = frames;

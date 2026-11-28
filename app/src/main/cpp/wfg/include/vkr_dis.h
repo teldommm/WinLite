@@ -37,13 +37,13 @@ bool vkr_dis_bind_dispatch(PFN_vkGetInstanceProcAddr gipa, VkInstance instance);
 VkrDis* vkr_dis_create(VkDevice device, VkPhysicalDevice physical_device);
 void vkr_dis_destroy(VkrDis* dis);
 
-// multiplier >= 2 fixes the output at that many frames per game frame (x2 = one generated
-// frame); the target is then ignored. 0 derives the count from target_fps (0 = refresh rate).
+// double_frames selects x2 (one generated frame per game frame). Otherwise the count is
+// derived from target_fps (0 = refresh rate).
 // fast_interp: the Fast preset's interpolation - a bilinear warp instead of Catmull-Rom and one
 // step to the source point instead of two; cheaper per output pixel, a little softer. It applies
 // from the next generated frame, without a rebuild.
 void vkr_dis_configure(VkrDis* dis, uint32_t flow_min_side, bool fast_interp, uint32_t target_fps,
-                       uint32_t multiplier, float refresh_rate);
+                       bool double_frames, float refresh_rate);
 
 // base_view: a view of the composite (the image vkr_dis_process reads, in GENERAL), sampled by
 // the interpolation outside the content rect. A different view means a rebuild: wait for the
@@ -54,10 +54,11 @@ bool vkr_dis_needs_rebuild(const VkrDis* dis, uint32_t width, uint32_t height,
 bool vkr_dis_prepare(VkrDis* dis, uint32_t width, uint32_t height, VkFormat format,
                      VkrDisContentRect content, VkImageView base_view);
 
-uint32_t vkr_dis_plan(VkrDis* dis, uint32_t capacity, uint64_t source_frames);
+// arrival_ns is the monotonic timestamp of the game frame being rendered.
+uint32_t vkr_dis_plan(VkrDis* dis, uint32_t capacity, uint64_t source_frames, uint64_t arrival_ns);
 
 // After vkr_dis_plan: it generates nothing for this frame and does not need the frame either (the
-// game already reaches the target, is below the source-rate floor, or there are no spare images).
+// game already reaches the target, or there are no spare images).
 // The renderer may then draw the frame straight to the swapchain and skip vkr_dis_process, calling
 // vkr_dis_skip_frame instead. The plan keeps running on every new game frame; when it wants
 // frames again, its first answer is 0 (and not idle) while it takes one frame in.
@@ -71,8 +72,9 @@ uint64_t vkr_dis_source_interval_ns(const VkrDis* dis);
 void vkr_dis_process(VkrDis* dis, VkCommandBuffer cmd, VkImage source,
                      uint32_t width, uint32_t height, uint32_t generations);
 
-// Writes generated frame `generation` into the image behind target_fb, as one fragment pass that
-// covers it whole. target_fb must be of a render pass compatible with WFG's: one attachment of the
+// Writes generated frame `generation` into target_fb in one fragment pass. t is its time
+// between the previous game frame (0) and the current one (1). An unset time uses an even split.
+// target_fb must be of a render pass compatible with WFG's: one attachment of the
 // format given to vkr_dis_prepare, one sample, one subpass and the single dependency
 // EXTERNAL -> 0, COLOR_ATTACHMENT_OUTPUT (no access) -> COLOR_ATTACHMENT_OUTPUT
 // (COLOR_ATTACHMENT_WRITE) - the renderer's swapchain pass. The image needs
@@ -80,12 +82,6 @@ void vkr_dis_process(VkrDis* dis, VkCommandBuffer cmd, VkImage source,
 // VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT. Called outside a render pass.
 // Returns false, recording nothing, when there is no such generated frame (no pair processed with
 // that many, or the engine is unusable): the image is then untouched and still the caller's.
-bool vkr_dis_generate_into(VkrDis* dis, VkCommandBuffer cmd, uint32_t generation,
-                           VkFramebuffer target_fb, uint32_t width, uint32_t height);
-
-// As vkr_dis_generate_into, with the frame's time between the previous game frame (0) and the
-// current one (1) given by the caller: the renderer passes where the frame lands on the display,
-// which differs from the even split when the output does not divide the refresh rate.
 bool vkr_dis_generate_into_at(VkrDis* dis, VkCommandBuffer cmd, uint32_t generation, float t,
                               VkFramebuffer target_fb, uint32_t width, uint32_t height);
 

@@ -72,7 +72,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private int     pendingWfgFlowSide    = 180;
     private boolean pendingWfgFastInterp  = true;
     private int     pendingWfgTargetFps   = 0;
-    private int     pendingWfgMultiplier  = 0;
+    private boolean pendingWfgDoubleFrames = false;
     private int     savedDisplayModeId    = -1;   // the window's mode before WFG raised it
     private android.hardware.display.DisplayManager.DisplayListener displayListener;
 
@@ -141,11 +141,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
     private native void nativeSetWfg(long handle, boolean enabled, int flowSide, boolean fastInterp,
-                                     int targetFps, int multiplier, float refreshHz);
+                                     int targetFps, boolean doubleFrames, float refreshHz);
     // The game's FPS limit (0 = none): WFG paces its presents to it while the game holds it.
     @FastNative private native void nativeSetWfgFpsLimit(long handle, int fps);
-    @FastNative private native boolean nativeGetDisplayClock(long handle, long[] out);
-    private native void nativeGetFrameCounts(long handle, long[] out);
+    private native boolean nativeGetFrameCounts(long handle, long[] out);
 
     private native void nativeDumpRendererInfo(long handle);
     private native void nativeSetFilterMode(long handle, int mode);
@@ -494,18 +493,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
      * @param flowSide  pixels on the shorter side of the frame the motion is analysed at
      * @param fastInterp the cheaper interpolation (bilinear warp, one source step) of the Fast
      *                  preset instead of the Catmull-Rom warp with two steps
-     * @param targetFps output rate to reach; 0 follows the display refresh rate. Ignored while
-     *                  multiplier is set.
-     * @param multiplier 2..4 fixes the output at that many frames per game frame (x2 = one
-     *                  generated frame); 0 chases targetFps instead
+     * @param targetFps output rate in Target mode; 0 follows the display refresh rate
+     * @param doubleFrames selects x2 mode, with one generated frame per game frame
      */
     public void setWfg(boolean enabled, int flowSide, boolean fastInterp, int targetFps,
-                       int multiplier) {
+                       boolean doubleFrames) {
         pendingWfgEnabled = enabled;
         pendingWfgFlowSide = flowSide;
         pendingWfgFastInterp = fastInterp;
         pendingWfgTargetFps = targetFps;
-        pendingWfgMultiplier = multiplier;
+        pendingWfgDoubleFrames = doubleFrames;
         requestDisplayMode();
         synchronized (lock) { applyWfg(); }
     }
@@ -527,14 +524,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     /**
-     * The WFG output rate when it is known up front: the game's FPS limit times a fixed
-     * multiplier, or the target of the target mode. 0 when it is not known (no limit with a
-     * fixed multiplier, or a target of "the refresh rate").
+     * The requested WFG output rate: twice the game's FPS limit in x2 mode, or the target
+     * FPS in Target mode. 0 lets the display refresh rate be chosen without a known output rate.
      */
     private int wfgOutputFps() {
-        if (pendingWfgMultiplier >= 2) {
-            return fpsLimit > 0 ? fpsLimit * pendingWfgMultiplier : 0;
-        }
+        if (pendingWfgDoubleFrames) return fpsLimit * 2;
         return Math.max(0, pendingWfgTargetFps);
     }
 
@@ -545,9 +539,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
      * into two or more refreshes per frame is taken: 120 Hz for 60 fps on a 60/90/120/144/165 Hz
      * panel. One refresh per frame is not enough: a game frame that comes a little early or a
      * GPU batch that ends a little late has no spare refresh to land on, and generated frames
-     * are dropped (30 fps x4 on 120 Hz showed ~105 fps). Otherwise, or when no mode qualifies,
-     * the fastest mode: the finer the refresh, the smaller an uneven step, and the interpolation
-     * phase follows where each frame really lands.
+     * are dropped. When no mode qualifies, the fastest mode gives the smallest timing step,
+     * and the interpolation phase follows where each frame lands.
      */
     public static android.view.Display.Mode wfgMode(android.view.Display display, int outputFps) {
         return displayModeFor(display, outputFps, 2);
@@ -579,7 +572,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     /**
      * Generated frames need display refresh slots above the game's rate: with WFG on, ask for the
      * mode wfgMode picks (the window otherwise stays at the system's default, often 60 Hz).
-     * Called again whenever the output rate changes (FPS limit, multiplier, target).
+     * Called again whenever the output rate changes (FPS limit, WFG mode, target).
      */
     private void requestDisplayMode() {
         final boolean on = pendingWfgEnabled || fpsLimit > 0;
@@ -631,31 +624,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
 
-    private final long[] frameCounts = new long[4];
-
-    private long frameCount(int which) {
-        synchronized (lock) {
-            if (nativeHandle == 0) return 0;
-            nativeGetFrameCounts(nativeHandle, frameCounts);
-            return frameCounts[which];
-        }
-    }
-
     @Override
     public boolean readFrameCounts(long[] out) {
         synchronized (lock) {
-            if (nativeHandle == 0) return false;
-            nativeGetFrameCounts(nativeHandle, frameCounts);
-            System.arraycopy(frameCounts, 0, out, 0, 4);
-            return true;
+            return nativeHandle != 0 && nativeGetFrameCounts(nativeHandle, out);
         }
     }
-
-    @Override
-    public long getPresentedFrameCount() { return frameCount(0); }
-
-    @Override
-    public long getGeneratedFrameCount() { return frameCount(1); }
 
     private void applyWfg() {
         if (nativeHandle == 0) return;
@@ -663,7 +637,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         android.view.Display display = getDisplay();
         if (display != null && display.getRefreshRate() > 1f) refreshHz = display.getRefreshRate();
         nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgFastInterp,
-                pendingWfgTargetFps, pendingWfgMultiplier, refreshHz);
+                pendingWfgTargetFps, pendingWfgDoubleFrames, refreshHz);
         nativeSetWfgFpsLimit(nativeHandle, fpsLimit);
     }
 
@@ -722,16 +696,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             classicHudRef.setOutputFrameSource(this);
         }
     }
-    public int getFpsLimit() {
-        return fpsLimit;
-    }
-
     @Override
-    public boolean getDisplayClock(long[] out) {
-        synchronized (lock) {
-            return nativeHandle != 0 && nativeGetDisplayClock(nativeHandle, out);
-        }
-    }
     public void setFpsLimit(int limit) {
         int v = Math.max(0, Math.min(1000, limit));
         boolean changed = v != fpsLimit;

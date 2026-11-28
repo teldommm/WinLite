@@ -998,7 +998,7 @@ void VulkanRendererContext::renderLoop() {
         }
         if (wfgDeferredRender.exchange(false)) {
             // A skipped render: show it with the next game frame, or on its own if none comes -
-            // after 100 ms (WFG), or once the paced frame it waited for is on screen (plain path).
+            // after 100 ms, or when the paced frame or batch it waited for is on screen.
             auto wait = std::chrono::nanoseconds(100000000LL);
             const uint64_t until = renderDeferUntilNs.exchange(0);
             if (until) {
@@ -1084,6 +1084,7 @@ void VulkanRendererContext::renderFrame() {
     vk_.ResetCommandBuffer(cmdBufs[currentFrame],0);
 
     float ox,oy,sx,sy,cw,ch;
+    uint64_t gameFrames, gameArrivalNs;
     short ptrX,ptrY,curHotX,curHotY,curW,curH; bool curVis;
     VkBuffer curUpload=VK_NULL_HANDLE; bool hasCurUpload=false;
     VkRect2D effectiveScissor{{0,0},swapchainExt};
@@ -1098,6 +1099,8 @@ void VulkanRendererContext::renderFrame() {
 
         ox=sceneOffsetX; oy=sceneOffsetY; sx=sceneScaleX; sy=sceneScaleY;
         cw=(float)containerWidth; ch=(float)containerHeight;
+        gameFrames=contentFrames.load(std::memory_order_relaxed);
+        gameArrivalNs=lastGameFrameNs.load(std::memory_order_relaxed);
         ptrX=(short)pointerX.load(); ptrY=(short)pointerY.load();
         curVis=cursorVisible.load();
 
@@ -1144,7 +1147,7 @@ void VulkanRendererContext::renderFrame() {
 
     // The display clock: feedback from earlier presents, every frame, whatever path presents.
     if (displayTiming_) wfgPollDisplayTiming();
-    WfgFrame wf = wfgBeginFrame(frameDraws,ox,oy,sx,sy,cw,ch);
+    WfgFrame wf = wfgBeginFrame(frameDraws,ox,oy,sx,sy,cw,ch,gameFrames,gameArrivalNs);
     // Without WFG, a new game frame under an FPS limit gets its own target on the refresh grid.
     const uint64_t plainAt = wf.active ? 0 : limitPlanPresent();
     {
@@ -1242,7 +1245,11 @@ void VulkanRendererContext::renderFrame() {
         gpi.waitSemaphoreCount=1; gpi.pWaitSemaphores=&sSem[1+g];
         gpi.swapchainCount=1; gpi.pSwapchains=scs; gpi.pImageIndices=&wf.genIdx[g];
         VkResult gr=vk_.QueuePresentKHR(graphicsQueue,&gpi);
-        if (gr==VK_SUCCESS||gr==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
+        if (gr==VK_SUCCESS||gr==VK_SUBOPTIMAL_KHR) {
+            presentedFrames.fetch_add(1,std::memory_order_relaxed);
+            generatedPresents++;
+            outputPresents++;
+        }
         if (gr==VK_ERROR_OUT_OF_DATE_KHR||gr==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
     }
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1250,13 +1257,16 @@ void VulkanRendererContext::renderFrame() {
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
     res = vk_.QueuePresentKHR(graphicsQueue, &pi);
-    if (res==VK_SUCCESS||res==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
-    {
-        // The whole burst of this real frame is out: stamp it for the HUD (see PresentStamp).
-        const uint64_t stampNs = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-        std::lock_guard<std::mutex> g(presentStampMutex);
-        presentStamp = { presentedFrames.load(std::memory_order_relaxed), stampNs };
+    if (res==VK_SUCCESS||res==VK_SUBOPTIMAL_KHR) {
+        presentedFrames.fetch_add(1,std::memory_order_relaxed);
+        // Snapshot completed game batches so a cursor update during a slow game does not
+        // change the reported WFG rate. Plain presents still clear the HUD when WFG goes idle.
+        if (wf.newFrame || !wf.active) {
+            const uint64_t stampNs = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+            std::lock_guard<std::mutex> g(presentStampMutex);
+            presentStamp = {++outputPresents, generatedPresents, stampNs};
+        }
     }
     if (wf.active) wfgNotePresented(wf,1+wf.genCount,acquireWaitNs);
 

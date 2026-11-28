@@ -205,18 +205,18 @@ public:
     std::vector<int> getSupportedPresentModes() const;
 
     // WFG frame generation (VulkanRendererWfg.cpp). flowSide: pixels on the shorter side of
-    // the frame the motion is analysed at; multiplier 2..4 fixes the output at that many frames
-    // per game frame, 0 chases targetFps instead (0 = the display refresh rate).
+    // the frame the motion is analysed at. doubleFrames selects x2; otherwise targetFps
+    // controls the output rate (0 = the display refresh rate).
     void setWfgEnabled(bool enabled);
-    void setWfgConfig(int flowSide, bool fastInterp, int targetFps, int multiplier, float refreshHz);
+    void setWfgConfig(int flowSide, bool fastInterp, int targetFps, bool doubleFrames, float refreshHz);
     void setWfgFpsLimit(int fps);
-    uint64_t getWfgGeneratedFrames() const { return wfgMadeFrames.load(std::memory_order_relaxed); }
-    uint64_t getPresentedFrames() const { return presentedFrames.load(std::memory_order_relaxed); }
-    // presentedFrames as of the latest real frame's presents (its generated ones included) and
-    // when they went out (steady_clock = CLOCK_MONOTONIC = Java's System.nanoTime()), read
-    // together. The HUD's output fps runs from one such burst to another: counted per HUD tick,
-    // it moved in steps of the WFG multiplier (x2 at 30 fps read 58..65, x3 read 87..97).
-    struct PresentStamp { uint64_t frames = 0; uint64_t ns = 0; };
+    // Counts and timestamp after queuing the latest game frame and its WFG frames. The HUD
+    // measures this interval on the same monotonic clock as System.nanoTime().
+    struct PresentStamp {
+        uint64_t frames = 0;
+        uint64_t generated = 0;
+        uint64_t ns = 0;
+    };
     PresentStamp getPresentStamp() const {
         std::lock_guard<std::mutex> g(presentStampMutex);
         return presentStamp;
@@ -473,7 +473,7 @@ public:
     // The display's refresh grid from VK_GOOGLE_display_timing feedback. Every present carries a
     // presentID (desiredPresentTime 0 when it is not paced), so the grid stays fresh whatever path
     // presents. One grid serves everything that times frames: the WFG and plain-path schedules
-    // snap onto it, and the FPS limiters (Java) read it through nativeGetDisplayClock.
+    // snap onto it, and xcore uses it for the Present and MIT-SHM FPS limiters.
     PFN_vkGetRefreshCycleDurationGOOGLE   getRefreshCycleGOOGLE_  = nullptr;
     PFN_vkGetPastPresentationTimingGOOGLE getPastPresentTimingGOOGLE_ = nullptr;
     uint64_t              wfgVsyncAnchorNs = 0;   // a refresh the display really showed a frame at
@@ -566,7 +566,7 @@ public:
     PaceState             lpPace;
     void     paceSchedule(PaceState& st, uint32_t n, uint64_t interval, uint64_t arrival,
                           uint64_t* presentAt, uint64_t* disp);
-    void     wfgPlanPresentTimes(WfgFrame& wf);
+    void     wfgPlanPresentTimes(WfgFrame& wf, bool doubleFrames, uint64_t arrivalNs);
     uint64_t              wfgPacedFrames = 0;
     // Generated frames dropped to drain the queue, by reason: the paced display chain fell
     // behind its schedule, or the FIFO queue model (unpaced) grew.
@@ -596,11 +596,13 @@ public:
     std::atomic<uint32_t> wfgFlowSide{180};
     std::atomic<bool>     wfgFastInterp{true};    // the Fast preset's cheaper interpolation
     std::atomic<uint32_t> wfgTargetFps{0};
-    std::atomic<uint32_t> wfgMultiplier{0};
+    std::atomic<bool>     wfgDoubleFrames{false};
     std::atomic<uint32_t> wfgRefreshMhz{0};
     std::atomic<uint64_t> contentFrames{0};       // the game window's content updates
-    std::atomic<uint64_t> wfgMadeFrames{0};
-    std::atomic<uint64_t> presentedFrames{0};     // real and generated frames shown
+    uint64_t              wfgMadeFrames = 0;     // generated images recorded, for diagnostics
+    uint64_t              generatedPresents = 0; // WFG frames accepted by QueuePresentKHR
+    uint64_t              outputPresents = 0;    // HUD: excludes WFG cursor/UI-only presents
+    std::atomic<uint64_t> presentedFrames{0};     // all frames accepted by QueuePresentKHR
     mutable std::mutex    presentStampMutex;
     PresentStamp          presentStamp;           // under presentStampMutex
     // The game window: the largest window whose content changed lately. Updates of other
@@ -747,7 +749,8 @@ public:
     VkrDisContentRect wfgContentRect(const std::vector<DrawEntry>& draws,
                                      float ox, float oy, float sx, float sy, float cw, float ch) const;
     WfgFrame wfgBeginFrame(const std::vector<DrawEntry>& draws,
-                           float ox, float oy, float sx, float sy, float cw, float ch);
+                           float ox, float oy, float sx, float sy, float cw, float ch,
+                           uint64_t gameFrames, uint64_t arrivalNs);
     void     wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFrame& wf);
 
     uint32_t        findMemType(uint32_t filter, VkMemoryPropertyFlags props);
