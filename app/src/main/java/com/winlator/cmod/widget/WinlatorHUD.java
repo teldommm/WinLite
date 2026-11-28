@@ -425,7 +425,7 @@ public class WinlatorHUD extends View {
     }
 
     public void update() {
-        onFrame();
+        onFrames(1, System.nanoTime(), false);
     }
 
     private void doStats() {
