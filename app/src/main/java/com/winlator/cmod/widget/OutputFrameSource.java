@@ -5,23 +5,24 @@ package com.winlator.cmod.widget;
  * "game fps → output fps" while WFG generates frames.
  */
 public interface OutputFrameSource {
-    /** Frames presented to the display, real and generated, since the renderer started. */
+    /** Successful queue presents, including repaints and copies of real frames. */
     long getPresentedFrameCount();
 
-    /** Frames WFG generated since the renderer started. */
+    /** Generated frames in the current HUD sample's counter. */
     long getGeneratedFrameCount();
 
     /**
-     * One consistent read into {@code out} (4 longs): {presented, generated, presented as of the
-     * latest real frame's burst of presents, that burst's time in ns on the
-     * {@link System#nanoTime()} clock}. The output fps is taken from burst to burst, see
-     * {@link OutputRateMeter}. False: no renderer.
+     * One sample into {@code out}: {queued presents, generated output, unique output,
+     * sample ns on the {@link System#nanoTime()} clock, 1 if based on queue time}.
+     * The output counters share a clock and exclude copies of the same real frame.
+     * False if no renderer is available.
      */
     default boolean readFrameCounts(long[] out) {
         out[0] = getPresentedFrameCount();
         out[1] = getGeneratedFrameCount();
         out[2] = out[0];
         out[3] = System.nanoTime();
+        if (out.length >= 5) out[4] = 1;
         return true;
     }
 }

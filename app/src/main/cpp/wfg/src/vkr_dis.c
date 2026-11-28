@@ -96,8 +96,7 @@
 #define DIS_MIN_RATE_SAMPLES 12u
 
 #define DIS_PLAN_LOG_NS 5000000000ull
-
-#define DIS_RATIO_SLACK 0.12f
+#define DIS_FIXED_BURST_CREDIT 2.0
 
 #define DIS_MIN_GEN_RATIO 1.45f
 
@@ -323,17 +322,18 @@ struct VkrDis {
     uint32_t last_generations;
 
     uint64_t src_sample_ns;
+    uint64_t src_arrival_ns;
     uint64_t src_last_frames;
     float src_frame_accum;
     float src_time_accum;
     float src_interval;
     uint32_t src_samples;
 
-    float smoothed_desired;
+    float planned_target;
+    double target_credit;
+    bool target_active;
 
-    int planned_gen;
-    uint32_t gen_high_streak;
-    uint32_t gen_low_streak;
+    double fixed_credit;
 
     // The last plan generates nothing and needs no frame (vkr_dis_idle), and frames went by
     // without vkr_dis_process since the slots were last filled (vkr_dis_skip_frame): the colour
@@ -342,7 +342,6 @@ struct VkrDis {
     bool stale;
 
     uint64_t plan_log_ns;
-    int plan_log_gen;
 
     uint32_t hist_parity;
     bool hist_valid;
@@ -1891,7 +1890,6 @@ VkrDis* vkr_dis_create(VkDevice device, VkPhysicalDevice physical_device) {
     d->target_fps = 0;
     d->multiplier = 0;
     d->refresh_rate = 0.0f;
-    d->plan_log_gen = -1;
 
     // Flow estimator: DIS unless asked for Farneback, by WFG_ENGINE=farneback in the
     // environment (the desktop bench) or, on a device,
@@ -2002,11 +2000,20 @@ void vkr_dis_configure(VkrDis* d, uint32_t flow_min_side, bool fast_interp, uint
                                                             : flow_min_side);
     d->flow_min_side = side;
     d->target_fps = target_fps;
-    // 0 and 1 both mean "no fixed multiplier"; one output per game frame generates nothing.
-    d->multiplier = multiplier < 2u ? 0u
-                  : (multiplier > VKR_DIS_MAX_GENERATIONS + 1u ? VKR_DIS_MAX_GENERATIONS + 1u
-                                                               : multiplier);
-    d->refresh_rate = refresh_rate > 0.0f ? refresh_rate : 0.0f;
+    // 0 and 1 both select Target. A mode change starts with a fresh generation plan.
+    if (multiplier < 2u) multiplier = 0u;
+    if (multiplier > VKR_DIS_MAX_GENERATIONS + 1u) multiplier = VKR_DIS_MAX_GENERATIONS + 1u;
+    if (d->multiplier != multiplier) {
+        d->multiplier = multiplier;
+        d->fixed_credit = DIS_FIXED_BURST_CREDIT;
+        d->target_active = false;
+        d->plan_log_ns = 0;
+    }
+    const float refresh = refresh_rate > 0.0f ? refresh_rate : 0.0f;
+    if (d->refresh_rate != refresh) {
+        d->refresh_rate = refresh;
+        d->fixed_credit = DIS_FIXED_BURST_CREDIT;
+    }
 }
 
 bool vkr_dis_needs_rebuild(const VkrDis* d, uint32_t width, uint32_t height, VkFormat format,
@@ -2117,8 +2124,8 @@ static void dis_track_source(VkrDis* d, uint64_t now, uint64_t source_frames) {
         return;
     }
 
+    if (now <= d->src_sample_ns) return;
     const uint64_t dt = now - d->src_sample_ns;
-    if (dt == 0) return;
     // A burst of presents can land inside one millisecond (startup, alt-tab) and
     // a single such sample spikes the rate estimate to hundreds of fps, which
     // then walks the planner up and down the generation ladder. Let the window
@@ -2146,45 +2153,81 @@ static void dis_track_source(VkrDis* d, uint64_t now, uint64_t source_frames) {
     if (d->src_samples < DIS_MIN_RATE_SAMPLES) d->src_samples++;
 }
 
-static int dis_gen_for_ratio(float ratio, uint32_t capacity) {
-    float outputs = ceilf(ratio - DIS_RATIO_SLACK);
-    if (outputs < 2.0f) outputs = 2.0f;
-    int gen = (int)outputs - 1;
-    if (gen < 1) gen = 1;
-    if (gen > (int)capacity) gen = (int)capacity;
-    return gen;
-}
+static uint32_t dis_plan_target(VkrDis* d, uint64_t now, float source_rate, double elapsed,
+                                uint32_t capacity) {
+    float desired = d->target_fps > 0 ? (float)d->target_fps : d->refresh_rate;
+    if (d->refresh_rate > 0.0f) desired = fminf(desired, d->refresh_rate);
+    const float ratio = desired / source_rate;
+    const float min_source = d->target_active ? DIS_MIN_SOURCE_FPS_OFF : DIS_MIN_SOURCE_FPS_ON;
+    const float min_ratio = d->target_active ? DIS_MIN_GEN_RATIO - DIS_RATIO_HYST : DIS_MIN_GEN_RATIO;
+    const bool active = source_rate >= min_source && ratio >= min_ratio;
+    const bool changed = active != d->target_active || desired != d->planned_target;
+    if (changed) d->target_credit = 0.5;  // Round the running total to the nearest frame.
+    d->target_active = active;
+    d->planned_target = desired;
+    d->plan_idle = !active;
 
-static void dis_log_plan(VkrDis* d, uint64_t now, float source_rate, float desired,
-                         float ratio, uint32_t capacity) {
-    if (d->planned_gen == d->plan_log_gen && now - d->plan_log_ns < DIS_PLAN_LOG_NS) return;
-    d->plan_log_gen = d->planned_gen;
-    d->plan_log_ns = now;
-    if (d->multiplier >= 2u) {
-        // A fixed multiplier has no target; "desired" there is just source * multiplier.
-        DIS_LOGI("WFG plan: source %.1f fps, fixed x%u -> %d generated (capacity %u, output %.1f fps)",
-                 (double)source_rate, d->multiplier, d->planned_gen, capacity,
-                 (double)(source_rate * (float)(d->planned_gen + 1)));
-        return;
+    // Each interval earns target * elapsed outputs, and the real frame uses one of them.
+    // Use arrival timestamps so a recovery from a slowdown cannot keep earning frames at the
+    // old rate while the EMA catches up. Discard whole credits beyond swapchain capacity.
+    const double extra = active ? fmin((double)desired * d->src_interval - 1.0, capacity) : 0.0;
+    uint32_t generated = 0;
+    if (active && !d->stale) {
+        const double budget = d->target_credit + (double)desired * elapsed - 1.0;
+        const double whole = floor(fmax(0.0, budget));
+        generated = (uint32_t)fmin(whole, capacity);
+        // Keep the full deficit across a burst of real frames. Dropping any of it allows
+        // the next long interval to buy frames that were already sent during the burst.
+        d->target_credit = budget - whole;
     }
-    DIS_LOGI("WFG plan: source %.1f fps, target %.1f fps, ratio %.2f -> %d generated "
-             "(capacity %u, output %.1f fps)",
-             (double)source_rate, (double)desired, (double)ratio, d->planned_gen, capacity,
-             (double)(source_rate * (float)(d->planned_gen + 1)));
+    if (changed || !d->plan_log_ns || now - d->plan_log_ns >= DIS_PLAN_LOG_NS) {
+        d->plan_log_ns = now;
+        DIS_LOGI("WFG plan: source %.1f fps, target %.1f fps -> %.2f generated/frame "
+                 "(capacity %u, output goal %.1f fps)",
+                 (double)source_rate, (double)desired, extra, capacity, source_rate * (1.0 + extra));
+    }
+    return generated;
 }
 
-uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
+static uint32_t dis_plan_fixed(VkrDis* d, uint64_t now, float source_rate, double elapsed,
+                               uint32_t capacity) {
+    const uint32_t requested = d->multiplier <= capacity + 1u ? d->multiplier : capacity + 1u;
+    d->plan_idle = d->refresh_rate > 0.0f && source_rate >= d->refresh_rate;
+    if (d->plan_idle || d->stale) return 0;
+
+    uint32_t outputs = requested;
+    if (d->refresh_rate > 0.0f) {
+        // Allow short bursts to borrow from two spare refresh slots. Sustained excess uses
+        // the display's fractional budget, while each batch still contains its real frame.
+        const double available = d->fixed_credit + (double)d->refresh_rate * elapsed;
+        // A rounded nanosecond timestamp must not turn an integral budget into a short batch.
+        outputs = (uint32_t)fmin(requested, fmax(1.0, floor(available + 1.0e-6)));
+        d->fixed_credit = fmin(DIS_FIXED_BURST_CREDIT, fmax(0.0, available - outputs));
+    }
+
+    if (!d->plan_log_ns || now - d->plan_log_ns >= DIS_PLAN_LOG_NS) {
+        d->plan_log_ns = now;
+        const float desired = source_rate * (float)requested;
+        const float output = d->refresh_rate > 0.0f ? fminf(desired, d->refresh_rate) : desired;
+        DIS_LOGI("WFG plan: source %.1f fps, fixed x%u (capacity %u, output goal %.1f fps)",
+                 (double)source_rate, d->multiplier, capacity, (double)output);
+    }
+    return outputs - 1u;
+}
+
+uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames, uint64_t arrival_ns) {
     if (!d || d->unavailable || !d->built) return 0;
     if (capacity > VKR_DIS_MAX_GENERATIONS) capacity = VKR_DIS_MAX_GENERATIONS;
 
     const uint64_t now = dis_now_ns();
-    dis_track_source(d, now, source_frames);
+    const uint64_t previous = d->src_arrival_ns;
+    d->src_arrival_ns = arrival_ns;
+    dis_track_source(d, arrival_ns, source_frames);
 
     if (capacity == 0 || d->frame_count < 2 || d->src_samples < DIS_MIN_RATE_SAMPLES ||
         d->src_interval <= 0.0f) {
-        d->planned_gen = 0;
-        d->gen_high_streak = 0;
-        d->gen_low_streak = 0;
+        d->fixed_credit = DIS_FIXED_BURST_CREDIT;
+        d->target_active = false;
         // Filling the slots or still measuring the game's rate needs the frames; without spare
         // swapchain images nothing is ever generated.
         d->plan_idle = capacity == 0;
@@ -2192,125 +2235,10 @@ uint32_t vkr_dis_plan(VkrDis* d, uint32_t capacity, uint64_t source_frames) {
     }
 
     const float source_rate = 1.0f / d->src_interval;
-    const bool fixed_mult = d->multiplier >= 2u;
-    float eff_desired;
-    float ratio;
-    if (fixed_mult) {
-        // A chosen xN has no target to chase, so there is nothing to smooth either. Dropping the
-        // smoothed value makes a later switch back to a target start from that target.
-        ratio = (float)d->multiplier;
-        eff_desired = source_rate * ratio;
-        d->smoothed_desired = 0.0f;
-    } else {
-        float desired = d->target_fps > 0 ? (float)d->target_fps : d->refresh_rate;
-        if (d->refresh_rate > 0.0f && desired > d->refresh_rate) desired = d->refresh_rate;
-        if (desired <= 0.0f) {
-            d->plan_idle = true;
-            return 0;
-        }
-
-        if (d->smoothed_desired <= 0.0f) {
-            d->smoothed_desired = desired;
-        } else {
-            d->smoothed_desired += (desired - d->smoothed_desired) * 0.25f;
-        }
-        eff_desired = d->smoothed_desired;
-        ratio = eff_desired / source_rate;
-    }
-
-    if (ratio <= 1.0f) {
-        d->planned_gen = 0;
-        d->gen_high_streak = 0;
-        d->gen_low_streak = 0;
-        d->plan_idle = true;
-        dis_log_plan(d, now, source_rate, eff_desired, ratio, capacity);
-        return 0;
-    }
-
-    const int cur = d->planned_gen > (int)capacity ? (int)capacity : d->planned_gen;
-    // Adaptive mode only, a safety net: off below 12 fps, back on above 15, so a game around
-    // the limit does not flicker on and off. Upstream used 20/24 (from 20 fps a fast camera turn
-    // collapses towards a repeat and each generated frame waits 50-66 ms for the next real one),
-    // which kept FG off for the 20-25 fps range where mobile games need it most.
-    const bool fast_enough = fixed_mult ||
-                             (cur > 0 ? source_rate >= DIS_MIN_SOURCE_FPS_OFF
-                                      : source_rate >= DIS_MIN_SOURCE_FPS_ON);
-    // A fixed xN always generates (the ratio is the multiplier itself, never below 2); only the
-    // display cap below can hold it back.
-    const bool generate = fast_enough && (fixed_mult ||
-                                          (cur > 0 ? (ratio >= DIS_MIN_GEN_RATIO - DIS_RATIO_HYST)
-                                                   : (ratio >= DIS_MIN_GEN_RATIO)));
-
-    int raw = 0;
-    if (generate) {
-        if (fixed_mult) {
-            raw = (int)d->multiplier - 1;
-            if (raw > (int)capacity) raw = (int)capacity;
-        } else {
-            const int want_up = dis_gen_for_ratio(ratio - DIS_RATIO_HYST, capacity);
-            const int want_down = dis_gen_for_ratio(ratio + DIS_RATIO_HYST, capacity);
-            raw = cur;
-            if (want_up > cur) {
-                raw = want_up;
-            } else if (want_down < cur) {
-                raw = want_down;
-            }
-        }
-        if (raw < 1) raw = 1;
-        // Never more frames than the display can show. dis_gen_for_ratio rounds the output count
-        // up so as not to fall short of the target, but when the target is the refresh rate
-        // itself that overshoots it: 28.4 fps at 120 Hz is a ratio of 4.22, rounded to 5 outputs
-        // - 142 fps. The swapchain then runs out of free images, generated frames time out on
-        // acquire and are dropped, and the pair shows one frame fewer than its neighbours: a
-        // visible jerk. Capped at the display rate, with room for the rate estimate's noise: a
-        // steady 30 fps game reads anywhere from 27.6 to 31.6 on a Snapdragon 8 Gen 3, and each
-        // flip of the count is a hitch of its own. 5% to step up to a count, 10% to step down
-        // from the one in use.
-        if (d->refresh_rate > 0.0f) {
-            const float slack = raw > d->planned_gen ? 1.05f : 1.10f;
-            const int max_gen = (int)floorf(d->refresh_rate * slack / source_rate) - 1;
-            if (fixed_mult && max_gen < 1) {
-                // The panel cannot show even two frames per game frame at this source rate (a
-                // target never gets here: its ratio already keeps it under the refresh rate).
-                raw = 0;
-            } else if (max_gen >= 1 && raw > max_gen) {
-                raw = max_gen;
-            }
-        }
-    }
-
-    if (raw > d->planned_gen) {
-        d->gen_low_streak = 0;
-        d->gen_high_streak++;
-        // Once generating, a step up waits for half a second of the slower rate: a game that
-        // hitches for a few frames reads as 25 fps from 30, and a step to 4 and back is two
-        // changes of cadence plus a frame the display cannot take. A step down stays quick,
-        // since too many frames is what overflows the swapchain.
-        int up_streak = d->planned_gen > 0 ? (int)(source_rate * 0.5f) : 2;
-        if (up_streak < 2) up_streak = 2;
-        if (d->gen_high_streak >= (uint32_t)up_streak) {
-            d->planned_gen = raw;
-            d->gen_high_streak = 0;
-        }
-    } else if (raw < d->planned_gen) {
-        d->gen_high_streak = 0;
-        d->gen_low_streak++;
-        if (d->gen_low_streak >= 3) {
-            d->planned_gen = raw;
-            d->gen_low_streak = 0;
-        }
-    } else {
-        d->gen_high_streak = 0;
-        d->gen_low_streak = 0;
-    }
-
-    dis_log_plan(d, now, source_rate, eff_desired, ratio, capacity);
-    // The planner's own hysteresis decides; idle is just its answer of nothing. After skipped
-    // frames the first answer of something is a frame taken in, not generated from: the slot
-    // before it holds a frame from before the pause.
-    d->plan_idle = d->planned_gen == 0;
-    if (d->planned_gen > 0 && d->stale) return 0;
-    return (uint32_t)d->planned_gen;
+    const double elapsed = previous && arrival_ns >= previous
+        ? (double)(arrival_ns - previous) * 1.0e-9 : d->src_interval;
+    if (d->multiplier >= 2u) return dis_plan_fixed(d, now, source_rate, elapsed, capacity);
+    return dis_plan_target(d, now, source_rate, elapsed, capacity);
 }
 
 bool vkr_dis_idle(const VkrDis* d) {
@@ -2877,16 +2805,16 @@ static void dis_reset(VkrDis* d) {
     d->next_idx = 0;
     d->active_slot = 0;
     d->src_sample_ns = 0;
+    d->src_arrival_ns = 0;
     d->src_last_frames = 0;
     d->src_frame_accum = 0.0f;
     d->src_time_accum = 0.0f;
     d->src_interval = 0.0f;
     d->src_samples = 0;
-    d->smoothed_desired = 0.0f;
-    d->planned_gen = 0;
-    d->gen_high_streak = 0;
-    d->gen_low_streak = 0;
-    d->plan_log_gen = -1;
+    d->planned_target = 0.0f;
+    d->target_credit = 0.0;
+    d->target_active = false;
+    d->fixed_credit = DIS_FIXED_BURST_CREDIT;
     d->plan_log_ns = 0;
     d->hist_parity = 0;
     d->hist_valid = false;

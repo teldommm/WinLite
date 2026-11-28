@@ -1,6 +1,7 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <list>
+#include <array>
 #include <cstddef>
 #include <vulkan/vulkan_android.h>
 
@@ -210,17 +211,15 @@ public:
     void setWfgEnabled(bool enabled);
     void setWfgConfig(int flowSide, bool fastInterp, int targetFps, int multiplier, float refreshHz);
     void setWfgFpsLimit(int fps);
-    uint64_t getWfgGeneratedFrames() const { return wfgMadeFrames.load(std::memory_order_relaxed); }
     uint64_t getPresentedFrames() const { return presentedFrames.load(std::memory_order_relaxed); }
-    // presentedFrames as of the latest real frame's presents (its generated ones included) and
-    // when they went out (steady_clock = CLOCK_MONOTONIC = Java's System.nanoTime()), read
-    // together. The HUD's output fps runs from one such burst to another: counted per HUD tick,
-    // it moved in steps of the WFG multiplier (x2 at 30 fps read 58..65, x3 read 87..97).
-    struct PresentStamp { uint64_t frames = 0; uint64_t ns = 0; };
-    PresentStamp getPresentStamp() const {
-        std::lock_guard<std::mutex> g(presentStampMutex);
-        return presentStamp;
-    }
+    // Clock and counters are sampled together. A missing display clock falls back to queue time.
+    struct PresentStamp {
+        uint64_t frames = 0;
+        uint64_t generated = 0;
+        uint64_t ns = 0;
+        bool estimated = true;
+    };
+    PresentStamp getPresentStamp() const;
 
     // Android PerformanceHint session for this renderer's render thread (see perf_hint.h).
     // The toggle may come from any thread; the session itself lives and dies on the render
@@ -454,6 +453,7 @@ public:
         bool     active   = false;   // the scene goes to the composite this frame
         bool     newFrame = false;   // the composite is a new game frame for WFG
         uint32_t genCount = 0;
+        uint32_t generatedMask = 0;  // images WFG wrote, excluding copies of the real frame
         uint32_t genIdx[VKR_DIS_MAX_GENERATIONS] = {};
         // VK_GOOGLE_display_timing: when each image should reach the display (CLOCK_MONOTONIC
         // ns, 0 = as soon as possible). [g] for generated frame g, [genCount] for the real one.
@@ -535,7 +535,8 @@ public:
     // phase-locked loop on the game's frames, a lead after each arrival that covers the GPU
     // work and the latch, and images snapped onto the display grid.
     struct PaceState {
-        uint64_t lastNs       = 0;   // unsnapped target of the last real frame
+        uint64_t lastStartNs  = 0;   // unsnapped target of the previous batch's first image
+        uint64_t lastRealTargetNs = 0; // unsnapped target of the previous batch's last image
         int64_t  integ        = 0;   // PLL integral: ns per frame of steady rate error
         uint64_t lastRealDisp = 0;   // the refresh the last real frame is planned for
         uint64_t lastPresentAt = 0;  // and its desiredPresentTime
@@ -560,13 +561,20 @@ public:
         // Feedback counters are taken afresh after a restart: what arrived meanwhile is about
         // images of another path or of a schedule given up.
         bool     resync       = true;
-        void restart() { lastNs = 0; integ = 0; lastRealDisp = 0; lastArrival = 0; resync = true; }
+        void restart() {
+            lastStartNs = 0;
+            lastRealTargetNs = 0;
+            integ = 0;
+            lastRealDisp = 0;
+            lastArrival = 0;
+            resync = true;
+        }
     };
     PaceState             wfgPace;
     PaceState             lpPace;
     void     paceSchedule(PaceState& st, uint32_t n, uint64_t interval, uint64_t arrival,
                           uint64_t* presentAt, uint64_t* disp);
-    void     wfgPlanPresentTimes(WfgFrame& wf);
+    void     wfgPlanPresentTimes(WfgFrame& wf, uint64_t arrival);
     uint64_t              wfgPacedFrames = 0;
     // Generated frames dropped to drain the queue, by reason: the paced display chain fell
     // behind its schedule, or the FIFO queue model (unpaced) grew.
@@ -575,7 +583,7 @@ public:
     int64_t               wfgLagSum        = 0;   // chain lag behind schedule, per log window
     uint64_t              wfgAcqWaitSum    = 0;   // real image acquire wait, per log window
     // Plain path (no WFG) paced to the game's FPS limit; see limitPlanPresent.
-    uint64_t limitPlanPresent();
+    uint64_t limitPlanPresent(uint64_t frames, uint64_t arrival);
     // A plain-path render without a new game frame while a paced one waits for its refresh:
     // one per pending frame goes as a supersede, the rest wait for that refresh (see
     // limitSkipRender).
@@ -599,10 +607,22 @@ public:
     std::atomic<uint32_t> wfgMultiplier{0};
     std::atomic<uint32_t> wfgRefreshMhz{0};
     std::atomic<uint64_t> contentFrames{0};       // the game window's content updates
-    std::atomic<uint64_t> wfgMadeFrames{0};
-    std::atomic<uint64_t> presentedFrames{0};     // real and generated frames shown
+    uint64_t              wfgMadeFrames = 0;
+    std::atomic<uint64_t> presentedFrames{0};     // successful queue presents, for PerformanceHint
+    // Match delayed display feedback to the successfully queued image. A copy and its real
+    // frame share a source sequence and together count once, even if only the copy was shown.
+    struct OutputPresent {
+        uint64_t seq = 0;
+        uint64_t sourceFrame = 0;
+        bool generated = false;
+    };
+    static constexpr size_t kOutputHistorySize = 128;
+    std::array<OutputPresent, kOutputHistorySize> outputPresents{};
+    std::array<uint64_t, kOutputHistorySize> shownSourceFrames{};
+    uint64_t              lastQueuedSourceFrame = 0;
     mutable std::mutex    presentStampMutex;
-    PresentStamp          presentStamp;           // under presentStampMutex
+    PresentStamp          queuedOutput;           // under presentStampMutex
+    PresentStamp          displayedOutput{0, 0, 0, false};
     // The game window: the largest window whose content changed lately. Updates of other
     // windows (launchers, tooltips, the desktop) are not game frames for WFG's pacing.
     struct ContentRate { int64_t area = 0; uint64_t lastNs = 0; };
@@ -746,7 +766,7 @@ public:
     void     wfgDestroy();
     VkrDisContentRect wfgContentRect(const std::vector<DrawEntry>& draws,
                                      float ox, float oy, float sx, float sy, float cw, float ch) const;
-    WfgFrame wfgBeginFrame(const std::vector<DrawEntry>& draws,
+    WfgFrame wfgBeginFrame(const std::vector<DrawEntry>& draws, uint64_t frames, uint64_t arrival,
                            float ox, float oy, float sx, float sy, float cw, float ch);
     void     wfgRecord(VkCommandBuffer cb, uint32_t imgIdx, WfgFrame& wf);
 

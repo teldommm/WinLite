@@ -695,9 +695,21 @@ void VulkanRendererContext::cleanupSwapchain() {
     if (swapchain!=VK_NULL_HANDLE) {
         vk_.DestroySwapchainKHR(device,swapchain,nullptr);
         swapchain=VK_NULL_HANDLE;
+        std::lock_guard<std::mutex> lock(presentStampMutex);
+        queuedOutput.ns = displayedOutput.ns = 0;
     }
     swapchainImages.clear();
     imgInFlight.clear();
+}
+
+VulkanRendererContext::PresentStamp VulkanRendererContext::getPresentStamp() const {
+    if (!wfgRequested.load(std::memory_order_relaxed)) return {};
+    std::lock_guard<std::mutex> lock(presentStampMutex);
+    const uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (displayedOutput.ns && displayedOutput.ns <= now && now - displayedOutput.ns < 1000000000ull)
+        return displayedOutput;
+    return queuedOutput;
 }
 
 uint32_t VulkanRendererContext::findMemType(uint32_t filter, VkMemoryPropertyFlags props) {
@@ -1087,6 +1099,7 @@ void VulkanRendererContext::renderFrame() {
     short ptrX,ptrY,curHotX,curHotY,curW,curH; bool curVis;
     VkBuffer curUpload=VK_NULL_HANDLE; bool hasCurUpload=false;
     VkRect2D effectiveScissor{{0,0},swapchainExt};
+    uint64_t gameFrames, gameArrival;
 
     {
         std::lock_guard<std::mutex> lk(renderMutex);
@@ -1117,6 +1130,9 @@ void VulkanRendererContext::renderFrame() {
             if (wt.needsTransition) de.needsTransition=true;
             frameDraws.push_back(de);
         }
+        // The sequence and timestamp must describe the same textures as frameDraws.
+        gameFrames = contentFrames.load(std::memory_order_relaxed);
+        gameArrival = lastGameFrameNs.load(std::memory_order_relaxed);
 
         // A new cursor image is applied here, on the render thread, in step with the frame that
         // shows it. A different size replaces the texture, which frames still in flight may be
@@ -1144,9 +1160,9 @@ void VulkanRendererContext::renderFrame() {
 
     // The display clock: feedback from earlier presents, every frame, whatever path presents.
     if (displayTiming_) wfgPollDisplayTiming();
-    WfgFrame wf = wfgBeginFrame(frameDraws,ox,oy,sx,sy,cw,ch);
+    WfgFrame wf = wfgBeginFrame(frameDraws,gameFrames,gameArrival,ox,oy,sx,sy,cw,ch);
     // Without WFG, a new game frame under an FPS limit gets its own target on the refresh grid.
-    const uint64_t plainAt = wf.active ? 0 : limitPlanPresent();
+    const uint64_t plainAt = wf.active ? 0 : limitPlanPresent(gameFrames,gameArrival);
     {
         struct RecordTargetReset {
             VulkanRendererContext* c;
@@ -1235,6 +1251,22 @@ void VulkanRendererContext::renderFrame() {
         }
         return &ptimes;
     };
+    const uint64_t outputSourceFrame = wfgRequested.load(std::memory_order_relaxed) ? gameFrames : 0;
+    uint32_t queuedFrames = 0, queuedGenerated = 0;
+    auto noteQueued = [&](VkResult result, bool generated) {
+        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) return;
+        presentedFrames.fetch_add(1, std::memory_order_relaxed);
+        if (!outputSourceFrame) return;
+        if (displayTiming_)
+            outputPresents[presentSeq % kOutputHistorySize] = {presentSeq, outputSourceFrame, generated};
+        if (generated) {
+            ++queuedFrames;
+            ++queuedGenerated;
+        } else if (lastQueuedSourceFrame != outputSourceFrame) {
+            lastQueuedSourceFrame = outputSourceFrame;
+            ++queuedFrames;
+        }
+    };
     // Generated frames sit between the previous real frame and this one.
     for (uint32_t g=0; g<wf.genCount; g++) {
         VkPresentInfoKHR gpi{}; gpi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1242,7 +1274,7 @@ void VulkanRendererContext::renderFrame() {
         gpi.waitSemaphoreCount=1; gpi.pWaitSemaphores=&sSem[1+g];
         gpi.swapchainCount=1; gpi.pSwapchains=scs; gpi.pImageIndices=&wf.genIdx[g];
         VkResult gr=vk_.QueuePresentKHR(graphicsQueue,&gpi);
-        if (gr==VK_SUCCESS||gr==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
+        noteQueued(gr, (wf.generatedMask & (1u << g)) != 0);
         if (gr==VK_ERROR_OUT_OF_DATE_KHR||gr==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
     }
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1250,13 +1282,15 @@ void VulkanRendererContext::renderFrame() {
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
     res = vk_.QueuePresentKHR(graphicsQueue, &pi);
-    if (res==VK_SUCCESS||res==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
-    {
-        // The whole burst of this real frame is out: stamp it for the HUD (see PresentStamp).
+    noteQueued(res, false);
+    if (queuedFrames) {
+        // Stamp the whole burst for the fallback on drivers without display feedback.
         const uint64_t stampNs = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
         std::lock_guard<std::mutex> g(presentStampMutex);
-        presentStamp = { presentedFrames.load(std::memory_order_relaxed), stampNs };
+        queuedOutput.frames += queuedFrames;
+        queuedOutput.generated += queuedGenerated;
+        queuedOutput.ns = stampNs;
     }
     if (wf.active) wfgNotePresented(wf,1+wf.genCount,acquireWaitNs);
 

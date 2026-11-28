@@ -37,8 +37,9 @@ bool vkr_dis_bind_dispatch(PFN_vkGetInstanceProcAddr gipa, VkInstance instance);
 VkrDis* vkr_dis_create(VkDevice device, VkPhysicalDevice physical_device);
 void vkr_dis_destroy(VkrDis* dis);
 
-// multiplier >= 2 fixes the output at that many frames per game frame (x2 = one generated
-// frame); the target is then ignored. 0 derives the count from target_fps (0 = refresh rate).
+// multiplier >= 2 requests that many outputs per game frame (x2 = one generated frame),
+// subject to the display's refresh rate and spare images. The target is then ignored.
+// 0 budgets output frames toward target_fps (0 = refresh rate).
 // fast_interp: the Fast preset's interpolation - a bilinear warp instead of Catmull-Rom and one
 // step to the source point instead of two; cheaper per output pixel, a little softer. It applies
 // from the next generated frame, without a rebuild.
@@ -54,10 +55,12 @@ bool vkr_dis_needs_rebuild(const VkrDis* dis, uint32_t width, uint32_t height,
 bool vkr_dis_prepare(VkrDis* dis, uint32_t width, uint32_t height, VkFormat format,
                      VkrDisContentRect content, VkImageView base_view);
 
-uint32_t vkr_dis_plan(VkrDis* dis, uint32_t capacity, uint64_t source_frames);
+// arrival_ns is the monotonic timestamp of the latest source frame in the composite.
+uint32_t vkr_dis_plan(VkrDis* dis, uint32_t capacity, uint64_t source_frames, uint64_t arrival_ns);
 
-// After vkr_dis_plan: it generates nothing for this frame and does not need the frame either (the
-// game already reaches the target, is below the source-rate floor, or there are no spare images).
+// After vkr_dis_plan: generation is inactive and does not need the frame (the game is already near
+// the target, is below the source-rate floor, or there are no spare images). An active plan can
+// also budget zero frames for this interval; it still needs the game frame for the next pair.
 // The renderer may then draw the frame straight to the swapchain and skip vkr_dis_process, calling
 // vkr_dis_skip_frame instead. The plan keeps running on every new game frame; when it wants
 // frames again, its first answer is 0 (and not idle) while it takes one frame in.

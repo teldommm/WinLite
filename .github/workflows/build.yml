@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - ludashi
+      - testmesa
   workflow_dispatch:
     inputs:
       bundle_validation_layer:
