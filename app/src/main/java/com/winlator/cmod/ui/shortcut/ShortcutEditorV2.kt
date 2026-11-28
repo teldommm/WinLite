@@ -1328,6 +1328,7 @@ private fun renameShortcutV2(shortcut: Shortcut, requested: String): ShortcutRen
     val target = File(parent, "$clean.$ext")
     if (target.exists()) return ShortcutRenameResult.NameTaken
     if (!shortcut.file.renameTo(target)) return ShortcutRenameResult.Failed
+    shortcut.movePipelineCache(shortcut.container, target)
 
     val oldLink = File(parent, "$oldName.lnk")
     if (oldLink.isFile) {

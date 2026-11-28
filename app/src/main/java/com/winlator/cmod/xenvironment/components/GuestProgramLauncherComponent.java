@@ -386,10 +386,11 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         execEnvVars.put("FONTCONFIG_PATH", rootDir.getPath() + "/usr/etc/fonts");
         execEnvVars.put("VK_LAYER_PATH", rootDir.getPath() + "/usr/share/vulkan/implicit_layer.d" + ":" + rootDir.getPath() + "/usr/share/vulkan/explicit_layer.d");
         execEnvVars.put("WRAPPER_LAYER_PATH", rootDir.getPath() + "/usr/lib");
-        execEnvVars.put("WRAPPER_CACHE_PATH", rootDir.getPath() + "/usr/var/cache");
+        final String wrapperCachePath = new File(rootDir, "usr/var/cache").getPath();
+        execEnvVars.put("WRAPPER_CACHE_PATH", wrapperCachePath);
         // The wrapper's persistent pipeline cache (WRAPPER_PIPELINE_CACHE) is asked to save here
         // before Wine is stopped, see ProcessHelper.requestPipelineCacheSave().
-        final String pipelineCacheRequest = rootDir.getPath() + "/usr/var/cache/pipeline_cache.request";
+        final String pipelineCacheRequest = new File(wrapperCachePath, "pipeline_cache.request").getPath();
         ProcessHelper.clearPipelineCacheRequest(pipelineCacheRequest);
         ProcessHelper.pipelineCacheRequestPath = pipelineCacheRequest;
         execEnvVars.put("WRAPPER_PIPELINE_CACHE_REQUEST", pipelineCacheRequest);
@@ -531,6 +532,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         
         if (this.envVars != null) {
             execEnvVars.putAll(this.envVars);
+        }
+
+        if (shortcut != null && execEnvVars.get("WRAPPER_PIPELINE_CACHE_PATH").isEmpty()
+                && wrapperCachePath.equals(execEnvVars.get("WRAPPER_CACHE_PATH"))) {
+            File cacheDir = shortcut.getPipelineCacheDir();
+            if (cacheDir != null) execEnvVars.put("WRAPPER_PIPELINE_CACHE_PATH", cacheDir.getPath());
         }
 
         // WRAPPER_SURFACE_FORMAT / WRAPPER_AHB_UBWC come in with this.envVars: XServerDisplayActivity

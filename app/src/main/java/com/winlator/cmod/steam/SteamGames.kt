@@ -78,7 +78,7 @@ object SteamGames {
             if (dir.exists()) Files.walk(dir.toPath()).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } }
             check(File(context.filesDir, "steam-library/$id.json").delete()) { "Could not remove Steam installation record" }
             context.getSharedPreferences("steam-settings", 0).edit().remove("pending-root-$id").apply()
-            shortcuts.forEach { check(it.file.delete()) { "Could not remove game shortcut" } }
+            shortcuts.forEach { check(it.deleteFileAndPipelineCache()) { "Could not remove game shortcut" } }
         } finally { locked.forEach { com.winlator.cmod.core.ContainerSessionGate.edited(it) } }
     }
 }

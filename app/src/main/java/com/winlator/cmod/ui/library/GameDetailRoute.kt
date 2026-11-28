@@ -176,12 +176,7 @@ private fun GameDetailLoaded(
                     activity.getString(R.string.ui_remove_shortcut_message),
                     activity.getString(R.string.remove),
                     {
-                        if (shortcut.file.delete()) {
-                            val base = shortcut.file.path.substringBeforeLast('.', "")
-                            if (base.isNotEmpty()) {
-                                File("$base.lnk").delete()
-                                File("$base.bat").delete()
-                            }
+                        if (shortcut.deleteFromLibrary()) {
                             ArtworkRepository.deleteArtworkIfUnused(activity, shortcut.file)
                             HomeShortcuts.unpin(activity, shortcut)
                             onLibraryChanged()

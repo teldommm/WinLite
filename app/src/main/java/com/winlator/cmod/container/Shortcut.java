@@ -5,16 +5,19 @@ import android.graphics.BitmapFactory;
 import android.os.Environment;
 import android.util.Log;
 
+import com.winlator.cmod.core.ContainerSessionGate;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.StringUtils;
 import com.winlator.cmod.xserver.SurfaceFormat;
 
-import java.io.IOException;
-import java.nio.file.Files;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -214,6 +217,73 @@ public class Shortcut {
         }
     }
 
+    public File getPipelineCacheDir() {
+        return pipelineCacheDir(container, file);
+    }
+
+    private static File pipelineCacheDir(Container owner, File shortcutFile) {
+        if (!shortcutFile.getName().endsWith(".desktop")) return null;
+        try {
+            File desktop = owner.getDesktopDir().getCanonicalFile();
+            if (!desktop.equals(shortcutFile.getAbsoluteFile().getParentFile().getCanonicalFile())) return null;
+
+            File cacheRoot = new File(owner.getRootDir().getCanonicalFile(), ".wrapper-pipeline-cache");
+            String key = UUID.nameUUIDFromBytes(shortcutFile.getName().getBytes(StandardCharsets.UTF_8)).toString();
+            File dir = new File(cacheRoot, key);
+            // The prefix can send Wine down symlinks. Only manage the directory WinLite owns.
+            return dir.equals(dir.getCanonicalFile()) && !Files.isSymbolicLink(cacheRoot.toPath())
+                    && !Files.isSymbolicLink(dir.toPath()) ? dir : null;
+        } catch (IOException e) {
+            Log.w("Shortcut", "Could not resolve wrapper pipeline cache directory", e);
+            return null;
+        }
+    }
+
+    /** The caller must hold the container's edit lease. */
+    public boolean deleteFileAndPipelineCache() {
+        return delete(false);
+    }
+
+    private boolean delete(boolean removeLaunchers) {
+        if (!file.delete()) return false;
+        if (removeLaunchers) deleteCompanionLaunchers();
+        File cache = getPipelineCacheDir();
+        if (cache != null && Files.exists(cache.toPath(), LinkOption.NOFOLLOW_LINKS) && !FileUtils.delete(cache)) {
+            Log.w("Shortcut", "Could not delete wrapper pipeline cache " + cache);
+        }
+        return true;
+    }
+
+    public boolean deleteFromLibrary() {
+        if (!ContainerSessionGate.edit(container.id)) return false;
+        try {
+            return delete(true);
+        } finally {
+            ContainerSessionGate.edited(container.id);
+        }
+    }
+
+    private void deleteCompanionLaunchers() {
+        String name = file.getName();
+        int dot = name.lastIndexOf('.');
+        if (dot <= 0) return;
+        String base = name.substring(0, dot);
+        new File(file.getParentFile(), base + ".lnk").delete();
+        new File(file.getParentFile(), base + ".bat").delete();
+    }
+
+    public void movePipelineCache(Container target, File targetFile) {
+        File source = getPipelineCacheDir();
+        File destination = pipelineCacheDir(target, targetFile);
+        if (source == null || destination == null || !source.isDirectory()) return;
+        try {
+            Files.createDirectories(destination.getParentFile().toPath());
+            Files.move(source.toPath(), destination.toPath());
+        } catch (IOException e) {
+            Log.w("Shortcut", "Could not move wrapper pipeline cache " + source, e);
+        }
+    }
+
     /**
      * Moves the shortcut to another container (the shortcut settings' container switch): the copy
      * is written first, the old .desktop and its .lnk/.bat go only once it is there. Everything in
@@ -228,13 +298,9 @@ public class Shortcut {
         if (!desktopDir.isDirectory()) desktopDir.mkdirs();
         if (!cloneToContainer(target) || !dst.isFile()) return null;
         // The .lnk goes too: a .lnk without its .desktop is turned back into a shortcut on load.
-        String path = file.getPath();
-        int dot = path.lastIndexOf('.');
-        if (dot > 0) {
-            new File(path.substring(0, dot) + ".lnk").delete();
-            new File(path.substring(0, dot) + ".bat").delete();
-        }
-        if (!file.delete()) Log.w("Shortcut", "Moved, but could not delete the old shortcut " + file);
+        deleteCompanionLaunchers();
+        if (file.delete()) movePipelineCache(target, dst);
+        else Log.w("Shortcut", "Moved, but could not delete the old shortcut " + file);
         return dst;
     }
 

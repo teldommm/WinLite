@@ -718,14 +718,7 @@ public class LibraryScreenController {
                     "Do you want to remove this shortcut? The game files stay on your device.",
                     "Remove",
                     () -> {
-                        boolean fileDeleted = shortcut.file.delete();
-                        try {
-                            String basePath = shortcut.file.getPath().substring(0, shortcut.file.getPath().lastIndexOf("."));
-                            new File(basePath + ".lnk").delete();
-                            new File(basePath + ".bat").delete();
-                        } catch (Exception ignored) {}
-
-                        if (fileDeleted) {
+                        if (shortcut.deleteFromLibrary()) {
                             ArtworkRepository.deleteArtworkIfUnused(activity, shortcut.file);
                             disableShortcutOnScreen(activity, shortcut);
                             loadShortcutsList();

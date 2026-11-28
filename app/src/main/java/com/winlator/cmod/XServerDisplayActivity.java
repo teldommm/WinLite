@@ -527,7 +527,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         containerManager.activateContainer(container);
 
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
-            shortcut = new Shortcut(container, new File(shortcutPath));
+            File shortcutFile = new File(shortcutPath);
+            if (!shortcutFile.isFile()) {
+                finish();
+                return;
+            }
+            shortcut = new Shortcut(container, shortcutFile);
             if (!com.winlator.cmod.steam.SteamLaunch.canLaunch(this, shortcut)) {
                 android.widget.Toast.makeText(this, "Configure the Steam game first, then enable Steam and sign in if required.", android.widget.Toast.LENGTH_LONG).show();
                 finish(); return;
