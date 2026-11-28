@@ -291,6 +291,7 @@ private:
                              std::vector<RenderEntry>& out,
                              std::vector<std::pair<int,int>>& outSizes);
     void rebuildRenderListFromTree();
+    void logFrameMetrics();
 public:
 
     ANativeWindow* window;
@@ -599,6 +600,14 @@ public:
     uint64_t              generatedPresents = 0; // WFG frames accepted by QueuePresentKHR
     uint64_t              outputPresents = 0;    // HUD: excludes WFG cursor/UI-only presents
     std::atomic<uint64_t> presentedFrames{0};     // all frames accepted by QueuePresentKHR
+    bool frameMetricsEnabled = false;
+    struct FrameMetrics {
+        std::atomic<uint64_t> imported{0}, cacheHits{0};
+        // The remaining counters are touched only by the render thread.
+        uint64_t shown = 0, gpuCompleted = 0;
+        uint64_t sampleNs = 0, sources = 0, submits = 0, queued = 0, generated = 0;
+        uint64_t reportedGpuCompleted = 0;
+    } frameMetrics;
     mutable std::mutex    presentStampMutex;
     PresentStamp          presentStamp;           // under presentStampMutex
     // The game window: the largest window whose content changed lately. Updates of other

@@ -29,6 +29,13 @@ const PIXMAP_FROM_BUFFERS: u8 = 7;
 #[derive(Default)]
 pub struct Dri3;
 
+fn resolve_drawable(s: &Server, id: u32) -> Option<u32> {
+    if s.drawables.contains_key(&id) || s.windows.contains_key(&id) {
+        return Some(id);
+    }
+    s.glx_windows.get(&id).and_then(|wrapper| wrapper.window)
+}
+
 /// The common tail of both PixmapFromBuffer requests.
 /// `fd` is the descriptor that came with the request; it is taken here (the platform closes it
 /// when it is done) or left in the option when the request fails first: the caller closes it
@@ -38,9 +45,9 @@ pub struct Dri3;
 /// ([`finish_import`] completes the request), and nobody else waits for it.
 #[allow(clippy::too_many_arguments)]
 fn pixmap_from_buffer(s: &mut Server, c: ClientId, minor: u8, fd: &mut Option<RawFd>, pixmap: u32, window: u32, width: i16, height: i16, depth: u8) -> Res {
-    if !s.windows.contains_key(&window) {
-        return Err(bad(err::BAD_WINDOW, window));
-    }
+    let window = resolve_drawable(s, window)
+        .filter(|id| s.windows.contains_key(id))
+        .ok_or_else(|| bad(err::BAD_WINDOW, window))?;
     if s.drawables.contains_key(&pixmap) || !s.is_valid_resource_id(c, pixmap) {
         return Err(bad(err::BAD_ID_CHOICE, pixmap));
     }
@@ -85,7 +92,7 @@ impl Extension for Dri3 {
             }
             OPEN => {
                 let drawable = r.u32()?;
-                if !s.drawables.contains_key(&drawable) {
+                if !resolve_drawable(s, drawable).is_some_and(|id| s.drawables.contains_key(&id)) {
                     return Err(bad(err::BAD_DRAWABLE, drawable));
                 }
                 // nfd = 0: the client gets no device; Wine/Mesa then use the buffer path below.
@@ -95,7 +102,7 @@ impl Extension for Dri3 {
             }
             GET_SUPPORTED_MODIFIERS => {
                 let window = r.u32()?;
-                if !s.windows.contains_key(&window) {
+                if !resolve_drawable(s, window).is_some_and(|id| s.windows.contains_key(&id)) {
                     return Err(bad(err::BAD_WINDOW, window));
                 }
                 s.reply(c, 0, 0, |w| {

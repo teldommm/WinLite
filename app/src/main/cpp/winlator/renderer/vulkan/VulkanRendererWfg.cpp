@@ -115,6 +115,7 @@ void VulkanRendererContext::wfgPollDisplayTiming() {
         for (uint32_t i = 0; i < count; i++) {
             const VkPastPresentationTimingGOOGLE& t = past[i];
             if (!t.actualPresentTime) continue;   // dropped, or no present fence
+            if (frameMetricsEnabled) ++frameMetrics.shown;
             const uint64_t seq = seqOfPresentId(t.presentID);
             if (seq <= wfgModeSeq) continue;
             if (t.actualPresentTime > wfgVsyncAnchorNs) wfgVsyncAnchorNs = t.actualPresentTime;

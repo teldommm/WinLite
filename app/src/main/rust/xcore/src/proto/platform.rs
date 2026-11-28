@@ -24,6 +24,8 @@ pub trait Platform: Send {
         monotonic_ns()
     }
 
+    fn record_present_request(&mut self) {}
+
     /// The FPS limit in force (0 = none), the single source of truth of the renderer view.
     fn fps_limit(&mut self) -> i32 {
         0

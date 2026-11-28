@@ -135,6 +135,8 @@ struct Rate {
 pub struct Router {
     output: Arc<dyn Output>,
     pending: Vec<Item>,
+    /// Last direct buffer presented to each window, including while unmapped.
+    direct_content: HashMap<u32, u32>,
     /// Per (window, direct): when Java last heard, and the frames since.
     rates: HashMap<(u32, bool), Rate>,
     /// Windows drawn in whole frames ([`Notify::ContentFrame`]): when the latest came. While it
@@ -154,6 +156,7 @@ impl Router {
         Router {
             output,
             pending: Vec::new(),
+            direct_content: HashMap::new(),
             rates: HashMap::new(),
             framed: HashMap::new(),
             cursor: None,
@@ -192,6 +195,7 @@ impl Router {
             Notify::ContentUpdate(w) => {
                 // Pixels of an unmapped window are not shown (Java skipped them too); mapping it
                 // shows them (below).
+                self.direct_content.remove(&w);
                 if is_mapped(server, w) {
                     self.show(server, w, w);
                 }
@@ -209,8 +213,17 @@ impl Router {
                 self.rate(w, 0, now)
             }
             Notify::ContentUpdateDirect { window, pixmap } => {
-                self.show(server, window, pixmap);
+                self.direct_content.insert(window, pixmap);
+                if is_mapped(server, window) {
+                    self.show(server, window, pixmap);
+                }
                 self.rate(window, pixmap, now)
+            }
+            Notify::DirectContentRemoved { window, pixmap } => {
+                if self.direct_content.get(&window) == Some(&pixmap) {
+                    self.direct_content.remove(&window);
+                }
+                Some(n)
             }
             Notify::DrawableRemoved(d) => {
                 self.push(Item::Removed(d));
@@ -228,6 +241,7 @@ impl Router {
             }
             Notify::DestroyWindow(w) => {
                 self.push(Item::Destroy(w));
+                self.direct_content.remove(&w);
                 self.rates.remove(&(w, false));
                 self.rates.remove(&(w, true));
                 self.framed.remove(&w);
@@ -270,6 +284,7 @@ impl Router {
                 if resized {
                     // A resized window has a new buffer under the same id (its DrawableRemoved
                     // came first); the renderer needs it even if nothing is drawn into it yet.
+                    self.direct_content.remove(&window);
                     self.show_content(server, window);
                 }
                 self.cursor_dirty = true;
@@ -393,12 +408,13 @@ impl Router {
         self.push(Item::Cursor(item));
     }
 
-    /// Shows the window's own (X-drawn) content if it has one and is mapped: after a new renderer
-    /// came up, after a resize, on map.
+    /// Restores the latest available content when a mapped window needs its texture again.
     pub fn show_content(&mut self, server: &Server, window: u32) {
         let has_content = server.windows.get(&window).map(|w| w.has_content).unwrap_or(false);
         if has_content && is_mapped(server, window) {
-            self.show(server, window, window);
+            let drawable = self.direct_content.get(&window).copied()
+                .filter(|id| server.drawables.contains_key(id)).unwrap_or(window);
+            self.show(server, window, drawable);
         }
     }
 
@@ -417,6 +433,7 @@ impl Router {
                     break;
                 }
                 Item::Removed(d) if d == drawable => break,
+                Item::Unmap(w) | Item::Destroy(w) if w == window => break,
                 _ => {}
             }
         }

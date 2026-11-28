@@ -144,6 +144,7 @@ pub mod code {
     pub const REPARENT_NOTIFY: u8 = 21;
     pub const CONFIGURE_NOTIFY: u8 = 22;
     pub const CONFIGURE_REQUEST: u8 = 23;
+    pub const GRAVITY_NOTIFY: u8 = 24;
     pub const RESIZE_REQUEST: u8 = 25;
     pub const PROPERTY_NOTIFY: u8 = 28;
     pub const SELECTION_CLEAR: u8 = 29;

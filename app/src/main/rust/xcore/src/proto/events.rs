@@ -17,6 +17,7 @@ pub enum Event {
     ReparentNotify { event: u32, window: u32, parent: u32, x: i16, y: i16, override_redirect: bool },
     ConfigureNotify { event: u32, window: u32, above: u32, x: i16, y: i16, w: i16, h: i16, border: i16, override_redirect: bool },
     ConfigureRequest { stack_mode: u8, parent: u32, window: u32, sibling: u32, x: i16, y: i16, w: i16, h: i16, border: i16, value_mask: u16 },
+    GravityNotify { event: u32, window: u32, x: i16, y: i16 },
     ResizeRequest { window: u32, w: i16, h: i16 },
     Expose { window: u32, w: i16, h: i16 },
     PropertyNotify { window: u32, atom: u32, time: u32, deleted: bool },
@@ -43,6 +44,7 @@ impl Event {
             Event::ReparentNotify { .. } => code::REPARENT_NOTIFY,
             Event::ConfigureNotify { .. } => code::CONFIGURE_NOTIFY,
             Event::ConfigureRequest { .. } => code::CONFIGURE_REQUEST,
+            Event::GravityNotify { .. } => code::GRAVITY_NOTIFY,
             Event::ResizeRequest { .. } => code::RESIZE_REQUEST,
             Event::Expose { .. } => code::EXPOSE,
             Event::PropertyNotify { .. } => code::PROPERTY_NOTIFY,
@@ -95,6 +97,10 @@ impl Event {
             Event::ConfigureRequest { stack_mode, parent, window, sibling, x, y, w: ww, h, border, value_mask } => {
                 w.u8(code::CONFIGURE_REQUEST).u8(*stack_mode).u16(seq).u32(*parent).u32(*window).u32(*sibling);
                 w.i16(*x).i16(*y).i16(*ww).i16(*h).i16(*border).u16(*value_mask).pad(4);
+            }
+            Event::GravityNotify { event, window, x, y } => {
+                w.u8(code::GRAVITY_NOTIFY).u8(0).u16(seq).u32(*event).u32(*window);
+                w.i16(*x).i16(*y).pad(16);
             }
             Event::ResizeRequest { window, w: ww, h } => {
                 w.u8(code::RESIZE_REQUEST).u8(0).u16(seq).u32(*window).i16(*ww).i16(*h).pad(20);

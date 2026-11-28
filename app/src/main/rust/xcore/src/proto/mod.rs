@@ -138,7 +138,7 @@ impl Default for WindowAttrs {
             cursor: None,
             backing_store: 0,
             bit_gravity: 5,
-            win_gravity: 5,
+            win_gravity: 1, // NorthWestGravity: keep the default child origin on resize.
             backing_planes: 1,
             backing_pixel: 0,
             background_pixel: None,
@@ -278,6 +278,7 @@ pub struct Server {
     pub root: u32,
     pub windows: HashMap<u32, Window>,
     pub drawables: HashMap<u32, Drawable>,
+    pub(crate) glx_windows: HashMap<u32, ext::glx::GlxWindow>,
     pub pixmaps: HashSet<u32>,
     pub gcs: HashMap<u32, Gc>,
     pub cursors: HashMap<u32, Cursor>,
@@ -340,6 +341,7 @@ impl Server {
             root,
             windows: HashMap::new(),
             drawables: HashMap::new(),
+            glx_windows: HashMap::new(),
             pixmaps: HashSet::new(),
             gcs: HashMap::new(),
             cursors: HashMap::new(),
@@ -1078,7 +1080,9 @@ impl Server {
     pub fn reparent_window(&mut self, id: u32, new_parent: u32, x: i16, y: i16) {
         let Some(old_parent) = self.windows.get(&id).and_then(|w| w.parent) else { return };
         // A mapped window is unmapped first and mapped again in its new place.
-        let was_mapped = self.windows[&id].attrs.mapped;
+        let window = &self.windows[&id];
+        let moved = old_parent != new_parent || (window.x, window.y) != (x, y);
+        let was_mapped = window.attrs.mapped;
         if was_mapped {
             self.unmap_window(id);
         }
@@ -1099,6 +1103,9 @@ impl Server {
         self.send_to_window(old_parent, ev::SUBSTRUCTURE_NOTIFY, &Event::ReparentNotify { event: old_parent, window: id, parent: new_parent, x, y, override_redirect });
         self.send_to_window(new_parent, ev::SUBSTRUCTURE_NOTIFY, &Event::ReparentNotify { event: new_parent, window: id, parent: new_parent, x, y, override_redirect });
         self.notifications.push(Notify::Reparent { window: id, parent: new_parent, x, y });
+        if moved {
+            self.run_hook(hooks::Hook::WindowGeometry { window: id, resized: false });
+        }
         self.update_point_window();
         if was_mapped {
             self.map_window(id);
@@ -1109,7 +1116,8 @@ impl Server {
     pub fn set_window_geometry(&mut self, id: u32, x: i16, y: i16, w: i16, h: i16) {
         let Some(win) = self.windows.get(&id) else { return };
         let (ox, oy, ow, oh) = (win.x, win.y, win.width, win.height);
-        self.change_window_geometry(id, x, y, w, h);
+        let border = win.border_width;
+        self.change_window_geometry(id, x, y, w, h, border);
         let win = &self.windows[&id];
         let (x, y, w, h) = (win.x, win.y, win.width, win.height);
         if (x, y, w, h) == (ox, oy, ow, oh) {
@@ -1125,10 +1133,10 @@ impl Server {
         }
     }
 
-    fn change_window_geometry(&mut self, id: u32, x: i16, y: i16, mut w: i16, mut h: i16) {
-        let (cw, ch) = {
+    fn change_window_geometry(&mut self, id: u32, x: i16, y: i16, mut w: i16, mut h: i16, border: i16) {
+        let (cx, cy, cw, ch, old_border) = {
             let win = &self.windows[&id];
-            (win.width, win.height)
+            (win.x, win.y, win.width, win.height, win.border_width)
         };
         let mut resized = cw != w || ch != h;
         if resized && self.has_listener_for(id, ev::RESIZE_REDIRECT) {
@@ -1162,19 +1170,59 @@ impl Server {
         }
 
         let win = self.windows.get_mut(&id).unwrap();
-        if resized || win.x != x || win.y != y {
+        win.border_width = border;
+        if resized || (cx, cy, old_border) != (x, y, border) {
             win.x = x;
             win.y = y;
             win.width = w;
             win.height = h;
             self.notifications.push(Notify::Geometry { window: id, resized });
             self.run_hook(hooks::Hook::WindowGeometry { window: id, resized });
+            if resized {
+                let border_delta = border as i32 - old_border as i32;
+                self.apply_child_gravity(
+                    id,
+                    (x as i32 - cx as i32 + border_delta, y as i32 - cy as i32 + border_delta),
+                    (w as i32 - cw as i32, h as i32 - ch as i32),
+                );
+            }
             self.update_point_window();
         }
         let win = &self.windows[&id];
         if resized && has_content && win.attrs.mapped {
             let ev = Event::Expose { window: id, w: win.width, h: win.height };
             self.send_to_window(id, ev::EXPOSURE, &ev);
+        }
+    }
+
+    fn apply_child_gravity(&mut self, parent: u32, shift: (i32, i32), size_delta: (i32, i32)) {
+        for id in self.windows[&parent].children.clone() {
+            let child = &self.windows[&id];
+            let (x, y) = (child.x, child.y);
+            let (dx, dy) = match child.attrs.win_gravity {
+                0 => { // UnmapGravity
+                    self.unmap_window(id);
+                    continue;
+                }
+                gravity @ 1..=9 => {
+                    let anchor = i32::from(gravity - 1);
+                    (size_delta.0 * (anchor % 3) / 2, size_delta.1 * (anchor / 3) / 2)
+                }
+                10 => (-shift.0, -shift.1), // StaticGravity holds the root position.
+                _ => continue,
+            };
+            let (new_x, new_y) = (x.wrapping_add(dx as i16), y.wrapping_add(dy as i16));
+            if (new_x, new_y) == (x, y) {
+                continue;
+            }
+            let child = self.windows.get_mut(&id).unwrap();
+            child.x = new_x;
+            child.y = new_y;
+            for (event, mask) in [(id, ev::STRUCTURE_NOTIFY), (parent, ev::SUBSTRUCTURE_NOTIFY)] {
+                self.send_to_window(event, mask, &Event::GravityNotify { event, window: id, x: new_x, y: new_y });
+            }
+            self.notifications.push(Notify::Geometry { window: id, resized: false });
+            self.run_hook(hooks::Hook::WindowGeometry { window: id, resized: false });
         }
     }
 
@@ -1186,8 +1234,7 @@ impl Server {
         let redirect = parent.map(|p| self.has_listener_for(p, ev::SUBSTRUCTURE_REDIRECT)).unwrap_or(false);
         let Some(parent) = parent else { return };
         if !redirect || or {
-            self.change_window_geometry(id, x, y, w, h);
-            self.windows.get_mut(&id).unwrap().border_width = border;
+            self.change_window_geometry(id, x, y, w, h, border);
             if let Some(mode) = stack_mode {
                 self.change_window_z_order(mode, id, sibling);
             }

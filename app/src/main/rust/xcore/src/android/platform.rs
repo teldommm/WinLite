@@ -13,6 +13,7 @@ use crate::proto::platform::{Platform, ShmMap};
 use std::ptr;
 use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// FPS limit of the renderer view (0 = none).
 static FPS_LIMIT: AtomicI32 = AtomicI32::new(0);
@@ -35,9 +36,41 @@ pub fn set_display_clock(period_ns: i64, phase_ns: i64, seq: i64) {
 /// How long a DRI3 client may take to hand over its buffer (only that client waits meanwhile).
 const IMPORT_TIMEOUT_SEC: libc::time_t = 2;
 
-pub struct AndroidPlatform;
+struct PresentMetrics {
+    started: Instant,
+    requests: u64,
+}
+
+pub struct AndroidPlatform {
+    present_metrics: Option<PresentMetrics>,
+}
+
+impl AndroidPlatform {
+    pub fn new() -> Self {
+        let mut value = [0 as libc::c_char; libc::PROP_VALUE_MAX as usize];
+        let enabled = unsafe {
+            libc::__system_property_get(
+                c"debug.winlite.x11_metrics".as_ptr(), value.as_mut_ptr()
+            ) == 1 && value[0] == b'1' as libc::c_char
+        };
+        Self { present_metrics: enabled.then(|| PresentMetrics { started: Instant::now(), requests: 0 }) }
+    }
+}
 
 impl Platform for AndroidPlatform {
+    fn record_present_request(&mut self) {
+        let Some(metrics) = &mut self.present_metrics else { return };
+        let now = Instant::now();
+        metrics.requests += 1;
+        let elapsed = now.duration_since(metrics.started);
+        if elapsed >= Duration::from_secs(1) {
+            log::write(log::DEBUG, "WinLiteX11",
+                &format!("seconds={:.3} present_requests={}", elapsed.as_secs_f64(), metrics.requests));
+            metrics.started = now;
+            metrics.requests = 0;
+        }
+    }
+
     fn fps_limit(&mut self) -> i32 {
         FPS_LIMIT.load(Ordering::Relaxed)
     }

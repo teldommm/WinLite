@@ -96,6 +96,9 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
     createFramebuffers(); createCmdPool(); createSampler();
     createWinTexPool(); createCursorDS(); createCmdBufs(); createSyncObjects();
     savePipelineCache();   // the window pipelines built above are on disk from the first run on
+    char metrics[PROP_VALUE_MAX] = {};
+    frameMetricsEnabled = __system_property_get("debug.winlite.x11_metrics", metrics) == 1
+        && metrics[0] == '1';
     isRunning = true;
     renderThread = std::thread(&VulkanRendererContext::renderLoop, this);
 }
@@ -960,15 +963,22 @@ void VulkanRendererContext::renderLoop() {
               return !isRunning||(!surfaceDetached.load()&&(needsRender.load()||fbResized.load()))||cursorMoved.load(); };
           // While textures wait for the GPU to finish with them, look at the fences every few
           // milliseconds instead of sleeping until the next frame.
-          if (hasRetired.load()) woken = dirtyCV.wait_for(lk,std::chrono::milliseconds(8),pred);
-          else dirtyCV.wait(lk,pred); }
+          if (hasRetired.load()) {
+              woken = dirtyCV.wait_for(lk,std::chrono::milliseconds(8),pred);
+          } else {
+              dirtyCV.wait(lk,[&]{ return pred() || hasRetired.load(); });
+              woken = pred();
+          } }
         if (!isRunning) break;
         if (!woken) { reapRetiredIdle(); continue; }
         // No swapchain guard here: renderFrame returns at once while the surface is detached
         // (clearing the wake flags) and is what retries a swapchain rebuild that failed.
 
         bool frameFailed = false;
-        try { renderFrame(); }
+        try {
+            renderFrame();
+            if (frameMetricsEnabled) logFrameMetrics();
+        }
         catch(...) {
             // A frame that threw after its acquire still holds the swapchain image(s) it took
             // (WFG's generated ones too) and leaves their acquire semaphores signaled, which
@@ -1275,6 +1285,45 @@ void VulkanRendererContext::renderFrame() {
         perfHint.reportWork(perfWorkStartNs, perfHintTargetNs(wf.active));
 }
 
+void VulkanRendererContext::logFrameMetrics() {
+    using namespace std::chrono;
+    const auto now = duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+    auto& metrics = frameMetrics;
+    if (metrics.sampleNs == 0) metrics.sampleNs = now;
+    const uint64_t elapsed = now - metrics.sampleNs;
+    if (elapsed < 1000000000ULL) return;
+
+    if (vk_.GetFenceStatus) {
+        // A signaled fence on the graphics queue also covers all older submissions.
+        const size_t slots = std::min<size_t>(inFlightFences.size(), MAX_FRAMES_IN_FLIGHT);
+        for (size_t i = 0; i < slots; ++i) {
+            if (slotSerial[i] > metrics.gpuCompleted &&
+                vk_.GetFenceStatus(device, inFlightFences[i]) == VK_SUCCESS)
+                metrics.gpuCompleted = slotSerial[i];
+        }
+    }
+    const auto sources = contentFrames.load(std::memory_order_relaxed);
+    const auto queued = presentedFrames.load(std::memory_order_relaxed);
+    const auto shown = metrics.shown;
+    __android_log_print(ANDROID_LOG_DEBUG, "WinLiteX11",
+        "seconds=%.3f sources=%" PRIu64 " gpu_submits=%" PRIu64 " gpu_completed=%" PRIu64
+        " present_queued=%" PRIu64 " generated_queued=%" PRIu64 " display_feedback=%" PRIu64
+        " display_timing=%d ahb_imports=%" PRIu64 " ahb_cache_hits=%" PRIu64,
+        elapsed / 1e9, sources - metrics.sources, submitSerial - metrics.submits,
+        metrics.gpuCompleted - metrics.reportedGpuCompleted,
+        queued - metrics.queued, generatedPresents - metrics.generated, shown,
+        int(displayTiming_ && getPastPresentTimingGOOGLE_),
+        metrics.imported.exchange(0, std::memory_order_relaxed),
+        metrics.cacheHits.exchange(0, std::memory_order_relaxed));
+    metrics.sampleNs = now;
+    metrics.sources = sources;
+    metrics.submits = submitSerial;
+    metrics.reportedGpuCompleted = metrics.gpuCompleted;
+    metrics.queued = queued;
+    metrics.generated = generatedPresents;
+    metrics.shown = 0;
+}
+
 bool VulkanRendererContext::swapchainStillMatchesSurface() {
     using namespace std::chrono;
     const uint64_t now = (uint64_t)duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
@@ -1414,23 +1463,38 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
         ahbImportCache[ahb] = tmp;
         windowAhbs[id].push_back(ahb);
         cit = ahbImportCache.find(ahb);
+        if (frameMetricsEnabled) frameMetrics.imported.fetch_add(1, std::memory_order_relaxed);
         RLOG("updateWindowContentAHB: imported new AHB %p for id=%" PRId64 " (%dx%d)",
             (void*)ahb, id, tmp.w, tmp.h);
+    } else if (frameMetricsEnabled) {
+        frameMetrics.cacheHits.fetch_add(1, std::memory_order_relaxed);
     }
     WinTex& src = cit->second;
-    // A window that gets its first texture can start to hide what is under it (see
-    // rebuildRenderListFromTree), so the draw list has to be rebuilt then.
+    // A new texture or a size change can affect which windows are covered.
     const auto prevTex = texMap.find(id);
-    const bool hadTexture = prevTex != texMap.end() && prevTex->second.ds != VK_NULL_HANDLE;
+    const bool coverageChanged = prevTex == texMap.end() || prevTex->second.ds == VK_NULL_HANDLE
+        || prevTex->second.w != src.w || prevTex->second.h != src.h;
     WinTex& wt  = texMap[id];
     wt.img  = src.img; wt.mem  = src.mem; wt.view = src.view; wt.ds   = src.ds;
     wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
     if (src.needsTransition) { wt.needsTransition = true; src.needsTransition = false; }
-    if (!hadTexture) treeDirty = true;
+    if (coverageChanged) treeDirty = true;
     // This window may have just stopped showing a buffer that was only waiting for that.
+    const bool wasRetiring = hasRetired.load();
     reapDeadAhbsLocked();
-    noteContentUpdate(id,src.w,src.h);
-    needsRender.store(true); wakeRender();
+
+    // Refresh visibility only when the scene changed. Hidden windows keep their latest
+    // texture for reveal, but their content must not drive presentation or WFG.
+    if (treeDirty) { rebuildRenderListFromTree(); treeDirty = false; }
+    const bool visible = std::any_of(renderList.begin(), renderList.end(),
+                                    [id](const RenderEntry& entry) { return entry.id == id; });
+    if (visible) {
+        noteContentUpdate(id, wt.w, wt.h);
+        needsRender.store(true);
+        wakeRender();
+    } else if (!wasRetiring && hasRetired.load()) {
+        wakeRender();
+    }
 }
 
 void VulkanRendererContext::removeWindow(int64_t id) {
@@ -1459,9 +1523,10 @@ void VulkanRendererContext::releaseAhb(AHardwareBuffer* ahb) {
     // Never imported (or already dropped): nothing of ours to free, and nothing may be marked -
     // the pointer could be reused by a later allocation.
     if (ahbImportCache.find(ahb) == ahbImportCache.end()) return;
+    const bool wasRetiring = hasRetired.load();
     ahbDead.insert(ahb);
     reapDeadAhbsLocked();
-    needsRender.store(true); wakeRender();
+    if (!wasRetiring && hasRetired.load()) wakeRender();
 }
 
 // Frees every dead imported buffer that no window shows any more. A window that still shows one
@@ -1621,9 +1686,11 @@ void VulkanRendererContext::syncChildOrder(int64_t parentId, const int64_t* orde
 void VulkanRendererContext::setWindowViewable(int64_t id, bool viewable) {
     std::lock_guard<std::mutex> lk(renderMutex);
     auto it = windowTree.find(id);
-    if (it == windowTree.end()) return;
+    if (it == windowTree.end() || it->second.viewable == viewable) return;
     it->second.viewable = viewable;
     treeDirty = true;
+    needsRender.store(true);
+    wakeRender();
 }
 
 void VulkanRendererContext::collectWindowNodes(int64_t id, int absX, int absY,
@@ -1657,19 +1724,28 @@ void VulkanRendererContext::rebuildRenderListFromTree() {
     std::vector<std::pair<int,int>> sizes;
     collectWindowNodes(rootWindowId, 0, 0, flat, sizes);
 
-    // A full-screen window hides everything under it, but only once it has something to show:
-    // without a texture it draws nothing, and culling the windows below it left a black frame.
-    int start = 0;
-    for (int i = (int)flat.size() - 1; i >= 0; i--) {
-        if (sizes[i].first >= treeScreenW && sizes[i].second >= treeScreenH) {
-            auto tit = texMap.find(flat[i].id);
-            if (tit == texMap.end() || tit->second.ds == VK_NULL_HANDLE) continue;
-            start = i;
+    // Cull lower windows only if the opaque texture and its window both cover the screen.
+    size_t start = 0;
+    for (size_t i = flat.size(); i > 0; --i) {
+        const auto& entry = flat[i - 1];
+        if (entry.x > 0 || entry.y > 0) continue;
+        const auto texture = texMap.find(entry.id);
+        if (texture == texMap.end() || texture->second.ds == VK_NULL_HANDLE) continue;
+        const auto [width, height] = sizes[i - 1];
+        if (int64_t(entry.x) + std::min(width, texture->second.w) >= treeScreenW &&
+            int64_t(entry.y) + std::min(height, texture->second.h) >= treeScreenH) {
+            start = i - 1;
             break;
         }
     }
 
     renderList.assign(flat.begin() + start, flat.end());
+    for (auto it = contentRates.begin(); it != contentRates.end();) {
+        const bool visible = std::any_of(renderList.begin(), renderList.end(),
+                                        [&](const RenderEntry& entry) { return entry.id == it->first; });
+        if (visible) ++it;
+        else it = contentRates.erase(it);
+    }
 }
 
 void VulkanRendererContext::cleanupAllAHBCache() {

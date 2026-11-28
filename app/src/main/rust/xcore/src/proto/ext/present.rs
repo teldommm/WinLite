@@ -15,6 +15,7 @@
 
 use super::reader;
 use crate::proto::consts::err;
+use crate::proto::gfx;
 use crate::proto::hooks::Hook;
 use crate::proto::requests::Extension;
 use crate::proto::{bad, ClientId, Fail, Res, Server};
@@ -64,6 +65,7 @@ struct Waiting {
     client: ClientId,
     idle: Idle,
     wait_fence: u32,
+    offset: (i16, i16),
     token: u64,
 }
 
@@ -202,7 +204,7 @@ impl Present {
 impl Present {
     /// Shows the pixmap: tells the renderer and answers with CompleteNotify (IdleNotify follows
     /// as the mode says). The window or the pixmap may be gone if the present was held.
-    fn do_present(&mut self, s: &mut Server, idle: Idle) {
+    fn do_present(&mut self, s: &mut Server, idle: Idle, offset: (i16, i16)) {
         let (window, pixmap, serial) = (idle.window, idle.pixmap, idle.serial);
         if !s.windows.contains_key(&window) || !s.pixmaps.contains(&pixmap) {
             if idle.fence != 0 {
@@ -213,7 +215,20 @@ impl Present {
         let fps = s.platform.fps_limit().min(1000);
         let ust = s.platform.now_ns() / 1000;
         let msc = ust / (s.refresh_interval_ns() / 1000).max(1);
-        s.content_changed(pixmap);
+        let source = &s.drawables[&pixmap];
+        if source.direct_window.is_some() {
+            s.content_changed(pixmap);
+        } else if let Some(destination) = s.drawables.get(&window) {
+            // Software pixmaps can be reused as soon as Present releases them. Copy into
+            // the window backing store so the compositor never samples the client's pixmap.
+            let (x, y) = offset;
+            let (width, height) = (source.width, source.height);
+            if source.depth == destination.depth && matches!(source.depth, 24 | 32)
+                && gfx::copy_area(source, destination, 0, 0, x, y, width, height, gfx::GX_COPY)
+            {
+                s.content_changed_rect(window, x.into(), y.into(), width.into(), height.into());
+            }
+        }
         if fps <= 0 {
             self.deadlines.remove(&window);
             self.present_unlimited(s, idle);
@@ -243,7 +258,7 @@ impl Present {
             }
             let Some(i) = due else { return };
             let w = self.waiting.remove(i);
-            self.do_present(s, w.idle);
+            self.do_present(s, w.idle, w.offset);
         }
     }
 
@@ -293,7 +308,7 @@ impl Extension for Present {
             PRESENT_PIXMAP => {
                 let (window, pixmap, serial) = (r.u32()?, r.u32()?, r.u32()?);
                 r.skip(8)?; // valid, update
-                let (_x_off, _y_off) = (r.i16()?, r.i16()?);
+                let offset = (r.i16()?, r.i16()?);
                 r.skip(4)?; // target_crtc
                 let wait_fence = r.u32()?;
                 let fence = r.u32()?;
@@ -303,6 +318,7 @@ impl Extension for Present {
                 if !s.pixmaps.contains(&pixmap) {
                     return Err(bad(err::BAD_PIXMAP, pixmap));
                 }
+                s.platform.record_present_request();
                 let idle = Idle { window, pixmap, serial, fence };
                 // Behind an earlier held present of the window: frames keep their order.
                 let must_wait = wait_fence != 0 && s.sync.fence_state(wait_fence) == Some(false);
@@ -310,9 +326,9 @@ impl Extension for Present {
                     let token = self.token();
                     let deadline = s.platform.now_ns() + WAIT_FENCE_TIMEOUT_NS;
                     s.schedule(MAJOR, deadline, token);
-                    self.waiting.push(Waiting { client: c, idle, wait_fence, token });
+                    self.waiting.push(Waiting { client: c, idle, wait_fence, offset, token });
                 } else {
-                    self.do_present(s, idle);
+                    self.do_present(s, idle, offset);
                 }
                 self.release_waiting(s);
             }

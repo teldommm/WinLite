@@ -88,7 +88,7 @@ pub extern "system" fn Java_com_winlator_cmod_xserver_XCore_nativeCreate(
             height: h,
             alloc: Box::new(move |w, h| AhbPixels::new(w, h, format).map(|p| Box::new(p) as Box<dyn PixelStore>)),
             clock_ms: Box::new(move || start.elapsed().as_millis() as u32),
-            platform: Box::new(AndroidPlatform),
+            platform: Box::new(AndroidPlatform::new()),
         });
         crate::proto::ext::register_all(&mut server);
         match Runtime::start(&path, server) {

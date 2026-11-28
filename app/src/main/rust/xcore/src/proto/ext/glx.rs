@@ -121,8 +121,8 @@ struct GlxPixmap {
     owner: ClientId,
 }
 
-struct GlxWindow {
-    window: u32,
+pub(crate) struct GlxWindow {
+    pub(crate) window: Option<u32>,
     fb: FbConfig,
     owner: ClientId,
 }
@@ -131,7 +131,6 @@ struct GlxWindow {
 pub struct Glx {
     contexts: HashMap<u32, GlxContext>,
     pixmaps: HashMap<u32, GlxPixmap>,
-    windows: HashMap<u32, GlxWindow>,
 }
 
 fn pair(w: &mut Writer, a: u32, b: u32) {
@@ -199,10 +198,18 @@ impl Extension for Glx {
 
     /// A client's GLX contexts and drawables go away with it (their ids are handed to the next
     /// client that gets the same id range).
-    fn on_client_disconnected(&mut self, _s: &mut Server, client: ClientId) {
+    fn on_client_disconnected(&mut self, s: &mut Server, client: ClientId) {
         self.contexts.retain(|_, v| v.owner != client);
         self.pixmaps.retain(|_, v| v.owner != client);
-        self.windows.retain(|_, v| v.owner != client);
+        s.glx_windows.retain(|_, v| v.owner != client);
+    }
+
+    fn on_hook(&mut self, s: &mut Server, hook: &crate::proto::hooks::Hook) {
+        if let crate::proto::hooks::Hook::WindowFreed(window) = *hook {
+            for wrapper in s.glx_windows.values_mut().filter(|wrapper| wrapper.window == Some(window)) {
+                wrapper.window = None;
+            }
+        }
     }
 
     fn handle(&mut self, s: &mut Server, c: ClientId, minor: u8, body: &[u8]) -> Res {
@@ -328,8 +335,9 @@ impl Extension for Glx {
             }
             GET_DRAWABLE_ATTRIBUTES => {
                 let id = r.u32()?;
-                let glx_window = self.windows.get(&id);
-                let window = glx_window.map(|g| g.window).unwrap_or(id);
+                let glx_window = s.glx_windows.get(&id);
+                let window = glx_window.map_or(Some(id), |wrapper| wrapper.window)
+                    .ok_or_else(|| bad(ERR_BAD_DRAWABLE, id))?;
                 let window_ref = s.windows.get(&window);
                 let glx_pixmap = self.pixmaps.get(&id);
                 if glx_window.is_none() && window_ref.is_none() && glx_pixmap.is_none() {
@@ -382,11 +390,16 @@ impl Extension for Glx {
                 if d.depth as u32 != fb.buffer_size {
                     return Err(bad(err::BAD_MATCH, 0));
                 }
-                self.windows.insert(glx_id, GlxWindow { window, fb, owner: c });
+                if !s.is_valid_resource_id(c, glx_id) || s.drawables.contains_key(&glx_id)
+                    || s.windows.contains_key(&glx_id) || s.glx_windows.contains_key(&glx_id)
+                    || self.contexts.contains_key(&glx_id) || self.pixmaps.contains_key(&glx_id) {
+                    return Err(bad(err::BAD_ID_CHOICE, glx_id));
+                }
+                s.glx_windows.insert(glx_id, GlxWindow { window: Some(window), fb, owner: c });
             }
             DESTROY_WINDOW => {
                 let id = r.u32()?;
-                if self.windows.remove(&id).is_none() {
+                if s.glx_windows.remove(&id).is_none() {
                     return Err(bad(ERR_BAD_WINDOW, id));
                 }
             }
