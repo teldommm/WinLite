@@ -59,6 +59,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.winlator.cmod.XServerDisplayActivity
 import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
+import com.winlator.cmod.core.ContainerSessionGate
 import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.StringUtils
 import com.winlator.cmod.ui.ThemedAlertHost
@@ -374,6 +375,7 @@ private fun ContainerMoreButton(
 
 @Composable
 private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var refreshKey by remember(container.id) { mutableIntStateOf(0) }
     var loading by remember(container.id) { mutableStateOf(true) }
@@ -384,14 +386,14 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
 
     val rootDir = container.rootDir
     val driveCDir = remember(container.id) { File(rootDir, ".wine/drive_c") }
-    val cacheDir = remember(container.id) { File(rootDir, ".cache") }
 
     LaunchedEffect(container.id, refreshKey) {
         loading = true
         val sizes = withContext(Dispatchers.IO) {
             Triple(
                 directorySize(driveCDir),
-                directorySize(cacheDir),
+                (container.cacheDir?.let(::directorySize) ?: 0L) +
+                    (container.wrapperPipelineCacheRoot?.let(::directorySize) ?: 0L),
                 directorySize(rootDir)
             )
         }
@@ -472,13 +474,20 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
                     if (!clearing) {
                         clearing = true
                         scope.launch {
-                            withContext(Dispatchers.IO) {
-                                FileUtils.clear(cacheDir)
-                                container.putExtra("desktopTheme", null)
-                                container.saveData()
+                            val error = withContext(Dispatchers.IO) {
+                                if (!ContainerSessionGate.edit(container.id)) {
+                                    R.string.ui_clear_cache_busy
+                                } else {
+                                    try {
+                                        if (container.clearCaches()) null else R.string.ui_clear_cache_failed
+                                    } finally {
+                                        ContainerSessionGate.edited(container.id)
+                                    }
+                                }
                             }
                             clearing = false
                             refreshKey++
+                            if (error != null) WinToast.show(context, uiStr(error), Toast.LENGTH_SHORT)
                         }
                     }
                 },

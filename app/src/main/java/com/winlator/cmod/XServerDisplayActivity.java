@@ -1069,11 +1069,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             winHandler.stop();
         if (wineRequestHandler != null)
             wineRequestHandler.stop();
-        if (ownsPrefixLease) {
-            com.winlator.cmod.core.ContainerSessionGate.stop(container.id);
-            ownsPrefixLease = false;
-        }
-
         Executors.newSingleThreadExecutor().execute(() -> {
 
             // A SIGSTOPped process (paused by hand, or still frozen from the background) never
@@ -1110,7 +1105,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
             }
 
-            runOnUiThread(() -> ThemedLoadingOverlayHost.dismiss(shutdownOverlay));
+            runOnUiThread(() -> {
+                if (ownsPrefixLease) {
+                    com.winlator.cmod.core.ContainerSessionGate.stop(container.id);
+                    ownsPrefixLease = false;
+                }
+                ThemedLoadingOverlayHost.dismiss(shutdownOverlay);
+            });
             if (quitAfterExit) {
                 runOnUiThread(() -> {
                     stopService(new Intent(getApplicationContext(),

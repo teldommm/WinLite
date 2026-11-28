@@ -534,10 +534,15 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             execEnvVars.putAll(this.envVars);
         }
 
-        if (shortcut != null && execEnvVars.get("WRAPPER_PIPELINE_CACHE_PATH").isEmpty()
+        if (container != null && execEnvVars.get("WRAPPER_PIPELINE_CACHE_PATH").isEmpty()
                 && wrapperCachePath.equals(execEnvVars.get("WRAPPER_CACHE_PATH"))) {
-            File cacheDir = shortcut.getPipelineCacheDir();
-            if (cacheDir != null) execEnvVars.put("WRAPPER_PIPELINE_CACHE_PATH", cacheDir.getPath());
+            File cacheDir = shortcut != null ? shortcut.getPipelineCacheDir() : container.getDesktopPipelineCacheDir();
+            if (cacheDir != null) {
+                execEnvVars.put("WRAPPER_PIPELINE_CACHE_PATH", cacheDir.getPath());
+            } else {
+                // An unusable managed directory must not create cache entries in the shared cache.
+                execEnvVars.put("WRAPPER_PIPELINE_CACHE", "0");
+            }
         }
 
         // WRAPPER_SURFACE_FORMAT / WRAPPER_AHB_UBWC come in with this.envVars: XServerDisplayActivity

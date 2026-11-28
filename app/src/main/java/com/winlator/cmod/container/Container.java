@@ -1,6 +1,7 @@
 package com.winlator.cmod.container;
 
 import android.os.Environment;
+import android.util.Log;
 
 import com.winlator.cmod.box64.Box64Preset;
 import com.winlator.cmod.core.DefaultVersion;
@@ -17,6 +18,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Iterator;
 
 public class Container {
@@ -348,6 +350,52 @@ public class Container {
 
     public File getRootDir() {
         return rootDir;
+    }
+
+    public File getCacheDir() {
+        return getManagedCacheDir(".cache");
+    }
+
+    public File getWrapperPipelineCacheRoot() {
+        return getManagedCacheDir(".wrapper-pipeline-cache");
+    }
+
+    public File getDesktopPipelineCacheDir() {
+        return getWrapperPipelineCacheDir("desktop");
+    }
+
+    File getWrapperPipelineCacheDir(String key) {
+        File cacheRoot = getWrapperPipelineCacheRoot();
+        return cacheRoot != null ? getCacheChild(cacheRoot, key) : null;
+    }
+
+    private File getManagedCacheDir(String name) {
+        if (rootDir == null || FileUtils.isSymlink(rootDir)) return null;
+        try {
+            return getCacheChild(rootDir.getCanonicalFile(), name);
+        } catch (IOException e) {
+            Log.w("Container", "Could not resolve cache directory for container " + id, e);
+            return null;
+        }
+    }
+
+    private static File getCacheChild(File parent, String name) {
+        File dir = new File(parent, name);
+        if (FileUtils.isSymlink(dir) || (dir.exists() && !dir.isDirectory())) return null;
+        return dir;
+    }
+
+    /** Call off the main thread while holding the container's edit lease. */
+    public boolean clearCaches() {
+        File cache = getCacheDir();
+        File pipeline = getWrapperPipelineCacheRoot();
+        boolean cacheCleared = cache != null && (!cache.exists() || FileUtils.clear(cache));
+        boolean pipelineCleared = pipeline != null && (!pipeline.exists() || FileUtils.clear(pipeline));
+        if (cacheCleared) {
+            putExtra("desktopTheme", null);
+            saveData();
+        }
+        return cacheCleared && pipelineCleared;
     }
 
     public void setRootDir(File rootDir) {

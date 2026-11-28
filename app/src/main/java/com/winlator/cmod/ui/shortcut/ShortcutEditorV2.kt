@@ -199,7 +199,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var name by mutableStateOf(com.winlator.cmod.steam.SteamGames.displayName(shortcut))
     var saveProfileMode by mutableStateOf(SaveProfiles.getMode(shortcut))
     var screen by mutableStateOf(normalizeResolution(shortcut.getExtra("screenSize", container.getScreenSize())))
-    var perfHintOverride: Boolean? by mutableStateOf(shortcut.getPerfHintOverride())
+    var perfHint by mutableStateOf(shortcut.isPerfHintEnabled())
         private set
     var presentMode by mutableStateOf(shortcut.getRendererPresentMode())
     var rendererDriver by mutableStateOf(shortcut.getRendererDriverId())
@@ -442,9 +442,9 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
         save()
     }
 
-    fun savePerfHint(override: Boolean?) {
-        perfHintOverride = override
-        shortcut.setPerfHintOverride(override)
+    fun savePerfHint(enabled: Boolean) {
+        perfHint = enabled
+        shortcut.setPerfHintEnabled(enabled)
         save()
     }
 
@@ -887,18 +887,9 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                val defaultRenderer = uiStr(R.string.ui_default)
-                val renderer = when (s.perfHintOverride) {
-                    true -> "Vulkan perf"
-                    false -> "Vulkan"
-                    null -> defaultRenderer
-                }
-                SettingChoice(uiStr(R.string.ui_renderer), renderer, listOf(defaultRenderer, "Vulkan", "Vulkan perf")) {
-                    s.savePerfHint(when (it) {
-                        "Vulkan perf" -> true
-                        "Vulkan" -> false
-                        else -> null
-                    })
+                val renderer = if (s.perfHint) "Vulkan perf" else "Vulkan"
+                SettingChoice(uiStr(R.string.ui_renderer), renderer, listOf("Vulkan", "Vulkan perf")) {
+                    s.savePerfHint(it == "Vulkan perf")
                 }
                 SettingsDivider()
                 SettingChoice(

@@ -227,12 +227,8 @@ public class Shortcut {
             File desktop = owner.getDesktopDir().getCanonicalFile();
             if (!desktop.equals(shortcutFile.getAbsoluteFile().getParentFile().getCanonicalFile())) return null;
 
-            File cacheRoot = new File(owner.getRootDir().getCanonicalFile(), ".wrapper-pipeline-cache");
             String key = UUID.nameUUIDFromBytes(shortcutFile.getName().getBytes(StandardCharsets.UTF_8)).toString();
-            File dir = new File(cacheRoot, key);
-            // The prefix can send Wine down symlinks. Only manage the directory WinLite owns.
-            return dir.equals(dir.getCanonicalFile()) && !Files.isSymbolicLink(cacheRoot.toPath())
-                    && !Files.isSymbolicLink(dir.toPath()) ? dir : null;
+            return owner.getWrapperPipelineCacheDir(key);
         } catch (IOException e) {
             Log.w("Shortcut", "Could not resolve wrapper pipeline cache directory", e);
             return null;
@@ -378,19 +374,12 @@ public class Shortcut {
         putExtra("surfaceUbwc", enabled ? "1" : "0");
     }
 
-    /** A null override inherits the container's PerformanceHint setting. */
-    public Boolean getPerfHintOverride() {
-        String value = getExtra("perfHint", null);
-        return value == null || value.isEmpty() ? null : "1".equals(value);
-    }
-
     public boolean isPerfHintEnabled() {
-        Boolean override = getPerfHintOverride();
-        return override != null ? override : container.isPerfHintEnabled();
+        return "1".equals(getExtra("perfHint", "0"));
     }
 
-    public void setPerfHintOverride(Boolean enabled) {
-        putExtra("perfHint", enabled == null ? null : (enabled ? "1" : "0"));
+    public void setPerfHintEnabled(boolean enabled) {
+        putExtra("perfHint", enabled ? "1" : "0");
     }
 
     public String getRendererPresentMode() {
