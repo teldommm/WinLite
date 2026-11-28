@@ -200,16 +200,13 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var name by mutableStateOf(com.winlator.cmod.steam.SteamGames.displayName(shortcut))
     var saveProfileMode by mutableStateOf(SaveProfiles.getMode(shortcut))
     var screen by mutableStateOf(normalizeResolution(shortcut.getExtra("screenSize", container.getScreenSize())))
-    // "Vulkan perf" is the Vulkan renderer plus the PerformanceHint session on the render
-    // thread; the choice persists as the perfHint extra (renderer itself is always Vulkan).
-    var renderer by mutableStateOf(if (shortcut.isPerfHintEnabled()) "Vulkan perf" else "Vulkan")
+    var perfHintOverride: Boolean? by mutableStateOf(shortcut.getPerfHintOverride())
+        private set
     var presentMode by mutableStateOf(shortcut.getRendererPresentMode())
     var rendererDriver by mutableStateOf(shortcut.getRendererDriverId())
     var filterMode by mutableIntStateOf(shortcut.getRendererFilterMode())
     var surfaceFormat by mutableStateOf(shortcut.getSurfaceFormat())
     var surfaceUbwc by mutableStateOf(shortcut.isSurfaceUbwc())
-    // Android PerformanceHint (power-HAL boost of the render thread); falls back to the container.
-    var perfHint by mutableStateOf(shortcut.isPerfHintEnabled())
     var graphicsDriver by mutableStateOf(StringUtils.parseIdentifier(shortcut.getExtra("graphicsDriver", container.getGraphicsDriver())))
     private val defaultDriverVersion = runCatching {
         val context = container.manager.context
@@ -487,7 +484,12 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
         shortcut.setRendererFilterMode(filterMode)
         shortcut.setSurfaceFormat(surfaceFormat)
         shortcut.setSurfaceUbwc(surfaceUbwc)
-        shortcut.setPerfHintEnabled(perfHint)
+        save()
+    }
+
+    fun savePerfHint(override: Boolean?) {
+        perfHintOverride = override
+        shortcut.setPerfHintOverride(override)
         save()
     }
 
@@ -932,10 +934,18 @@ private fun ShortcutCategoryV2(
                     }
                 }
                 SettingsDivider()
-                SettingChoice(uiStr(R.string.ui_renderer), s.renderer, listOf("Vulkan", "Vulkan perf")) {
-                    s.renderer = it
-                    s.perfHint = it == "Vulkan perf"
-                    s.saveRenderer()
+                val defaultRenderer = uiStr(R.string.ui_default)
+                val renderer = when (s.perfHintOverride) {
+                    true -> "Vulkan perf"
+                    false -> "Vulkan"
+                    null -> defaultRenderer
+                }
+                SettingChoice(uiStr(R.string.ui_renderer), renderer, listOf(defaultRenderer, "Vulkan", "Vulkan perf")) {
+                    s.savePerfHint(when (it) {
+                        "Vulkan perf" -> true
+                        "Vulkan" -> false
+                        else -> null
+                    })
                 }
                 SettingsDivider()
                 SettingChoice(

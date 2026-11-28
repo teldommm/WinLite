@@ -516,12 +516,8 @@ public:
     std::atomic<uint64_t> clockPeriodNs{0};
 
     // ---- PerformanceHint (perf_hint.h) ----
-    // Render thread only, except setPerfHintEnabled() from any thread.
     PerfHint perfHint;
-    std::atomic<bool> perfHintEnabled{false};
-    // Creates the session on the render thread's tid if enabled and none exists; keeps the
-    // target at the display's refresh period (clamped 24..1000 Hz), 60 Hz while unknown.
-    void perfHintEnsure();
+    int64_t perfHintTargetNs(bool wfgActive) const;
     // The arrival error (int32 ns, high half) and its sequence number (low half) in one word,
     // so a reader never pairs a new sequence number with the previous error.
     std::atomic<uint64_t> clockErr{0};

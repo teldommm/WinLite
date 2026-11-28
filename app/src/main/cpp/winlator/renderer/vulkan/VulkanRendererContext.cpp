@@ -103,7 +103,7 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
 VulkanRendererContext::~VulkanRendererContext() {
     isRunning = false; wakeRender(true);
     if (renderThread.joinable()) renderThread.join();
-    perfHint.close();
+    perfHint.setEnabled(false);
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
     texMap.clear();   // aliases of the imported buffers freed below
@@ -921,22 +921,34 @@ void VulkanRendererContext::ensureCursorStaging(uint32_t slot, VkDeviceSize sz) 
 }
 
 void VulkanRendererContext::setPerfHintEnabled(bool enabled) {
-    const bool was = perfHintEnabled.exchange(enabled, std::memory_order_relaxed);
-    if (was && !enabled) {
-        // The render thread recreates/closes by the flag too; this closes promptly even when
-        // no frame is being produced. PerfHint::close is safe from any thread.
-        perfHint.close();
-    }
+    perfHint.setEnabled(enabled);
 }
 
-// Target for the session: the measured refresh period (what the pacing/limiters publish), with
-// the same 24..1000 Hz clamp the donor used, 60 Hz while the grid is not known yet.
-void VulkanRendererContext::perfHintEnsure() {
-    if (!perfHintEnabled.load(std::memory_order_relaxed) || !perfHint.available()) return;
-    int64_t periodNs = static_cast<int64_t>(clockPeriodNs.load(std::memory_order_relaxed));
-    if (periodNs <= 0) periodNs = 1000000000LL / 60;
-    periodNs = std::clamp<int64_t>(periodNs, 1000000LL, 41666667LL);
-    perfHint.ensureSession(periodNs);
+int64_t VulkanRendererContext::perfHintTargetNs(bool wfgActive) const {
+    constexpr uint64_t nsPerSecond = 1000000000;
+    const uint64_t refreshPeriod = wfgPeriodNs();
+    const uint32_t limit = wfgFpsLimit.load(std::memory_order_relaxed);
+    const uint64_t limitPeriod = limit ? nsPerSecond / limit : 0;
+    if (!wfgActive) return std::max(refreshPeriod, limitPeriod);
+
+    // An active WFG batch has to be ready for its first image, at the output cadence.
+    if (!wfgDoubleFrames.load(std::memory_order_relaxed)) {
+        const uint32_t target = wfgTargetFps.load(std::memory_order_relaxed);
+        return target ? std::max(refreshPeriod, nsPerSecond / target) : refreshPeriod;
+    }
+
+    const uint64_t measured = vkr_dis_source_interval_ns(wfg);
+    if (!measured || (limit && measured * 10 >= limitPeriod * 9 &&
+                              measured * 10 <= limitPeriod * 11))
+        return std::max(refreshPeriod, limitPeriod / 2);
+
+    // The measured source interval varies even at a steady rate. Round the derived
+    // budget to milliseconds so small fluctuations don't update the power HAL every frame.
+    constexpr uint64_t nsPerMillisecond = 1000000;
+    const uint64_t outputPeriod = measured / 2;
+    const uint64_t roundedPeriod =
+        ((outputPeriod + nsPerMillisecond / 2) / nsPerMillisecond) * nsPerMillisecond;
+    return std::max(refreshPeriod, roundedPeriod);
 }
 
 void VulkanRendererContext::renderLoop() {
@@ -955,21 +967,6 @@ void VulkanRendererContext::renderLoop() {
         // No swapchain guard here: renderFrame returns at once while the surface is detached
         // (clearing the wake flags) and is what retries a swapchain rebuild that failed.
 
-        // PerformanceHint: arm the work measurement only when there is something to present, so
-        // iterations that renderFrame early-outs on (skipped, rebuild, detached) report nothing.
-        uint64_t perfHintFramesBefore = 0;
-        std::chrono::steady_clock::time_point perfHintWorkStart;
-        bool perfHintArmed = false;
-        if (perfHintEnabled.load(std::memory_order_relaxed) &&
-            !surfaceDetached.load(std::memory_order_acquire)) {
-            perfHintEnsure();
-            if (perfHint.hasSession()) {
-                perfHintFramesBefore = presentedFrames.load(std::memory_order_relaxed);
-                perfHintWorkStart = std::chrono::steady_clock::now();
-                perfHintArmed = true;
-            }
-        }
-
         bool frameFailed = false;
         try { renderFrame(); }
         catch(...) {
@@ -981,14 +978,6 @@ void VulkanRendererContext::renderLoop() {
             frameFailed = true;
         }
 
-        // Only a presented frame counts as work: the duration is the CPU side of producing it
-        // (compose + submit), not the frame interval and not GPU time.
-        if (perfHintArmed &&
-            presentedFrames.load(std::memory_order_relaxed) > perfHintFramesBefore) {
-            const int64_t workNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - perfHintWorkStart).count();
-            perfHint.reportWork(std::max<int64_t>(1, workNs));
-        }
         if (frameFailed || (swapchainRebuildFailed && fbResized.load())) {
             // A failure that repeats must not rebuild, or retry, in a tight loop. The flag alone
             // is not enough: reattachSurface() builds a swapchain without clearing it.
@@ -1081,6 +1070,9 @@ void VulkanRendererContext::renderFrame() {
     }
     imgInFlight[imgIdx]=inFlightFences[currentFrame];
 
+    // CPU time excludes blocking waits still possible here, including WFG image
+    // acquisition, cursor fences and driver backpressure during submission/present.
+    const int64_t perfWorkStartNs = perfHint.beginWork();
     vk_.ResetCommandBuffer(cmdBufs[currentFrame],0);
 
     float ox,oy,sx,sy,cw,ch;
@@ -1239,6 +1231,7 @@ void VulkanRendererContext::renderFrame() {
         return &ptimes;
     };
     // Generated frames sit between the previous real frame and this one.
+    bool framePresented = false;
     for (uint32_t g=0; g<wf.genCount; g++) {
         VkPresentInfoKHR gpi{}; gpi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         gpi.pNext=pacedNext(wf.presentAt[g]);
@@ -1246,6 +1239,7 @@ void VulkanRendererContext::renderFrame() {
         gpi.swapchainCount=1; gpi.pSwapchains=scs; gpi.pImageIndices=&wf.genIdx[g];
         VkResult gr=vk_.QueuePresentKHR(graphicsQueue,&gpi);
         if (gr==VK_SUCCESS||gr==VK_SUBOPTIMAL_KHR) {
+            framePresented = true;
             presentedFrames.fetch_add(1,std::memory_order_relaxed);
             generatedPresents++;
             outputPresents++;
@@ -1258,6 +1252,7 @@ void VulkanRendererContext::renderFrame() {
 
     res = vk_.QueuePresentKHR(graphicsQueue, &pi);
     if (res==VK_SUCCESS||res==VK_SUBOPTIMAL_KHR) {
+        framePresented = true;
         presentedFrames.fetch_add(1,std::memory_order_relaxed);
         // Snapshot completed game batches so a cursor update during a slow game does not
         // change the reported WFG rate. Plain presents still clear the HUD when WFG goes idle.
@@ -1276,6 +1271,8 @@ void VulkanRendererContext::renderFrame() {
     // only when the transform or the size really differ from what the swapchain was built for.
     else if (res==VK_SUBOPTIMAL_KHR && !swapchainStillMatchesSurface()) fbResized.store(true);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
+    if (perfWorkStartNs > 0 && framePresented)
+        perfHint.reportWork(perfWorkStartNs, perfHintTargetNs(wf.active));
 }
 
 bool VulkanRendererContext::swapchainStillMatchesSurface() {

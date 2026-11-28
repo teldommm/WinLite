@@ -312,14 +312,19 @@ public class Shortcut {
         putExtra("surfaceUbwc", enabled ? "1" : "0");
     }
 
-    /** PerformanceHint boost (the container's setting when the shortcut has none). */
-    public boolean isPerfHintEnabled() {
-        String v = getExtra("perfHint", null);
-        if (v == null || v.isEmpty()) return container.isPerfHintEnabled();
-        return "1".equals(v);
+    /** A null override inherits the container's PerformanceHint setting. */
+    public Boolean getPerfHintOverride() {
+        String value = getExtra("perfHint", null);
+        return value == null || value.isEmpty() ? null : "1".equals(value);
     }
-    public void setPerfHintEnabled(boolean enabled) {
-        putExtra("perfHint", enabled ? "1" : "0");
+
+    public boolean isPerfHintEnabled() {
+        Boolean override = getPerfHintOverride();
+        return override != null ? override : container.isPerfHintEnabled();
+    }
+
+    public void setPerfHintOverride(Boolean enabled) {
+        putExtra("perfHint", enabled == null ? null : (enabled ? "1" : "0"));
     }
 
     public String getRendererPresentMode() {
