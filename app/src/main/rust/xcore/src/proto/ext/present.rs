@@ -140,14 +140,12 @@ impl Present {
         self.next_token
     }
 
-    /// Keep the window's release cadence across ordinary render and wake-up delays.
+    /// The pixmap's release is due one frame interval after the window's previous one.
     fn schedule_idle(&mut self, s: &mut Server, idle: Idle, fps: i32) {
         let frame = s.next_frame_interval(fps);
         let now = s.platform.now_ns();
-        let deadline = match self.deadlines.get(&idle.window).map(|prev| prev + frame) {
-            // Give the renderer time to take the pixmap even when it arrived just before
-            // the next release slot. Rebase after a missed slot instead of catching up.
-            Some(next) if next > now => next.max(now + frame / 2),
+        let deadline = match self.deadlines.get(&idle.window) {
+            Some(prev) if *prev >= now => prev + frame,
             _ => now + frame,
         };
         self.deadlines.insert(idle.window, deadline);
@@ -215,7 +213,6 @@ impl Present {
         let msc = ust / (s.refresh_interval_ns() / 1000).max(1);
         s.content_changed(pixmap);
         if fps <= 0 {
-            self.deadlines.remove(&window);
             self.present_unlimited(s, idle);
             self.send_complete(s, window, serial, ust, msc);
         } else {
@@ -366,7 +363,6 @@ impl Extension for Present {
         match *hook {
             Hook::WindowGeometry { window, .. } => self.send_configure(s, window, 0),
             Hook::WindowUnmapped(w) => {
-                self.deadlines.remove(&w);
                 self.flush_pending(s, w);
                 self.release_waiting(s); // the flushed idle may trigger a held present's fence
             }

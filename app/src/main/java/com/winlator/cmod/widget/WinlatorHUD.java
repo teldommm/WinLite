@@ -181,7 +181,7 @@ public class WinlatorHUD extends View {
     private static final String FPS_ARROW = " → ";
     private volatile OutputFrameSource outputSource;
     private final OutputRateMeter outputMeter = new OutputRateMeter();
-    private OutputRateMeter.Reading snapOutputFps = OutputRateMeter.Reading.EMPTY;
+    private float snapOutputFps = 0;
     private float snapFps = 0;
 
     private int snapGpu = -1, snapCpu = -1, snapCpuTemp = -1;
@@ -857,11 +857,11 @@ public class WinlatorHUD extends View {
         lastFpsNs = now;
 
         String value = String.format(Locale.US, "%.0f", snapFps);
-        OutputRateMeter.Reading outFps = outputMeter.take(outputSource, now, 250_000_000L);
-        if (outFps != null) snapOutputFps = outFps;
-        if (snapOutputFps.fps > 0) {
-            value += FPS_ARROW + (snapOutputFps.estimated ? "≈" : "") +
-                    String.format(Locale.US, "%.0f", snapOutputFps.fps);
+        // From one burst of presents to another, not tick to tick: see OutputRateMeter.
+        float outFps = outputMeter.take(outputSource, now, 250_000_000L);
+        if (outFps >= 0) snapOutputFps = outFps;
+        if (snapOutputFps > 0) {
+            value += FPS_ARROW + String.format(Locale.US, "%.0f", snapOutputFps);
         }
         if (!value.equals(strFps)) {
             strFps = value;
@@ -988,7 +988,7 @@ public class WinlatorHUD extends View {
     public void setOutputFrameSource(OutputFrameSource source) {
         outputSource = source;
         outputMeter.reset();
-        snapOutputFps = OutputRateMeter.Reading.EMPTY;
+        snapOutputFps = 0;
     }
 
     /** The game's fps, then the output fps in the FPS colour while WFG generates frames. */
@@ -1655,7 +1655,7 @@ public class WinlatorHUD extends View {
             if (rendererActive) return;
             fpsMeter.reset();
             outputMeter.reset();
-            snapOutputFps = OutputRateMeter.Reading.EMPTY;
+            snapOutputFps = 0;
             snapFps = 0;
             lastFpsNs = 0;
             if (!"0".equals(strFps)) {
@@ -1734,7 +1734,7 @@ public class WinlatorHUD extends View {
     public void reset() {
         fpsMeter.reset();
         outputMeter.reset();
-        snapOutputFps = OutputRateMeter.Reading.EMPTY;
+        snapOutputFps = 0;
         snapFps = 0;
         lastFpsNs = 0;
         mesaRendererActive = false;

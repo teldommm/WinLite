@@ -29,7 +29,7 @@ public class FrameRating extends FrameLayout implements Runnable {
     private final FrameSpanMeter fpsMeter = new FrameSpanMeter();
     private float lastFPS = 0;
     // Output fps (real and WFG-generated frames shown), 0 while nothing is generated.
-    private volatile OutputRateMeter.Reading outputFPS = OutputRateMeter.Reading.EMPTY;
+    private volatile float outputFPS = 0;
     private OutputFrameSource outputSource;
     private final OutputRateMeter outputMeter = new OutputRateMeter();
     private String totalRAM = null;
@@ -224,7 +224,7 @@ public class FrameRating extends FrameLayout implements Runnable {
     public void setOutputFrameSource(OutputFrameSource source) {
         outputSource = source;
         outputMeter.reset();
-        outputFPS = OutputRateMeter.Reading.EMPTY;
+        outputFPS = 0;
     }
 
     /** Shows the HUD (a rated window was picked); no frame of its own any more. */
@@ -250,8 +250,9 @@ public class FrameRating extends FrameLayout implements Runnable {
         if (time >= lastTime + 500) {
             float fps = fpsMeter.take(System.nanoTime(), 400_000_000L);
             if (fps >= 0) lastFPS = fps;
-            OutputRateMeter.Reading out = outputMeter.take(outputSource, System.nanoTime(), 400_000_000L);
-            if (out != null) outputFPS = out;
+            // From one burst of presents to another, see OutputRateMeter.
+            float out = outputMeter.take(outputSource, System.nanoTime(), 400_000_000L);
+            if (out >= 0) outputFPS = out;
             post(this);
             lastTime = time;
         }
@@ -261,9 +262,8 @@ public class FrameRating extends FrameLayout implements Runnable {
     public void run() {
         if (!userEnabled) return;
         if (getVisibility() == GONE) setVisibility(View.VISIBLE);
-        final OutputRateMeter.Reading out = outputFPS;
-        tvFPS.setText(out.fps > 0
-                ? String.format(Locale.ENGLISH, "%.1f → %s%.0f", lastFPS, out.estimated ? "≈" : "", out.fps)
+        tvFPS.setText(outputFPS > 0
+                ? String.format(Locale.ENGLISH, "%.1f → %.0f", lastFPS, outputFPS)
                 : String.format(Locale.ENGLISH, "%.1f", lastFPS));
         tvRAM.setText(getAvailableRAM() + " GB Used / " + totalRAM + " Total");
     }

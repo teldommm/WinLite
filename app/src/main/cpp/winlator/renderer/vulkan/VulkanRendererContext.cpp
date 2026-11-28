@@ -513,10 +513,6 @@ void VulkanRendererContext::createSwapchain() {
     if (oldSwapchain!=VK_NULL_HANDLE) vk_.DestroySwapchainKHR(device,oldSwapchain,nullptr);
     vk_.GetSwapchainImagesKHR(device,swapchain,&imgCount,nullptr);
     swapchainImages.resize(imgCount); vk_.GetSwapchainImagesKHR(device,swapchain,&imgCount,swapchainImages.data());
-    if (wantWfg)
-        __android_log_print(ANDROID_LOG_INFO, WLOG_TAG,
-                            "WFG swapchain: %u images, surface minimum %u, display timing %d",
-                            imgCount, swapchainMinImages, displayTiming_);
     swapchainViews.resize(imgCount);
     for (size_t i=0;i<imgCount;i++) {
         VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -699,27 +695,9 @@ void VulkanRendererContext::cleanupSwapchain() {
     if (swapchain!=VK_NULL_HANDLE) {
         vk_.DestroySwapchainKHR(device,swapchain,nullptr);
         swapchain=VK_NULL_HANDLE;
-        wfgRefreshNs = refreshPollNs = 0;
-        wfgVsyncAnchorNs = wfgGridPeriodNs = 0;
-        wfgModeSeq = presentSeq;
-        wfgQueueEndNs = 0;
-        wfgPace.restart();
-        lpPace.restart();
-        std::lock_guard<std::mutex> lock(presentStampMutex);
-        queuedOutput.ns = displayedOutput.ns = 0;
     }
     swapchainImages.clear();
     imgInFlight.clear();
-}
-
-VulkanRendererContext::PresentStamp VulkanRendererContext::getPresentStamp() const {
-    if (!wfgRequested.load(std::memory_order_relaxed)) return {};
-    std::lock_guard<std::mutex> lock(presentStampMutex);
-    const uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-    if (displayedOutput.ns && displayedOutput.ns <= now && now - displayedOutput.ns < 1000000000ull)
-        return displayedOutput;
-    return queuedOutput;
 }
 
 uint32_t VulkanRendererContext::findMemType(uint32_t filter, VkMemoryPropertyFlags props) {
@@ -1109,7 +1087,6 @@ void VulkanRendererContext::renderFrame() {
     short ptrX,ptrY,curHotX,curHotY,curW,curH; bool curVis;
     VkBuffer curUpload=VK_NULL_HANDLE; bool hasCurUpload=false;
     VkRect2D effectiveScissor{{0,0},swapchainExt};
-    uint64_t gameFrames, gameArrival;
 
     {
         std::lock_guard<std::mutex> lk(renderMutex);
@@ -1140,9 +1117,6 @@ void VulkanRendererContext::renderFrame() {
             if (wt.needsTransition) de.needsTransition=true;
             frameDraws.push_back(de);
         }
-        // The sequence and timestamp must describe the same textures as frameDraws.
-        gameFrames = contentFrames.load(std::memory_order_relaxed);
-        gameArrival = lastGameFrameNs.load(std::memory_order_relaxed);
 
         // A new cursor image is applied here, on the render thread, in step with the frame that
         // shows it. A different size replaces the texture, which frames still in flight may be
@@ -1170,9 +1144,9 @@ void VulkanRendererContext::renderFrame() {
 
     // The display clock: feedback from earlier presents, every frame, whatever path presents.
     if (displayTiming_) wfgPollDisplayTiming();
-    WfgFrame wf = wfgBeginFrame(frameDraws,gameFrames,gameArrival,ox,oy,sx,sy,cw,ch);
+    WfgFrame wf = wfgBeginFrame(frameDraws,ox,oy,sx,sy,cw,ch);
     // Without WFG, a new game frame under an FPS limit gets its own target on the refresh grid.
-    const uint64_t plainAt = wf.active ? 0 : limitPlanPresent(gameFrames,gameArrival);
+    const uint64_t plainAt = wf.active ? 0 : limitPlanPresent();
     {
         struct RecordTargetReset {
             VulkanRendererContext* c;
@@ -1261,22 +1235,6 @@ void VulkanRendererContext::renderFrame() {
         }
         return &ptimes;
     };
-    const uint64_t outputSourceFrame = wfgRequested.load(std::memory_order_relaxed) ? gameFrames : 0;
-    uint32_t queuedFrames = 0, queuedGenerated = 0;
-    auto noteQueued = [&](VkResult result, bool generated) {
-        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) return;
-        presentedFrames.fetch_add(1, std::memory_order_relaxed);
-        if (!outputSourceFrame) return;
-        if (displayTiming_)
-            outputPresents[presentSeq % kOutputHistorySize] = {presentSeq, outputSourceFrame, generated};
-        if (generated) {
-            ++queuedFrames;
-            ++queuedGenerated;
-        } else if (lastQueuedSourceFrame != outputSourceFrame) {
-            lastQueuedSourceFrame = outputSourceFrame;
-            ++queuedFrames;
-        }
-    };
     // Generated frames sit between the previous real frame and this one.
     for (uint32_t g=0; g<wf.genCount; g++) {
         VkPresentInfoKHR gpi{}; gpi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1284,7 +1242,7 @@ void VulkanRendererContext::renderFrame() {
         gpi.waitSemaphoreCount=1; gpi.pWaitSemaphores=&sSem[1+g];
         gpi.swapchainCount=1; gpi.pSwapchains=scs; gpi.pImageIndices=&wf.genIdx[g];
         VkResult gr=vk_.QueuePresentKHR(graphicsQueue,&gpi);
-        noteQueued(gr, (wf.generatedMask & (1u << g)) != 0);
+        if (gr==VK_SUCCESS||gr==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
         if (gr==VK_ERROR_OUT_OF_DATE_KHR||gr==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
     }
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1292,15 +1250,13 @@ void VulkanRendererContext::renderFrame() {
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
     res = vk_.QueuePresentKHR(graphicsQueue, &pi);
-    noteQueued(res, false);
-    if (queuedFrames) {
-        // Stamp the whole burst for the fallback on drivers without display feedback.
+    if (res==VK_SUCCESS||res==VK_SUBOPTIMAL_KHR) presentedFrames.fetch_add(1,std::memory_order_relaxed);
+    {
+        // The whole burst of this real frame is out: stamp it for the HUD (see PresentStamp).
         const uint64_t stampNs = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
         std::lock_guard<std::mutex> g(presentStampMutex);
-        queuedOutput.frames += queuedFrames;
-        queuedOutput.generated += queuedGenerated;
-        queuedOutput.ns = stampNs;
+        presentStamp = { presentedFrames.load(std::memory_order_relaxed), stampNs };
     }
     if (wf.active) wfgNotePresented(wf,1+wf.genCount,acquireWaitNs);
 

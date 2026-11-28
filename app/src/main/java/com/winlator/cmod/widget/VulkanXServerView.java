@@ -631,7 +631,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
 
-    private final long[] frameCounts = new long[5];
+    private final long[] frameCounts = new long[4];
 
     private long frameCount(int which) {
         synchronized (lock) {
@@ -646,7 +646,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         synchronized (lock) {
             if (nativeHandle == 0) return false;
             nativeGetFrameCounts(nativeHandle, frameCounts);
-            System.arraycopy(frameCounts, 0, out, 0, Math.min(out.length, frameCounts.length));
+            System.arraycopy(frameCounts, 0, out, 0, 4);
             return true;
         }
     }
@@ -661,10 +661,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         if (nativeHandle == 0) return;
         float refreshHz = 60f;
         android.view.Display display = getDisplay();
-        if (display != null) {
-            float rate = pendingWfgEnabled ? display.getMode().getRefreshRate() : display.getRefreshRate();
-            if (rate > 1f) refreshHz = rate;
-        }
+        if (display != null && display.getRefreshRate() > 1f) refreshHz = display.getRefreshRate();
         nativeSetWfg(nativeHandle, pendingWfgEnabled, pendingWfgFlowSide, pendingWfgFastInterp,
                 pendingWfgTargetFps, pendingWfgMultiplier, refreshHz);
         nativeSetWfgFpsLimit(nativeHandle, fpsLimit);
